@@ -19,8 +19,9 @@ class Settings(BaseSettings):
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 
-    def get_database_url(self) -> str:
-        return self.database_url or f"postgresql+asyncpg://outreach:{self.db_password}@db/outreach"
+    def get_asyncpg_dsn(self) -> str:
+        """Returns a plain asyncpg DSN (no driver prefix)."""
+        return self.database_url.replace("postgresql+asyncpg://", "postgresql://") if self.database_url else f"postgresql://outreach:{self.db_password}@db/outreach"
 
 
 settings = Settings()

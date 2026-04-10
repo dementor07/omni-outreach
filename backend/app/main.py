@@ -10,8 +10,7 @@ from app.routers import auth, campaigns, leads, sequences, templates, accounts, 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    dsn = settings.get_database_url().replace("postgresql+asyncpg", "postgresql")
-    await init_pool(dsn)
+    await init_pool(settings.get_asyncpg_dsn())
     yield
     await close_pool()
 
