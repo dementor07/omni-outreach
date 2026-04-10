@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     retell_api_key: str = ""
     anthropic_api_key: str = ""
     apify_api_key: str = ""
+    serper_api_key: str = ""
 
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24  # 24h
