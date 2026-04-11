@@ -124,20 +124,35 @@ const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNode; colo
 const ActionNode = ({ data, id, selected }: NodeProps) => {
   const nodeType = data.node_type as NodeType
   const cfg = NODE_PALETTE.find(p => p.type === nodeType)
+  const mode = (data as any).mode || 'simple'
   const configured = !!(data.email_account_id || data.voice_agent_id || nodeType === 'action_linkedin_invite' || (data.template && (data.template as any).body))
   
   return (
-    <div className={`relative min-w-[200px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : cfg?.border ?? 'border-slate-200'}`}>
+    <div className={`relative min-w-[220px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : cfg?.border ?? 'border-slate-200'}`}>
       <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
-      <div className="flex items-center gap-3">
+      
+      <div className="flex items-center justify-between mb-3">
         <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${cfg?.bg ?? 'bg-slate-50'} ${cfg?.color ?? 'text-slate-500'}`}>
           {cfg?.icon}
         </div>
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Action</p>
-          <p className="text-xs font-bold text-slate-900">{cfg?.label ?? nodeType}</p>
+        <div className="flex rounded-lg bg-slate-50 p-0.5 ring-1 ring-slate-900/5 scale-90 origin-right">
+          <div className={`px-2 py-0.5 text-[8px] font-black uppercase tracking-widest rounded-md transition-all ${mode === 'simple' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}>Simple</div>
+          <div className={`px-2 py-0.5 text-[8px] font-black uppercase tracking-widest rounded-md transition-all ${mode === 'flow' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-400'}`}>Flow</div>
         </div>
       </div>
+
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Engagement</p>
+        <p className="text-xs font-bold text-slate-900">{cfg?.label ?? nodeType}</p>
+      </div>
+
+      {mode === 'flow' && (
+        <div className="mt-3 flex items-center gap-1.5 rounded-lg border border-dashed border-sky-200 bg-sky-50/50 p-2">
+          <Zap size={10} className="text-sky-500" />
+          <span className="text-[9px] font-bold uppercase tracking-tight text-sky-600">Nested Architecture</span>
+        </div>
+      )}
+
       <div className="mt-3 flex items-center justify-between border-t border-slate-50 pt-3">
         <span className={`text-[10px] font-medium ${configured ? 'text-emerald-500' : 'text-slate-300'}`}>
           {configured ? 'Ready' : 'Draft'}
@@ -663,6 +678,24 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
 
       <div className="flex-1 overflow-auto p-6 space-y-8">
         <div>
+          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 block">Operation Mode</label>
+          <div className="grid grid-cols-2 gap-2 p-1 bg-slate-50 rounded-xl ring-1 ring-slate-900/5">
+            <button 
+              onClick={() => onUpdate({ mode: 'simple' })}
+              className={`py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${((node.data as any).mode || 'simple') === 'simple' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              Standard
+            </button>
+            <button 
+              onClick={() => onUpdate({ mode: 'flow' })}
+              className={`py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${((node.data as any).mode || 'simple') === 'flow' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              Nested Flow
+            </button>
+          </div>
+        </div>
+
+        <div>
           <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Module Type</label>
           <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-2xl ring-1 ring-slate-900/5">
             <StepIcon type={nodeType} />
@@ -698,16 +731,31 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
         )}
 
         {isVoice && (
-          <div>
-            <label className={labelCls}>Voice Agent</label>
-            <select 
-              value={(node.data as any).voice_agent_id || ''} 
-              onChange={(e) => onUpdate({ voice_agent_id: e.target.value })}
-              className={inputClassName}
-            >
-              <option value="">Select agent...</option>
-              {(voiceAgentsQuery.data || []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
+          <div className="space-y-4">
+            <div>
+              <label className={labelCls}>Voice Agent</label>
+              <select 
+                value={(node.data as any).voice_agent_id || ''} 
+                onChange={(e) => onUpdate({ voice_agent_id: e.target.value })}
+                className={inputClassName}
+              >
+                <option value="">Select agent...</option>
+                {(voiceAgentsQuery.data || []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+            
+            {((node.data as any).mode === 'flow') && (
+              <div>
+                <label className={labelCls}>Retell Conversation Flow ID</label>
+                <input 
+                  value={(node.data as any).retell_flow_id || ''} 
+                  onChange={(e) => onUpdate({ retell_flow_id: e.target.value })}
+                  placeholder="fc_..."
+                  className={inputClassName}
+                />
+                <p className="mt-2 text-[10px] text-slate-400 font-medium italic">Embeds the nodal Retell architecture within this Omni step.</p>
+              </div>
+            )}
           </div>
         )}
 

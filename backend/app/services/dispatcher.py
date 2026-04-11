@@ -218,9 +218,13 @@ async def _handle_voice(task: dict, lead: dict, campaign: dict) -> None:
     agent = await fetch_one("SELECT * FROM voice_agents WHERE id=$1", config.get("voice_agent_id"))
     if not agent: raise RuntimeError("Voice agent not found")
 
+    mode = config.get("mode", "simple")
+    retell_flow_id = config.get("retell_flow_id") if mode == "flow" else None
+
     await voice.make_call(
         agent["retell_agent_id"], lead["phone"],
-        metadata={"lead_id": str(lead["id"]), "campaign_id": str(lead["campaign_id"])}
+        metadata={"lead_id": str(lead["id"]), "campaign_id": str(lead["campaign_id"])},
+        conversation_flow_id=retell_flow_id
     )
     await _log_event(lead["id"], lead["campaign_id"], "call_made", "voice")
     await _mark_sent(task["id"])

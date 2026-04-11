@@ -14,6 +14,7 @@ async def make_call(
     phone_number: str,
     metadata: dict | None = None,
     from_number: str | None = None,
+    conversation_flow_id: str | None = None,
 ) -> dict:
     if not phone_number.startswith("+"):
         raise ValueError(
@@ -25,6 +26,9 @@ async def make_call(
         "to_number": phone_number,
         "metadata": metadata or {},
     }
+    if conversation_flow_id:
+        body["conversation_flow_id"] = conversation_flow_id
+
     _from = from_number or settings.retell_from_number
     if _from:
         body["from_number"] = _from
