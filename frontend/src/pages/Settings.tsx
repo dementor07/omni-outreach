@@ -68,7 +68,7 @@ export default function Settings() {
   })
 
   const addEmail = useMutation({
-    mutationFn: async (payload: { from_name: string; from_email: string; resend_api_key: string }) =>
+    mutationFn: async (payload: { from_name: string; from_email: string; smtp_host: string; smtp_port: number; smtp_username: string; smtp_password: string; smtp_use_tls: boolean }) =>
       (await api.post('/accounts/email', payload)).data,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['settings', 'email'] })
@@ -287,12 +287,12 @@ function AccountModal({
   tab: SettingsTab
   onClose: () => void
   onCreateLinkedIn: (p: { unipile_id: string; name: string; email?: string; daily_invite_cap: number }) => Promise<unknown>
-  onCreateEmail: (p: { from_name: string; from_email: string; resend_api_key: string }) => Promise<unknown>
+  onCreateEmail: (p: { from_name: string; from_email: string; smtp_host: string; smtp_port: number; smtp_username: string; smtp_password: string; smtp_use_tls: boolean }) => Promise<unknown>
   onCreateVoice: (p: { retell_agent_id: string; name: string }) => Promise<unknown>
   busy: boolean
 }) {
   const [linkedin, setLinkedin] = useState({ unipile_id: '', name: '', email: '', daily_invite_cap: 20 })
-  const [email, setEmail]       = useState({ from_name: '', from_email: '', resend_api_key: '' })
+  const [email, setEmail]       = useState({ from_name: '', from_email: '', smtp_host: '', smtp_port: 587, smtp_username: '', smtp_password: '', smtp_use_tls: true })
   const [voice, setVoice]       = useState({ retell_agent_id: '', name: '' })
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -322,7 +322,16 @@ function AccountModal({
           <>
             <input className={inputCls} placeholder="From name" value={email.from_name} onChange={(e) => setEmail({ ...email, from_name: e.target.value })} required />
             <input className={inputCls} placeholder="From email" value={email.from_email} onChange={(e) => setEmail({ ...email, from_email: e.target.value })} required />
-            <input className={inputCls} placeholder="Resend API key" value={email.resend_api_key} onChange={(e) => setEmail({ ...email, resend_api_key: e.target.value })} required />
+            <input className={inputCls} placeholder="SMTP host (e.g. smtp.gmail.com)" value={email.smtp_host} onChange={(e) => setEmail({ ...email, smtp_host: e.target.value })} required />
+            <div className="grid grid-cols-2 gap-3">
+              <input className={inputCls} type="number" placeholder="Port (587)" value={email.smtp_port} onChange={(e) => setEmail({ ...email, smtp_port: Number(e.target.value) })} required />
+              <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 cursor-pointer">
+                <input type="checkbox" checked={email.smtp_use_tls} onChange={(e) => setEmail({ ...email, smtp_use_tls: e.target.checked })} />
+                Use STARTTLS
+              </label>
+            </div>
+            <input className={inputCls} placeholder="SMTP username (usually your email)" value={email.smtp_username} onChange={(e) => setEmail({ ...email, smtp_username: e.target.value })} required />
+            <input className={inputCls} type="password" placeholder="SMTP password / app password" value={email.smtp_password} onChange={(e) => setEmail({ ...email, smtp_password: e.target.value })} required />
           </>
         )}
         {tab === 'voice' && (

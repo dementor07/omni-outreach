@@ -189,8 +189,16 @@ async def _handle_email(task: dict, lead: dict, campaign: dict) -> None:
     body = renderer.render(template["body"], lead)
 
     await email.send_email(
-        acct["from_name"], acct["from_email"], acct["resend_api_key"],
-        lead["email"], subject, body,
+        from_name=acct["from_name"],
+        from_email=acct["from_email"],
+        smtp_host=acct["smtp_host"],
+        smtp_port=acct["smtp_port"],
+        smtp_username=acct["smtp_username"],
+        smtp_password=acct["smtp_password"],
+        smtp_use_tls=acct["smtp_use_tls"],
+        to_email=lead["email"],
+        subject=subject,
+        body_html=body,
     )
     await _log_event(lead["id"], lead["campaign_id"], "email_sent", "email")
     await _mark_sent(task["id"])

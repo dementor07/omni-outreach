@@ -61,19 +61,31 @@ async def test_linkedin_account(account_id: str, user_id: str = Depends(get_curr
 class EmailAccountCreate(BaseModel):
     from_name: str
     from_email: str
-    resend_api_key: str
+    smtp_host: str
+    smtp_port: int = 587
+    smtp_username: str
+    smtp_password: str
+    smtp_use_tls: bool = True
 
 
 @router.get("/email")
 async def list_email_accounts(user_id: str = Depends(get_current_user)):
-    return await fetch_all("SELECT id, from_name, from_email, is_active, created_at FROM email_accounts ORDER BY from_name")
+    return await fetch_all(
+        "SELECT id, from_name, from_email, smtp_host, smtp_port, smtp_use_tls, is_active, created_at FROM email_accounts ORDER BY from_name"
+    )
 
 
 @router.post("/email", status_code=201)
 async def create_email_account(body: EmailAccountCreate, user_id: str = Depends(get_current_user)):
     return await fetch_one(
-        "INSERT INTO email_accounts (from_name, from_email, resend_api_key) VALUES ($1,$2,$3) RETURNING id, from_name, from_email, is_active, created_at",
-        body.from_name, body.from_email, body.resend_api_key,
+        """
+        INSERT INTO email_accounts
+            (from_name, from_email, smtp_host, smtp_port, smtp_username, smtp_password, smtp_use_tls)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        RETURNING id, from_name, from_email, smtp_host, smtp_port, smtp_use_tls, is_active, created_at
+        """,
+        body.from_name, body.from_email,
+        body.smtp_host, body.smtp_port, body.smtp_username, body.smtp_password, body.smtp_use_tls,
     )
 
 
