@@ -3,20 +3,28 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Plus, Save, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap } from 'lucide-react'
-import { 
-  ReactFlow, 
-  Background, 
-  Controls, 
-  useNodesState, 
-  useEdgesState, 
-  addEdge, 
-  Connection, 
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  MiniMap,
+  useNodesState,
+  useEdgesState,
+  addEdge,
+  Connection,
   Edge,
   Node,
   Handle,
   Position,
   NodeProps,
-  Panel
+  Panel,
+  BaseEdge,
+  EdgeLabelRenderer,
+  getBezierPath,
+  useReactFlow,
+  MarkerType,
+  ConnectionLineType,
+  type EdgeProps,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
@@ -58,6 +66,44 @@ const defaultCampaignForm: CampaignPayload = {
   active_hours_end: 18,
   screening_prompt: '',
   sequence_mode: 'sequential',
+}
+
+// ── Custom deletable edge ──────────────────────────────────────────────────
+
+function CustomEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, selected }: EdgeProps) {
+  const { deleteElements } = useReactFlow()
+  const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
+  return (
+    <>
+      <BaseEdge id={id} path={edgePath} style={{ stroke: selected ? '#0ea5e9' : '#94a3b8', strokeWidth: selected ? 2.5 : 2 }} />
+      <EdgeLabelRenderer>
+        <div
+          style={{
+            position: 'absolute',
+            transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+            pointerEvents: 'all',
+          }}
+          className="nodrag nopan"
+        >
+          <button
+            onClick={(e) => { e.stopPropagation(); deleteElements({ edges: [{ id }] }) }}
+            style={{ opacity: selected ? 1 : 0 }}
+            className="flex h-5 w-5 items-center justify-center rounded-full border border-rose-200 bg-white text-[11px] font-bold text-rose-400 shadow-sm transition hover:bg-rose-50 hover:text-rose-600"
+            title="Remove connection"
+          >
+            ×
+          </button>
+        </div>
+      </EdgeLabelRenderer>
+    </>
+  )
+}
+
+const edgeTypes = { custom: CustomEdge }
+
+const defaultEdgeOptions = {
+  type: 'custom',
+  markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8', width: 16, height: 16 },
 }
 
 // ── Node palette config ────────────────────────────────────────────────────
@@ -491,11 +537,20 @@ export default function Campaigns() {
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
                 nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                defaultEdgeOptions={defaultEdgeOptions}
+                connectionLineType={ConnectionLineType.Bezier}
                 fitView
                 deleteKeyCode="Delete"
               >
                 <Background color="#e2e8f0" gap={24} />
                 <Controls />
+                <MiniMap
+                  nodeStrokeWidth={3}
+                  nodeColor="#e2e8f0"
+                  maskColor="rgba(241,245,249,0.7)"
+                  className="!rounded-2xl !border !border-slate-200"
+                />
                 <NodePalette onAdd={addNode} />
                 <Panel position="top-right">
                   <div className="flex gap-2">
