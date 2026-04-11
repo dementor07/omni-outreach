@@ -1,119 +1,85 @@
-# OmniOutreach
+# OmniOutreach — Multi-Channel Outreach Control Plane
 
-OmniOutreach is a multi-channel outreach control plane built with a FastAPI backend and a React frontend. The product direction is simple: create campaigns, import and inspect leads, watch queue health, manage sending accounts, and grow into a clean operator-facing SaaS for LinkedIn, email, and voice workflows.
+Multi-channel outreach automation platform (LinkedIn, WhatsApp, Email, AI Voice). This repository contains the FastAPI asynchronous backend, the React TypeScript frontend, and the Directed Acyclic Graph (DAG) execution engine.
 
-## Stack
+## System Architecture
 
-- Backend: FastAPI, asyncpg, PostgreSQL, Redis/ARQ
-- Frontend: React 18, TypeScript, Vite, Tailwind CSS, React Query, Axios
-- Infra: Docker Compose for local orchestration
+### Outreach Engine (DAG)
+The platform has transitioned from a linear sequence model to a Directed Acyclic Graph (DAG) model. This allows for complex branching logic based on lead behavior (e.g., "If replied on LinkedIn, stop email follow-up; else, send WhatsApp message").
 
-## Repo layout
+- **Sequencer (`backend/app/services/sequencer.py`)**: A graph traversal engine that identifies outgoing edges from a completed node and schedules the next task in the `queue`.
+- **Dispatcher (`backend/app/services/dispatcher.py`)**: A worker loop that batch-locks queued tasks using `FOR UPDATE SKIP LOCKED` and executes channel-specific handlers.
+- **Webhook Handler (`backend/app/routers/webhooks.py`)**: Listens for Unipile `message.received` events to update lead state and trigger conditional graph branches.
 
-- `backend/`
-  FastAPI app, routers, services, schema, and worker-facing logic
-- `frontend/`
-  React app and UI components
-- `nginx/`
-  Reverse proxy config
-- `docker-compose.yml`
-  Local multi-service orchestration
-- `CODEX_CONTEXT.md`
-  Product and frontend implementation brief
+### Backend Stack
+- **Framework**: FastAPI (Python 3.12)
+- **Database**: PostgreSQL (via `asyncpg` for non-blocking I/O)
+- **Worker**: ARQ (Redis-backed) for scheduled task dispatching
+- **Integrations**: Unipile (Unified Messaging), Retell AI (Voice), Native SMTP (Email)
 
-## What is implemented
+### Frontend Stack
+- **Core**: React 18 + TypeScript + Vite
+- **Canvas**: `@xyflow/react` (React Flow) for the nodal flow builder
+- **State**: TanStack React Query + Zustand
+- **Styling**: Pure Tailwind CSS + Lucide icons (No external UI libraries)
 
-### Backend
+---
 
-- Auth:
-  register and login endpoints with bearer token auth
-- Campaigns:
-  CRUD plus per-campaign stats
-- Leads:
-  paginated listing, detail + timeline, import, and stop
-- Queue:
-  list and queue stats endpoints
-- Accounts:
-  LinkedIn, email, and voice account CRUD plus LinkedIn connection test
-- Job Search:
-  trigger, config listing, and run listing endpoints
+## Data Model (PostgreSQL)
 
-### Frontend
+### Table: campaigns
+Stores global campaign constraints, timezone settings, and the builder mode preference.
+- `sequence_mode`: `sequential` (linear list builder) or `canvas` (nodal graph editor).
 
-- Protected app shell with route guard
-- Login screen
-- Overview dashboard
-- Campaign list and campaign detail experience
-- Lead browser with right-side profile drawer
-- Queue view with filter controls and live stats
-- Settings view for LinkedIn, email, and voice accounts
-- Reusable UI primitives:
-  badges, stat cards, tables, modals, empty states, layout shell
-- React Query hooks for campaigns, leads, and queue
+### Table: sequence_nodes
+Replaces the old `sequence_steps` table.
+- `node_type`: `trigger_start`, `action_linkedin_dm`, `action_whatsapp`, `action_email`, `condition_replied`, `delay`.
+- `data`: JSONB column storing node-specific configuration (e.g., `delay_days`, `template_id`).
+- `position_x`, `position_y`: UI coordinates for the canvas.
 
-## Current known gaps
+### Table: sequence_edges
+Defines directed connections between nodes.
+- `source_handle`: Used for branching logic (e.g., `true` handle for "Replied", `false` for "Silent").
 
-- `backend/app/routers/sequences.py` is still a stub
-- `backend/app/routers/settings.py` is still a stub
-- `backend/app/routers/templates.py` is still a stub
-- Job Search config creation and editing still need a fuller backend/API surface
-- The frontend currently reflects those backend gaps honestly instead of faking finished functionality
+### Table: leads
+Tracks the current state of a prospect within a sequence.
+- `current_node_id`: FK to `sequence_nodes` acting as an execution bookmark.
+- `replied_at`: Populated via webhooks to satisfy `condition_replied` nodes.
 
-## Local development
+---
 
-### 1. Backend
+## Implementation Status
 
-From `backend/`:
+### Core Features
+- **Dual-Mode Builder**: Users can build sequences via a high-speed linear list (Sequential mode) or an advanced graph editor (Canvas mode). The frontend "compiles" linear lists into graph nodes and edges automatically.
+- **Unified Messaging**: Support for LinkedIn, WhatsApp, IG, and Telegram via Unipile unified `/api/v1/chats` endpoint.
+- **Native Email**: High-deliverability SMTP implementation (bypass Unipile for email).
+- **AI Voice**: Retell AI integration for automated telecalling.
 
+---
+
+## Deployment Context
+
+### Infrastructure
+- **Environment**: Containerized via Docker Compose.
+- **Reverse Proxy**: Nginx (handling API proxying and frontend serving).
+- **VPS Deployment**: `145.223.21.222` (default path: `/home/omni-outreach`).
+
+### Local Development
+**1. Backend**
 ```bash
-python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
-### 2. Frontend
-
-From `frontend/`:
-
+**2. Frontend**
 ```bash
 npm install
 npm run dev
 ```
 
-Open:
+---
 
-```text
-http://localhost:5173
-```
-
-Vite proxies `/api` to the FastAPI backend on port `8000`.
-
-## Frontend build
-
-From `frontend/`:
-
-```bash
-npm run build
-```
-
-## API notes
-
-The frontend uses `frontend/src/api/client.ts`, which:
-
-- sends requests to `/api`
-- attaches the bearer token from `localStorage`
-- clears the token and redirects to `/login` on `401`
-
-## Design direction
-
-The UI is intentionally clean and operator-focused:
-
-- light shell
-- slate neutrals
-- sky brand accents
-- no component library dependency
-- reusable primitives instead of one-off page markup
-
-## Next sensible steps
-
-1. Implement backend sequence/template/settings endpoints so the frontend can replace the current honest placeholders.
-2. Add Job Search config CRUD and run detail UX.
-3. Add tests for the new frontend hooks and page flows.
+## Technical Documentation
+For line-by-line analysis of the sequencer logic and builder compilation, refer to:
+- `OMNI_TUTORIAL.md` — Architectural deep-dive and code tutorial.
+- `CLAUDE_HANDOVER.md` — Engineering summary for next-step logic implementation (Nested Voice Flows).
