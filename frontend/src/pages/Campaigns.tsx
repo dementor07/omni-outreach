@@ -648,6 +648,11 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
     queryKey: ['accounts', 'voice'],
     queryFn: async () => (await api.get<VoiceAgent[]>('/accounts/voice')).data,
   })
+  const retellFlowsQuery = useQuery({
+    queryKey: ['accounts', 'voice-flows'],
+    queryFn: async () => (await api.get<any[]>('/accounts/voice/flows')).data,
+    enabled: !!node && node.type === 'action_voice' && ((node.data as any).mode === 'flow'),
+  })
 
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
@@ -746,13 +751,20 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
             
             {((node.data as any).mode === 'flow') && (
               <div>
-                <label className={labelCls}>Retell Conversation Flow ID</label>
-                <input 
+                <label className={labelCls}>Retell Conversation Flow</label>
+                <select 
                   value={(node.data as any).retell_flow_id || ''} 
                   onChange={(e) => onUpdate({ retell_flow_id: e.target.value })}
-                  placeholder="fc_..."
                   className={inputClassName}
-                />
+                >
+                  <option value="">Select a flow...</option>
+                  {(retellFlowsQuery.data || []).map((f: any) => (
+                    <option key={f.conversation_flow_id} value={f.conversation_flow_id}>
+                      {f.conversation_flow_name}
+                    </option>
+                  ))}
+                </select>
+                {retellFlowsQuery.isLoading && <p className="mt-2 text-[10px] text-slate-400 animate-pulse">Syncing with Retell...</p>}
                 <p className="mt-2 text-[10px] text-slate-400 font-medium italic">Embeds the nodal Retell architecture within this Omni step.</p>
               </div>
             )}
