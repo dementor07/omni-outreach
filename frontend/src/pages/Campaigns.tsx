@@ -60,89 +60,98 @@ const defaultCampaignForm: CampaignPayload = {
   sequence_mode: 'sequential',
 }
 
+// ── Node palette config ────────────────────────────────────────────────────
+
+const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNode; color: string; bg: string; border: string }[] = [
+  { type: 'action_linkedin_invite', label: 'LinkedIn Invite', icon: <Linkedin size={15} />, color: 'text-sky-600',     bg: 'bg-sky-50',     border: 'border-sky-200' },
+  { type: 'action_linkedin_dm',     label: 'LinkedIn DM',     icon: <Linkedin size={15} />, color: 'text-sky-500',     bg: 'bg-sky-50',     border: 'border-sky-200' },
+  { type: 'action_email',           label: 'Email',           icon: <Mail size={15} />,     color: 'text-slate-600',   bg: 'bg-slate-50',   border: 'border-slate-200' },
+  { type: 'action_whatsapp',        label: 'WhatsApp',        icon: <MessageSquare size={15} />, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' },
+  { type: 'action_instagram',       label: 'Instagram',       icon: <Instagram size={15} />, color: 'text-pink-500',   bg: 'bg-pink-50',    border: 'border-pink-200' },
+  { type: 'action_telegram',        label: 'Telegram',        icon: <Send size={15} />,     color: 'text-blue-500',    bg: 'bg-blue-50',    border: 'border-blue-200' },
+  { type: 'action_voice',           label: 'Voice Call',      icon: <Phone size={15} />,    color: 'text-indigo-600',  bg: 'bg-indigo-50',  border: 'border-indigo-200' },
+  { type: 'condition_replied',      label: 'Branch: Reply?',  icon: <Zap size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
+  { type: 'delay',                  label: 'Wait / Delay',    icon: <Clock size={15} />,    color: 'text-slate-400',   bg: 'bg-slate-50',   border: 'border-slate-200' },
+]
+
 // ── React Flow Node Types ──────────────────────────────────────────────────
 
 interface ActionNodeData extends Record<string, unknown> {
   node_type: NodeType
+  label?: string
+  email_account_id?: string
+  voice_agent_id?: string
+  delay_days?: number
   onEditTemplate: (id: string) => void
 }
 
 const ActionNode = ({ data, id }: NodeProps<Node<ActionNodeData>>) => {
   const nodeType = data.node_type
-  const iconMap: Record<string, React.ReactNode> = {
-    action_linkedin_invite: <Linkedin size={16} className="text-sky-500" />,
-    action_linkedin_dm: <Linkedin size={16} className="text-sky-500" />,
-    action_email: <Mail size={16} className="text-slate-500" />,
-    action_whatsapp: <MessageSquare size={16} className="text-emerald-500" />,
-    action_instagram: <Instagram size={16} className="text-pink-500" />,
-    action_telegram: <Send size={16} className="text-blue-400" />,
-    action_voice: <Phone size={16} className="text-indigo-500" />,
-  }
-
+  const cfg = NODE_PALETTE.find(p => p.type === nodeType)
   return (
-    <div className="group relative min-w-[180px] rounded-2xl border-2 border-slate-200 bg-white p-4 shadow-sm transition-all hover:border-sky-400 hover:shadow-md">
-      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-slate-300" />
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50 transition-colors group-hover:bg-sky-50">
-          {iconMap[nodeType] || <Zap size={16} />}
-        </div>
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Action</p>
-          <p className="text-sm font-semibold text-slate-900">{nodeType.replace('action_', '').replace('_', ' ')}</p>
-        </div>
+    <div className={`group relative w-52 rounded-2xl border-2 bg-white shadow-sm transition-all hover:shadow-md ${cfg?.border ?? 'border-slate-200'}`}>
+      <Handle type="target" position={Position.Top} className="!h-3 !w-3 !border-2 !border-white !bg-slate-400" />
+      <div className={`flex items-center gap-2.5 rounded-t-xl px-3 py-2 ${cfg?.bg ?? 'bg-slate-50'}`}>
+        <span className={cfg?.color ?? 'text-slate-500'}>{cfg?.icon}</span>
+        <span className={`text-xs font-bold uppercase tracking-wide ${cfg?.color ?? 'text-slate-500'}`}>{cfg?.label ?? nodeType}</span>
       </div>
-      <button 
+      <div className="px-3 py-2">
+        {data.email_account_id && <p className="truncate text-[11px] text-slate-400">Account configured</p>}
+        {data.voice_agent_id && <p className="truncate text-[11px] text-slate-400">Agent configured</p>}
+        {!data.email_account_id && !data.voice_agent_id && nodeType !== 'action_linkedin_invite' && (
+          <p className="text-[11px] text-slate-300 italic">Not configured</p>
+        )}
+      </div>
+      <button
         onClick={() => data.onEditTemplate(id)}
-        className="mt-3 w-full rounded-lg bg-slate-50 py-1.5 text-xs font-medium text-slate-600 hover:bg-sky-50 hover:text-sky-600 transition-colors"
+        className="w-full rounded-b-xl border-t border-slate-100 py-1.5 text-[11px] font-semibold text-slate-500 transition hover:bg-sky-50 hover:text-sky-600"
       >
-        Configure Step
+        Configure →
       </button>
-      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-slate-300" />
+      <Handle type="source" position={Position.Bottom} className="!h-3 !w-3 !border-2 !border-white !bg-slate-400" />
     </div>
   )
 }
 
 const TriggerNode = () => (
-  <div className="min-w-[150px] rounded-2xl border-2 border-emerald-400 bg-emerald-50 p-4 text-center shadow-sm">
-    <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Trigger</p>
+  <div className="w-44 rounded-2xl border-2 border-emerald-400 bg-emerald-50 p-4 text-center shadow-md">
+    <div className="mx-auto mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-emerald-400">
+      <Zap size={14} className="text-white" />
+    </div>
+    <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Start</p>
     <p className="text-sm font-semibold text-emerald-900">Lead Accepted</p>
-    <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-emerald-400" />
+    <Handle type="source" position={Position.Bottom} className="!h-3 !w-3 !border-2 !border-white !bg-emerald-500" />
   </div>
 )
 
-const ConditionNode = ({ data }: NodeProps) => (
-  <div className="min-w-[180px] rounded-2xl border-2 border-amber-200 bg-white p-4 shadow-sm transition-all hover:border-amber-400">
-    <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-slate-300" />
-    <div className="flex items-center gap-3">
-      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50">
-        <MessageSquare size={16} className="text-amber-500" />
-      </div>
-      <div>
-        <p className="text-[10px] font-bold uppercase tracking-wider text-amber-500">Condition</p>
-        <p className="text-sm font-semibold text-slate-900">Wait for Reply</p>
-      </div>
+const ConditionNode = (_: NodeProps) => (
+  <div className="w-52 rounded-2xl border-2 border-amber-300 bg-white shadow-sm transition-all hover:shadow-md">
+    <Handle type="target" position={Position.Top} className="!h-3 !w-3 !border-2 !border-white !bg-slate-400" />
+    <div className="flex items-center gap-2.5 rounded-t-xl bg-amber-50 px-3 py-2">
+      <Zap size={15} className="text-amber-500" />
+      <span className="text-xs font-bold uppercase tracking-wide text-amber-600">Branch: Reply?</span>
     </div>
-    <div className="mt-3 flex gap-2">
-      <div className="flex-1 text-center">
-        <div className="text-[10px] font-medium text-slate-400">Replied</div>
-        <Handle type="source" position={Position.Bottom} id="true" className="!static !mt-1 !h-2 !w-2 !bg-emerald-400" />
+    <div className="grid grid-cols-2 divide-x divide-slate-100 border-t border-slate-100">
+      <div className="flex flex-col items-center gap-1 py-2">
+        <span className="text-[10px] font-semibold text-emerald-600">Replied ✓</span>
+        <Handle type="source" id="true" position={Position.Bottom} className="!relative !inset-auto !h-3 !w-3 !translate-x-0 !border-2 !border-white !bg-emerald-400" />
       </div>
-      <div className="flex-1 text-center">
-        <div className="text-[10px] font-medium text-slate-400">No Reply</div>
-        <Handle type="source" position={Position.Bottom} id="false" className="!static !mt-1 !h-2 !w-2 !bg-rose-400" />
+      <div className="flex flex-col items-center gap-1 py-2">
+        <span className="text-[10px] font-semibold text-rose-500">No Reply ✗</span>
+        <Handle type="source" id="false" position={Position.Bottom} className="!relative !inset-auto !h-3 !w-3 !translate-x-0 !border-2 !border-white !bg-rose-400" />
       </div>
     </div>
   </div>
 )
 
 const DelayNode = ({ data }: NodeProps<Node<{ delay_days?: number }>>) => (
-  <div className="min-w-[140px] rounded-2xl border-2 border-slate-200 bg-white p-3 shadow-sm transition-all hover:border-sky-400">
-    <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-slate-300" />
+  <div className="w-40 rounded-2xl border-2 border-slate-200 bg-white px-3 py-3 shadow-sm transition-all hover:border-slate-300 hover:shadow-md">
+    <Handle type="target" position={Position.Top} className="!h-3 !w-3 !border-2 !border-white !bg-slate-400" />
     <div className="flex items-center justify-center gap-2">
       <Clock size={14} className="text-slate-400" />
-      <span className="text-sm font-semibold text-slate-700">Wait {data.delay_days || 1} Days</span>
+      <span className="text-sm font-semibold text-slate-600">Wait {data.delay_days ?? 1}d</span>
     </div>
-    <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-slate-300" />
+    <Handle type="source" position={Position.Bottom} className="!h-3 !w-3 !border-2 !border-white !bg-slate-400" />
   </div>
 )
 
@@ -157,6 +166,32 @@ const nodeTypes = {
   action_voice: ActionNode,
   condition_replied: ConditionNode,
   delay: DelayNode,
+}
+
+// ── Left palette sidebar ───────────────────────────────────────────────────
+
+function NodePalette({ onAdd }: { onAdd: (type: NodeType) => void }) {
+  return (
+    <div className="absolute left-3 top-3 z-10 flex w-44 flex-col gap-1 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg">
+      <p className="px-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Add node</p>
+      <button
+        onClick={() => onAdd('trigger_start')}
+        className="flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 transition"
+      >
+        <Zap size={14} /> Start Trigger
+      </button>
+      <div className="my-1 h-px bg-slate-100" />
+      {NODE_PALETTE.map(({ type, label, icon, color, bg }) => (
+        <button
+          key={type}
+          onClick={() => onAdd(type)}
+          className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition hover:opacity-80 ${bg} ${color}`}
+        >
+          {icon} {label}
+        </button>
+      ))}
+    </div>
+  )
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────
@@ -408,28 +443,19 @@ export default function Campaigns() {
                 onConnect={onConnect}
                 nodeTypes={nodeTypes}
                 fitView
+                deleteKeyCode="Delete"
               >
-                <Background color="#cbd5e1" gap={20} />
+                <Background color="#e2e8f0" gap={24} />
                 <Controls />
-                <Panel position="top-right" className="flex flex-col gap-2">
-                  <div className="flex gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
-                    <button onClick={() => addNode('trigger_start')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Trigger"><Zap size={18} className="text-emerald-500" /></button>
-                    <div className="w-px bg-slate-100" />
-                    <button onClick={() => addNode('action_linkedin_dm')} className="rounded-xl p-2 hover:bg-slate-50" title="Add LinkedIn DM"><Linkedin size={18} className="text-sky-500" /></button>
-                    <button onClick={() => addNode('action_email')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Email"><Mail size={18} className="text-slate-500" /></button>
-                    <button onClick={() => addNode('action_whatsapp')} className="rounded-xl p-2 hover:bg-slate-50" title="Add WhatsApp"><MessageSquare size={18} className="text-emerald-500" /></button>
-                    <button onClick={() => addNode('action_instagram')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Instagram"><Instagram size={18} className="text-pink-500" /></button>
-                    <div className="w-px bg-slate-100" />
-                    <button onClick={() => addNode('condition_replied')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Branch"><Zap size={18} className="text-amber-500" /></button>
-                    <button onClick={() => addNode('delay')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Delay"><Clock size={18} className="text-slate-400" /></button>
-                  </div>
-                  <button 
+                <NodePalette onAdd={addNode} />
+                <Panel position="top-right">
+                  <button
                     onClick={onSaveCanvas}
                     disabled={saveGraph.isPending}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-sky-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-sky-200 transition-all hover:bg-sky-600 hover:scale-[1.02] active:scale-[0.98]"
+                    className="inline-flex items-center gap-2 rounded-2xl bg-sky-500 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-sky-200 transition hover:bg-sky-600 active:scale-95 disabled:opacity-60"
                   >
-                    <Save size={18} />
-                    {saveGraph.isPending ? 'Saving...' : 'Save Canvas'}
+                    <Save size={16} />
+                    {saveGraph.isPending ? 'Saving…' : 'Save Canvas'}
                   </button>
                 </Panel>
               </ReactFlow>
