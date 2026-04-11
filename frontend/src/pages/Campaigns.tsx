@@ -261,6 +261,7 @@ export default function Campaigns() {
       active_hours_end: campaignQuery.data.active_hours_end,
       screening_prompt: campaignQuery.data.screening_prompt || '',
       status: campaignQuery.data.status,
+      sequence_mode: campaignQuery.data.sequence_mode,
     })
   }, [campaignQuery.data])
 
