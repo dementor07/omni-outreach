@@ -16,6 +16,7 @@ export interface Lead {
   status?: 'active' | 'stopped'
   invited_at?: string | null
   accepted_at?: string | null
+  replied_at?: string | null
   stopped_at?: string | null
   created_at?: string
 }

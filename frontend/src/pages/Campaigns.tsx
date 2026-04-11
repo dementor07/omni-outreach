@@ -60,9 +60,14 @@ const defaultCampaignForm: CampaignPayload = {
 
 // ── React Flow Node Types ──────────────────────────────────────────────────
 
-const ActionNode = ({ data, id }: NodeProps) => {
-  const nodeType = data.node_type as NodeType
-  const iconMap: Record<string, any> = {
+interface ActionNodeData extends Record<string, unknown> {
+  node_type: NodeType
+  onEditTemplate: (id: string) => void
+}
+
+const ActionNode = ({ data, id }: NodeProps<Node<ActionNodeData>>) => {
+  const nodeType = data.node_type
+  const iconMap: Record<string, React.ReactNode> = {
     action_linkedin_invite: <Linkedin size={16} className="text-sky-500" />,
     action_linkedin_dm: <Linkedin size={16} className="text-sky-500" />,
     action_email: <Mail size={16} className="text-slate-500" />,
@@ -128,7 +133,7 @@ const ConditionNode = ({ data }: NodeProps) => (
   </div>
 )
 
-const DelayNode = ({ data }: NodeProps) => (
+const DelayNode = ({ data }: NodeProps<Node<{ delay_days?: number }>>) => (
   <div className="min-w-[140px] rounded-2xl border-2 border-slate-200 bg-white p-3 shadow-sm transition-all hover:border-sky-400">
     <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-slate-300" />
     <div className="flex items-center justify-center gap-2">
@@ -174,8 +179,8 @@ export default function Campaigns() {
   const graphQuery = useGetGraph(id)
   const saveGraph = useSaveGraph()
 
-  const [nodes, setNodes, onNodesChange] = useNodesState([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([])
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [templateNodeId, setTemplateNodeId] = useState<string | null>(null)
   
   const [createOpen, setCreateOpen] = useState(false)
@@ -298,7 +303,7 @@ export default function Campaigns() {
         </div>
 
         <Modal title="New campaign" open={createOpen} onClose={() => setCreateOpen(false)} width="lg">
-          <CampaignForm form={form} onChange={setForm} onSubmit={async (e) => { e.preventDefault(); await createCampaign.mutateAsync(form); setCreateOpen(false); }} busy={createCampaign.isPending} submitLabel="Create campaign" />
+          <CampaignForm form={form} onChange={setForm} onSubmit={async (e: FormEvent) => { e.preventDefault(); await createCampaign.mutateAsync(form); setCreateOpen(false); }} busy={createCampaign.isPending} submitLabel="Create campaign" />
         </Modal>
       </div>
     )
@@ -416,7 +421,7 @@ export default function Campaigns() {
       />
 
       <Modal title="Import leads" open={importOpen} onClose={() => setImportOpen(false)} width="lg">
-        <form className="space-y-4" onSubmit={async (e) => {
+        <form className="space-y-4" onSubmit={async (e: FormEvent) => {
           e.preventDefault()
           const parsed = JSON.parse(importPayload)
           await importLeads.mutateAsync({ campaignId: id!, leads: parsed })
@@ -479,7 +484,7 @@ function TemplateModal({ nodeId, onClose }: { nodeId: string | null; onClose: ()
   )
 }
 
-function CampaignForm({ form, onChange, onSubmit, busy, submitLabel }: any) {
+function CampaignForm({ form, onChange, onSubmit, busy, submitLabel }: { form: any, onChange: any, onSubmit: (e: FormEvent) => void, busy: boolean, submitLabel: string }) {
   const update = (key: string, val: any) => onChange({ ...form, [key]: val })
   return (
     <form className="space-y-4" onSubmit={onSubmit}>
