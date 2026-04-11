@@ -36,27 +36,36 @@ export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate
 
   const addStep = (type: NodeType) => {
     const newId = `node_${Date.now()}`
-    const lastNode = nodes.length > 0 ? nodes[nodes.length - 1] : null
-    
+    const hasTrigger = nodes.some(n => n.type === 'trigger_start')
+    const newNodes = [...nodes]
+    const newEdges = [...edges]
+
+    if (!hasTrigger) {
+      const trigger: Node = {
+        id: 'trigger_start',
+        type: 'trigger_start',
+        position: { x: 250, y: 0 },
+        data: {},
+      }
+      newNodes.unshift(trigger)
+    }
+
+    const lastNode = newNodes[newNodes.length - 1]
     const newNode: Node = {
       id: newId,
       type,
-      position: { x: 250, y: nodes.length * 150 + 100 },
-      data: { delay_days: type === 'delay' ? 1 : 0 }
+      position: { x: 250, y: newNodes.length * 150 },
+      data: { delay_days: type === 'delay' ? 1 : 0 },
     }
+    newNodes.push(newNode)
 
-    const newNodes = [...nodes, newNode]
-    const newEdges = [...edges]
-
-    if (lastNode) {
-      newEdges.push({
-        id: `edge_${lastNode.id}_${newId}`,
-        source: lastNode.id,
-        target: newId,
-        sourceHandle: 'default',
-        targetHandle: 'default'
-      })
-    }
+    newEdges.push({
+      id: `edge_${lastNode.id}_${newId}`,
+      source: lastNode.id,
+      target: newId,
+      sourceHandle: 'default',
+      targetHandle: 'default',
+    })
 
     onSave(newNodes, newEdges)
   }

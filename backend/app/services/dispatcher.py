@@ -175,6 +175,20 @@ async def _handle_whatsapp(task: dict, lead: dict, campaign: dict) -> None:
     await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
 
 
+async def _handle_instagram(task: dict, lead: dict, campaign: dict) -> None:
+    raise NotImplementedError(
+        "Instagram DM not yet implemented. "
+        "Requires a Unipile account with Instagram connected and an attendee_id resolver."
+    )
+
+
+async def _handle_telegram(task: dict, lead: dict, campaign: dict) -> None:
+    raise NotImplementedError(
+        "Telegram not yet implemented. "
+        "Requires a Unipile account with Telegram connected and an attendee_id resolver."
+    )
+
+
 async def _handle_email(task: dict, lead: dict, campaign: dict) -> None:
     node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
     config = node.get("data", {})
@@ -241,6 +255,8 @@ async def _process_task(task: dict, worker_id: str) -> None:
         if ch == "linkedin_invite": await _handle_linkedin_invite(task, lead, campaign)
         elif ch == "linkedin_dm": await _handle_linkedin_dm(task, lead, campaign)
         elif ch == "whatsapp": await _handle_whatsapp(task, lead, campaign)
+        elif ch == "instagram": await _handle_instagram(task, lead, campaign)
+        elif ch == "telegram": await _handle_telegram(task, lead, campaign)
         elif ch == "email": await _handle_email(task, lead, campaign)
         elif ch == "voice": await _handle_voice(task, lead, campaign)
         else: raise RuntimeError(f"Unknown channel: {ch}")

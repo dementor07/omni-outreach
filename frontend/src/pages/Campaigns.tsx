@@ -1,6 +1,8 @@
-import { FormEvent, useEffect, useMemo, useState, useCallback } from 'react'
+import { FormEvent, useEffect, useState, useCallback } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '../api/client'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { Plus, Upload, Save, Play, Pause, Trash2, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap } from 'lucide-react'
+import { Plus, Save, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap } from 'lucide-react'
 import { 
   ReactFlow, 
   Background, 
@@ -42,8 +44,6 @@ import {
   useGetTemplate,
   useUpsertTemplate,
   type NodeType,
-  type SequenceNode,
-  type SequenceEdge,
 } from '../hooks/useSequenceSteps'
 
 type CampaignTab = 'leads' | 'queue' | 'sequence'
@@ -183,7 +183,7 @@ export default function Campaigns() {
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
-  const [templateNodeId, setTemplateNodeId] = useState<string | null>(null)
+  const [configNodeId, setConfigNodeId] = useState<string | null>(null)
   
   const [createOpen, setCreateOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
@@ -197,7 +197,7 @@ export default function Campaigns() {
         id: n.id,
         type: n.node_type,
         position: { x: n.position_x, y: n.position_y },
-        data: { ...n.data, node_type: n.node_type, onEditTemplate: (id: string) => setTemplateNodeId(id) }
+        data: { ...n.data, node_type: n.node_type, onEditTemplate: (id: string) => setConfigNodeId(id) }
       }))
       const rfEdges: Edge[] = graphQuery.data.edges.map(e => ({
         id: e.id,
@@ -243,7 +243,7 @@ export default function Campaigns() {
       id: `node_${Date.now()}`,
       type,
       position: { x: 100, y: 100 },
-      data: { node_type: type, onEditTemplate: (id: string) => setTemplateNodeId(id) }
+      data: { node_type: type, onEditTemplate: (id: string) => setConfigNodeId(id) }
     }
     setNodes(nds => nds.concat(newNode))
   }
@@ -327,7 +327,25 @@ export default function Campaigns() {
               </div>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-3">
+            {activeTab === 'sequence' && campaignQuery.data && (
+              <div className="flex rounded-full border border-slate-200 bg-slate-100 p-0.5 text-xs font-semibold">
+                {(['sequential', 'canvas'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => updateCampaign.mutate({ id: id!, payload: { sequence_mode: mode } })}
+                    className={`rounded-full px-3 py-1 capitalize transition ${
+                      campaignQuery.data.sequence_mode === mode
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+            )}
             {(['leads', 'queue', 'sequence'] as CampaignTab[]).map((tab) => (
               <button
                 key={tab}
@@ -440,7 +458,7 @@ export default function Campaigns() {
                     }))
                   })
                 }}
-                onEditTemplate={setTemplateNodeId}
+                onEditTemplate={setConfigNodeId}
                 isSaving={saveGraph.isPending}
               />
             )}
@@ -448,9 +466,11 @@ export default function Campaigns() {
         )}
       </div>
 
-      <TemplateModal
-        nodeId={templateNodeId}
-        onClose={() => setTemplateNodeId(null)}
+      <NodeConfigModal
+        nodeId={configNodeId}
+        nodes={nodes}
+        onClose={() => setConfigNodeId(null)}
+        onUpdateNodeData={(nodeId, data) => setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, ...data } } : n))}
       />
 
       <Modal title="Import leads" open={importOpen} onClose={() => setImportOpen(false)} width="lg">
@@ -475,42 +495,177 @@ export default function Campaigns() {
   )
 }
 
-function TemplateModal({ nodeId, onClose }: { nodeId: string | null; onClose: () => void }) {
+type EmailAccount = { id: string; from_name: string; from_email: string }
+type VoiceAgent = { id: string; name: string; retell_agent_id: string }
+
+function NodeConfigModal({
+  nodeId,
+  nodes,
+  onClose,
+  onUpdateNodeData,
+}: {
+  nodeId: string | null
+  nodes: Node[]
+  onClose: () => void
+  onUpdateNodeData: (nodeId: string, data: Record<string, unknown>) => void
+}) {
   const open = !!nodeId
   const toast = useToast()
+  const node = nodes.find(n => n.id === nodeId)
+  const nodeType = node?.data?.node_type as NodeType | undefined
+
   const templateQuery = useGetTemplate(nodeId || undefined)
   const upsertTemplate = useUpsertTemplate()
 
+  const emailAccountsQuery = useQuery({
+    queryKey: ['accounts', 'email'],
+    queryFn: async () => (await api.get<EmailAccount[]>('/accounts/email')).data,
+    staleTime: 60_000,
+  })
+  const voiceAgentsQuery = useQuery({
+    queryKey: ['accounts', 'voice'],
+    queryFn: async () => (await api.get<VoiceAgent[]>('/accounts/voice')).data,
+    staleTime: 60_000,
+  })
+
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
+  const [emailAccountId, setEmailAccountId] = useState('')
+  const [voiceAgentId, setVoiceAgentId] = useState('')
+  const [delayDays, setDelayDays] = useState(1)
 
   useEffect(() => {
+    if (!open) return
+    // Load template text
     if (templateQuery.data) {
       setSubject(templateQuery.data.subject ?? '')
       setBody(templateQuery.data.body ?? '')
+    } else {
+      setSubject('')
+      setBody('')
     }
-  }, [templateQuery.data])
+    // Load node-level config from node.data
+    if (node?.data) {
+      setEmailAccountId((node.data.email_account_id as string) ?? '')
+      setVoiceAgentId((node.data.voice_agent_id as string) ?? '')
+      setDelayDays((node.data.delay_days as number) ?? 1)
+    }
+  }, [open, nodeId, templateQuery.data])
 
-  if (!open) return null
+  if (!open || !nodeType) return null
+
+  const needsTemplate = nodeType.startsWith('action_') && nodeType !== 'action_linkedin_invite' && nodeType !== 'action_voice'
+  const isEmail = nodeType === 'action_email'
+  const isVoice = nodeType === 'action_voice'
+  const isDelay = nodeType === 'delay'
+  const isInvite = nodeType === 'action_linkedin_invite'
+
+  const titleMap: Partial<Record<NodeType, string>> = {
+    action_linkedin_invite: 'LinkedIn Invite',
+    action_linkedin_dm: 'LinkedIn DM',
+    action_email: 'Email',
+    action_whatsapp: 'WhatsApp',
+    action_instagram: 'Instagram DM',
+    action_telegram: 'Telegram',
+    action_voice: 'Voice Call',
+    delay: 'Delay',
+  }
 
   return (
-    <Modal title="Configure Node" open={open} onClose={onClose} width="lg">
-      <form className="space-y-4" onSubmit={async (e) => {
-        e.preventDefault()
-        await upsertTemplate.mutateAsync({ node_id: nodeId!, subject: subject || null, body })
-        toast.success('Configuration saved.')
-        onClose()
-      }}>
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium text-slate-700">Subject (optional)</span>
-          <input value={subject} onChange={(e) => setSubject(e.target.value)} className={inputClassName} />
-        </label>
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium text-slate-700">Message / Script</span>
-          <textarea value={body} onChange={(e) => setBody(e.target.value)} className={`${inputClassName} min-h-[200px]`} required />
-        </label>
-        <button type="submit" className="w-full rounded-xl bg-sky-500 py-3 font-semibold text-white" disabled={upsertTemplate.isPending}>
-          {upsertTemplate.isPending ? 'Saving...' : 'Save Configuration'}
+    <Modal title={`Configure: ${titleMap[nodeType] ?? nodeType}`} open={open} onClose={onClose} width="lg">
+      <form
+        className="space-y-4"
+        onSubmit={async (e) => {
+          e.preventDefault()
+          // 1. Persist account/agent/delay into node.data in React state
+          const dataUpdate: Record<string, unknown> = {}
+          if (isEmail && emailAccountId) dataUpdate.email_account_id = emailAccountId
+          if (isVoice && voiceAgentId) dataUpdate.voice_agent_id = voiceAgentId
+          if (isDelay) dataUpdate.delay_days = delayDays
+          if (Object.keys(dataUpdate).length > 0) {
+            onUpdateNodeData(nodeId!, dataUpdate)
+          }
+          // 2. Save template text (only for channels that need it)
+          if (needsTemplate && body.trim()) {
+            await upsertTemplate.mutateAsync({ node_id: nodeId!, subject: subject || null, body })
+          }
+          toast.success('Saved.')
+          onClose()
+        }}
+      >
+        {isDelay && (
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-slate-700">Wait (days)</span>
+            <input
+              type="number"
+              min={1}
+              value={delayDays}
+              onChange={(e) => setDelayDays(Number(e.target.value))}
+              className={inputClassName}
+              required
+            />
+          </label>
+        )}
+
+        {isEmail && (
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-slate-700">Email account</span>
+            <select value={emailAccountId} onChange={(e) => setEmailAccountId(e.target.value)} className={inputClassName} required>
+              <option value="">Select account…</option>
+              {(emailAccountsQuery.data ?? []).map(a => (
+                <option key={a.id} value={a.id}>{a.from_name} &lt;{a.from_email}&gt;</option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        {isVoice && (
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-slate-700">Voice agent</span>
+            <select value={voiceAgentId} onChange={(e) => setVoiceAgentId(e.target.value)} className={inputClassName} required>
+              <option value="">Select agent…</option>
+              {(voiceAgentsQuery.data ?? []).map(a => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        {isEmail && (
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-slate-700">Subject</span>
+            <input value={subject} onChange={(e) => setSubject(e.target.value)} className={inputClassName} placeholder="Your subject line…" />
+          </label>
+        )}
+
+        {needsTemplate && (
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-slate-700">
+              Message body
+              <span className="ml-2 font-normal text-slate-400 text-xs">Use {'{{first_name}}'}, {'{{company}}'}</span>
+            </span>
+            <textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              className={`${inputClassName} min-h-[180px]`}
+              placeholder="Hi {{first_name}}, …"
+              required
+            />
+          </label>
+        )}
+
+        {isInvite && (
+          <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">
+            LinkedIn invite will be sent automatically — no message template needed.
+          </p>
+        )}
+
+        <button
+          type="submit"
+          className="w-full rounded-xl bg-sky-500 py-3 font-semibold text-white hover:bg-sky-600 disabled:opacity-60"
+          disabled={upsertTemplate.isPending}
+        >
+          {upsertTemplate.isPending ? 'Saving…' : 'Save'}
         </button>
       </form>
     </Modal>
