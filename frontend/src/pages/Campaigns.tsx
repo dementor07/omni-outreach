@@ -24,6 +24,7 @@ import { useQueueList } from '../hooks/useQueue'
 import {
   useListSteps,
   useCreateStep,
+  useUpdateStep,
   useDeleteStep,
   useGetTemplate,
   useUpsertTemplate,
@@ -68,6 +69,7 @@ export default function Campaigns() {
   const queueQuery = useQueueList({ campaignId: id, limit: 100 })
   const stepsQuery = useListSteps(id)
   const createStep = useCreateStep()
+  const updateStep = useUpdateStep()
   const deleteStep = useDeleteStep()
 
   const [createOpen, setCreateOpen] = useState(false)
@@ -428,23 +430,39 @@ export default function Campaigns() {
 
               {!stepsQuery.isLoading && (stepsQuery.data?.length ?? 0) > 0 && (
                 <div className="space-y-2">
-                  {(stepsQuery.data ?? []).map((step, idx) => (
-                    <SequenceStepRow
-                      key={step.id}
-                      step={step}
-                      isFirst={idx === 0}
-                      isLast={idx === (stepsQuery.data?.length ?? 1) - 1}
-                      onDelete={async () => {
-                        try {
-                          await deleteStep.mutateAsync({ id: step.id, campaignId: step.campaign_id })
-                          toast.success('Step deleted.')
-                        } catch {
-                          toast.error('Failed to delete step.')
-                        }
-                      }}
-                      onEditTemplate={() => setTemplateModalStep(step)}
-                    />
-                  ))}
+                  {(stepsQuery.data ?? []).map((step, idx) => {
+                    const steps = stepsQuery.data ?? []
+                    return (
+                      <SequenceStepRow
+                        key={step.id}
+                        step={step}
+                        isFirst={idx === 0}
+                        isLast={idx === steps.length - 1}
+                        onMove={async (dir) => {
+                          const swapWith = steps[dir === 'up' ? idx - 1 : idx + 1]
+                          if (!swapWith) return
+                          try {
+                            // Use a temporary order to avoid unique constraint collision
+                            const tmp = -1
+                            await updateStep.mutateAsync({ id: step.id, campaignId: step.campaign_id, payload: { step_order: tmp } })
+                            await updateStep.mutateAsync({ id: swapWith.id, campaignId: swapWith.campaign_id, payload: { step_order: step.step_order } })
+                            await updateStep.mutateAsync({ id: step.id, campaignId: step.campaign_id, payload: { step_order: swapWith.step_order } })
+                          } catch {
+                            toast.error('Failed to reorder steps.')
+                          }
+                        }}
+                        onDelete={async () => {
+                          try {
+                            await deleteStep.mutateAsync({ id: step.id, campaignId: step.campaign_id })
+                            toast.success('Step deleted.')
+                          } catch {
+                            toast.error('Failed to delete step.')
+                          }
+                        }}
+                        onEditTemplate={() => setTemplateModalStep(step)}
+                      />
+                    )
+                  })}
                 </div>
               )}
             </>
@@ -502,12 +520,14 @@ function SequenceStepRow({
   step,
   isFirst,
   isLast,
+  onMove,
   onDelete,
   onEditTemplate,
 }: {
   step: SequenceStep
   isFirst: boolean
   isLast: boolean
+  onMove: (dir: 'up' | 'down') => Promise<void>
   onDelete: () => void
   onEditTemplate: () => void
 }) {
@@ -523,10 +543,10 @@ function SequenceStepRow({
   return (
     <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
       <div className="flex flex-col gap-0.5">
-        <button type="button" disabled={isFirst} className="text-slate-300 hover:text-slate-500 disabled:opacity-30" title="Move up">
+        <button type="button" disabled={isFirst} onClick={() => onMove('up')} className="text-slate-300 hover:text-slate-500 disabled:opacity-30" title="Move up">
           <ChevronUp size={14} />
         </button>
-        <button type="button" disabled={isLast} className="text-slate-300 hover:text-slate-500 disabled:opacity-30" title="Move down">
+        <button type="button" disabled={isLast} onClick={() => onMove('down')} className="text-slate-300 hover:text-slate-500 disabled:opacity-30" title="Move down">
           <ChevronDown size={14} />
         </button>
       </div>
