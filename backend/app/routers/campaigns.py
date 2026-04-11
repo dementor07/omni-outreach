@@ -86,6 +86,40 @@ async def delete_campaign(campaign_id: str, user_id: str = Depends(get_current_u
     await execute("UPDATE campaigns SET status='archived' WHERE id=$1", campaign_id)
 
 
+class AccountAssign(BaseModel):
+    account_id: str
+
+
+@router.get("/{campaign_id}/accounts")
+async def list_campaign_accounts(campaign_id: str, user_id: str = Depends(get_current_user)):
+    return await fetch_all(
+        """
+        SELECT la.* FROM linkedin_accounts la
+        JOIN campaign_linkedin_accounts cla ON cla.account_id = la.id
+        WHERE cla.campaign_id = $1
+        ORDER BY la.name
+        """,
+        campaign_id,
+    )
+
+
+@router.post("/{campaign_id}/accounts", status_code=201)
+async def assign_account(campaign_id: str, body: AccountAssign, user_id: str = Depends(get_current_user)):
+    await execute(
+        "INSERT INTO campaign_linkedin_accounts (campaign_id, account_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        campaign_id, body.account_id,
+    )
+    return {"ok": True}
+
+
+@router.delete("/{campaign_id}/accounts/{account_id}", status_code=204)
+async def unassign_account(campaign_id: str, account_id: str, user_id: str = Depends(get_current_user)):
+    await execute(
+        "DELETE FROM campaign_linkedin_accounts WHERE campaign_id=$1 AND account_id=$2",
+        campaign_id, account_id,
+    )
+
+
 @router.get("/{campaign_id}/stats")
 async def campaign_stats(campaign_id: str, user_id: str = Depends(get_current_user)):
     return await fetch_one(
