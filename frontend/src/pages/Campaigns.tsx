@@ -8,6 +8,8 @@ import Badge from '../components/Badge'
 import DataTable from '../components/DataTable'
 import EmptyState from '../components/EmptyState'
 import Modal from '../components/Modal'
+import { useToast } from '../components/Toast'
+import { formatDate } from '../lib/time'
 import {
   CampaignPayload,
   useCampaignStats,
@@ -33,10 +35,6 @@ const defaultCampaignForm: CampaignPayload = {
   screening_prompt: '',
 }
 
-function formatDate(iso?: string | null) {
-  return iso ? new Date(iso).toLocaleDateString() : '—'
-}
-
 function parseJsonImport(raw: string) {
   const parsed = JSON.parse(raw)
   if (!Array.isArray(parsed)) throw new Error('Expected a JSON array of lead objects')
@@ -48,6 +46,7 @@ export default function Campaigns() {
   const { id } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const activeTab = (searchParams.get('tab') as CampaignTab | null) || 'leads'
+  const toast = useToast()
 
   const campaignsQuery = useListCampaigns()
   const campaignQuery = useGetCampaign(id)
@@ -141,33 +140,48 @@ export default function Campaigns() {
 
   async function handleCreateCampaign(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    await createCampaign.mutateAsync(form)
-    setCreateOpen(false)
-    setForm(defaultCampaignForm)
+    try {
+      await createCampaign.mutateAsync(form)
+      setCreateOpen(false)
+      setForm(defaultCampaignForm)
+      toast.success('Campaign created.')
+    } catch {
+      toast.error('Failed to create campaign.')
+    }
   }
 
   async function handleSaveCampaign(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!id) return
-    await updateCampaign.mutateAsync({ id, payload: form })
+    try {
+      await updateCampaign.mutateAsync({ id, payload: form })
+      toast.success('Campaign saved.')
+    } catch {
+      toast.error('Failed to save campaign.')
+    }
   }
 
   async function handleArchiveCampaign() {
     if (!id) return
-    await deleteCampaign.mutateAsync(id)
-    navigate('/campaigns')
+    try {
+      await deleteCampaign.mutateAsync(id)
+      toast.success('Campaign archived.')
+      navigate('/campaigns')
+    } catch {
+      toast.error('Failed to archive campaign.')
+    }
   }
 
   async function handleImportLeads(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!id) return
-
     try {
       setImportError('')
       const parsed = parseJsonImport(importPayload)
-      await importLeads.mutateAsync({ campaignId: id, leads: parsed })
+      const result = await importLeads.mutateAsync({ campaignId: id, leads: parsed })
       setImportOpen(false)
       setImportPayload('')
+      toast.success(`Imported ${result.imported} leads${result.skipped ? `, ${result.skipped} skipped` : ''}.`)
     } catch (error) {
       setImportError(error instanceof Error ? error.message : 'Import failed')
     }
@@ -226,10 +240,34 @@ export default function Campaigns() {
         <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
           <div>
             <Link to="/campaigns" className="text-sm font-medium text-sky-500 hover:text-sky-600">← Back to campaigns</Link>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">
-              {campaignQuery.data?.name || 'Campaign detail'}
-            </h1>
-            <div className="mt-4 flex flex-wrap gap-3 text-sm text-slate-500">
+            <div className="mt-3 flex items-center gap-3">
+              <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
+                {campaignQuery.data?.name || 'Campaign detail'}
+              </h1>
+              {campaignQuery.data && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const current = campaignQuery.data.status
+                    const next = current === 'paused' ? 'active' : 'paused'
+                    try {
+                      await updateCampaign.mutateAsync({ id: id!, payload: { status: next } })
+                      toast.success(`Campaign ${next === 'active' ? 'resumed' : 'paused'}.`)
+                    } catch {
+                      toast.error('Failed to update campaign status.')
+                    }
+                  }}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                    campaignQuery.data.status === 'paused'
+                      ? 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                      : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                  }`}
+                >
+                  {campaignQuery.data.status === 'paused' ? 'Resume' : 'Pause'}
+                </button>
+              )}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-3 text-sm text-slate-500">
               <span className="rounded-full bg-slate-100 px-3 py-1">{campaignQuery.data?.timezone || 'Asia/Kolkata'}</span>
               <span className="rounded-full bg-slate-100 px-3 py-1">
                 Active hours {campaignQuery.data?.active_hours_start ?? 9}:00 to {campaignQuery.data?.active_hours_end ?? 18}:00

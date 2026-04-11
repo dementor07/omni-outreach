@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import init_pool, close_pool
-from app.routers import auth, campaigns, leads, sequences, templates, accounts, queue, job_search, settings as settings_router
+from app.routers import auth, campaigns, leads, sequences, templates, accounts, queue, job_search, settings as settings_router, overview
 
 
 @asynccontextmanager
@@ -34,6 +34,7 @@ app.include_router(accounts.router, prefix="/accounts", tags=["accounts"])
 app.include_router(queue.router, prefix="/queue", tags=["queue"])
 app.include_router(job_search.router, prefix="/job-search", tags=["job-search"])
 app.include_router(settings_router.router, prefix="/settings", tags=["settings"])
+app.include_router(overview.router, prefix="/overview", tags=["overview"])
 
 
 @app.get("/health")
