@@ -11,6 +11,7 @@ class Settings(BaseSettings):
 
     resend_api_key: str = ""
     retell_api_key: str = ""
+    retell_from_number: str = ""
     anthropic_api_key: str = ""
     apify_api_key: str = ""
     serper_api_key: str = ""

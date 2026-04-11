@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+from app.config import settings
 from app.db import execute, fetch_all, fetch_one
 from app.services import linkedin, email, voice, renderer, sequencer
 
@@ -220,6 +221,7 @@ async def _handle_voice(task: dict, lead: dict, campaign: dict) -> None:
         agent["retell_agent_id"],
         lead["phone"],
         metadata={"lead_id": str(lead["id"]), "campaign_id": str(lead["campaign_id"])},
+        from_number=settings.retell_from_number or None,
     )
     await _log_event(lead["id"], lead["campaign_id"], "call_made", "voice")
     await _mark_sent(task["id"])

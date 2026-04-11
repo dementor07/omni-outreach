@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { Plus, Upload } from 'lucide-react'
+import { ChevronUp, ChevronDown, ListOrdered, Linkedin, Mail, Phone, Plus, Trash2, Upload } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 
 import { api } from '../api/client'
@@ -21,6 +21,15 @@ import {
 } from '../hooks/useCampaigns'
 import { useImportLeads, useListLeads } from '../hooks/useLeads'
 import { useQueueList } from '../hooks/useQueue'
+import {
+  useListSteps,
+  useCreateStep,
+  useDeleteStep,
+  useGetTemplate,
+  useUpsertTemplate,
+  type SequenceStep,
+  type ChannelType,
+} from '../hooks/useSequenceSteps'
 
 type CampaignTab = 'leads' | 'queue' | 'sequence'
 
@@ -57,18 +66,14 @@ export default function Campaigns() {
   const importLeads = useImportLeads()
   const leadsQuery = useListLeads(id, 1, 50)
   const queueQuery = useQueueList({ campaignId: id, limit: 100 })
-  const sequencesQuery = useQuery({
-    queryKey: ['sequence-steps', id],
-    enabled: !!id,
-    queryFn: async () => {
-      const { data } = await api.get(`/sequences?campaign_id=${id}`)
-      return data
-    },
-    retry: false,
-  })
+  const stepsQuery = useListSteps(id)
+  const createStep = useCreateStep()
+  const deleteStep = useDeleteStep()
 
   const [createOpen, setCreateOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [stepModalOpen, setStepModalOpen] = useState(false)
+  const [templateModalStep, setTemplateModalStep] = useState<SequenceStep | null>(null)
   const [form, setForm] = useState<CampaignPayload>(defaultCampaignForm)
   const [importPayload, setImportPayload] = useState('')
   const [importError, setImportError] = useState('')
@@ -390,16 +395,57 @@ export default function Campaigns() {
 
           {activeTab === 'sequence' && (
             <>
-              <h2 className="text-lg font-semibold text-slate-900">Sequence steps</h2>
-              <p className="mb-4 text-sm text-slate-500">This backend route is still a stub, so the frontend shows the current state honestly.</p>
-              {sequencesQuery.isError ? (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-700">
-                  Sequence endpoints are not implemented yet on the backend.
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-900">Sequence steps</h2>
+                  <p className="text-sm text-slate-500">Define the outreach order, channel, and delay for each step.</p>
                 </div>
-              ) : (
-                <pre className="overflow-auto rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
-                  {JSON.stringify(sequencesQuery.data, null, 2)}
-                </pre>
+                <button
+                  type="button"
+                  onClick={() => setStepModalOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-600"
+                >
+                  <Plus size={15} />
+                  Add step
+                </button>
+              </div>
+
+              {stepsQuery.isLoading && (
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="h-14 animate-pulse rounded-2xl bg-slate-100" />
+                  ))}
+                </div>
+              )}
+
+              {!stepsQuery.isLoading && (stepsQuery.data?.length ?? 0) === 0 && (
+                <EmptyState
+                  icon={ListOrdered}
+                  title="No sequence steps yet"
+                  description="Add your first step to define how outreach progresses after acceptance."
+                />
+              )}
+
+              {!stepsQuery.isLoading && (stepsQuery.data?.length ?? 0) > 0 && (
+                <div className="space-y-2">
+                  {(stepsQuery.data ?? []).map((step, idx) => (
+                    <SequenceStepRow
+                      key={step.id}
+                      step={step}
+                      isFirst={idx === 0}
+                      isLast={idx === (stepsQuery.data?.length ?? 1) - 1}
+                      onDelete={async () => {
+                        try {
+                          await deleteStep.mutateAsync({ id: step.id, campaignId: step.campaign_id })
+                          toast.success('Step deleted.')
+                        } catch {
+                          toast.error('Failed to delete step.')
+                        }
+                      }}
+                      onEditTemplate={() => setTemplateModalStep(step)}
+                    />
+                  ))}
+                </div>
               )}
             </>
           )}
@@ -428,7 +474,352 @@ export default function Campaigns() {
           </div>
         </form>
       </Modal>
+
+      <AddStepModal
+        open={stepModalOpen}
+        campaignId={id!}
+        existingOrders={(stepsQuery.data ?? []).map((s) => s.step_order)}
+        onClose={() => setStepModalOpen(false)}
+        onCreate={async (payload) => {
+          try {
+            await createStep.mutateAsync(payload)
+            toast.success('Step added.')
+          } catch {
+            toast.error('Failed to add step.')
+          }
+        }}
+      />
+
+      <TemplateModal
+        step={templateModalStep}
+        onClose={() => setTemplateModalStep(null)}
+      />
     </div>
+  )
+}
+
+function SequenceStepRow({
+  step,
+  isFirst,
+  isLast,
+  onDelete,
+  onEditTemplate,
+}: {
+  step: SequenceStep
+  isFirst: boolean
+  isLast: boolean
+  onDelete: () => void
+  onEditTemplate: () => void
+}) {
+  const channelIcon: Record<ChannelType, React.ReactNode> = {
+    linkedin_invite: <Linkedin size={14} className="text-sky-500" />,
+    linkedin_dm: <Linkedin size={14} className="text-sky-500" />,
+    email: <Mail size={14} className="text-slate-500" />,
+    voice: <Phone size={14} className="text-emerald-500" />,
+  }
+
+  const hasTemplate = step.channel !== 'linkedin_invite'
+
+  return (
+    <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+      <div className="flex flex-col gap-0.5">
+        <button type="button" disabled={isFirst} className="text-slate-300 hover:text-slate-500 disabled:opacity-30" title="Move up">
+          <ChevronUp size={14} />
+        </button>
+        <button type="button" disabled={isLast} className="text-slate-300 hover:text-slate-500 disabled:opacity-30" title="Move down">
+          <ChevronDown size={14} />
+        </button>
+      </div>
+
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-xs font-semibold text-slate-500">
+        {step.step_order}
+      </div>
+
+      <div className="flex min-w-[8rem] items-center gap-1.5">
+        {channelIcon[step.channel]}
+        <Badge label={step.channel} asChannel />
+      </div>
+
+      <div className="flex-1 text-sm text-slate-500">
+        {step.delay_days === 0 ? 'Immediately' : `+${step.delay_days} day${step.delay_days !== 1 ? 's' : ''}`}
+        {step.voice_agent_name && (
+          <span className="ml-2 text-xs text-slate-400">· {step.voice_agent_name}</span>
+        )}
+        {step.email_account_email && (
+          <span className="ml-2 text-xs text-slate-400">· {step.email_account_email}</span>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2">
+        {hasTemplate && (
+          <button
+            type="button"
+            onClick={onEditTemplate}
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-white"
+          >
+            Edit template
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onDelete}
+          className="rounded-lg border border-rose-200 p-1.5 text-rose-400 transition-colors hover:bg-rose-50"
+          title="Delete step"
+        >
+          <Trash2 size={13} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function AddStepModal({
+  open,
+  campaignId,
+  existingOrders,
+  onClose,
+  onCreate,
+}: {
+  open: boolean
+  campaignId: string
+  existingOrders: number[]
+  onClose: () => void
+  onCreate: (payload: {
+    campaign_id: string
+    step_order: number
+    channel: ChannelType
+    delay_days: number
+    voice_agent_id?: string | null
+    email_account_id?: string | null
+  }) => Promise<void>
+}) {
+  const nextOrder = existingOrders.length === 0 ? 0 : Math.max(...existingOrders) + 1
+
+  const [channel, setChannel] = useState<ChannelType>('linkedin_invite')
+  const [stepOrder, setStepOrder] = useState(nextOrder)
+  const [delayDays, setDelayDays] = useState(0)
+  const [voiceAgentId, setVoiceAgentId] = useState('')
+  const [emailAccountId, setEmailAccountId] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (open) {
+      const next = existingOrders.length === 0 ? 0 : Math.max(...existingOrders) + 1
+      setChannel('linkedin_invite')
+      setStepOrder(next)
+      setDelayDays(0)
+      setVoiceAgentId('')
+      setEmailAccountId('')
+    }
+  }, [open])
+
+  const voiceAgentsQuery = useQuery({
+    queryKey: ['settings', 'voice'],
+    queryFn: async () => (await api.get<{ id: string; name: string; retell_agent_id: string }[]>('/accounts/voice')).data,
+    enabled: open && channel === 'voice',
+  })
+
+  const emailAccountsQuery = useQuery({
+    queryKey: ['settings', 'email'],
+    queryFn: async () => (await api.get<{ id: string; from_name: string; from_email: string }[]>('/accounts/email')).data,
+    enabled: open && channel === 'email',
+  })
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      await onCreate({
+        campaign_id: campaignId,
+        step_order: stepOrder,
+        channel,
+        delay_days: delayDays,
+        voice_agent_id: channel === 'voice' ? voiceAgentId || null : null,
+        email_account_id: channel === 'email' ? emailAccountId || null : null,
+      })
+      onClose()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title="Add sequence step" open={open} onClose={onClose}>
+      <form className="space-y-4" onSubmit={handleSubmit}>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-slate-700">Step order</span>
+            <input
+              type="number"
+              min={0}
+              value={stepOrder}
+              onChange={(e) => setStepOrder(Number(e.target.value))}
+              className={inputClassName}
+              required
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-slate-700">Delay (days)</span>
+            <input
+              type="number"
+              min={0}
+              value={delayDays}
+              onChange={(e) => setDelayDays(Number(e.target.value))}
+              className={inputClassName}
+              required
+            />
+          </label>
+        </div>
+
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-medium text-slate-700">Channel</span>
+          <select
+            value={channel}
+            onChange={(e) => setChannel(e.target.value as ChannelType)}
+            className={inputClassName}
+          >
+            <option value="linkedin_invite">LinkedIn Invite</option>
+            <option value="linkedin_dm">LinkedIn DM</option>
+            <option value="email">Email</option>
+            <option value="voice">Voice call</option>
+          </select>
+        </label>
+
+        {channel === 'voice' && (
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-slate-700">Voice agent</span>
+            <select
+              value={voiceAgentId}
+              onChange={(e) => setVoiceAgentId(e.target.value)}
+              className={inputClassName}
+              required
+            >
+              <option value="">Select an agent…</option>
+              {(voiceAgentsQuery.data ?? []).map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        {channel === 'email' && (
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-slate-700">Email account</span>
+            <select
+              value={emailAccountId}
+              onChange={(e) => setEmailAccountId(e.target.value)}
+              className={inputClassName}
+              required
+            >
+              <option value="">Select an account…</option>
+              {(emailAccountsQuery.data ?? []).map((a) => (
+                <option key={a.id} value={a.id}>{a.from_name} ({a.from_email})</option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        <div className="flex justify-end gap-3 pt-1">
+          <button type="button" onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600">
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={busy}
+            className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-sky-600 disabled:opacity-60"
+          >
+            {busy ? 'Adding…' : 'Add step'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function TemplateModal({ step, onClose }: { step: SequenceStep | null; onClose: () => void }) {
+  const open = !!step
+  const toast = useToast()
+  const templateQuery = useGetTemplate(step?.id)
+  const upsertTemplate = useUpsertTemplate()
+
+  const [subject, setSubject] = useState('')
+  const [body, setBody] = useState('')
+
+  useEffect(() => {
+    if (templateQuery.data) {
+      setSubject(templateQuery.data.subject ?? '')
+      setBody(templateQuery.data.body ?? '')
+    } else if (!templateQuery.isLoading && open) {
+      setSubject('')
+      setBody('')
+    }
+  }, [templateQuery.data, templateQuery.isLoading, open])
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!step) return
+    try {
+      await upsertTemplate.mutateAsync({ step_id: step.id, subject: subject || null, body })
+      toast.success('Template saved.')
+      onClose()
+    } catch {
+      toast.error('Failed to save template.')
+    }
+  }
+
+  const hasSubject = step?.channel === 'email'
+
+  return (
+    <Modal title="Edit step template" open={open} onClose={onClose} width="lg">
+      <div className="mb-3 flex items-center gap-2">
+        {step && <Badge label={step.channel} asChannel />}
+        <span className="text-xs text-slate-400">
+          Variables:{' '}
+          <code className="rounded bg-slate-100 px-1 font-mono">{'{{first_name}}'}</code>{' '}
+          <code className="rounded bg-slate-100 px-1 font-mono">{'{{company}}'}</code>{' '}
+          <code className="rounded bg-slate-100 px-1 font-mono">{'{{last_name}}'}</code>
+        </span>
+      </div>
+      {templateQuery.isLoading ? (
+        <div className="h-32 animate-pulse rounded-2xl bg-slate-100" />
+      ) : (
+        <form className="space-y-4" onSubmit={handleSubmit}>
+          {hasSubject && (
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-medium text-slate-700">Subject</span>
+              <input
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                className={inputClassName}
+                placeholder="e.g. Quick question, {{first_name}}"
+              />
+            </label>
+          )}
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-slate-700">Message body</span>
+            <textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              className={`${inputClassName} min-h-[200px]`}
+              placeholder="Hi {{first_name}}, saw that {{company}} is hiring…"
+              required
+            />
+          </label>
+          <div className="flex justify-end gap-3">
+            <button type="button" onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={upsertTemplate.isPending}
+              className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-sky-600 disabled:opacity-60"
+            >
+              {upsertTemplate.isPending ? 'Saving…' : 'Save template'}
+            </button>
+          </div>
+        </form>
+      )}
+    </Modal>
   )
 }
 
