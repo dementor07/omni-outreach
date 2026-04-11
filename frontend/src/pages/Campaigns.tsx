@@ -1,8 +1,8 @@
-import { FormEvent, useEffect, useState, useCallback } from 'react'
+import { FormEvent, useEffect, useState, useCallback, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { Plus, Save, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap } from 'lucide-react'
+import { Plus, Save, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap, X, ChevronRight, Settings2, Trash2 } from 'lucide-react'
 import {
   ReactFlow,
   Background,
@@ -75,7 +75,7 @@ function CustomEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
   const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
   return (
     <>
-      <BaseEdge id={id} path={edgePath} style={{ stroke: selected ? '#0ea5e9' : '#94a3b8', strokeWidth: selected ? 2.5 : 2 }} />
+      <BaseEdge id={id} path={edgePath} style={{ stroke: selected ? '#0ea5e9' : '#e2e8f0', strokeWidth: selected ? 3 : 2 }} />
       <EdgeLabelRenderer>
         <div
           style={{
@@ -87,9 +87,8 @@ function CustomEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
         >
           <button
             onClick={(e) => { e.stopPropagation(); deleteElements({ edges: [{ id }] }) }}
-            style={{ opacity: selected ? 1 : 0 }}
-            className="flex h-5 w-5 items-center justify-center rounded-full border border-rose-200 bg-white text-[11px] font-bold text-rose-400 shadow-sm transition hover:bg-rose-50 hover:text-rose-600"
-            title="Remove connection"
+            style={{ display: selected ? 'flex' : 'none' }}
+            className="h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-white text-[11px] font-bold text-slate-400 shadow-sm transition hover:text-rose-500"
           >
             ×
           </button>
@@ -103,7 +102,7 @@ const edgeTypes = { custom: CustomEdge }
 
 const defaultEdgeOptions = {
   type: 'custom',
-  markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8', width: 16, height: 16 },
+  markerEnd: { type: MarkerType.ArrowClosed, color: '#cbd5e1', width: 20, height: 20 },
 }
 
 // ── Node palette config ────────────────────────────────────────────────────
@@ -122,110 +121,94 @@ const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNode; colo
 
 // ── React Flow Node Types ──────────────────────────────────────────────────
 
-interface ActionNodeData extends Record<string, unknown> {
-  node_type: NodeType
-  email_account_id?: string
-  voice_agent_id?: string
-  delay_days?: number
-  onEditTemplate: (id: string) => void
-  onDelete: (id: string) => void
-}
-
-const ActionNode = ({ data, id }: NodeProps<Node<ActionNodeData>>) => {
-  const nodeType = data.node_type
+const ActionNode = ({ data, id, selected }: NodeProps) => {
+  const nodeType = data.node_type as NodeType
   const cfg = NODE_PALETTE.find(p => p.type === nodeType)
-  const configured = !!(data.email_account_id || data.voice_agent_id || nodeType === 'action_linkedin_invite')
+  const configured = !!(data.email_account_id || data.voice_agent_id || nodeType === 'action_linkedin_invite' || (data.template && (data.template as any).body))
+  
   return (
-    <div className={`nodrag-ignore group relative w-56 rounded-2xl border-2 bg-white shadow-sm transition-all hover:shadow-md ${cfg?.border ?? 'border-slate-200'}`}>
-      <Handle type="target" position={Position.Top} className="!h-3 !w-3 !border-2 !border-white !bg-slate-400" />
-      {/* Header */}
-      <div className={`flex items-center justify-between rounded-t-xl px-3 py-2 ${cfg?.bg ?? 'bg-slate-50'}`}>
-        <div className="flex items-center gap-2">
-          <span className={cfg?.color ?? 'text-slate-500'}>{cfg?.icon}</span>
-          <span className={`text-xs font-bold uppercase tracking-wide ${cfg?.color ?? 'text-slate-500'}`}>{cfg?.label ?? nodeType}</span>
+    <div className={`relative min-w-[200px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : cfg?.border ?? 'border-slate-200'}`}>
+      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
+      <div className="flex items-center gap-3">
+        <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${cfg?.bg ?? 'bg-slate-50'} ${cfg?.color ?? 'text-slate-500'}`}>
+          {cfg?.icon}
         </div>
-        <button
-          onClick={(e) => { e.stopPropagation(); data.onDelete(id) }}
-          className="rounded-lg p-0.5 text-slate-300 opacity-0 transition hover:bg-rose-50 hover:text-rose-400 group-hover:opacity-100"
-          title="Delete node"
-        >✕</button>
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Action</p>
+          <p className="text-xs font-bold text-slate-900">{cfg?.label ?? nodeType}</p>
+        </div>
       </div>
-      {/* Status */}
-      <div className="px-3 py-2">
-        <span className={`text-[11px] ${configured ? 'text-emerald-500 font-medium' : 'italic text-slate-300'}`}>
-          {configured ? '✓ Configured' : 'Not configured'}
+      <div className="mt-3 flex items-center justify-between border-t border-slate-50 pt-3">
+        <span className={`text-[10px] font-medium ${configured ? 'text-emerald-500' : 'text-slate-300'}`}>
+          {configured ? 'Ready' : 'Draft'}
         </span>
+        <Settings2 size={12} className="text-slate-300" />
       </div>
-      {/* Configure button */}
-      <button
-        onClick={() => data.onEditTemplate(id)}
-        className="w-full rounded-b-xl border-t border-slate-100 py-1.5 text-[11px] font-semibold text-slate-500 transition hover:bg-sky-50 hover:text-sky-600"
-      >
-        Configure →
-      </button>
-      <Handle type="source" position={Position.Bottom} className="!h-3 !w-3 !border-2 !border-white !bg-slate-400" />
+      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-none !bg-slate-300" />
     </div>
   )
 }
 
-const TriggerNode = ({ id, data }: NodeProps<Node<ActionNodeData>>) => (
-  <div className="group relative w-48 rounded-2xl border-2 border-emerald-400 bg-emerald-50 p-4 text-center shadow-md">
-    <button
-      onClick={(e) => { e.stopPropagation(); data.onDelete?.(id) }}
-      className="absolute right-2 top-2 rounded-lg p-0.5 text-emerald-300 opacity-0 transition hover:bg-emerald-100 hover:text-rose-400 group-hover:opacity-100"
-      title="Delete node"
-    >✕</button>
-    <div className="mx-auto mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-emerald-400">
-      <Zap size={14} className="text-white" />
+const TriggerNode = ({ selected }: NodeProps) => (
+  <div className={`relative min-w-[180px] rounded-xl border-2 bg-slate-900 p-4 shadow-lg transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-slate-800'}`}>
+    <div className="flex items-center gap-3 text-white">
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/20">
+        <Zap size={14} fill="currentColor" />
+      </div>
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Inception</p>
+        <p className="text-xs font-bold uppercase tracking-tight">Lead Accepted</p>
+      </div>
     </div>
-    <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Start</p>
-    <p className="text-sm font-semibold text-emerald-900">Lead Accepted</p>
-    <Handle type="source" position={Position.Bottom} className="!h-3 !w-3 !border-2 !border-white !bg-emerald-500" />
+    <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-none !bg-white/20" />
   </div>
 )
 
-const ConditionNode = ({ id, data }: NodeProps<Node<ActionNodeData>>) => (
-  <div className="group relative w-56 rounded-2xl border-2 border-amber-300 bg-white shadow-sm transition-all hover:shadow-md">
-    <Handle type="target" position={Position.Top} className="!h-3 !w-3 !border-2 !border-white !bg-slate-400" />
-    <div className="flex items-center justify-between rounded-t-xl bg-amber-50 px-3 py-2">
-      <div className="flex items-center gap-2">
-        <Zap size={15} className="text-amber-500" />
-        <span className="text-xs font-bold uppercase tracking-wide text-amber-600">Branch: Reply?</span>
+const ConditionNode = ({ selected }: NodeProps) => (
+  <div className={`relative min-w-[200px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-amber-200'}`}>
+    <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
+    <div className="flex items-center gap-3">
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 text-amber-500">
+        <Zap size={14} />
       </div>
-      <button
-        onClick={(e) => { e.stopPropagation(); data.onDelete?.(id) }}
-        className="rounded-lg p-0.5 text-slate-300 opacity-0 transition hover:bg-rose-50 hover:text-rose-400 group-hover:opacity-100"
-        title="Delete node"
-      >✕</button>
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-amber-500/60">Condition</p>
+        <p className="text-xs font-bold text-slate-900">Wait for Reply</p>
+      </div>
     </div>
-    <div className="grid grid-cols-2 divide-x divide-slate-100 border-t border-slate-100 px-2 py-3">
-      <div className="flex flex-col items-center gap-2">
-        <span className="text-[10px] font-semibold text-emerald-600">Replied ✓</span>
-        <Handle type="source" id="true" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!h-3 !w-3 !border-2 !border-white !bg-emerald-400" />
+    <div className="mt-4 grid grid-cols-2 divide-x divide-slate-50 border-t border-slate-50 pt-3">
+      <div className="flex flex-col items-center">
+        <span className="text-[9px] font-black uppercase text-emerald-500">True</span>
+        <Handle type="source" id="true" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-emerald-400" />
       </div>
-      <div className="flex flex-col items-center gap-2">
-        <span className="text-[10px] font-semibold text-rose-500">No Reply ✗</span>
-        <Handle type="source" id="false" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!h-3 !w-3 !border-2 !border-white !bg-rose-400" />
+      <div className="flex flex-col items-center">
+        <span className="text-[9px] font-black uppercase text-rose-400">False</span>
+        <Handle type="source" id="false" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-rose-400" />
       </div>
     </div>
   </div>
 )
 
-const DelayNode = ({ id, data }: NodeProps<Node<ActionNodeData>>) => (
-  <div className="group relative w-44 rounded-2xl border-2 border-slate-200 bg-white px-4 py-3 shadow-sm transition-all hover:border-slate-300 hover:shadow-md">
-    <Handle type="target" position={Position.Top} className="!h-3 !w-3 !border-2 !border-white !bg-slate-400" />
+const DelayNode = ({ data, id, selected }: NodeProps<Node<{ delay_days?: number; onChange?: (id: string, val: number) => void }>>) => (
+  <div className={`relative min-w-[160px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-slate-200'}`}>
+    <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
         <Clock size={14} className="text-slate-400" />
-        <span className="text-sm font-semibold text-slate-600">Wait {(data.delay_days as number) ?? 1}d</span>
+        <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Wait</span>
       </div>
-      <button
-        onClick={(e) => { e.stopPropagation(); data.onDelete?.(id) }}
-        className="rounded-lg p-0.5 text-slate-300 opacity-0 transition hover:bg-rose-50 hover:text-rose-400 group-hover:opacity-100"
-        title="Delete node"
-      >✕</button>
+      <div className="flex items-center gap-1">
+        <input 
+          type="number"
+          min="1"
+          value={data.delay_days || 1}
+          onChange={(e) => data.onChange?.(id, parseInt(e.target.value) || 1)}
+          className="w-10 rounded border-none bg-slate-50 py-0.5 text-center text-xs font-bold text-slate-900 focus:ring-2 focus:ring-sky-500/20"
+        />
+        <span className="text-[10px] font-bold text-slate-400 uppercase">Days</span>
+      </div>
     </div>
-    <Handle type="source" position={Position.Bottom} className="!h-3 !w-3 !border-2 !border-white !bg-slate-400" />
+    <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-none !bg-slate-300" />
   </div>
 )
 
@@ -240,32 +223,6 @@ const nodeTypes = {
   action_voice: ActionNode,
   condition_replied: ConditionNode,
   delay: DelayNode,
-}
-
-// ── Left palette sidebar ───────────────────────────────────────────────────
-
-function NodePalette({ onAdd }: { onAdd: (type: NodeType) => void }) {
-  return (
-    <div className="absolute left-3 top-3 z-10 flex w-44 flex-col gap-1 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg">
-      <p className="px-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Add node</p>
-      <button
-        onClick={() => onAdd('trigger_start')}
-        className="flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 transition"
-      >
-        <Zap size={14} /> Start Trigger
-      </button>
-      <div className="my-1 h-px bg-slate-100" />
-      {NODE_PALETTE.map(({ type, label, icon, color, bg }) => (
-        <button
-          key={type}
-          onClick={() => onAdd(type)}
-          className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition hover:opacity-80 ${bg} ${color}`}
-        >
-          {icon} {label}
-        </button>
-      ))}
-    </div>
-  )
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────
@@ -292,24 +249,23 @@ export default function Campaigns() {
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
-  const [configNodeId, setConfigNodeId] = useState<string | null>(null)
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   
   const [createOpen, setCreateOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [form, setForm] = useState<CampaignPayload>(defaultCampaignForm)
   const [importPayload, setImportPayload] = useState('')
 
-  const deleteNode = useCallback((nodeId: string) => {
-    setNodes(nds => nds.filter(n => n.id !== nodeId))
-    setEdges(eds => eds.filter(e => e.source !== nodeId && e.target !== nodeId))
-  }, [setNodes, setEdges])
-
-  const makeNodeData = useCallback((base: Record<string, unknown>, nodeType: string) => ({
-    ...base,
-    node_type: nodeType,
-    onEditTemplate: (nid: string) => setConfigNodeId(nid),
-    onDelete: (nid: string) => deleteNode(nid),
-  }), [deleteNode])
+  const updateNodeData = useCallback((nodeId: string, newData: any) => {
+    setNodes((nds) =>
+      nds.map((node) => {
+        if (node.id === nodeId) {
+          return { ...node, data: { ...node.data, ...newData } }
+        }
+        return node
+      })
+    )
+  }, [setNodes])
 
   // Sync React Flow state with database
   useEffect(() => {
@@ -318,7 +274,11 @@ export default function Campaigns() {
         id: n.id,
         type: n.node_type,
         position: { x: n.position_x, y: n.position_y },
-        data: makeNodeData(n.data as Record<string, unknown>, n.node_type),
+        data: { 
+          ...n.data, 
+          node_type: n.node_type,
+          onChange: (id: string, val: number) => updateNodeData(id, { delay_days: val })
+        },
       }))
       const rfEdges: Edge[] = graphQuery.data.edges.map(e => ({
         id: e.id,
@@ -326,13 +286,14 @@ export default function Campaigns() {
         target: e.target_node_id,
         sourceHandle: e.source_handle,
         targetHandle: e.target_handle,
+        type: 'custom',
       }))
       setNodes(rfNodes)
       setEdges(rfEdges)
     }
-  }, [graphQuery.data, setNodes, setEdges, makeNodeData])
+  }, [graphQuery.data, setNodes, setEdges, updateNodeData])
 
-  const onConnect = useCallback((params: Connection) => setEdges((eds) => addEdge(params, eds)), [setEdges])
+  const onConnect = useCallback((params: Connection) => setEdges((eds) => addEdge({ ...params, type: 'custom' }, eds)), [setEdges])
 
   const onSaveCanvas = async () => {
     if (!id) return
@@ -353,7 +314,7 @@ export default function Campaigns() {
           target_handle: e.targetHandle || 'default'
         }))
       })
-      toast.success('Canvas saved successfully.')
+      toast.success('Canvas saved.')
     } catch {
       toast.error('Failed to save canvas.')
     }
@@ -364,21 +325,24 @@ export default function Campaigns() {
     const newNode: Node = {
       id: newId,
       type,
-      position: { x: 200 + Math.random() * 100, y: 100 + Math.random() * 100 },
-      data: makeNodeData({ delay_days: type === 'delay' ? 1 : undefined }, type),
+      position: { x: 200 + Math.random() * 50, y: 100 + Math.random() * 50 },
+      data: { 
+        node_type: type, 
+        delay_days: type === 'delay' ? 1 : 0,
+        onChange: (id: string, val: number) => updateNodeData(id, { delay_days: val })
+      },
     }
     setNodes(nds => nds.concat(newNode))
+    setSelectedNodeId(newId)
   }
 
-  const clearCanvas = async () => {
-    if (!id) return
-    setNodes([])
-    setEdges([])
-    await saveGraph.mutateAsync({ campaign_id: id, nodes: [], edges: [] })
-    toast.success('Canvas cleared.')
+  const deleteNode = (nodeId: string) => {
+    setNodes(nds => nds.filter(n => n.id !== nodeId))
+    setEdges(eds => eds.filter(e => e.source !== nodeId && e.target !== nodeId))
+    if (selectedNodeId === nodeId) setSelectedNodeId(null)
   }
 
-  // ... (Keep existing useEffect for form and handleCreate/Save/Archive/Import)
+  // Handle form and data loading
   useEffect(() => {
     if (!campaignQuery.data) return
     setForm({
@@ -395,28 +359,23 @@ export default function Campaigns() {
     })
   }, [campaignQuery.data])
 
-  const campaignRows = campaignsQuery.data || []
-  const detailLeads = leadsQuery.data?.leads || []
-  const detailQueue = queueQuery.data || []
-  const stats = statsQuery.data
-
   if (!id) {
     return (
       <div className="space-y-6">
         <section className="flex items-start justify-between rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-500">Campaigns</p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">Configure the outreach engine campaign by campaign</h1>
+            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">Outreach Playbooks</h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
-              Build campaign constraints, choose operating hours, and drop into deeper views when you need leads or queue detail.
+              Build, test, and dispatch multi-channel sequences from a unified dashboard.
             </p>
           </div>
           <button
             type="button"
             onClick={() => setCreateOpen(true)}
-            className="inline-flex items-center gap-2 rounded-xl bg-sky-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-600"
+            className="btn-tactile bg-sky-500 px-6 py-3 text-sm text-white hover:bg-sky-600"
           >
-            <Plus size={16} />
+            <Plus size={16} className="mr-2" />
             New Campaign
           </button>
         </section>
@@ -429,7 +388,7 @@ export default function Campaigns() {
               { key: 'daily_lead_cap', header: 'Daily Leads', className: 'text-right', render: (row) => row.daily_lead_cap },
               { key: 'created_at', header: 'Created', render: (row) => formatDate(row.created_at) },
             ]}
-            rows={campaignRows}
+            rows={campaignsQuery.data || []}
             loading={campaignsQuery.isLoading}
             onRowClick={(row) => navigate(`/campaigns/${row.id}?tab=leads`)}
           />
@@ -451,7 +410,7 @@ export default function Campaigns() {
             <div>
               <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{campaignQuery.data?.name || 'Campaign detail'}</h1>
               <div className="flex gap-2 text-xs text-slate-400">
-                <span>{campaignQuery.data?.status}</span>
+                <Badge label={campaignQuery.data?.status || 'active'} asStatus />
                 <span>•</span>
                 <span>{campaignQuery.data?.timezone}</span>
               </div>
@@ -492,130 +451,117 @@ export default function Campaigns() {
         </div>
       </section>
 
-      <div className="flex-1 overflow-hidden">
-        {activeTab === 'leads' && (
-          <div className="h-full rounded-3xl border border-slate-200 bg-white p-6 shadow-sm overflow-auto">
-             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-slate-900">Leads</h2>
-              <button onClick={() => setImportOpen(true)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium hover:bg-slate-50">Import Leads</button>
-            </div>
-            <DataTable
-              columns={[
-                { key: 'name', header: 'Lead', render: (row) => `${row.first_name || ''} ${row.last_name || ''}` },
-                { key: 'status', header: 'Status', render: (row) => <Badge label={row.status || 'active'} asStatus /> },
-                { key: 'replied_at', header: 'Replied', render: (row) => formatDate(row.replied_at) },
-              ]}
-              rows={detailLeads}
-              loading={leadsQuery.isLoading}
-            />
-          </div>
-        )}
-
-        {activeTab === 'queue' && (
-          <div className="h-full rounded-3xl border border-slate-200 bg-white p-6 shadow-sm overflow-auto">
-            <h2 className="text-lg font-semibold text-slate-900">Queue</h2>
-            <DataTable
-              columns={[
-                { key: 'lead', header: 'Lead', render: (row) => row.first_name || row.linkedin_url },
-                { key: 'channel', header: 'Channel', render: (row) => <Badge label={row.channel} asChannel /> },
-                { key: 'status', header: 'Status', render: (row) => <Badge label={row.status} asStatus /> },
-                { key: 'scheduled_at', header: 'Scheduled', render: (row) => formatDate(row.scheduled_at) },
-              ]}
-              rows={detailQueue}
-              loading={queueQuery.isLoading}
-            />
-          </div>
-        )}
-...
-        {activeTab === 'sequence' && (
-          <div className="relative h-full rounded-3xl border border-slate-200 bg-slate-50 shadow-inner">
-            {campaignQuery.data?.sequence_mode === 'canvas' ? (
-              <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                onConnect={onConnect}
-                nodeTypes={nodeTypes}
-                edgeTypes={edgeTypes}
-                defaultEdgeOptions={defaultEdgeOptions}
-                connectionLineType={ConnectionLineType.Bezier}
-                fitView
-                deleteKeyCode="Delete"
-              >
-                <Background color="#e2e8f0" gap={24} />
-                <Controls />
-                <MiniMap
-                  nodeStrokeWidth={3}
-                  nodeColor="#e2e8f0"
-                  maskColor="rgba(241,245,249,0.7)"
-                  className="!rounded-2xl !border !border-slate-200"
+      <div className="flex-1 overflow-hidden relative">
+        <div className={`h-full flex gap-6 transition-all duration-300`}>
+          <div className="flex-1 overflow-hidden">
+            {activeTab === 'leads' && (
+              <div className="h-full rounded-3xl border border-slate-200 bg-white p-6 shadow-sm overflow-auto">
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="text-lg font-semibold text-slate-900 uppercase tracking-tight">Leads Pipeline</h2>
+                  <button onClick={() => setImportOpen(true)} className="btn-tactile border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50">Import Leads</button>
+                </div>
+                <DataTable
+                  columns={[
+                    { key: 'name', header: 'Lead', render: (row) => `${row.first_name || ''} ${row.last_name || ''}` },
+                    { key: 'status', header: 'Status', render: (row) => <Badge label={row.status || 'active'} asStatus /> },
+                    { key: 'replied_at', header: 'Replied', render: (row) => formatDate(row.replied_at) },
+                  ]}
+                  rows={leadsQuery.data?.leads || []}
+                  loading={leadsQuery.isLoading}
                 />
-                <NodePalette onAdd={addNode} />
-                <Panel position="top-right">
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => { if (window.confirm('Clear all nodes and edges?')) clearCanvas() }}
-                      className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-500 shadow-sm transition hover:bg-rose-50 active:scale-95"
-                    >
-                      Clear
-                    </button>
-                    <button
-                      onClick={onSaveCanvas}
-                      disabled={saveGraph.isPending}
-                      className="inline-flex items-center gap-2 rounded-2xl bg-sky-500 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-sky-200 transition hover:bg-sky-600 active:scale-95 disabled:opacity-60"
-                    >
-                      <Save size={16} />
-                      {saveGraph.isPending ? 'Saving…' : 'Save Canvas'}
-                    </button>
-                  </div>
-                </Panel>
-              </ReactFlow>
-            ) : (
-              <SequentialBuilder
-                nodes={nodes}
-                edges={edges}
-                onSave={(newNodes, newEdges) => {
-                  setNodes(newNodes)
-                  setEdges(newEdges)
-                  // Use mutated state directly for save
-                  saveGraph.mutate({
-                    campaign_id: id!,
-                    nodes: newNodes.map(n => ({
-                      id: n.id,
-                      node_type: n.type as NodeType,
-                      position_x: n.position.x,
-                      position_y: n.position.y,
-                      data: n.data
-                    })),
-                    edges: newEdges.map(e => ({
-                      source_node_id: e.source,
-                      target_node_id: e.target,
-                      source_handle: e.sourceHandle || 'default',
-                      target_handle: e.targetHandle || 'default'
-                    }))
-                  })
-                }}
-                onEditTemplate={setConfigNodeId}
-                isSaving={saveGraph.isPending}
-              />
+              </div>
+            )}
+
+            {activeTab === 'queue' && (
+              <div className="h-full rounded-3xl border border-slate-200 bg-white p-6 shadow-sm overflow-auto">
+                <h2 className="text-lg font-semibold text-slate-900 uppercase tracking-tight mb-4">Live Dispatch</h2>
+                <DataTable
+                  columns={[
+                    { key: 'lead', header: 'Lead', render: (row) => row.first_name || row.linkedin_url },
+                    { key: 'channel', header: 'Channel', render: (row) => <Badge label={row.channel} asChannel /> },
+                    { key: 'status', header: 'Status', render: (row) => <Badge label={row.status} asStatus /> },
+                    { key: 'scheduled_at', header: 'Scheduled', render: (row) => formatDate(row.scheduled_at) },
+                  ]}
+                  rows={queueQuery.data || []}
+                  loading={queueQuery.isLoading}
+                />
+              </div>
+            )}
+
+            {activeTab === 'sequence' && (
+              <div className="relative h-full rounded-3xl border border-slate-200 bg-slate-50 shadow-inner">
+                {campaignQuery.data?.sequence_mode === 'canvas' ? (
+                  <ReactFlow
+                    nodes={nodes}
+                    edges={edges}
+                    onNodesChange={onNodesChange}
+                    onEdgesChange={onEdgesChange}
+                    onConnect={onConnect}
+                    onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+                    onPaneClick={() => setSelectedNodeId(null)}
+                    nodeTypes={nodeTypes}
+                    edgeTypes={edgeTypes}
+                    defaultEdgeOptions={defaultEdgeOptions}
+                    connectionLineType={ConnectionLineType.Bezier}
+                    fitView
+                    deleteKeyCode="Delete"
+                  >
+                    <Background color="#cbd5e1" gap={24} />
+                    <Controls />
+                    <NodePalette onAdd={addNode} />
+                    <Panel position="top-right">
+                      <div className="flex gap-2">
+                        <button
+                          onClick={onSaveCanvas}
+                          disabled={saveGraph.isPending}
+                          className="btn-tactile bg-slate-900 px-6 py-3 text-xs font-bold text-white shadow-xl shadow-slate-200 transition hover:bg-slate-800"
+                        >
+                          <Save size={16} className="mr-2" />
+                          {saveGraph.isPending ? 'Syncing...' : 'Deploy Canvas'}
+                        </button>
+                      </div>
+                    </Panel>
+                  </ReactFlow>
+                ) : (
+                  <SequentialBuilder
+                    nodes={nodes}
+                    edges={edges}
+                    onSave={(newNodes, newEdges) => {
+                      setNodes(newNodes)
+                      setEdges(newEdges)
+                      saveGraph.mutate({
+                        campaign_id: id!,
+                        nodes: newNodes.map(n => ({ id: n.id, node_type: n.type as NodeType, position_x: n.position.x, position_y: n.position.y, data: n.data })),
+                        edges: newEdges.map(e => ({ source_node_id: e.source, target_node_id: e.target, source_handle: e.sourceHandle || 'default', target_handle: e.targetHandle || 'default' }))
+                      })
+                    }}
+                    onEditTemplate={setSelectedNodeId}
+                    isSaving={saveGraph.isPending}
+                  />
+                )}
+              </div>
+            )}
+
+            {activeTab === 'settings' && (
+              <div className="h-full overflow-auto rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+                <CampaignSettings campaignId={id!} />
+              </div>
             )}
           </div>
-        )}
 
-        {activeTab === 'settings' && (
-          <div className="h-full overflow-auto rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-            <CampaignSettings campaignId={id!} />
-          </div>
-        )}
+          {activeTab === 'sequence' && campaignQuery.data?.sequence_mode === 'canvas' && (
+            <div className={`w-80 bg-white border-l border-slate-200 transition-all ${selectedNodeId ? 'mr-0' : '-mr-80'}`}>
+              <ConfigSidebar 
+                nodeId={selectedNodeId} 
+                nodes={nodes} 
+                onClose={() => setSelectedNodeId(null)}
+                onUpdate={(data) => updateNodeData(selectedNodeId!, data)}
+                onDelete={() => deleteNode(selectedNodeId!)}
+              />
+            </div>
+          )}
+        </div>
       </div>
-
-      <NodeConfigModal
-        nodeId={configNodeId}
-        nodes={nodes}
-        onClose={() => setConfigNodeId(null)}
-        onUpdateNodeData={(nodeId, data) => setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, ...data } } : n))}
-      />
 
       <Modal title="Import leads" open={importOpen} onClose={() => setImportOpen(false)} width="lg">
         <form className="space-y-4" onSubmit={async (e: FormEvent) => {
@@ -639,48 +585,59 @@ export default function Campaigns() {
   )
 }
 
-type EmailAccount = { id: string; from_name: string; from_email: string }
-type VoiceAgent = { id: string; name: string; retell_agent_id: string }
+function NodePalette({ onAdd }: { onAdd: (type: NodeType) => void }) {
+  return (
+    <div className="absolute left-4 top-4 z-10 flex w-48 flex-col gap-1 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+      <p className="px-3 pb-2 pt-1 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Add Module</p>
+      <button
+        onClick={() => onAdd('trigger_start')}
+        className="flex items-center gap-3 rounded-xl bg-slate-900 px-4 py-3 text-xs font-bold text-white transition hover:bg-slate-800"
+      >
+        <Zap size={14} fill="currentColor" /> Genesis Trigger
+      </button>
+      <div className="my-2 h-px bg-slate-100" />
+      <div className="space-y-1">
+        {NODE_PALETTE.map(({ type, label, icon, color, bg, border }) => (
+          <button
+            key={type}
+            onClick={() => onAdd(type)}
+            className={`flex w-full items-center gap-3 rounded-xl border border-transparent px-4 py-2.5 text-xs font-bold transition hover:border-slate-200 hover:bg-slate-50 ${color}`}
+          >
+            {icon} {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
 
-function NodeConfigModal({
-  nodeId,
-  nodes,
-  onClose,
-  onUpdateNodeData,
-}: {
-  nodeId: string | null
-  nodes: Node[]
-  onClose: () => void
-  onUpdateNodeData: (nodeId: string, data: Record<string, unknown>) => void
+function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: { 
+  nodeId: string | null; 
+  nodes: Node[]; 
+  onClose: () => void;
+  onUpdate: (data: any) => void;
+  onDelete: () => void;
 }) {
-  const open = !!nodeId
-  const toast = useToast()
   const node = nodes.find(n => n.id === nodeId)
-  const nodeType = node?.data?.node_type as NodeType | undefined
-
+  const nodeType = node?.type as NodeType
+  const toast = useToast()
+  
   const templateQuery = useGetTemplate(nodeId || undefined)
   const upsertTemplate = useUpsertTemplate()
 
   const emailAccountsQuery = useQuery({
     queryKey: ['accounts', 'email'],
     queryFn: async () => (await api.get<EmailAccount[]>('/accounts/email')).data,
-    staleTime: 60_000,
   })
   const voiceAgentsQuery = useQuery({
     queryKey: ['accounts', 'voice'],
     queryFn: async () => (await api.get<VoiceAgent[]>('/accounts/voice')).data,
-    staleTime: 60_000,
   })
 
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
-  const [emailAccountId, setEmailAccountId] = useState('')
-  const [voiceAgentId, setVoiceAgentId] = useState('')
-  const [delayDays, setDelayDays] = useState(1)
 
   useEffect(() => {
-    if (!open) return
-    // Load template text
     if (templateQuery.data) {
       setSubject(templateQuery.data.subject ?? '')
       setBody(templateQuery.data.body ?? '')
@@ -688,137 +645,131 @@ function NodeConfigModal({
       setSubject('')
       setBody('')
     }
-    // Load node-level config from node.data
-    if (node?.data) {
-      setEmailAccountId((node.data.email_account_id as string) ?? '')
-      setVoiceAgentId((node.data.voice_agent_id as string) ?? '')
-      setDelayDays((node.data.delay_days as number) ?? 1)
-    }
-  }, [open, nodeId, templateQuery.data])
+  }, [templateQuery.data])
 
-  if (!open || !nodeType) return null
+  if (!node) return null
 
-  const needsTemplate = nodeType.startsWith('action_') && nodeType !== 'action_linkedin_invite' && nodeType !== 'action_voice'
   const isEmail = nodeType === 'action_email'
   const isVoice = nodeType === 'action_voice'
   const isDelay = nodeType === 'delay'
-  const isInvite = nodeType === 'action_linkedin_invite'
-
-  const titleMap: Partial<Record<NodeType, string>> = {
-    action_linkedin_invite: 'LinkedIn Invite',
-    action_linkedin_dm: 'LinkedIn DM',
-    action_email: 'Email',
-    action_whatsapp: 'WhatsApp',
-    action_instagram: 'Instagram DM',
-    action_telegram: 'Telegram',
-    action_voice: 'Voice Call',
-    delay: 'Delay',
-  }
+  const needsTemplate = nodeType.startsWith('action_') && nodeType !== 'action_linkedin_invite' && nodeType !== 'action_voice'
 
   return (
-    <Modal title={`Configure: ${titleMap[nodeType] ?? nodeType}`} open={open} onClose={onClose} width="lg">
-      <form
-        className="space-y-4"
-        onSubmit={async (e) => {
-          e.preventDefault()
-          // 1. Persist account/agent/delay into node.data in React state
-          const dataUpdate: Record<string, unknown> = {}
-          if (isEmail && emailAccountId) dataUpdate.email_account_id = emailAccountId
-          if (isVoice && voiceAgentId) dataUpdate.voice_agent_id = voiceAgentId
-          if (isDelay) dataUpdate.delay_days = delayDays
-          if (Object.keys(dataUpdate).length > 0) {
-            onUpdateNodeData(nodeId!, dataUpdate)
-          }
-          // 2. Save template text (only for channels that need it)
-          if (needsTemplate && body.trim()) {
-            await upsertTemplate.mutateAsync({ node_id: nodeId!, subject: subject || null, body })
-          }
-          toast.success('Saved.')
-          onClose()
-        }}
-      >
+    <div className="h-full flex flex-col">
+      <div className="flex items-center justify-between p-6 border-b border-slate-100">
+        <h3 className="text-sm font-black uppercase tracking-widest text-slate-900">Module Config</h3>
+        <button onClick={onClose} className="p-2 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-900 transition-all"><X size={18} /></button>
+      </div>
+
+      <div className="flex-1 overflow-auto p-6 space-y-8">
+        <div>
+          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Module Type</label>
+          <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-2xl ring-1 ring-slate-900/5">
+            <StepIcon type={nodeType} />
+            <span className="text-sm font-bold text-slate-900 capitalize">{nodeType.replace('action_', '').replace('_', ' ')}</span>
+          </div>
+        </div>
+
         {isDelay && (
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-slate-700">Wait (days)</span>
-            <input
-              type="number"
-              min={1}
-              value={delayDays}
-              onChange={(e) => setDelayDays(Number(e.target.value))}
+          <div>
+            <label className={labelCls}>Wait Duration (Days)</label>
+            <input 
+              type="number" 
+              min="1" 
+              value={node.data.delay_days || 1} 
+              onChange={(e) => onUpdate({ delay_days: parseInt(e.target.value) || 1 })}
               className={inputClassName}
-              required
             />
-          </label>
+          </div>
         )}
 
         {isEmail && (
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-slate-700">Email account</span>
-            <select value={emailAccountId} onChange={(e) => setEmailAccountId(e.target.value)} className={inputClassName} required>
-              <option value="">Select account…</option>
-              {(emailAccountsQuery.data ?? []).map(a => (
-                <option key={a.id} value={a.id}>{a.from_name} &lt;{a.from_email}&gt;</option>
-              ))}
+          <div>
+            <label className={labelCls}>Sending Account</label>
+            <select 
+              value={node.data.email_account_id || ''} 
+              onChange={(e) => onUpdate({ email_account_id: e.target.value })}
+              className={inputClassName}
+            >
+              <option value="">Select identity...</option>
+              {(emailAccountsQuery.data || []).map(a => <option key={a.id} value={a.id}>{a.from_name}</option>)}
             </select>
-          </label>
+          </div>
         )}
 
         {isVoice && (
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-slate-700">Voice agent</span>
-            <select value={voiceAgentId} onChange={(e) => setVoiceAgentId(e.target.value)} className={inputClassName} required>
-              <option value="">Select agent…</option>
-              {(voiceAgentsQuery.data ?? []).map(a => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
+          <div>
+            <label className={labelCls}>Voice Agent</label>
+            <select 
+              value={node.data.voice_agent_id || ''} 
+              onChange={(e) => onUpdate({ voice_agent_id: e.target.value })}
+              className={inputClassName}
+            >
+              <option value="">Select agent...</option>
+              {(voiceAgentsQuery.data || []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
-          </label>
-        )}
-
-        {isEmail && (
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-slate-700">Subject</span>
-            <input value={subject} onChange={(e) => setSubject(e.target.value)} className={inputClassName} placeholder="Your subject line…" />
-          </label>
+          </div>
         )}
 
         {needsTemplate && (
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-slate-700">
-              Message body
-              <span className="ml-2 font-normal text-slate-400 text-xs">Use {'{{first_name}}'}, {'{{company}}'}</span>
-            </span>
-            <textarea
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              className={`${inputClassName} min-h-[180px]`}
-              placeholder="Hi {{first_name}}, …"
-              required
-            />
-          </label>
+          <div className="space-y-4 pt-4 border-t border-slate-100">
+            {isEmail && (
+              <div>
+                <label className={labelCls}>Subject Line</label>
+                <input value={subject} onChange={(e) => setSubject(e.target.value)} className={inputClassName} />
+              </div>
+            )}
+            <div>
+              <label className={labelCls}>Message / Script</label>
+              <textarea 
+                value={body} 
+                onChange={(e) => setBody(e.target.value)} 
+                className={`${inputClassName} min-h-[200px] resize-none text-pretty`}
+                placeholder="Hi {{first_name}}, ..."
+              />
+            </div>
+            <button 
+              onClick={async () => {
+                await upsertTemplate.mutateAsync({ node_id: nodeId!, subject: subject || null, body })
+                toast.success('Script updated.')
+              }}
+              disabled={upsertTemplate.isPending}
+              className="w-full btn-tactile bg-slate-100 py-3 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:bg-slate-200"
+            >
+              {upsertTemplate.isPending ? 'Syncing...' : 'Update Script'}
+            </button>
+          </div>
         )}
+      </div>
 
-        {isInvite && (
-          <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">
-            LinkedIn invite will be sent automatically — no message template needed.
-          </p>
-        )}
-
-        <button
-          type="submit"
-          className="w-full rounded-xl bg-sky-500 py-3 font-semibold text-white hover:bg-sky-600 disabled:opacity-60"
-          disabled={upsertTemplate.isPending}
+      <div className="p-6 border-t border-slate-100">
+        <button 
+          onClick={onDelete}
+          className="w-full flex items-center justify-center gap-2 py-3 text-[10px] font-black uppercase tracking-widest text-rose-500 hover:bg-rose-50 rounded-xl transition-all"
         >
-          {upsertTemplate.isPending ? 'Saving…' : 'Save'}
+          <Trash2 size={14} /> Remove Module
         </button>
-      </form>
-    </Modal>
+      </div>
+    </div>
   )
 }
 
-// ── Campaign Settings Tab ──────────────────────────────────────────────────
+function StepIcon({ type }: { type: NodeType }) {
+  const common = { size: 18, strokeWidth: 2, className: "text-slate-600" }
+  switch (type) {
+    case 'action_linkedin_invite':
+    case 'action_linkedin_dm': return <Linkedin {...common} className="text-sky-500" />
+    case 'action_email': return <Mail {...common} className="text-slate-500" />
+    case 'action_whatsapp': return <MessageSquare {...common} className="text-emerald-500" />
+    case 'action_instagram': return <Instagram {...common} className="text-pink-500" />
+    case 'action_telegram': return <Send {...common} className="text-blue-500" />
+    case 'action_voice': return <Phone {...common} className="text-indigo-500" />
+    case 'delay': return <Clock {...common} className="text-amber-500" />
+    default: return <Zap {...common} />
+  }
+}
 
-type LinkedInAccount = { id: string; name: string; unipile_id: string; is_active: boolean }
+// ── Shared UI Parts ────────────────────────────────────────────────────────
 
 function CampaignSettings({ campaignId }: { campaignId: string }) {
   const toast = useToast()
@@ -832,12 +783,10 @@ function CampaignSettings({ campaignId }: { campaignId: string }) {
   const linkedinAccountsQuery = useQuery({
     queryKey: ['settings', 'linkedin'],
     queryFn: async () => (await api.get<LinkedInAccount[]>('/accounts/linkedin')).data,
-    staleTime: 60_000,
   })
   const assignedQuery = useQuery({
     queryKey: ['campaign-accounts', campaignId],
     queryFn: async () => (await api.get<LinkedInAccount[]>(`/campaigns/${campaignId}/accounts`)).data,
-    staleTime: 30_000,
   })
 
   useEffect(() => {
@@ -857,23 +806,10 @@ function CampaignSettings({ campaignId }: { campaignId: string }) {
     }
   }, [campaignQuery.data, dirty])
 
-  const update = (key: string, val: unknown) => {
-    setForm(f => ({ ...f, [key]: val }))
-    setDirty(true)
-  }
-
-  const onSave = async (e: FormEvent) => {
-    e.preventDefault()
-    await updateCampaign.mutateAsync({ id: campaignId, payload: form })
-    setDirty(false)
-    toast.success('Campaign settings saved.')
-  }
-
   const assignedIds = new Set((assignedQuery.data ?? []).map(a => a.id))
 
   const toggleAccount = async (accountId: string) => {
-    const assigned = assignedIds.has(accountId)
-    if (assigned) {
+    if (assignedIds.has(accountId)) {
       await api.delete(`/campaigns/${campaignId}/accounts/${accountId}`)
     } else {
       await api.post(`/campaigns/${campaignId}/accounts`, { account_id: accountId })
@@ -885,170 +821,55 @@ function CampaignSettings({ campaignId }: { campaignId: string }) {
 
   return (
     <div className="space-y-10 max-w-2xl">
-      <form onSubmit={onSave} className="space-y-6">
-        <h2 className="text-base font-bold text-slate-900">Campaign constants</h2>
-
+      <form onSubmit={async (e) => { e.preventDefault(); await updateCampaign.mutateAsync({ id: campaignId, payload: form }); setDirty(false); toast.success('Saved.'); }} className="space-y-6">
+        <h2 className="text-sm font-black uppercase tracking-widest text-slate-900">Campaign Configuration</h2>
         <div className="grid grid-cols-2 gap-4">
-          <label className="block">
-            <span className={labelCls}>Name</span>
-            <input value={form.name ?? ''} onChange={e => update('name', e.target.value)} className={inputClassName} required />
-          </label>
-          <label className="block">
-            <span className={labelCls}>Timezone</span>
-            <input value={form.timezone ?? ''} onChange={e => update('timezone', e.target.value)} className={inputClassName} placeholder="Asia/Kolkata" required />
-          </label>
+          <label className="block"><span className={labelCls}>Name</span><input value={form.name ?? ''} onChange={e => { setForm({ ...form, name: e.target.value }); setDirty(true); }} className={inputClassName} required /></label>
+          <label className="block"><span className={labelCls}>Timezone</span><input value={form.timezone ?? ''} onChange={e => { setForm({ ...form, timezone: e.target.value }); setDirty(true); }} className={inputClassName} required /></label>
         </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <label className="block">
-            <span className={labelCls}>Daily lead cap</span>
-            <input type="number" min={1} value={form.daily_lead_cap ?? 50} onChange={e => update('daily_lead_cap', Number(e.target.value))} className={inputClassName} />
-          </label>
-          <label className="block">
-            <span className={labelCls}>Daily invite cap</span>
-            <input type="number" min={1} value={form.invite_daily_cap ?? 20} onChange={e => update('invite_daily_cap', Number(e.target.value))} className={inputClassName} />
-          </label>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <label className="block">
-            <span className={labelCls}>Active hours start (24h)</span>
-            <input type="number" min={0} max={23} value={form.active_hours_start ?? 9} onChange={e => update('active_hours_start', Number(e.target.value))} className={inputClassName} />
-          </label>
-          <label className="block">
-            <span className={labelCls}>Active hours end (24h)</span>
-            <input type="number" min={1} max={24} value={form.active_hours_end ?? 18} onChange={e => update('active_hours_end', Number(e.target.value))} className={inputClassName} />
-          </label>
-        </div>
-
-        <label className="flex items-center gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={!!form.simulation_mode}
-            onChange={e => update('simulation_mode', e.target.checked)}
-            className="h-4 w-4 rounded border-slate-300 text-sky-500"
-          />
-          <span className="text-sm font-medium text-slate-700">Simulation mode <span className="font-normal text-slate-400">(log actions, don't send)</span></span>
-        </label>
-
-        <label className="block">
-          <span className={labelCls}>Screening prompt</span>
-          <textarea
-            value={form.screening_prompt ?? ''}
-            onChange={e => update('screening_prompt', e.target.value)}
-            rows={4}
-            className={`${inputClassName} resize-none`}
-            placeholder="Describe who to accept or reject…"
-          />
-        </label>
-
-        <button
-          type="submit"
-          disabled={!dirty || updateCampaign.isPending}
-          className="inline-flex items-center gap-2 rounded-xl bg-sky-500 px-6 py-2.5 text-sm font-bold text-white transition hover:bg-sky-600 disabled:opacity-40"
-        >
-          <Save size={15} />
-          {updateCampaign.isPending ? 'Saving…' : 'Save changes'}
-        </button>
+        <button type="submit" disabled={!dirty} className="btn-tactile bg-sky-500 px-6 py-2.5 text-xs text-white">Save Changes</button>
       </form>
 
-      <div className="border-t border-slate-100 pt-8">
-        <h2 className="mb-4 text-base font-bold text-slate-900">LinkedIn accounts assigned to this campaign</h2>
-        {linkedinAccountsQuery.isLoading ? (
-          <p className="text-sm text-slate-400">Loading accounts…</p>
-        ) : (
-          <div className="space-y-2">
-            {(linkedinAccountsQuery.data ?? []).map(acct => {
-              const on = assignedIds.has(acct.id)
-              return (
-                <div key={acct.id} className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">{acct.name}</p>
-                    <p className="text-xs text-slate-400">{acct.unipile_id}</p>
-                  </div>
-                  <button
-                    onClick={() => toggleAccount(acct.id)}
-                    className={`rounded-xl px-4 py-1.5 text-xs font-bold transition ${on ? 'bg-emerald-100 text-emerald-700 hover:bg-rose-50 hover:text-rose-500' : 'bg-slate-200 text-slate-500 hover:bg-sky-50 hover:text-sky-600'}`}
-                  >
-                    {on ? 'Assigned ✓' : 'Assign'}
-                  </button>
-                </div>
-              )
-            })}
-            {(linkedinAccountsQuery.data ?? []).length === 0 && (
-              <p className="text-sm text-slate-400">No LinkedIn accounts configured yet. Go to Settings → LinkedIn.</p>
-            )}
-          </div>
-        )}
+      <div className="pt-8 border-t border-slate-100">
+        <h2 className="text-sm font-black uppercase tracking-widest text-slate-900 mb-4">Assigned Sending Nodes</h2>
+        <div className="space-y-2">
+          {(linkedinAccountsQuery.data || []).map(acct => (
+            <div key={acct.id} className="flex items-center justify-between p-4 rounded-2xl bg-slate-50 ring-1 ring-slate-900/5">
+              <span className="text-sm font-bold text-slate-900">{acct.name}</span>
+              <button onClick={() => toggleAccount(acct.id)} className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest ${assignedIds.has(acct.id) ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
+                {assignedIds.has(acct.id) ? 'Active' : 'Enable'}
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )
 }
 
-// ── Campaign creation form ─────────────────────────────────────────────────
-
-const labelCls = 'mb-1.5 block text-sm font-medium text-slate-700'
-
-function CampaignForm({ form, onChange, onSubmit, busy, submitLabel }: { form: any, onChange: any, onSubmit: (e: FormEvent) => void, busy: boolean, submitLabel: string }) {
+function CampaignForm({ form, onChange, onSubmit, busy, submitLabel }: any) {
   const update = (key: string, val: any) => onChange({ ...form, [key]: val })
   return (
-    <form className="space-y-4" onSubmit={onSubmit}>
-      <label className="block">
-        <span className={labelCls}>Campaign name</span>
-        <input value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="e.g. SaaS Founders Q2" className={inputClassName} required />
-      </label>
-
+    <form className="space-y-6" onSubmit={onSubmit}>
+      <input value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="Campaign Name" className={inputClassName} required />
       <div className="grid grid-cols-2 gap-4">
-        <label className="block">
-          <span className={labelCls}>Timezone</span>
-          <input value={form.timezone} onChange={(e) => update('timezone', e.target.value)} placeholder="Asia/Kolkata" className={inputClassName} required />
-        </label>
-        <label className="block">
-          <span className={labelCls}>Daily lead cap</span>
-          <input type="number" min={1} value={form.daily_lead_cap} onChange={(e) => update('daily_lead_cap', Number(e.target.value))} className={inputClassName} />
-        </label>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <label className="block">
-          <span className={labelCls}>Daily invite cap</span>
-          <input type="number" min={1} value={form.invite_daily_cap} onChange={(e) => update('invite_daily_cap', Number(e.target.value))} className={inputClassName} />
-        </label>
-        <label className="block">
-          <span className={labelCls}>Active hours (24h start–end)</span>
-          <div className="flex items-center gap-2">
-            <input type="number" min={0} max={23} value={form.active_hours_start} onChange={(e) => update('active_hours_start', Number(e.target.value))} className={inputClassName} />
-            <span className="text-slate-400">–</span>
-            <input type="number" min={1} max={24} value={form.active_hours_end} onChange={(e) => update('active_hours_end', Number(e.target.value))} className={inputClassName} />
-          </div>
-        </label>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <button type="button" onClick={() => update('sequence_mode', 'sequential')}
-          className={`flex flex-col items-center gap-2 rounded-2xl border-2 p-4 transition ${form.sequence_mode === 'sequential' ? 'border-sky-500 bg-sky-50' : 'border-slate-100 bg-slate-50 hover:border-slate-200'}`}>
-          <div className={`rounded-lg p-2 ${form.sequence_mode === 'sequential' ? 'bg-sky-500 text-white' : 'bg-white text-slate-400'}`}><Clock size={20} /></div>
-          <div className="text-center"><p className="text-sm font-bold text-slate-900">Sequential</p><p className="text-[10px] text-slate-500">Simple linear list</p></div>
+        <button type="button" onClick={() => update('sequence_mode', 'sequential')} className={`btn-tactile p-6 border-2 flex flex-col gap-2 ${form.sequence_mode === 'sequential' ? 'border-sky-500 bg-sky-50' : 'border-slate-100 bg-slate-50'}`}>
+          <Clock size={20} className={form.sequence_mode === 'sequential' ? 'text-sky-500' : 'text-slate-400'} />
+          <span className="text-xs font-black uppercase">Sequential</span>
         </button>
-        <button type="button" onClick={() => update('sequence_mode', 'canvas')}
-          className={`flex flex-col items-center gap-2 rounded-2xl border-2 p-4 transition ${form.sequence_mode === 'canvas' ? 'border-sky-500 bg-sky-50' : 'border-slate-100 bg-slate-50 hover:border-slate-200'}`}>
-          <div className={`rounded-lg p-2 ${form.sequence_mode === 'canvas' ? 'bg-sky-500 text-white' : 'bg-white text-slate-400'}`}><Zap size={20} /></div>
-          <div className="text-center"><p className="text-sm font-bold text-slate-900">Nodal Canvas</p><p className="text-[10px] text-slate-500">Advanced graph flow</p></div>
+        <button type="button" onClick={() => update('sequence_mode', 'canvas')} className={`btn-tactile p-6 border-2 flex flex-col gap-2 ${form.sequence_mode === 'canvas' ? 'border-sky-500 bg-sky-50' : 'border-slate-100 bg-slate-50'}`}>
+          <Zap size={20} className={form.sequence_mode === 'canvas' ? 'text-sky-500' : 'text-slate-400'} />
+          <span className="text-xs font-black uppercase">Canvas</span>
         </button>
       </div>
-
-      <button type="submit" className="w-full rounded-xl bg-sky-500 py-3 font-semibold text-white hover:bg-sky-600 disabled:opacity-50" disabled={busy}>{submitLabel}</button>
+      <button type="submit" disabled={busy} className="btn-tactile w-full bg-sky-500 py-4 text-xs text-white">{busy ? 'Creating...' : submitLabel}</button>
     </form>
   )
 }
 
-function MiniStat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-center">
-      <div className="text-xs uppercase tracking-[0.14em] text-slate-400">{label}</div>
-      <div className="mt-1 text-xl font-semibold text-slate-900">{value}</div>
-    </div>
-  )
-}
+const labelCls = 'mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-400'
+const inputClassName = 'w-full rounded-xl border-none bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none ring-1 ring-slate-900/5 transition-all focus:bg-white focus:ring-4 focus:ring-sky-100'
 
-const inputClassName = 'w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:ring-4 focus:ring-sky-100'
+type EmailAccount = { id: string; from_name: string; from_email: string }
+type VoiceAgent = { id: string; name: string; retell_agent_id: string }
+type LinkedInAccount = { id: string; name: string; unipile_id: string; is_active: boolean }
