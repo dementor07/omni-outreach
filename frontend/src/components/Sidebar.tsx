@@ -26,7 +26,7 @@ export default function Sidebar() {
           <Zap size={14} className="text-white" fill="white" />
         </div>
         <div>
-          <span className="block text-sm font-bold tracking-tight text-slate-900">OmniOutreach</span>
+          <span className="block text-sm font-bold tracking-tight text-slate-900">Omni</span>
           <span className="block text-[11px] uppercase tracking-[0.18em] text-slate-400">Control Plane</span>
         </div>
       </div>

@@ -44,7 +44,7 @@ export default function Login() {
               <div>
                 <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em]">
                   <Shield size={14} />
-                  OmniOutreach
+                  Omni
                 </div>
                 <h1 className="mt-8 max-w-md text-4xl font-semibold tracking-tight">
                   Multi-channel outreach, operated from one calm control surface.
