@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, List
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -8,107 +8,95 @@ from app.db import execute, fetch_all, fetch_one
 
 router = APIRouter()
 
-ChannelType = Literal["linkedin_invite", "linkedin_dm", "email", "voice"]
+NodeType = Literal[
+    "trigger_start", 
+    "action_linkedin_invite", 
+    "action_linkedin_dm", 
+    "action_email", 
+    "action_whatsapp", 
+    "action_instagram", 
+    "action_telegram", 
+    "action_voice", 
+    "condition_replied", 
+    "delay"
+]
 
+class NodeCreate(BaseModel):
+    id: str | None = None # React Flow ID
+    node_type: NodeType
+    position_x: float
+    position_y: float
+    data: dict = {}
 
-class StepCreate(BaseModel):
+class EdgeCreate(BaseModel):
+    id: str | None = None
+    source_node_id: str
+    target_node_id: str
+    source_handle: str = "default"
+    target_handle: str = "default"
+
+class SequenceGraph(BaseModel):
     campaign_id: str
-    step_order: int
-    channel: ChannelType
-    delay_days: int = 0
-    voice_agent_id: str | None = None
-    email_account_id: str | None = None
-    template_id: str | None = None
+    nodes: List[NodeCreate]
+    edges: List[EdgeCreate]
 
-
-class StepUpdate(BaseModel):
-    step_order: int | None = None
-    channel: ChannelType | None = None
-    delay_days: int | None = None
-    voice_agent_id: str | None = None
-    email_account_id: str | None = None
-    template_id: str | None = None
-
-
-@router.get("")
-async def list_steps(campaign_id: str, user_id: str = Depends(get_current_user)):
-    return await fetch_all(
-        """
-        SELECT ss.*,
-               va.name      AS voice_agent_name,
-               ea.from_email AS email_account_email
-        FROM sequence_steps ss
-        LEFT JOIN voice_agents   va ON va.id = ss.voice_agent_id
-        LEFT JOIN email_accounts ea ON ea.id = ss.email_account_id
-        WHERE ss.campaign_id = $1
-        ORDER BY ss.step_order ASC
-        """,
+@router.get("/{campaign_id}")
+async def get_graph(campaign_id: str, user_id: str = Depends(get_current_user)):
+    nodes = await fetch_all(
+        "SELECT * FROM sequence_nodes WHERE campaign_id = $1",
         campaign_id,
     )
+    edges = await fetch_all(
+        "SELECT * FROM sequence_edges WHERE campaign_id = $1",
+        campaign_id,
+    )
+    return {"nodes": nodes, "edges": edges}
 
-
-@router.post("", status_code=201)
-async def create_step(body: StepCreate, user_id: str = Depends(get_current_user)):
+@router.post("/save")
+async def save_graph(body: SequenceGraph, user_id: str = Depends(get_current_user)):
+    # Verify campaign exists
     campaign = await fetch_one("SELECT id FROM campaigns WHERE id=$1", body.campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
-    existing = await fetch_one(
-        "SELECT id FROM sequence_steps WHERE campaign_id=$1 AND step_order=$2",
-        body.campaign_id, body.step_order,
-    )
-    if existing:
-        raise HTTPException(
-            status_code=409,
-            detail=f"A step with order {body.step_order} already exists for this campaign",
+    # Transactional update: Delete old nodes/edges and insert new ones
+    # In a real production app, we'd use a transaction here. 
+    # For now, we'll execute sequentially.
+    
+    await execute("DELETE FROM sequence_edges WHERE campaign_id=$1", body.campaign_id)
+    await execute("DELETE FROM sequence_nodes WHERE campaign_id=$1", body.campaign_id)
+
+    # Insert Nodes
+    node_id_map = {} # Map temporary React Flow IDs to actual DB IDs if needed
+    for node in body.nodes:
+        inserted = await fetch_one(
+            """
+            INSERT INTO sequence_nodes (campaign_id, node_type, position_x, position_y, data)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+            """,
+            body.campaign_id, node.node_type, node.position_x, node.position_y, node.data
+        )
+        if node.id:
+            node_id_map[node.id] = inserted["id"]
+
+    # Insert Edges
+    for edge in body.edges:
+        # Use the mapped IDs if they exist, otherwise assume the IDs provided are UUIDs
+        source_id = node_id_map.get(edge.source_node_id, edge.source_node_id)
+        target_id = node_id_map.get(edge.target_node_id, edge.target_node_id)
+        
+        await execute(
+            """
+            INSERT INTO sequence_edges (campaign_id, source_node_id, target_node_id, source_handle, target_handle)
+            VALUES ($1, $2, $3, $4, $5)
+            """,
+            body.campaign_id, source_id, target_id, edge.source_handle, edge.target_handle
         )
 
-    return await fetch_one(
-        """
-        INSERT INTO sequence_steps
-            (campaign_id, step_order, channel, delay_days, voice_agent_id, email_account_id, template_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING *
-        """,
-        body.campaign_id, body.step_order, body.channel, body.delay_days,
-        body.voice_agent_id, body.email_account_id, body.template_id,
-    )
+    return {"status": "success"}
 
-
-@router.put("/{step_id}")
-async def update_step(
-    step_id: str, body: StepUpdate, user_id: str = Depends(get_current_user)
-):
-    step = await fetch_one("SELECT * FROM sequence_steps WHERE id=$1", step_id)
-    if not step:
-        raise HTTPException(status_code=404, detail="Step not found")
-
-    updates = body.model_dump(exclude_unset=True)
-    if not updates:
-        raise HTTPException(status_code=400, detail="No fields to update")
-
-    if "step_order" in updates:
-        conflict = await fetch_one(
-            "SELECT id FROM sequence_steps WHERE campaign_id=$1 AND step_order=$2 AND id<>$3",
-            step["campaign_id"], updates["step_order"], step_id,
-        )
-        if conflict:
-            raise HTTPException(
-                status_code=409,
-                detail=f"A step with order {updates['step_order']} already exists",
-            )
-
-    set_clause = ", ".join(f"{k}=${i + 2}" for i, k in enumerate(updates))
-    values = list(updates.values())
-    return await fetch_one(
-        f"UPDATE sequence_steps SET {set_clause} WHERE id=$1 RETURNING *",
-        step_id, *values,
-    )
-
-
-@router.delete("/{step_id}", status_code=204)
-async def delete_step(step_id: str, user_id: str = Depends(get_current_user)):
-    step = await fetch_one("SELECT id FROM sequence_steps WHERE id=$1", step_id)
-    if not step:
-        raise HTTPException(status_code=404, detail="Step not found")
-    await execute("DELETE FROM sequence_steps WHERE id=$1", step_id)
+@router.delete("/{campaign_id}")
+async def clear_graph(campaign_id: str, user_id: str = Depends(get_current_user)):
+    await execute("DELETE FROM sequence_nodes WHERE campaign_id=$1", campaign_id)
+    return {"status": "deleted"}

@@ -64,22 +64,30 @@ CREATE TABLE IF NOT EXISTS campaign_linkedin_accounts (
 );
 
 -- ── Sequences ─────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS sequence_steps (
+CREATE TABLE IF NOT EXISTS sequence_nodes (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     campaign_id         UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
-    step_order          INTEGER NOT NULL,
-    channel             TEXT NOT NULL, -- linkedin_invite|linkedin_dm|email|voice
-    delay_days          INTEGER NOT NULL DEFAULT 0,
-    template_id         UUID,
-    email_account_id    UUID REFERENCES email_accounts(id),
-    voice_agent_id      UUID REFERENCES voice_agents(id),
-    UNIQUE (campaign_id, step_order)
+    node_type           TEXT NOT NULL, -- trigger_start|action_linkedin_invite|action_linkedin_dm|action_email|action_whatsapp|action_instagram|action_telegram|action_voice|condition_replied|delay
+    position_x          FLOAT NOT NULL DEFAULT 0,
+    position_y          FLOAT NOT NULL DEFAULT 0,
+    data                JSONB NOT NULL DEFAULT '{}', -- stores delay_days, template_id, email_account_id, voice_agent_id
+    created_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS sequence_edges (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    campaign_id         UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    source_node_id      UUID NOT NULL REFERENCES sequence_nodes(id) ON DELETE CASCADE,
+    target_node_id      UUID NOT NULL REFERENCES sequence_nodes(id) ON DELETE CASCADE,
+    source_handle       TEXT DEFAULT 'default', -- true|false|default
+    target_handle       TEXT DEFAULT 'default',
+    created_at          TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS templates (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     campaign_id     UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
-    step_id         UUID REFERENCES sequence_steps(id) ON DELETE SET NULL,
+    node_id         UUID REFERENCES sequence_nodes(id) ON DELETE SET NULL,
     name            TEXT NOT NULL,
     channel         TEXT NOT NULL,
     subject         TEXT,
@@ -87,10 +95,9 @@ CREATE TABLE IF NOT EXISTS templates (
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
-ALTER TABLE sequence_steps
-    ADD CONSTRAINT fk_step_template
-    FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE SET NULL
-    DEFERRABLE INITIALLY DEFERRED;
+CREATE INDEX IF NOT EXISTS idx_node_campaign ON sequence_nodes(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_edge_campaign ON sequence_edges(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_edge_source ON sequence_edges(source_node_id);
 
 -- ── Lead gen ──────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS job_search_configs (
@@ -140,9 +147,10 @@ CREATE TABLE IF NOT EXISTS leads (
     stop_reason             TEXT,
     linkedin_account_id     UUID REFERENCES linkedin_accounts(id),
     chat_id                 TEXT,
-    current_step            INTEGER NOT NULL DEFAULT 0,
+    current_node_id         UUID REFERENCES sequence_nodes(id) ON DELETE SET NULL,
     invited_at              TIMESTAMPTZ,
     accepted_at             TIMESTAMPTZ,
+    replied_at              TIMESTAMPTZ,
     stopped_at              TIMESTAMPTZ,
     created_at              TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (campaign_id, linkedin_url)
@@ -156,7 +164,7 @@ CREATE TABLE IF NOT EXISTS queue (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     campaign_id     UUID NOT NULL REFERENCES campaigns(id),
     lead_id         UUID NOT NULL REFERENCES leads(id),
-    step_id         UUID REFERENCES sequence_steps(id),
+    node_id         UUID REFERENCES sequence_nodes(id),
     channel         TEXT NOT NULL,
     status          TEXT NOT NULL DEFAULT 'queued', -- queued|locked|sent|failed|skipped
     scheduled_at    TIMESTAMPTZ NOT NULL,

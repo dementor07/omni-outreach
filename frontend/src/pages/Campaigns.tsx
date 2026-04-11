@@ -1,9 +1,23 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useState, useCallback } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ChevronUp, ChevronDown, ListOrdered, Linkedin, Mail, Phone, Plus, Trash2, Upload } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
+import { Plus, Upload, Save, Play, Pause, Trash2, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap } from 'lucide-react'
+import { 
+  ReactFlow, 
+  Background, 
+  Controls, 
+  useNodesState, 
+  useEdgesState, 
+  addEdge, 
+  Connection, 
+  Edge,
+  Node,
+  Handle,
+  Position,
+  NodeProps,
+  Panel
+} from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
 
-import { api } from '../api/client'
 import Badge from '../components/Badge'
 import DataTable from '../components/DataTable'
 import EmptyState from '../components/EmptyState'
@@ -22,14 +36,13 @@ import {
 import { useImportLeads, useListLeads } from '../hooks/useLeads'
 import { useQueueList } from '../hooks/useQueue'
 import {
-  useListSteps,
-  useCreateStep,
-  useUpdateStep,
-  useDeleteStep,
+  useGetGraph,
+  useSaveGraph,
   useGetTemplate,
   useUpsertTemplate,
-  type SequenceStep,
-  type ChannelType,
+  type NodeType,
+  type SequenceNode,
+  type SequenceEdge,
 } from '../hooks/useSequenceSteps'
 
 type CampaignTab = 'leads' | 'queue' | 'sequence'
@@ -45,11 +58,101 @@ const defaultCampaignForm: CampaignPayload = {
   screening_prompt: '',
 }
 
-function parseJsonImport(raw: string) {
-  const parsed = JSON.parse(raw)
-  if (!Array.isArray(parsed)) throw new Error('Expected a JSON array of lead objects')
-  return parsed
+// ── React Flow Node Types ──────────────────────────────────────────────────
+
+const ActionNode = ({ data, id }: NodeProps) => {
+  const nodeType = data.node_type as NodeType
+  const iconMap: Record<string, any> = {
+    action_linkedin_invite: <Linkedin size={16} className="text-sky-500" />,
+    action_linkedin_dm: <Linkedin size={16} className="text-sky-500" />,
+    action_email: <Mail size={16} className="text-slate-500" />,
+    action_whatsapp: <MessageSquare size={16} className="text-emerald-500" />,
+    action_instagram: <Instagram size={16} className="text-pink-500" />,
+    action_telegram: <Send size={16} className="text-blue-400" />,
+    action_voice: <Phone size={16} className="text-indigo-500" />,
+  }
+
+  return (
+    <div className="group relative min-w-[180px] rounded-2xl border-2 border-slate-200 bg-white p-4 shadow-sm transition-all hover:border-sky-400 hover:shadow-md">
+      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-slate-300" />
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50 transition-colors group-hover:bg-sky-50">
+          {iconMap[nodeType] || <Zap size={16} />}
+        </div>
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Action</p>
+          <p className="text-sm font-semibold text-slate-900">{nodeType.replace('action_', '').replace('_', ' ')}</p>
+        </div>
+      </div>
+      <button 
+        onClick={() => data.onEditTemplate(id)}
+        className="mt-3 w-full rounded-lg bg-slate-50 py-1.5 text-xs font-medium text-slate-600 hover:bg-sky-50 hover:text-sky-600 transition-colors"
+      >
+        Configure Step
+      </button>
+      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-slate-300" />
+    </div>
+  )
 }
+
+const TriggerNode = () => (
+  <div className="min-w-[150px] rounded-2xl border-2 border-emerald-400 bg-emerald-50 p-4 text-center shadow-sm">
+    <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Trigger</p>
+    <p className="text-sm font-semibold text-emerald-900">Lead Accepted</p>
+    <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-emerald-400" />
+  </div>
+)
+
+const ConditionNode = ({ data }: NodeProps) => (
+  <div className="min-w-[180px] rounded-2xl border-2 border-amber-200 bg-white p-4 shadow-sm transition-all hover:border-amber-400">
+    <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-slate-300" />
+    <div className="flex items-center gap-3">
+      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50">
+        <MessageSquare size={16} className="text-amber-500" />
+      </div>
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-wider text-amber-500">Condition</p>
+        <p className="text-sm font-semibold text-slate-900">Wait for Reply</p>
+      </div>
+    </div>
+    <div className="mt-3 flex gap-2">
+      <div className="flex-1 text-center">
+        <div className="text-[10px] font-medium text-slate-400">Replied</div>
+        <Handle type="source" position={Position.Bottom} id="true" className="!static !mt-1 !h-2 !w-2 !bg-emerald-400" />
+      </div>
+      <div className="flex-1 text-center">
+        <div className="text-[10px] font-medium text-slate-400">No Reply</div>
+        <Handle type="source" position={Position.Bottom} id="false" className="!static !mt-1 !h-2 !w-2 !bg-rose-400" />
+      </div>
+    </div>
+  </div>
+)
+
+const DelayNode = ({ data }: NodeProps) => (
+  <div className="min-w-[140px] rounded-2xl border-2 border-slate-200 bg-white p-3 shadow-sm transition-all hover:border-sky-400">
+    <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-slate-300" />
+    <div className="flex items-center justify-center gap-2">
+      <Clock size={14} className="text-slate-400" />
+      <span className="text-sm font-semibold text-slate-700">Wait {data.delay_days || 1} Days</span>
+    </div>
+    <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-slate-300" />
+  </div>
+)
+
+const nodeTypes = {
+  trigger_start: TriggerNode,
+  action_linkedin_invite: ActionNode,
+  action_linkedin_dm: ActionNode,
+  action_email: ActionNode,
+  action_whatsapp: ActionNode,
+  action_instagram: ActionNode,
+  action_telegram: ActionNode,
+  action_voice: ActionNode,
+  condition_replied: ConditionNode,
+  delay: DelayNode,
+}
+
+// ── Main Component ─────────────────────────────────────────────────────────
 
 export default function Campaigns() {
   const navigate = useNavigate()
@@ -67,19 +170,78 @@ export default function Campaigns() {
   const importLeads = useImportLeads()
   const leadsQuery = useListLeads(id, 1, 50)
   const queueQuery = useQueueList({ campaignId: id, limit: 100 })
-  const stepsQuery = useListSteps(id)
-  const createStep = useCreateStep()
-  const updateStep = useUpdateStep()
-  const deleteStep = useDeleteStep()
+  
+  const graphQuery = useGetGraph(id)
+  const saveGraph = useSaveGraph()
 
+  const [nodes, setNodes, onNodesChange] = useNodesState([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState([])
+  const [templateNodeId, setTemplateNodeId] = useState<string | null>(null)
+  
   const [createOpen, setCreateOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
-  const [stepModalOpen, setStepModalOpen] = useState(false)
-  const [templateModalStep, setTemplateModalStep] = useState<SequenceStep | null>(null)
   const [form, setForm] = useState<CampaignPayload>(defaultCampaignForm)
   const [importPayload, setImportPayload] = useState('')
-  const [importError, setImportError] = useState('')
 
+  // Sync React Flow state with database
+  useEffect(() => {
+    if (graphQuery.data) {
+      const rfNodes: Node[] = graphQuery.data.nodes.map(n => ({
+        id: n.id,
+        type: n.node_type,
+        position: { x: n.position_x, y: n.position_y },
+        data: { ...n.data, node_type: n.node_type, onEditTemplate: (id: string) => setTemplateNodeId(id) }
+      }))
+      const rfEdges: Edge[] = graphQuery.data.edges.map(e => ({
+        id: e.id,
+        source: e.source_node_id,
+        target: e.target_node_id,
+        sourceHandle: e.source_handle,
+        targetHandle: e.target_handle,
+      }))
+      setNodes(rfNodes)
+      setEdges(rfEdges)
+    }
+  }, [graphQuery.data, setNodes, setEdges])
+
+  const onConnect = useCallback((params: Connection) => setEdges((eds) => addEdge(params, eds)), [setEdges])
+
+  const onSaveCanvas = async () => {
+    if (!id) return
+    try {
+      await saveGraph.mutateAsync({
+        campaign_id: id,
+        nodes: nodes.map(n => ({
+          id: n.id,
+          node_type: n.type as NodeType,
+          position_x: n.position.x,
+          position_y: n.position.y,
+          data: n.data
+        })),
+        edges: edges.map(e => ({
+          source_node_id: e.source,
+          target_node_id: e.target,
+          source_handle: e.sourceHandle || 'default',
+          target_handle: e.targetHandle || 'default'
+        }))
+      })
+      toast.success('Canvas saved successfully.')
+    } catch {
+      toast.error('Failed to save canvas.')
+    }
+  }
+
+  const addNode = (type: NodeType) => {
+    const newNode: Node = {
+      id: `node_${Date.now()}`,
+      type,
+      position: { x: 100, y: 100 },
+      data: { node_type: type, onEditTemplate: (id: string) => setTemplateNodeId(id) }
+    }
+    setNodes(nds => nds.concat(newNode))
+  }
+
+  // ... (Keep existing useEffect for form and handleCreate/Save/Archive/Import)
   useEffect(() => {
     if (!campaignQuery.data) return
     setForm({
@@ -99,100 +261,6 @@ export default function Campaigns() {
   const detailLeads = leadsQuery.data?.leads || []
   const detailQueue = queueQuery.data || []
   const stats = statsQuery.data
-
-  const campaignColumns = useMemo(
-    () => [
-      {
-        key: 'name',
-        header: 'Campaign',
-        render: (row: typeof campaignRows[number]) => (
-          <div>
-            <p className="font-medium text-slate-900">{row.name}</p>
-            <p className="text-xs uppercase tracking-[0.16em] text-slate-400">{row.timezone}</p>
-          </div>
-        ),
-      },
-      {
-        key: 'status',
-        header: 'Status',
-        render: (row: typeof campaignRows[number]) => <Badge label={row.status || 'active'} asStatus />,
-      },
-      {
-        key: 'daily_lead_cap',
-        header: 'Daily Leads',
-        className: 'text-right',
-        render: (row: typeof campaignRows[number]) => <span className="tabular-nums">{row.daily_lead_cap}</span>,
-      },
-      {
-        key: 'invite_daily_cap',
-        header: 'Invite Cap',
-        className: 'text-right',
-        render: (row: typeof campaignRows[number]) => <span className="tabular-nums">{row.invite_daily_cap}</span>,
-      },
-      {
-        key: 'simulation_mode',
-        header: 'Mode',
-        render: (row: typeof campaignRows[number]) => (
-          <Badge label={row.simulation_mode ? 'simulation' : 'live'} variant={row.simulation_mode ? 'warning' : 'success'} />
-        ),
-      },
-      {
-        key: 'created_at',
-        header: 'Created',
-        render: (row: typeof campaignRows[number]) => formatDate(row.created_at),
-      },
-    ],
-    [campaignRows],
-  )
-
-  async function handleCreateCampaign(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    try {
-      await createCampaign.mutateAsync(form)
-      setCreateOpen(false)
-      setForm(defaultCampaignForm)
-      toast.success('Campaign created.')
-    } catch {
-      toast.error('Failed to create campaign.')
-    }
-  }
-
-  async function handleSaveCampaign(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!id) return
-    try {
-      await updateCampaign.mutateAsync({ id, payload: form })
-      toast.success('Campaign saved.')
-    } catch {
-      toast.error('Failed to save campaign.')
-    }
-  }
-
-  async function handleArchiveCampaign() {
-    if (!id) return
-    try {
-      await deleteCampaign.mutateAsync(id)
-      toast.success('Campaign archived.')
-      navigate('/campaigns')
-    } catch {
-      toast.error('Failed to archive campaign.')
-    }
-  }
-
-  async function handleImportLeads(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!id) return
-    try {
-      setImportError('')
-      const parsed = parseJsonImport(importPayload)
-      const result = await importLeads.mutateAsync({ campaignId: id, leads: parsed })
-      setImportOpen(false)
-      setImportPayload('')
-      toast.success(`Imported ${result.imported} leads${result.skipped ? `, ${result.skipped} skipped` : ''}.`)
-    } catch (error) {
-      setImportError(error instanceof Error ? error.message : 'Import failed')
-    }
-  }
 
   if (!id) {
     return (
@@ -216,550 +284,163 @@ export default function Campaigns() {
         </section>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          {campaignRows.length === 0 && !campaignsQuery.isLoading ? (
-            <EmptyState icon={Plus} title="No campaigns created yet" description="Create your first campaign to start feeding leads into the system." />
-          ) : (
-            <DataTable
-              columns={campaignColumns}
-              rows={campaignRows}
-              loading={campaignsQuery.isLoading}
-              onRowClick={(row) => navigate(`/campaigns/${row.id}?tab=leads`)}
-            />
-          )}
+          <DataTable
+            columns={[
+              { key: 'name', header: 'Campaign', render: (row) => <div><p className="font-medium text-slate-900">{row.name}</p><p className="text-xs uppercase text-slate-400">{row.timezone}</p></div> },
+              { key: 'status', header: 'Status', render: (row) => <Badge label={row.status || 'active'} asStatus /> },
+              { key: 'daily_lead_cap', header: 'Daily Leads', className: 'text-right', render: (row) => row.daily_lead_cap },
+              { key: 'created_at', header: 'Created', render: (row) => formatDate(row.created_at) },
+            ]}
+            rows={campaignRows}
+            loading={campaignsQuery.isLoading}
+            onRowClick={(row) => navigate(`/campaigns/${row.id}?tab=leads`)}
+          />
         </div>
 
         <Modal title="New campaign" open={createOpen} onClose={() => setCreateOpen(false)} width="lg">
-          <CampaignForm
-            form={form}
-            onChange={setForm}
-            onSubmit={handleCreateCampaign}
-            busy={createCampaign.isPending}
-            submitLabel="Create campaign"
-          />
+          <CampaignForm form={form} onChange={setForm} onSubmit={async (e) => { e.preventDefault(); await createCampaign.mutateAsync(form); setCreateOpen(false); }} busy={createCampaign.isPending} submitLabel="Create campaign" />
         </Modal>
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-        <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
-          <div>
-            <Link to="/campaigns" className="text-sm font-medium text-sky-500 hover:text-sky-600">← Back to campaigns</Link>
-            <div className="mt-3 flex items-center gap-3">
-              <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
-                {campaignQuery.data?.name || 'Campaign detail'}
-              </h1>
-              {campaignQuery.data && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const current = campaignQuery.data.status
-                    const next = current === 'paused' ? 'active' : 'paused'
-                    try {
-                      await updateCampaign.mutateAsync({ id: id!, payload: { status: next } })
-                      toast.success(`Campaign ${next === 'active' ? 'resumed' : 'paused'}.`)
-                    } catch {
-                      toast.error('Failed to update campaign status.')
-                    }
-                  }}
-                  className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
-                    campaignQuery.data.status === 'paused'
-                      ? 'bg-amber-50 text-amber-700 hover:bg-amber-100'
-                      : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                  }`}
-                >
-                  {campaignQuery.data.status === 'paused' ? 'Resume' : 'Pause'}
-                </button>
-              )}
-            </div>
-            <div className="mt-3 flex flex-wrap gap-3 text-sm text-slate-500">
-              <span className="rounded-full bg-slate-100 px-3 py-1">{campaignQuery.data?.timezone || 'Asia/Kolkata'}</span>
-              <span className="rounded-full bg-slate-100 px-3 py-1">
-                Active hours {campaignQuery.data?.active_hours_start ?? 9}:00 to {campaignQuery.data?.active_hours_end ?? 18}:00
-              </span>
+    <div className="flex h-[calc(100vh-140px)] flex-col gap-6">
+      <section className="shrink-0 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-6">
+            <Link to="/campaigns" className="text-slate-400 hover:text-slate-600">←</Link>
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{campaignQuery.data?.name || 'Campaign detail'}</h1>
+              <div className="flex gap-2 text-xs text-slate-400">
+                <span>{campaignQuery.data?.status}</span>
+                <span>•</span>
+                <span>{campaignQuery.data?.timezone}</span>
+              </div>
             </div>
           </div>
-          {stats && (
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-              <MiniStat label="Total" value={stats.total} />
-              <MiniStat label="Active" value={stats.active} />
-              <MiniStat label="Invited" value={stats.invited} />
-              <MiniStat label="Accepted" value={stats.accepted} />
-              <MiniStat label="Stopped" value={stats.stopped} />
-            </div>
-          )}
+          <div className="flex gap-2">
+            {(['leads', 'queue', 'sequence'] as CampaignTab[]).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setSearchParams({ tab })}
+                className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
+                  activeTab === tab ? 'bg-sky-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                }`}
+              >
+                {tab === 'sequence' ? 'Canvas' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 
-      <div className="flex flex-wrap gap-2">
-        {(['leads', 'queue', 'sequence'] as CampaignTab[]).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            onClick={() => setSearchParams({ tab })}
-            className={`rounded-full px-4 py-2 text-sm font-medium transition ${
-              activeTab === tab ? 'bg-sky-500 text-white' : 'bg-white text-slate-500 hover:bg-slate-100'
-            }`}
-          >
-            {tab === 'sequence' ? 'Sequence steps' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-          </button>
-        ))}
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-900">Campaign settings</h2>
-          <p className="mt-1 text-sm text-slate-500">Tune pacing, simulation mode, and screening from the same control surface.</p>
-          <div className="mt-5">
-            <CampaignForm
-              form={form}
-              onChange={setForm}
-              onSubmit={handleSaveCampaign}
-              busy={updateCampaign.isPending}
-              submitLabel="Save campaign"
-              compact
+      <div className="flex-1 overflow-hidden">
+        {activeTab === 'leads' && (
+          <div className="h-full rounded-3xl border border-slate-200 bg-white p-6 shadow-sm overflow-auto">
+             <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-900">Leads</h2>
+              <button onClick={() => setImportOpen(true)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium hover:bg-slate-50">Import Leads</button>
+            </div>
+            <DataTable
+              columns={[
+                { key: 'name', header: 'Lead', render: (row) => `${row.first_name || ''} ${row.last_name || ''}` },
+                { key: 'status', header: 'Status', render: (row) => <Badge label={row.status || 'active'} asStatus /> },
+                { key: 'replied_at', header: 'Replied', render: (row) => formatDate(row.replied_at) },
+              ]}
+              rows={detailLeads}
+              loading={leadsQuery.isLoading}
             />
           </div>
-          <button
-            type="button"
-            onClick={handleArchiveCampaign}
-            className="mt-4 text-sm font-medium text-rose-600 hover:text-rose-700"
-          >
-            Archive campaign
-          </button>
-        </div>
+        )}
 
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          {activeTab === 'leads' && (
-            <>
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-semibold text-slate-900">Campaign leads</h2>
-                  <p className="text-sm text-slate-500">Imported and enriched leads for this campaign.</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setImportOpen(true)}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                >
-                  <Upload size={16} />
-                  Import leads
-                </button>
-              </div>
-              <DataTable
-                columns={[
-                  {
-                    key: 'name',
-                    header: 'Lead',
-                    render: (row) => (
-                      <div>
-                        <p className="font-medium text-slate-900">{`${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Unknown'}</p>
-                        <p className="text-xs text-slate-400">{row.company || '—'}</p>
-                      </div>
-                    ),
-                  },
-                  { key: 'headline', header: 'Headline', render: (row) => <span className="line-clamp-2">{row.headline || '—'}</span> },
-                  { key: 'status', header: 'Status', render: (row) => <Badge label={row.status || 'active'} asStatus /> },
-                  { key: 'invited_at', header: 'Invited', render: (row) => formatDate(row.invited_at) },
-                  { key: 'accepted_at', header: 'Accepted', render: (row) => formatDate(row.accepted_at) },
-                ]}
-                rows={detailLeads}
-                loading={leadsQuery.isLoading}
-                emptyMessage="No leads imported for this campaign yet."
-              />
-            </>
-          )}
-
-          {activeTab === 'queue' && (
-            <>
-              <h2 className="text-lg font-semibold text-slate-900">Queue for this campaign</h2>
-              <p className="mb-4 text-sm text-slate-500">Tasks scheduled for the selected campaign.</p>
-              <DataTable
-                columns={[
-                  {
-                    key: 'lead',
-                    header: 'Lead',
-                    render: (row) => `${row.first_name || ''} ${row.last_name || ''}`.trim() || row.linkedin_url || 'Unknown',
-                  },
-                  { key: 'channel', header: 'Channel', render: (row) => <Badge label={row.channel} asChannel /> },
-                  { key: 'status', header: 'Status', render: (row) => <Badge label={row.status} asStatus /> },
-                  { key: 'scheduled_at', header: 'Scheduled', render: (row) => formatDate(row.scheduled_at) },
-                  { key: 'retry_count', header: 'Retries', className: 'text-right', render: (row) => row.retry_count || 0 },
-                ]}
-                rows={detailQueue}
-                loading={queueQuery.isLoading}
-                emptyMessage="No queue tasks yet for this campaign."
-              />
-            </>
-          )}
-
-          {activeTab === 'sequence' && (
-            <>
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-semibold text-slate-900">Sequence steps</h2>
-                  <p className="text-sm text-slate-500">Define the outreach order, channel, and delay for each step.</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setStepModalOpen(true)}
-                  className="inline-flex items-center gap-2 rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-600"
-                >
-                  <Plus size={15} />
-                  Add step
-                </button>
-              </div>
-
-              {stepsQuery.isLoading && (
-                <div className="space-y-2">
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="h-14 animate-pulse rounded-2xl bg-slate-100" />
-                  ))}
-                </div>
-              )}
-
-              {!stepsQuery.isLoading && (stepsQuery.data?.length ?? 0) === 0 && (
-                <EmptyState
-                  icon={ListOrdered}
-                  title="No sequence steps yet"
-                  description="Add your first step to define how outreach progresses after acceptance."
-                />
-              )}
-
-              {!stepsQuery.isLoading && (stepsQuery.data?.length ?? 0) > 0 && (
-                <div className="space-y-2">
-                  {(stepsQuery.data ?? []).map((step, idx) => {
-                    const steps = stepsQuery.data ?? []
-                    return (
-                      <SequenceStepRow
-                        key={step.id}
-                        step={step}
-                        isFirst={idx === 0}
-                        isLast={idx === steps.length - 1}
-                        onMove={async (dir) => {
-                          const swapWith = steps[dir === 'up' ? idx - 1 : idx + 1]
-                          if (!swapWith) return
-                          try {
-                            // Use a temporary order to avoid unique constraint collision
-                            const tmp = -1
-                            await updateStep.mutateAsync({ id: step.id, campaignId: step.campaign_id, payload: { step_order: tmp } })
-                            await updateStep.mutateAsync({ id: swapWith.id, campaignId: swapWith.campaign_id, payload: { step_order: step.step_order } })
-                            await updateStep.mutateAsync({ id: step.id, campaignId: step.campaign_id, payload: { step_order: swapWith.step_order } })
-                          } catch {
-                            toast.error('Failed to reorder steps.')
-                          }
-                        }}
-                        onDelete={async () => {
-                          try {
-                            await deleteStep.mutateAsync({ id: step.id, campaignId: step.campaign_id })
-                            toast.success('Step deleted.')
-                          } catch {
-                            toast.error('Failed to delete step.')
-                          }
-                        }}
-                        onEditTemplate={() => setTemplateModalStep(step)}
-                      />
-                    )
-                  })}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-
-      <Modal title="Import leads" open={importOpen} onClose={() => setImportOpen(false)} width="lg">
-        <form className="space-y-4" onSubmit={handleImportLeads}>
-          <p className="text-sm text-slate-500">
-            Paste a JSON array of lead objects. Each object should at least include `linkedin_url`.
-          </p>
-          <textarea
-            value={importPayload}
-            onChange={(event) => setImportPayload(event.target.value)}
-            className="min-h-[260px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
-            placeholder='[{"linkedin_url":"https://linkedin.com/in/example","first_name":"Ava"}]'
-          />
-          {importError && <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{importError}</div>}
-          <div className="flex justify-end gap-3">
-            <button type="button" onClick={() => setImportOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600">
-              Cancel
-            </button>
-            <button type="submit" className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white" disabled={importLeads.isPending}>
-              {importLeads.isPending ? 'Importing...' : 'Import leads'}
-            </button>
+        {activeTab === 'queue' && (
+          <div className="h-full rounded-3xl border border-slate-200 bg-white p-6 shadow-sm overflow-auto">
+            <h2 className="text-lg font-semibold text-slate-900">Queue</h2>
+            <DataTable
+              columns={[
+                { key: 'lead', header: 'Lead', render: (row) => row.first_name || row.linkedin_url },
+                { key: 'channel', header: 'Channel', render: (row) => <Badge label={row.channel} asChannel /> },
+                { key: 'status', header: 'Status', render: (row) => <Badge label={row.status} asStatus /> },
+                { key: 'scheduled_at', header: 'Scheduled', render: (row) => formatDate(row.scheduled_at) },
+              ]}
+              rows={detailQueue}
+              loading={queueQuery.isLoading}
+            />
           </div>
-        </form>
-      </Modal>
+        )}
 
-      <AddStepModal
-        open={stepModalOpen}
-        campaignId={id!}
-        existingOrders={(stepsQuery.data ?? []).map((s) => s.step_order)}
-        onClose={() => setStepModalOpen(false)}
-        onCreate={async (payload) => {
-          try {
-            await createStep.mutateAsync(payload)
-            toast.success('Step added.')
-          } catch {
-            toast.error('Failed to add step.')
-          }
-        }}
-      />
+        {activeTab === 'sequence' && (
+          <div className="relative h-full rounded-3xl border border-slate-200 bg-slate-50 shadow-inner">
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              nodeTypes={nodeTypes}
+              fitView
+            >
+              <Background color="#cbd5e1" gap={20} />
+              <Controls />
+              <Panel position="top-right" className="flex flex-col gap-2">
+                <div className="flex gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+                  <button onClick={() => addNode('trigger_start')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Trigger"><Zap size={18} className="text-emerald-500" /></button>
+                  <div className="w-px bg-slate-100" />
+                  <button onClick={() => addNode('action_linkedin_dm')} className="rounded-xl p-2 hover:bg-slate-50" title="Add LinkedIn DM"><Linkedin size={18} className="text-sky-500" /></button>
+                  <button onClick={() => addNode('action_email')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Email"><Mail size={18} className="text-slate-500" /></button>
+                  <button onClick={() => addNode('action_whatsapp')} className="rounded-xl p-2 hover:bg-slate-50" title="Add WhatsApp"><MessageSquare size={18} className="text-emerald-500" /></button>
+                  <button onClick={() => addNode('action_instagram')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Instagram"><Instagram size={18} className="text-pink-500" /></button>
+                  <div className="w-px bg-slate-100" />
+                  <button onClick={() => addNode('condition_replied')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Branch"><Zap size={18} className="text-amber-500" /></button>
+                  <button onClick={() => addNode('delay')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Delay"><Clock size={18} className="text-slate-400" /></button>
+                </div>
+                <button 
+                  onClick={onSaveCanvas}
+                  disabled={saveGraph.isPending}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-sky-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-sky-200 transition-all hover:bg-sky-600 hover:scale-[1.02] active:scale-[0.98]"
+                >
+                  <Save size={18} />
+                  {saveGraph.isPending ? 'Saving...' : 'Save Canvas'}
+                </button>
+              </Panel>
+            </ReactFlow>
+          </div>
+        )}
+      </div>
 
       <TemplateModal
-        step={templateModalStep}
-        onClose={() => setTemplateModalStep(null)}
+        nodeId={templateNodeId}
+        onClose={() => setTemplateNodeId(null)}
       />
+
+      <Modal title="Import leads" open={importOpen} onClose={() => setImportOpen(false)} width="lg">
+        <form className="space-y-4" onSubmit={async (e) => {
+          e.preventDefault()
+          const parsed = JSON.parse(importPayload)
+          await importLeads.mutateAsync({ campaignId: id!, leads: parsed })
+          setImportOpen(false)
+          setImportPayload('')
+          toast.success('Leads imported.')
+        }}>
+          <textarea
+            value={importPayload}
+            onChange={(e) => setImportPayload(e.target.value)}
+            className="min-h-[260px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
+            placeholder='[{"linkedin_url":"..."}]'
+          />
+          <button type="submit" className="w-full rounded-xl bg-sky-500 py-3 font-semibold text-white">Import Leads</button>
+        </form>
+      </Modal>
     </div>
   )
 }
 
-function SequenceStepRow({
-  step,
-  isFirst,
-  isLast,
-  onMove,
-  onDelete,
-  onEditTemplate,
-}: {
-  step: SequenceStep
-  isFirst: boolean
-  isLast: boolean
-  onMove: (dir: 'up' | 'down') => Promise<void>
-  onDelete: () => void
-  onEditTemplate: () => void
-}) {
-  const channelIcon: Record<ChannelType, React.ReactNode> = {
-    linkedin_invite: <Linkedin size={14} className="text-sky-500" />,
-    linkedin_dm: <Linkedin size={14} className="text-sky-500" />,
-    email: <Mail size={14} className="text-slate-500" />,
-    voice: <Phone size={14} className="text-emerald-500" />,
-  }
-
-  const hasTemplate = step.channel !== 'linkedin_invite'
-
-  return (
-    <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-      <div className="flex flex-col gap-0.5">
-        <button type="button" disabled={isFirst} onClick={() => onMove('up')} className="text-slate-300 hover:text-slate-500 disabled:opacity-30" title="Move up">
-          <ChevronUp size={14} />
-        </button>
-        <button type="button" disabled={isLast} onClick={() => onMove('down')} className="text-slate-300 hover:text-slate-500 disabled:opacity-30" title="Move down">
-          <ChevronDown size={14} />
-        </button>
-      </div>
-
-      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-xs font-semibold text-slate-500">
-        {step.step_order}
-      </div>
-
-      <div className="flex min-w-[8rem] items-center gap-1.5">
-        {channelIcon[step.channel]}
-        <Badge label={step.channel} asChannel />
-      </div>
-
-      <div className="flex-1 text-sm text-slate-500">
-        {step.delay_days === 0 ? 'Immediately' : `+${step.delay_days} day${step.delay_days !== 1 ? 's' : ''}`}
-        {step.voice_agent_name && (
-          <span className="ml-2 text-xs text-slate-400">· {step.voice_agent_name}</span>
-        )}
-        {step.email_account_email && (
-          <span className="ml-2 text-xs text-slate-400">· {step.email_account_email}</span>
-        )}
-      </div>
-
-      <div className="flex items-center gap-2">
-        {hasTemplate && (
-          <button
-            type="button"
-            onClick={onEditTemplate}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-white"
-          >
-            Edit template
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={onDelete}
-          className="rounded-lg border border-rose-200 p-1.5 text-rose-400 transition-colors hover:bg-rose-50"
-          title="Delete step"
-        >
-          <Trash2 size={13} />
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function AddStepModal({
-  open,
-  campaignId,
-  existingOrders,
-  onClose,
-  onCreate,
-}: {
-  open: boolean
-  campaignId: string
-  existingOrders: number[]
-  onClose: () => void
-  onCreate: (payload: {
-    campaign_id: string
-    step_order: number
-    channel: ChannelType
-    delay_days: number
-    voice_agent_id?: string | null
-    email_account_id?: string | null
-  }) => Promise<void>
-}) {
-  const nextOrder = existingOrders.length === 0 ? 0 : Math.max(...existingOrders) + 1
-
-  const [channel, setChannel] = useState<ChannelType>('linkedin_invite')
-  const [stepOrder, setStepOrder] = useState(nextOrder)
-  const [delayDays, setDelayDays] = useState(0)
-  const [voiceAgentId, setVoiceAgentId] = useState('')
-  const [emailAccountId, setEmailAccountId] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    if (open) {
-      const next = existingOrders.length === 0 ? 0 : Math.max(...existingOrders) + 1
-      setChannel('linkedin_invite')
-      setStepOrder(next)
-      setDelayDays(0)
-      setVoiceAgentId('')
-      setEmailAccountId('')
-    }
-  }, [open])
-
-  const voiceAgentsQuery = useQuery({
-    queryKey: ['settings', 'voice'],
-    queryFn: async () => (await api.get<{ id: string; name: string; retell_agent_id: string }[]>('/accounts/voice')).data,
-    enabled: open && channel === 'voice',
-  })
-
-  const emailAccountsQuery = useQuery({
-    queryKey: ['settings', 'email'],
-    queryFn: async () => (await api.get<{ id: string; from_name: string; from_email: string }[]>('/accounts/email')).data,
-    enabled: open && channel === 'email',
-  })
-
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    setBusy(true)
-    try {
-      await onCreate({
-        campaign_id: campaignId,
-        step_order: stepOrder,
-        channel,
-        delay_days: delayDays,
-        voice_agent_id: channel === 'voice' ? voiceAgentId || null : null,
-        email_account_id: channel === 'email' ? emailAccountId || null : null,
-      })
-      onClose()
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Modal title="Add sequence step" open={open} onClose={onClose}>
-      <form className="space-y-4" onSubmit={handleSubmit}>
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-slate-700">Step order</span>
-            <input
-              type="number"
-              min={0}
-              value={stepOrder}
-              onChange={(e) => setStepOrder(Number(e.target.value))}
-              className={inputClassName}
-              required
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-slate-700">Delay (days)</span>
-            <input
-              type="number"
-              min={0}
-              value={delayDays}
-              onChange={(e) => setDelayDays(Number(e.target.value))}
-              className={inputClassName}
-              required
-            />
-          </label>
-        </div>
-
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium text-slate-700">Channel</span>
-          <select
-            value={channel}
-            onChange={(e) => setChannel(e.target.value as ChannelType)}
-            className={inputClassName}
-          >
-            <option value="linkedin_invite">LinkedIn Invite</option>
-            <option value="linkedin_dm">LinkedIn DM</option>
-            <option value="email">Email</option>
-            <option value="voice">Voice call</option>
-          </select>
-        </label>
-
-        {channel === 'voice' && (
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-slate-700">Voice agent</span>
-            <select
-              value={voiceAgentId}
-              onChange={(e) => setVoiceAgentId(e.target.value)}
-              className={inputClassName}
-              required
-            >
-              <option value="">Select an agent…</option>
-              {(voiceAgentsQuery.data ?? []).map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
-          </label>
-        )}
-
-        {channel === 'email' && (
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-slate-700">Email account</span>
-            <select
-              value={emailAccountId}
-              onChange={(e) => setEmailAccountId(e.target.value)}
-              className={inputClassName}
-              required
-            >
-              <option value="">Select an account…</option>
-              {(emailAccountsQuery.data ?? []).map((a) => (
-                <option key={a.id} value={a.id}>{a.from_name} ({a.from_email})</option>
-              ))}
-            </select>
-          </label>
-        )}
-
-        <div className="flex justify-end gap-3 pt-1">
-          <button type="button" onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600">
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={busy}
-            className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-sky-600 disabled:opacity-60"
-          >
-            {busy ? 'Adding…' : 'Add step'}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  )
-}
-
-function TemplateModal({ step, onClose }: { step: SequenceStep | null; onClose: () => void }) {
-  const open = !!step
+function TemplateModal({ nodeId, onClose }: { nodeId: string | null; onClose: () => void }) {
+  const open = !!nodeId
   const toast = useToast()
-  const templateQuery = useGetTemplate(step?.id)
+  const templateQuery = useGetTemplate(nodeId || undefined)
   const upsertTemplate = useUpsertTemplate()
 
   const [subject, setSubject] = useState('')
@@ -769,146 +450,43 @@ function TemplateModal({ step, onClose }: { step: SequenceStep | null; onClose: 
     if (templateQuery.data) {
       setSubject(templateQuery.data.subject ?? '')
       setBody(templateQuery.data.body ?? '')
-    } else if (!templateQuery.isLoading && open) {
-      setSubject('')
-      setBody('')
     }
-  }, [templateQuery.data, templateQuery.isLoading, open])
+  }, [templateQuery.data])
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    if (!step) return
-    try {
-      await upsertTemplate.mutateAsync({ step_id: step.id, subject: subject || null, body })
-      toast.success('Template saved.')
-      onClose()
-    } catch {
-      toast.error('Failed to save template.')
-    }
-  }
-
-  const hasSubject = step?.channel === 'email'
+  if (!open) return null
 
   return (
-    <Modal title="Edit step template" open={open} onClose={onClose} width="lg">
-      <div className="mb-3 flex items-center gap-2">
-        {step && <Badge label={step.channel} asChannel />}
-        <span className="text-xs text-slate-400">
-          Variables:{' '}
-          <code className="rounded bg-slate-100 px-1 font-mono">{'{{first_name}}'}</code>{' '}
-          <code className="rounded bg-slate-100 px-1 font-mono">{'{{company}}'}</code>{' '}
-          <code className="rounded bg-slate-100 px-1 font-mono">{'{{last_name}}'}</code>
-        </span>
-      </div>
-      {templateQuery.isLoading ? (
-        <div className="h-32 animate-pulse rounded-2xl bg-slate-100" />
-      ) : (
-        <form className="space-y-4" onSubmit={handleSubmit}>
-          {hasSubject && (
-            <label className="block">
-              <span className="mb-1.5 block text-sm font-medium text-slate-700">Subject</span>
-              <input
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                className={inputClassName}
-                placeholder="e.g. Quick question, {{first_name}}"
-              />
-            </label>
-          )}
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-slate-700">Message body</span>
-            <textarea
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              className={`${inputClassName} min-h-[200px]`}
-              placeholder="Hi {{first_name}}, saw that {{company}} is hiring…"
-              required
-            />
-          </label>
-          <div className="flex justify-end gap-3">
-            <button type="button" onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600">
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={upsertTemplate.isPending}
-              className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-sky-600 disabled:opacity-60"
-            >
-              {upsertTemplate.isPending ? 'Saving…' : 'Save template'}
-            </button>
-          </div>
-        </form>
-      )}
+    <Modal title="Configure Node" open={open} onClose={onClose} width="lg">
+      <form className="space-y-4" onSubmit={async (e) => {
+        e.preventDefault()
+        await upsertTemplate.mutateAsync({ node_id: nodeId!, subject: subject || null, body })
+        toast.success('Configuration saved.')
+        onClose()
+      }}>
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-medium text-slate-700">Subject (optional)</span>
+          <input value={subject} onChange={(e) => setSubject(e.target.value)} className={inputClassName} />
+        </label>
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-medium text-slate-700">Message / Script</span>
+          <textarea value={body} onChange={(e) => setBody(e.target.value)} className={`${inputClassName} min-h-[200px]`} required />
+        </label>
+        <button type="submit" className="w-full rounded-xl bg-sky-500 py-3 font-semibold text-white" disabled={upsertTemplate.isPending}>
+          {upsertTemplate.isPending ? 'Saving...' : 'Save Configuration'}
+        </button>
+      </form>
     </Modal>
   )
 }
 
-function CampaignForm({
-  form,
-  onChange,
-  onSubmit,
-  busy,
-  submitLabel,
-  compact = false,
-}: {
-  form: CampaignPayload
-  onChange: (payload: CampaignPayload) => void
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void>
-  busy: boolean
-  submitLabel: string
-  compact?: boolean
-}) {
-  function update<K extends keyof CampaignPayload>(key: K, value: CampaignPayload[K]) {
-    onChange({ ...form, [key]: value })
-  }
-
+function CampaignForm({ form, onChange, onSubmit, busy, submitLabel }: any) {
+  const update = (key: string, val: any) => onChange({ ...form, [key]: val })
   return (
-    <form className={compact ? 'space-y-4' : 'space-y-5'} onSubmit={onSubmit}>
-      <div className={compact ? 'grid gap-4' : 'grid gap-4 md:grid-cols-2'}>
-        <Field label="Campaign name">
-          <input value={form.name} onChange={(event) => update('name', event.target.value)} className={inputClassName} required />
-        </Field>
-        <Field label="Timezone">
-          <input value={form.timezone} onChange={(event) => update('timezone', event.target.value)} className={inputClassName} required />
-        </Field>
-        <Field label="Daily lead cap">
-          <input type="number" value={form.daily_lead_cap} onChange={(event) => update('daily_lead_cap', Number(event.target.value))} className={inputClassName} required />
-        </Field>
-        <Field label="Invite daily cap">
-          <input type="number" value={form.invite_daily_cap} onChange={(event) => update('invite_daily_cap', Number(event.target.value))} className={inputClassName} required />
-        </Field>
-        <Field label="Active hours start">
-          <input type="number" min={0} max={23} value={form.active_hours_start} onChange={(event) => update('active_hours_start', Number(event.target.value))} className={inputClassName} required />
-        </Field>
-        <Field label="Active hours end">
-          <input type="number" min={0} max={23} value={form.active_hours_end} onChange={(event) => update('active_hours_end', Number(event.target.value))} className={inputClassName} required />
-        </Field>
-      </div>
-
-      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-        <input type="checkbox" checked={form.simulation_mode} onChange={(event) => update('simulation_mode', event.target.checked)} />
-        Run this campaign in simulation mode
-      </label>
-
-      <Field label="Screening prompt">
-        <textarea value={form.screening_prompt || ''} onChange={(event) => update('screening_prompt', event.target.value)} className={`${inputClassName} min-h-[120px]`} />
-      </Field>
-
-      <div className="flex justify-end">
-        <button type="submit" className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white" disabled={busy}>
-          {busy ? 'Saving...' : submitLabel}
-        </button>
-      </div>
+    <form className="space-y-4" onSubmit={onSubmit}>
+      <input value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="Name" className={inputClassName} required />
+      <input value={form.timezone} onChange={(e) => update('timezone', e.target.value)} placeholder="Timezone" className={inputClassName} required />
+      <button type="submit" className="w-full rounded-xl bg-sky-500 py-3 font-semibold text-white" disabled={busy}>{submitLabel}</button>
     </form>
-  )
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-2 block text-sm font-medium text-slate-700">{label}</span>
-      {children}
-    </label>
   )
 }
 
@@ -921,5 +499,4 @@ function MiniStat({ label, value }: { label: string; value: number }) {
   )
 }
 
-const inputClassName =
-  'w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100'
+const inputClassName = 'w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:ring-4 focus:ring-sky-100'

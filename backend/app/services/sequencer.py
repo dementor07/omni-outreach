@@ -1,70 +1,86 @@
 import logging
-from datetime import timedelta
-
+from datetime import datetime, timedelta, timezone
 from app.db import execute, fetch_all, fetch_one
 
 log = logging.getLogger(__name__)
 
-
 async def schedule_sequence(lead_id: str) -> None:
-    """After acceptance, insert queue rows for all remaining sequence steps."""
+    """Entry point: Start the sequence for a lead (usually after acceptance)."""
     lead = await fetch_one(
-        "SELECT campaign_id, accepted_at FROM leads WHERE id=$1", lead_id
+        "SELECT id, campaign_id, accepted_at FROM leads WHERE id=$1", lead_id
     )
-    if not lead:
-        log.warning(f"[sequencer] Lead {lead_id} not found")
-        return
-    if not lead["accepted_at"]:
-        log.warning(f"[sequencer] Lead {lead_id} has no accepted_at — skipping")
+    if not lead or not lead["accepted_at"]:
         return
 
-    steps = await fetch_all(
+    # Find trigger_start node
+    start_node = await fetch_one(
+        "SELECT id FROM sequence_nodes WHERE campaign_id=$1 AND node_type='trigger_start' LIMIT 1",
+        lead["campaign_id"]
+    )
+    
+    if not start_node:
+        log.warning(f"[sequencer] No trigger_start for campaign {lead['campaign_id']}")
+        return
+
+    await queue_next_nodes(lead_id, start_node["id"])
+
+async def queue_next_nodes(lead_id: str, source_node_id: str, handle: str = "default") -> None:
+    """Finds target nodes from source_node and handles them (queue or recursive evaluate)."""
+    lead = await fetch_one("SELECT * FROM leads WHERE id=$1", lead_id)
+    if not lead: return
+
+    edges = await fetch_all(
         """
-        SELECT id, step_order, channel, delay_days
-        FROM sequence_steps
-        WHERE campaign_id=$1
-        ORDER BY step_order ASC
+        SELECT target_node_id FROM sequence_edges 
+        WHERE source_node_id=$1 AND source_handle=$2
         """,
-        lead["campaign_id"],
+        source_node_id, handle
     )
 
-    if not steps:
-        log.info(f"[sequencer] No sequence steps for campaign {lead['campaign_id']}")
-        return
+    for edge in edges:
+        target_id = edge["target_node_id"]
+        node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", target_id)
+        if not node: continue
 
-    base = lead["accepted_at"]
-    cumulative_days = 0
+        node_type = node["node_type"]
+        
+        if node_type.startswith("action_"):
+            channel = node_type.replace("action_", "")
+            delay_days = node.get("data", {}).get("delay_days", 0)
+            scheduled_at = datetime.now(timezone.utc) + timedelta(days=delay_days)
+            
+            await execute(
+                """
+                INSERT INTO queue (campaign_id, lead_id, node_id, channel, status, scheduled_at)
+                VALUES ($1, $2, $3, $4, 'queued', $5)
+                ON CONFLICT DO NOTHING
+                """,
+                lead["campaign_id"], lead_id, target_id, channel, scheduled_at
+            )
+            log.info(f"[sequencer] Queued {channel} for lead {lead_id} at {scheduled_at}")
 
-    for step in steps:
-        if step["step_order"] == 0:
-            # Step 0 is the invite — already done
-            continue
+        elif node_type == "delay":
+            # Delay node is passive in this impl, or we can treat it as a trigger for next
+            # Simplified: just move to next after delay
+            delay_days = node.get("data", {}).get("delay_days", 1)
+            # For delay nodes, we might need a specific queue task or just schedule next action with more delay
+            await queue_next_nodes(lead_id, target_id) # Recursive for now (will need better temporal handling)
 
-        cumulative_days += step["delay_days"]
-        scheduled_at = base + timedelta(days=cumulative_days)
+        elif node_type == "condition_replied":
+            # Evaluate immediately if they already replied, or wait
+            if lead["replied_at"]:
+                await queue_next_nodes(lead_id, target_id, "true")
+            else:
+                # Lead stays here until webhook triggers evaluate_conditions
+                await execute("UPDATE leads SET current_node_id=$1 WHERE id=$2", target_id, lead_id)
 
-        # Idempotency check
-        existing = await fetch_one(
-            "SELECT 1 FROM queue WHERE lead_id=$1 AND step_id=$2 LIMIT 1",
-            lead_id, step["id"],
-        )
-        if existing:
-            continue
-
-        await execute(
-            """
-            INSERT INTO queue
-                (campaign_id, lead_id, step_id, channel, status, scheduled_at, payload)
-            VALUES ($1, $2, $3, $4, 'queued', $5, '{}')
-            ON CONFLICT DO NOTHING
-            """,
-            lead["campaign_id"],
-            lead_id,
-            step["id"],
-            step["channel"],
-            scheduled_at,
-        )
-        log.info(
-            f"[sequencer] Lead {lead_id} step {step['step_order']} "
-            f"({step['channel']}) scheduled for {scheduled_at}"
-        )
+async def evaluate_conditions(lead_id: str) -> None:
+    """Called when lead state changes (e.g. reply received)."""
+    lead = await fetch_one("SELECT id, current_node_id, replied_at FROM leads WHERE id=$1", lead_id)
+    if not lead or not lead["current_node_id"]: return
+    
+    node = await fetch_one("SELECT node_type FROM sequence_nodes WHERE id=$1", lead["current_node_id"])
+    if node and node["node_type"] == "condition_replied":
+        if lead["replied_at"]:
+            await queue_next_nodes(lead_id, lead["current_node_id"], "true")
+            await execute("UPDATE leads SET current_node_id=NULL WHERE id=$1", lead_id)
