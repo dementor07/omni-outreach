@@ -676,7 +676,7 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
             <input 
               type="number" 
               min="1" 
-              value={node.data.delay_days || 1} 
+              value={(node.data as any).delay_days || 1} 
               onChange={(e) => onUpdate({ delay_days: parseInt(e.target.value) || 1 })}
               className={inputClassName}
             />
@@ -687,7 +687,7 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
           <div>
             <label className={labelCls}>Sending Account</label>
             <select 
-              value={node.data.email_account_id || ''} 
+              value={(node.data as any).email_account_id || ''} 
               onChange={(e) => onUpdate({ email_account_id: e.target.value })}
               className={inputClassName}
             >
@@ -701,7 +701,7 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
           <div>
             <label className={labelCls}>Voice Agent</label>
             <select 
-              value={node.data.voice_agent_id || ''} 
+              value={(node.data as any).voice_agent_id || ''} 
               onChange={(e) => onUpdate({ voice_agent_id: e.target.value })}
               className={inputClassName}
             >
