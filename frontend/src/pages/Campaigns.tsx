@@ -22,6 +22,7 @@ import Badge from '../components/Badge'
 import DataTable from '../components/DataTable'
 import EmptyState from '../components/EmptyState'
 import Modal from '../components/Modal'
+import SequentialBuilder from '../components/SequentialBuilder'
 import { useToast } from '../components/Toast'
 import { formatDate } from '../lib/time'
 import {
@@ -56,6 +57,7 @@ const defaultCampaignForm: CampaignPayload = {
   active_hours_start: 9,
   active_hours_end: 18,
   screening_prompt: '',
+  sequence_mode: 'sequential',
 }
 
 // ── React Flow Node Types ──────────────────────────────────────────────────
@@ -375,42 +377,72 @@ export default function Campaigns() {
             />
           </div>
         )}
-
+...
         {activeTab === 'sequence' && (
           <div className="relative h-full rounded-3xl border border-slate-200 bg-slate-50 shadow-inner">
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              nodeTypes={nodeTypes}
-              fitView
-            >
-              <Background color="#cbd5e1" gap={20} />
-              <Controls />
-              <Panel position="top-right" className="flex flex-col gap-2">
-                <div className="flex gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
-                  <button onClick={() => addNode('trigger_start')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Trigger"><Zap size={18} className="text-emerald-500" /></button>
-                  <div className="w-px bg-slate-100" />
-                  <button onClick={() => addNode('action_linkedin_dm')} className="rounded-xl p-2 hover:bg-slate-50" title="Add LinkedIn DM"><Linkedin size={18} className="text-sky-500" /></button>
-                  <button onClick={() => addNode('action_email')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Email"><Mail size={18} className="text-slate-500" /></button>
-                  <button onClick={() => addNode('action_whatsapp')} className="rounded-xl p-2 hover:bg-slate-50" title="Add WhatsApp"><MessageSquare size={18} className="text-emerald-500" /></button>
-                  <button onClick={() => addNode('action_instagram')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Instagram"><Instagram size={18} className="text-pink-500" /></button>
-                  <div className="w-px bg-slate-100" />
-                  <button onClick={() => addNode('condition_replied')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Branch"><Zap size={18} className="text-amber-500" /></button>
-                  <button onClick={() => addNode('delay')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Delay"><Clock size={18} className="text-slate-400" /></button>
-                </div>
-                <button 
-                  onClick={onSaveCanvas}
-                  disabled={saveGraph.isPending}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-sky-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-sky-200 transition-all hover:bg-sky-600 hover:scale-[1.02] active:scale-[0.98]"
-                >
-                  <Save size={18} />
-                  {saveGraph.isPending ? 'Saving...' : 'Save Canvas'}
-                </button>
-              </Panel>
-            </ReactFlow>
+            {campaignQuery.data?.sequence_mode === 'canvas' ? (
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={onConnect}
+                nodeTypes={nodeTypes}
+                fitView
+              >
+                <Background color="#cbd5e1" gap={20} />
+                <Controls />
+                <Panel position="top-right" className="flex flex-col gap-2">
+                  <div className="flex gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+                    <button onClick={() => addNode('trigger_start')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Trigger"><Zap size={18} className="text-emerald-500" /></button>
+                    <div className="w-px bg-slate-100" />
+                    <button onClick={() => addNode('action_linkedin_dm')} className="rounded-xl p-2 hover:bg-slate-50" title="Add LinkedIn DM"><Linkedin size={18} className="text-sky-500" /></button>
+                    <button onClick={() => addNode('action_email')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Email"><Mail size={18} className="text-slate-500" /></button>
+                    <button onClick={() => addNode('action_whatsapp')} className="rounded-xl p-2 hover:bg-slate-50" title="Add WhatsApp"><MessageSquare size={18} className="text-emerald-500" /></button>
+                    <button onClick={() => addNode('action_instagram')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Instagram"><Instagram size={18} className="text-pink-500" /></button>
+                    <div className="w-px bg-slate-100" />
+                    <button onClick={() => addNode('condition_replied')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Branch"><Zap size={18} className="text-amber-500" /></button>
+                    <button onClick={() => addNode('delay')} className="rounded-xl p-2 hover:bg-slate-50" title="Add Delay"><Clock size={18} className="text-slate-400" /></button>
+                  </div>
+                  <button 
+                    onClick={onSaveCanvas}
+                    disabled={saveGraph.isPending}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-sky-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-sky-200 transition-all hover:bg-sky-600 hover:scale-[1.02] active:scale-[0.98]"
+                  >
+                    <Save size={18} />
+                    {saveGraph.isPending ? 'Saving...' : 'Save Canvas'}
+                  </button>
+                </Panel>
+              </ReactFlow>
+            ) : (
+              <SequentialBuilder
+                nodes={nodes}
+                edges={edges}
+                onSave={(newNodes, newEdges) => {
+                  setNodes(newNodes)
+                  setEdges(newEdges)
+                  // Use mutated state directly for save
+                  saveGraph.mutate({
+                    campaign_id: id!,
+                    nodes: newNodes.map(n => ({
+                      id: n.id,
+                      node_type: n.type as NodeType,
+                      position_x: n.position.x,
+                      position_y: n.position.y,
+                      data: n.data
+                    })),
+                    edges: newEdges.map(e => ({
+                      source_node_id: e.source,
+                      target_node_id: e.target,
+                      source_handle: e.sourceHandle || 'default',
+                      target_handle: e.targetHandle || 'default'
+                    }))
+                  })
+                }}
+                onEditTemplate={setTemplateNodeId}
+                isSaving={saveGraph.isPending}
+              />
+            )}
           </div>
         )}
       </div>
@@ -490,6 +522,41 @@ function CampaignForm({ form, onChange, onSubmit, busy, submitLabel }: { form: a
     <form className="space-y-4" onSubmit={onSubmit}>
       <input value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="Name" className={inputClassName} required />
       <input value={form.timezone} onChange={(e) => update('timezone', e.target.value)} placeholder="Timezone" className={inputClassName} required />
+      
+      <div className="grid grid-cols-2 gap-4">
+        <button
+          type="button"
+          onClick={() => update('sequence_mode', 'sequential')}
+          className={`flex flex-col items-center gap-2 rounded-2xl border-2 p-4 transition ${
+            form.sequence_mode === 'sequential' ? 'border-sky-500 bg-sky-50' : 'border-slate-100 bg-slate-50 hover:border-slate-200'
+          }`}
+        >
+          <div className={`rounded-lg p-2 ${form.sequence_mode === 'sequential' ? 'bg-sky-500 text-white' : 'bg-white text-slate-400'}`}>
+            <Clock size={20} />
+          </div>
+          <div className="text-center">
+            <p className="text-sm font-bold text-slate-900">Sequential</p>
+            <p className="text-[10px] text-slate-500 text-pretty">Simple, linear list</p>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => update('sequence_mode', 'canvas')}
+          className={`flex flex-col items-center gap-2 rounded-2xl border-2 p-4 transition ${
+            form.sequence_mode === 'canvas' ? 'border-sky-500 bg-sky-50' : 'border-slate-100 bg-slate-50 hover:border-slate-200'
+          }`}
+        >
+          <div className={`rounded-lg p-2 ${form.sequence_mode === 'canvas' ? 'bg-sky-500 text-white' : 'bg-white text-slate-400'}`}>
+            <Zap size={20} />
+          </div>
+          <div className="text-center">
+            <p className="text-sm font-bold text-slate-900">Nodal Canvas</p>
+            <p className="text-[10px] text-slate-500 text-pretty">Advanced graph flow</p>
+          </div>
+        </button>
+      </div>
+
       <button type="submit" className="w-full rounded-xl bg-sky-500 py-3 font-semibold text-white" disabled={busy}>{submitLabel}</button>
     </form>
   )

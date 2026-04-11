@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
     active_hours_start      INTEGER NOT NULL DEFAULT 9,
     active_hours_end        INTEGER NOT NULL DEFAULT 18,
     screening_prompt        TEXT,
+    sequence_mode           TEXT NOT NULL DEFAULT 'sequential', -- sequential|canvas
     created_at              TIMESTAMPTZ DEFAULT NOW()
 );
 

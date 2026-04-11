@@ -16,6 +16,7 @@ class CampaignCreate(BaseModel):
     active_hours_start: int = 9
     active_hours_end: int = 18
     screening_prompt: str | None = None
+    sequence_mode: str = "sequential"
 
 
 class CampaignUpdate(BaseModel):
@@ -28,6 +29,7 @@ class CampaignUpdate(BaseModel):
     active_hours_start: int | None = None
     active_hours_end: int | None = None
     screening_prompt: str | None = None
+    sequence_mode: str | None = None
 
 
 @router.get("")
@@ -41,12 +43,13 @@ async def create_campaign(body: CampaignCreate, user_id: str = Depends(get_curre
         """
         INSERT INTO campaigns
             (name, daily_lead_cap, invite_daily_cap, simulation_mode,
-             timezone, active_hours_start, active_hours_end, screening_prompt)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+             timezone, active_hours_start, active_hours_end, screening_prompt, sequence_mode)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
         RETURNING *
         """,
         body.name, body.daily_lead_cap, body.invite_daily_cap, body.simulation_mode,
         body.timezone, body.active_hours_start, body.active_hours_end, body.screening_prompt,
+        body.sequence_mode,
     )
 
 

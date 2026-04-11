@@ -13,6 +13,7 @@ export interface Campaign {
   active_hours_start: number
   active_hours_end: number
   screening_prompt?: string | null
+  sequence_mode: 'sequential' | 'canvas'
   created_at?: string
 }
 
@@ -33,6 +34,7 @@ export interface CampaignPayload {
   active_hours_start: number
   active_hours_end: number
   screening_prompt?: string | null
+  sequence_mode: 'sequential' | 'canvas'
   status?: string
 }
 
