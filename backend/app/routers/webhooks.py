@@ -36,13 +36,13 @@ async def unipile_webhook(request: Request):
                 lead["id"]
             )
             
-            # Log event
+            # Log inbound message
             await execute(
                 """
-                INSERT INTO events (lead_id, campaign_id, event_type, channel, meta)
-                VALUES ($1, $2, 'reply_received', $3, $4)
+                INSERT INTO inbound_messages (lead_id, campaign_id, channel, body, raw)
+                VALUES ($1, $2, $3, $4, $5)
                 """,
-                lead["id"], lead["campaign_id"], payload.get("channel"), payload
+                lead["id"], lead["campaign_id"], payload.get("channel"), payload.get("text"), payload
             )
             
             # Evaluate sequence logic (branching)
