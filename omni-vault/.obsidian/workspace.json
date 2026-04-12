@@ -11,10 +11,14 @@
             "id": "1cccf6b5934c6ba8",
             "type": "leaf",
             "state": {
-              "type": "graph",
-              "state": {},
-              "icon": "lucide-git-fork",
-              "title": "Graph view"
+              "type": "markdown",
+              "state": {
+                "file": "raw/Clippings/Supercharging LLM Wiki with Knowledge Graphs Build a Self-Evolving Research System.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Supercharging LLM Wiki with Knowledge Graphs Build a Self-Evolving Research System"
             }
           }
         ]
@@ -176,8 +180,11 @@
       "bases:Create new base": false
     }
   },
-  "active": "1cccf6b5934c6ba8",
+  "active": "8afbc273f9cf835a",
   "lastOpenFiles": [
+    "wiki/architecture/knowledge-graphs.md",
+    "raw/Clippings/Supercharging LLM Wiki with Knowledge Graphs Build a Self-Evolving Research System.md",
+    "Clippings",
     "wiki/architecture/auto-optimization-engine.md",
     "wiki/integrations/instagram-telegram-integration.md",
     "wiki/architecture/event-bus-architecture.md",
@@ -204,7 +211,6 @@
     "wiki/integrations/retell-integration.md",
     "wiki/integrations/unipile-integration.md",
     "wiki/decisions/voice-node-architecture.md",
-    "wiki/architecture/system-overview.md",
     "CLAUDE.md.tmp.28148.1775993918027",
     "wiki/campaigns",
     "wiki/competitors",
@@ -212,7 +218,6 @@
     "wiki/integrations",
     "wiki/architecture",
     "wiki/product",
-    "wiki",
-    "raw"
+    "wiki"
   ]
 }

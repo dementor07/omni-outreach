@@ -13,6 +13,7 @@ Last updated: 2026-04-12
 | [[auto-optimization-engine]] | Reinforcement learning, multi-armed bandit for dynamic A/B splits |
 | [[bridge-agent]] | Claude ↔ Gemini autonomous development loop |
 | [[llm-wiki-method]] | The Karpathy method for persistent LLM knowledge bases |
+| [[knowledge-graphs]] | Enhancing the LLM Wiki with structural self-awareness and gap detection |
 
 ## Product
 
