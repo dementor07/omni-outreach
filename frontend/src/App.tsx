@@ -6,6 +6,7 @@ import Leads from './pages/Leads'
 import Queue from './pages/Queue'
 import Settings from './pages/Settings'
 import Login from './pages/Login'
+import JobSearch from './pages/JobSearch'
 
 function RequireAuth() {
   const location = useLocation()
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="/leads" element={<Leads />} />
         <Route path="/queue" element={<Queue />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/job-search" element={<JobSearch />} />
       </Route>
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
