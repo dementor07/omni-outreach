@@ -143,7 +143,7 @@ const ActionNode = ({ data, id, selected }: NodeProps) => {
           {cfg?.icon}
         </div>
         <div className="flex rounded-lg bg-slate-50 p-0.5 ring-1 ring-slate-900/5 scale-90 origin-right">
-          <div className={`px-2 py-0.5 text-[8px] font-black uppercase tracking-widest rounded-md transition-all ${mode === 'simple' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}>Simple</div>
+          <div className={`px-2 py-0.5 text-[8px] font-black uppercase tracking-widest rounded-md transition-all ${mode !== 'flow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}>Simple</div>
           <div className={`px-2 py-0.5 text-[8px] font-black uppercase tracking-widest rounded-md transition-all ${mode === 'flow' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-400'}`}>Flow</div>
         </div>
       </div>

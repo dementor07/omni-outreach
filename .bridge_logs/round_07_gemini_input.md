@@ -4,235 +4,124 @@ Here is the Round 7 spec:
 
 ---
 
-## ROUND 7 — Retell Voice Node Editor: Data Correctness Fixes
+## ROUND 7 — RETELL VOICE NODE EDITOR: FINAL POLISH & BUG FIXES
 
 ---
 
 ### 1. OBJECTIVE
 
-Fix three data-correctness bugs in the completed Retell voice node editor: a stale-position bug when editing dragged nodes, a publish payload that sends illegal extra fields to Retell, and a spurious `setNodes` mutation in `onConnect` that diverges node data from edge state.
+Fix two remaining bugs in the Retell voice node feature: (1) the ActionNode mode badge never highlights "Simple" after a user explicitly sets Standard mode in the ConfigSidebar, and (2) the RetellFlowEditor shows a blank canvas with no feedback when the flow API call fails.
 
 ---
 
 ### 2. FILES TO CHANGE
 
-- `frontend/src/pages/RetellFlowEditor.tsx` — fix stale selectedNode position, onConnect mutation, unused import, publish payload
-- `backend/app/routers/accounts.py` — fix `update_voice_agent_flow` to only forward allowed fields to Retell
+- `frontend/src/pages/Campaigns.tsx` — one-line fix in `ActionNode`
+- `frontend/src/pages/RetellFlowEditor.tsx` — add error state when flow fails to load
+
+---
 
 ### 3. DO NOT TOUCH
 
-**CRITICAL: Do not touch any of these. Not even cosmetic changes.**
+**Do not touch any of the following — they are fully working and must not be modified:**
 
-- `frontend/src/pages/Campaigns.tsx` — fully correct, do not open it
-- `frontend/src/App.tsx` — route already registered correctly
-- `backend/app/routers/accounts.py` — touch ONLY the `update_voice_agent_flow` endpoint body (lines ~246–268). Do not touch any other endpoint.
-- Any file not listed in FILES TO CHANGE
-- Existing node visual design (colors, sizing, typography) in RetellFlowEditor.tsx
-- Existing `NodeConfigPanel` JSX
-- Existing `CustomEdge` component
-- The three custom node components (`ConversationNode`, `TransferCallNode`, `EndNode`)
-- `retellNodesToFlow`, `retellEdgesToFlow` functions — do not modify them
+- `backend/app/routers/accounts.py` — all four voice endpoints are complete and correct
+- `frontend/src/App.tsx` — route `/campaigns/:id/voice-flow/:agentId` is already registered
+- `frontend/src/api/client.ts` — do not change this file or any import of it
+- The `ConfigSidebar` function in `Campaigns.tsx` — the voice section (Standard mode prompt editor, Flow mode "Open Flow Editor" button, flowMeta node/edge count) is complete. Do not rewrite or move any of this logic.
+- The `RetellFlowEditor` page logic — `retellNodesToFlow`, `retellEdgesToFlow`, `flowToRetellNodes`, `ConversationNode`, `TransferCallNode`, `EndNode`, `CustomEdge`, `NodeConfigPanel`, `RetellFlowInner`, `handlePublish`, `onConnect`, `addNode`, `handleNodeChange`, `handleEdgeUpdate`, `handleEdgeDestinationChange` — all correct, do not change.
+- The `nodeTypes`, `retellEdgeTypes`, `retellDefaultEdgeOptions` constants in `RetellFlowEditor.tsx`.
+- Non-voice sections of `Campaigns.tsx`: email, LinkedIn, delay nodes, canvas pan/zoom, lead table, campaign settings, import modal, etc.
+- `SequentialBuilder.tsx`, `sequencer.py`, `dispatcher.py`
+- `frontend/src/components/Sidebar.tsx`
 
 ---
 
 ### 4. IMPLEMENTATION
 
-#### Fix A — Stale position bug in `RetellFlowEditor.tsx` (CRITICAL)
+#### Fix A — ActionNode badge: `mode === 'simple'` → `mode !== 'flow'`
 
-**Problem:** `selectedNode` is stored as a full `Node<RetellNode>` object in state. When the user drags a node, `onNodesChange` updates `nodes` but `selectedNode` still holds the pre-drag position. When `handleNodeChange` runs, it writes `{ ...updatedNode, position: <stale> }` back into `nodes`, silently resetting the node's position to where it was before the drag.
+**File:** `frontend/src/pages/Campaigns.tsx`  
+**Location:** `ActionNode` function, approximately line 146.
 
-**Fix:** Replace the `selectedNode: Node<RetellNode> | null` state with a `selectedNodeId: string | null` state. Derive the actual selected node from `nodes` on every render using `useMemo`.
-
-Exact changes to `RetellFlowEditor.tsx`:
-
-**Step A1** — Replace the state declaration:
-```ts
-// REMOVE:
-const [selectedNode, setSelectedNode] = useState<Node<RetellNode> | null>(null);
-
-// ADD:
-const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-const selectedNode = useMemo(
-  () => (selectedNodeId ? nodes.find(n => n.id === selectedNodeId) ?? null : null),
-  [nodes, selectedNodeId]
-);
-```
-
-`useMemo` is already imported. No new imports needed.
-
-**Step A2** — Update every call to `setSelectedNode(...)`:
-- `setSelectedNode(node)` → `setSelectedNodeId(node.id)` (in `onNodeClick`)
-- `setSelectedNode(null)` → `setSelectedNodeId(null)` (in `onPaneClick` and `onClose`)
-- In `addNode`, after `setNodes(...)`: change `setSelectedNode(rfNode)` → `setSelectedNodeId(id)`
-- In `RetellFlowInner` props, change `setSelectedNode` prop name to `setSelectedNodeId` and its type to `(id: string | null) => void`
-
-**Step A3** — Update `handleNodeChange`:
-
-```ts
-// REMOVE:
-const handleNodeChange = (updatedNode: Node<RetellNode>) => {
-  setNodes(nds => nds.map(n => n.id === updatedNode.id ? updatedNode : n));
-  setSelectedNode(updatedNode);
-};
-
-// ADD:
-const handleNodeChange = useCallback((updatedNode: Node<RetellNode>) => {
-  setNodes(nds => nds.map(n =>
-    n.id === updatedNode.id
-      ? { ...updatedNode, position: n.position }  // preserve drag position
-      : n
-  ));
-}, [setNodes]);
-```
-
-Note: `setSelectedNode(updatedNode)` call is removed entirely — `selectedNode` is now derived, so no update needed.
-
-**Step A4** — Update `RetellFlowInnerProps` interface: change `setSelectedNode: (n: Node<RetellNode> | null) => void` to `setSelectedNodeId: (id: string | null) => void`.
-
-**Step A5** — In the `RetellFlowInner` function signature, rename the destructured prop `setSelectedNode` → `setSelectedNodeId`.
-
-**Step A6** — In `RetellFlowInner` JSX:
-- `onNodeClick={(_, node) => setSelectedNode(node)}` → `onNodeClick={(_, node) => setSelectedNodeId(node.id)}`
-- `onPaneClick={() => setSelectedNode(null)}` → `onPaneClick={() => setSelectedNodeId(null)}`
-
-**Step A7** — In the `NodeConfigPanel` delete handler (inside `RetellFlowInner`'s `onDelete`):
-```ts
-// REMOVE:
-onDelete={() => {
-  deleteElements({ nodes: [{ id: selectedNode.id }] });
-  setSelectedNode(null);
-}}
-
-// ADD:
-onDelete={() => {
-  deleteElements({ nodes: [{ id: selectedNode.id }] });
-  setSelectedNodeId(null);
-}}
-```
-
-**Step A8** — In `RetellFlowEditor`'s `ReactFlowProvider` block, rename the prop:
+Current code:
 ```tsx
-// REMOVE:
-setSelectedNode={setSelectedNode}
-
-// ADD:
-setSelectedNodeId={setSelectedNodeId}
+const mode = (data as any).mode || 'simple'
+// ...
+<div className={`px-2 py-0.5 text-[8px] font-black uppercase tracking-widest rounded-md transition-all ${mode === 'simple' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}>Simple</div>
+<div className={`px-2 py-0.5 text-[8px] font-black uppercase tracking-widest rounded-md transition-all ${mode === 'flow' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-400'}`}>Flow</div>
 ```
+
+**Root cause:** `ConfigSidebar` calls `onUpdate({ mode: 'standard' })` when the user clicks the "Standard" button (line ~736). The node data then has `mode: 'standard'`. But `ActionNode` checks `mode === 'simple'` — which is never true after the user explicitly selects Standard in the sidebar. Result: neither pill is highlighted.
+
+**Fix:** Change the condition for the "Simple" pill from `mode === 'simple'` to `mode !== 'flow'`. The `mode || 'simple'` default on the line above is fine as-is — do not change it.
+
+After fix:
+```tsx
+<div className={`px-2 py-0.5 text-[8px] font-black uppercase tracking-widest rounded-md transition-all ${mode !== 'flow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}>Simple</div>
+```
+
+This is a **single token change on one line**. Do not change any other line in `ActionNode`.
 
 ---
 
-#### Fix B — Remove spurious `setNodes` in `onConnect` (`RetellFlowEditor.tsx`)
+#### Fix B — RetellFlowEditor: show error state when flow fails to load
 
-**Problem:** `onConnect` calls both `setEdges(addEdge(...))` AND `setNodes(nds => nds.map(...))` to add the new edge to `node.data.edges`. But `flowToRetellNodes` (called in `handlePublish`) builds each node's edges entirely from the ReactFlow `edges` state — it ignores `node.data.edges`. The `setNodes` update is therefore redundant AND can cause stale data bugs.
+**File:** `frontend/src/pages/RetellFlowEditor.tsx`
 
-**Fix:** Remove the entire `setNodes(...)` call from `onConnect`. Keep only the `setEdges` call.
+**Root cause:** The current `useEffect` (line ~450) calls `.catch(() => toast.error('Failed to load voice flow'))` then `.finally(() => setLoading(false))`. After a failure, `loading` is `false` but `flow` is `null` and `nodes`/`edges` are empty arrays. The component renders the full ReactFlow canvas with no nodes and no error — the user sees a blank dark canvas with no explanation.
 
-```ts
-// REMOVE the entire setNodes block from onConnect:
-setNodes((nds) =>
-  nds.map((n) => {
-    if (n.id === params.source && n.data.type === 'conversation') {
-      return {
-        ...n,
-        data: {
-          ...n.data,
-          edges: [...(n.data.edges ?? []), newRetellEdge],
-        },
-      };
-    }
-    return n;
-  })
-);
-```
+**Fix:** Add a `loadError` boolean state. Set it to `true` in the catch handler. Render an error screen when `!loading && loadError`.
 
-The `onConnect` callback after the fix:
-```ts
-const onConnect = useCallback(
-  (params: Connection) => {
-    const newRetellEdge: RetellEdge = {
-      id: `edge-${Date.now()}`,
-      destination_node_id: params.target!,
-      transition_condition: { type: 'prompt', prompt: '' },
-    };
-    setEdges((eds) =>
-      addEdge({ ...params, id: newRetellEdge.id, data: newRetellEdge, label: '' }, eds)
-    );
-  },
-  [setEdges]
-);
-```
+Step-by-step:
 
----
+1. Add state at the top of `RetellFlowEditor` (alongside the existing `loading` state):
+   ```tsx
+   const [loadError, setLoadError] = useState(false);
+   ```
 
-#### Fix C — Publish payload (`RetellFlowEditor.tsx`)
+2. In the existing `useEffect` that calls `api.get(...)`, update the `.catch` to also set `loadError`:
+   ```tsx
+   .catch(() => {
+     toast.error('Failed to load voice flow');
+     setLoadError(true);
+   })
+   ```
+   Do not change `.finally(() => setLoading(false))` — leave it as-is.
 
-**Problem:** `handlePublish` spreads the full `flow` object into the PATCH body: `{ ...flow, global_prompt: globalPrompt, nodes: updatedNodes }`. The `flow` object contains `conversation_flow_id`, `created_at`, `last_modification_timestamp` and other fields the Retell PATCH endpoint does not accept. Retell only accepts `{ global_prompt, nodes, start_node_id }`.
+3. Add an error screen render block immediately after the existing loading block (after the `if (loading) { return ... }` block):
+   ```tsx
+   if (loadError) {
+     return (
+       <div className="h-screen bg-slate-950 flex flex-col items-center justify-center gap-4">
+         <p className="text-rose-400 font-black uppercase tracking-widest text-sm">Failed to load flow</p>
+         <p className="text-slate-500 text-xs">This agent may not be a conversation-flow type, or the Retell API is unreachable.</p>
+         <button
+           onClick={() => navigate(`/campaigns/${campaignId}`)}
+           className="flex items-center gap-2 text-slate-400 hover:text-slate-100 transition text-[10px] font-black uppercase tracking-widest mt-4"
+         >
+           <ArrowLeft size={16} /> Back to Sequence
+         </button>
+       </div>
+     );
+   }
+   ```
 
-**Fix:** Send only the three allowed fields:
-```ts
-// REMOVE:
-await api.patch(`/accounts/voice/${agentId}/flow`, {
-  ...flow,
-  global_prompt: globalPrompt,
-  nodes: updatedNodes
-});
+   Colors: `rose-400` for the error text, `slate-500` for the description, `slate-400`/`slate-100` for the back button. No `red-*`, `gray-*`, or `green-*`.
 
-// ADD:
-await api.patch(`/accounts/voice/${agentId}/flow`, {
-  global_prompt: globalPrompt,
-  nodes: updatedNodes,
-  start_node_id: flow.start_node_id,
-});
-```
-
----
-
-#### Fix D — Remove unused `useMemo` import if it's no longer used (`RetellFlowEditor.tsx`)
-
-After Fix A, `useMemo` IS used (to derive `selectedNode`). No change needed to the import line — keep it.
-
----
-
-#### Fix E — Backend publish filter (`backend/app/routers/accounts.py`)
-
-**Problem:** `update_voice_agent_flow` receives `body: dict` and forwards it directly to Retell with `json=body`. If the frontend accidentally sends extra fields (e.g., `conversation_flow_id`), Retell may reject the request.
-
-**Fix:** In the `update_voice_agent_flow` endpoint, extract only the three allowed fields before forwarding:
-
-```python
-# REPLACE the json=body line in update_voice_agent_flow:
-payload = {k: v for k, v in body.items() if k in {"global_prompt", "nodes", "start_node_id"}}
-resp = await client.patch(
-    f"https://api.retellai.com/update-conversation-flow/{flow_id}",
-    headers={"Authorization": f"Bearer {RETELL_API_KEY}"},
-    json=payload,
-)
-```
-
-This is a one-line whitelist filter. Change ONLY this — do not touch any other endpoint in `accounts.py`.
+4. Do not change any other part of the component. The existing loading screen, the `RetellFlowProvider`/`RetellFlowInner` render, the header, or the `handlePublish` function are all correct.
 
 ---
 
 ### 5. ACCEPTANCE CRITERIA
 
-- [ ] Drag a node on the canvas, then open it in NodeConfigPanel and edit its name — after saving, the node stays at the dragged position (does not snap back to its original position)
-- [ ] Adding a new edge via drag-connect does not mutate `node.data.edges` in the nodes state
-- [ ] Clicking "Publish to Retell" sends exactly `{ global_prompt, nodes, start_node_id }` to the backend — verify in browser Network tab that the request body contains no `conversation_flow_id` or timestamp fields
-- [ ] Backend `PATCH /accounts/voice/{agent_id}/flow` only forwards `global_prompt`, `nodes`, `start_node_id` to Retell — even if the client sends extra fields
-- [ ] No TypeScript errors (`tsc --noEmit` passes)
-- [ ] All existing canvas features in Campaigns.tsx remain fully functional — do NOT break them
-- [ ] Standard mode prompt editing still works: select standard agent → fields load → edit → save → changes appear on next load
-- [ ] Flow mode "Open Flow Editor →" button still navigates correctly
-- [ ] The node/edge count still displays in flow mode ConfigSidebar
-
----
-
-**GEMINI INSTRUCTIONS:**
-- Read each file before editing — do not make blind edits
-- Make surgical changes only — do not reformat, reorganize, or rename anything not listed above
-- After all edits, run `tsc --noEmit` from `frontend/` and fix any TypeScript errors before finishing
-- Do not add `console.log`, comments, or new abstractions
-- Do not touch `Campaigns.tsx` under any circumstances
+- **Badge fix**: Select a voice node on the canvas → open ConfigSidebar → the "Standard" button is highlighted. The `ActionNode` card immediately shows the "Simple" pill with `bg-white text-slate-900 shadow-sm` (lit state). Switching to "Nested Flow" highlights the "Flow" pill and dims "Simple". Switching back to "Standard" re-highlights "Simple". For new nodes (no mode field set), "Simple" is still highlighted by default.
+- **Badge fix**: For all non-voice nodes (email, delay, LinkedIn, etc.), the "Simple" badge remains highlighted as before — no regression.
+- **Error state**: Navigate to `/campaigns/:id/voice-flow/invalid-agent-id` (or any agent ID that returns a 400/502 from the flow endpoint) → page shows rose-400 "Failed to load flow" message with a back button instead of a blank canvas. The toast.error also fires as before.
+- **No regressions**: The RetellFlowEditor still loads and renders correctly for valid conversation-flow agents. All node types render, clicking opens NodeConfigPanel, "Publish to Retell" still calls PATCH correctly.
+- **No TypeScript errors**: `npx tsc --noEmit` returns zero errors.
+- **No changes to backend**: `accounts.py` is not modified.
+- **No changes to App.tsx, Sidebar.tsx, api/client.ts**, or any non-voice feature.
 
 IMPORTANT RULES:
 - Only modify the files listed in FILES TO CHANGE

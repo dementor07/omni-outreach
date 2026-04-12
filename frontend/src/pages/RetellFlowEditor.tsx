@@ -450,6 +450,7 @@ export default function RetellFlowEditor() {
   );
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     api.get(`/accounts/voice/${agentId}/flow`)
@@ -460,7 +461,10 @@ export default function RetellFlowEditor() {
         setNodes(retellNodesToFlow(flowData.nodes));
         setEdges(retellEdgesToFlow(flowData.nodes));
       })
-      .catch(() => toast.error('Failed to load voice flow'))
+      .catch(() => {
+        toast.error('Failed to load voice flow');
+        setLoadError(true);
+      })
       .finally(() => setLoading(false));
   }, [agentId, setNodes, setEdges, toast]);
 
@@ -545,6 +549,21 @@ export default function RetellFlowEditor() {
     return (
       <div className="h-screen bg-slate-950 flex items-center justify-center">
         <div className="text-sky-500 font-black uppercase tracking-widest animate-pulse">Loading Flow...</div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="h-screen bg-slate-950 flex flex-col items-center justify-center gap-4">
+        <p className="text-rose-400 font-black uppercase tracking-widest text-sm">Failed to load flow</p>
+        <p className="text-slate-500 text-xs">This agent may not be a conversation-flow type, or the Retell API is unreachable.</p>
+        <button
+          onClick={() => navigate(`/campaigns/${campaignId}`)}
+          className="flex items-center gap-2 text-slate-400 hover:text-slate-100 transition text-[10px] font-black uppercase tracking-widest mt-4"
+        >
+          <ArrowLeft size={16} /> Back to Sequence
+        </button>
       </div>
     );
   }
