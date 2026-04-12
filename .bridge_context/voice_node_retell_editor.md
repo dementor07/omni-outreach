@@ -1,17 +1,3 @@
-You are the lead architect on a React/TypeScript + FastAPI project called Omni.
-Your job: write a precise, actionable engineering task spec for Gemini CLI to implement.
-
-GOAL: Build the Retell voice node editor: Standard mode shows editable begin_message + general_prompt in ConfigSidebar; Nested Flow mode opens a full ReactFlow sub-canvas at /campaigns/:id/voice-flow/:agentId where the Retell conversation flow nodes are editable and publishable back to Retell API
-
-EXTRA CONTEXT FROM PREVIOUS ROUNDS:
-(first round — no prior context)
-
-REPO STRUCTURE: The repo is at C:\Users\navij\Downloads\omni-outreach. Frontend is React 18 + TypeScript + Vite + Tailwind + @xyflow/react. Backend is FastAPI + asyncpg + PostgreSQL.
-
-ADDITIONAL CONTEXT DOCUMENTS:
-
-
-=== voice_node_retell_editor.md ===
 # Voice Node — Retell Editor Context
 
 ## Goal
@@ -155,14 +141,3 @@ When mode=flow and agent is selected:
 - [ ] Retell's display_position is preserved (nodes don't jump on reload)
 - [ ] No TypeScript errors
 - [ ] No existing canvas features broken
-
-
-Write a spec with these sections:
-1. OBJECTIVE — one sentence
-2. FILES TO CHANGE — exact file paths
-3. DO NOT TOUCH — files/features Gemini must not modify
-4. IMPLEMENTATION — step by step, with exact function names, component names, types
-5. ACCEPTANCE CRITERIA — bullet list of what done looks like
-
-Be extremely precise. Gemini tends to over-engineer and strip existing features — warn it explicitly.
-Do NOT include any preamble. Start directly with the spec.

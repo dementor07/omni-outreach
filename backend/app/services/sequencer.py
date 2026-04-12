@@ -74,11 +74,30 @@ async def queue_next_nodes(
 
 async def evaluate_conditions(lead_id: str) -> None:
     """Called when lead state changes (e.g. reply received)."""
+    log.info(f"[sequencer] Re-evaluating conditions for lead {lead_id}")
     lead = await fetch_one("SELECT id, current_node_id, replied_at FROM leads WHERE id=$1", lead_id)
-    if not lead or not lead["current_node_id"]: return
+    
+    if not lead:
+        log.warning(f"[sequencer] Lead {lead_id} not found during evaluate_conditions")
+        return
+        
+    if not lead["current_node_id"]:
+        log.debug(f"[sequencer] Lead {lead_id} has no current_node_id; skipping re-evaluation")
+        return
     
     node = await fetch_one("SELECT node_type FROM sequence_nodes WHERE id=$1", lead["current_node_id"])
-    if node and node["node_type"] == "condition_replied":
+    if not node:
+        log.warning(f"[sequencer] current_node_id {lead['current_node_id']} not found for lead {lead_id}")
+        return
+
+    log.debug(f"[sequencer] Lead {lead_id} currently at node {node['node_type']} ({lead['current_node_id']})")
+
+    if node["node_type"] == "condition_replied":
         if lead["replied_at"]:
+            log.info(f"[sequencer] Lead {lead_id} has replied (at {lead['replied_at']}). Advancing True branch.")
             await queue_next_nodes(lead_id, lead["current_node_id"], "true")
             await execute("UPDATE leads SET current_node_id=NULL WHERE id=$1", lead_id)
+        else:
+            log.info(f"[sequencer] Lead {lead_id} at condition_replied but replied_at is NULL; staying parked.")
+    else:
+        log.debug(f"[sequencer] Lead {lead_id} is at {node['node_type']}, not a condition node; no-op.")

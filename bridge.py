@@ -138,6 +138,13 @@ def run_bridge(goal: str, max_rounds: int, auto: bool) -> None:
         log(f"━━━ ROUND {round_n}/{max_rounds} ━━━", "bold")
 
         # ── Step 1: Claude produces a precise task spec for Gemini ──
+        # Load any context files from .bridge_context/
+        context_dir = REPO / ".bridge_context"
+        extra_docs = ""
+        if context_dir.exists():
+            for f in sorted(context_dir.glob("*.md")):
+                extra_docs += f"\n\n=== {f.name} ===\n{f.read_text(encoding='utf-8')}"
+
         spec_prompt = f"""You are the lead architect on a React/TypeScript + FastAPI project called Omni.
 Your job: write a precise, actionable engineering task spec for Gemini CLI to implement.
 
@@ -147,6 +154,9 @@ EXTRA CONTEXT FROM PREVIOUS ROUNDS:
 {extra_context or "(first round — no prior context)"}
 
 REPO STRUCTURE: The repo is at {REPO}. Frontend is React 18 + TypeScript + Vite + Tailwind + @xyflow/react. Backend is FastAPI + asyncpg + PostgreSQL.
+
+ADDITIONAL CONTEXT DOCUMENTS:
+{extra_docs or "(none)"}
 
 Write a spec with these sections:
 1. OBJECTIVE — one sentence

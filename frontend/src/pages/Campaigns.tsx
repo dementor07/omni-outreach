@@ -56,6 +56,13 @@ import {
 
 type CampaignTab = 'leads' | 'queue' | 'sequence' | 'settings'
 
+interface RetellPrompt {
+  begin_message: string;
+  general_prompt: string;
+  llm_id: string;
+  model: string;
+}
+
 const defaultCampaignForm: CampaignPayload = {
   name: '',
   daily_lead_cap: 50,
@@ -640,6 +647,8 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
   const node = nodes.find(n => n.id === nodeId)
   const nodeType = node?.type as NodeType
   const toast = useToast()
+  const { id: campaignId } = useParams()
+  const navigate = useNavigate()
   
   const templateQuery = useGetTemplate(nodeId || undefined)
   const upsertTemplate = useUpsertTemplate()
@@ -660,6 +669,34 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
 
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
+
+  const [retellPrompt, setRetellPrompt] = useState<RetellPrompt | null>(null);
+  const [promptLoading, setPromptLoading] = useState(false);
+  const [promptSaving, setPromptSaving] = useState(false);
+  const [flowMeta, setFlowMeta] = useState<{ nodeCount: number; edgeCount: number } | null>(null);
+
+  const selectedVoiceAgentId = (node?.data as any)?.voice_agent_id;
+  const mode = (node?.data as any)?.mode || 'simple';
+
+  useEffect(() => {
+    if (mode !== 'simple' || !selectedVoiceAgentId) return;
+    setPromptLoading(true);
+    api.get(`/accounts/voice/${selectedVoiceAgentId}/prompt`)
+      .then(r => setRetellPrompt(r.data))
+      .catch(() => toast.error('Failed to load agent prompt'))
+      .finally(() => setPromptLoading(false));
+  }, [selectedVoiceAgentId, mode, toast]);
+
+  useEffect(() => {
+    if (mode !== 'flow' || !selectedVoiceAgentId) return;
+    api.get(`/accounts/voice/${selectedVoiceAgentId}/flow`)
+      .then(r => {
+        const nodes = r.data.nodes ?? [];
+        const edges = nodes.flatMap((n: any) => [...(n.edges ?? []), ...(n.edge ? [n.edge] : [])]);
+        setFlowMeta({ nodeCount: nodes.length, edgeCount: edges.length });
+      })
+      .catch(() => setFlowMeta(null));
+  }, [selectedVoiceAgentId, mode]);
 
   useEffect(() => {
     if (templateQuery.data) {
@@ -753,23 +790,69 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
               </select>
             </div>
             
-            {((node.data as any).mode === 'flow') && (
-              <div>
-                <label className={labelCls}>Retell Conversation Flow</label>
-                <select 
-                  value={(node.data as any).retell_flow_id || ''} 
-                  onChange={(e) => onUpdate({ retell_flow_id: e.target.value })}
-                  className={inputClassName}
+            {mode === 'simple' && selectedVoiceAgentId && (
+              <div className="space-y-3 mt-4">
+                {promptLoading ? (
+                  <p className="text-slate-400 text-sm">Loading prompt...</p>
+                ) : retellPrompt ? (
+                  <>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-300 mb-1">Begin Message</label>
+                      <input
+                        className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                        value={retellPrompt.begin_message}
+                        onChange={e => setRetellPrompt(p => p ? { ...p, begin_message: e.target.value } : p)}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-300 mb-1">System Prompt</label>
+                      <textarea
+                        className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-sky-500 resize-y"
+                        style={{ minHeight: '200px' }}
+                        value={retellPrompt.general_prompt}
+                        onChange={e => setRetellPrompt(p => p ? { ...p, general_prompt: e.target.value } : p)}
+                      />
+                    </div>
+                    <button
+                      disabled={promptSaving}
+                      onClick={async () => {
+                        if (!retellPrompt) return;
+                        setPromptSaving(true);
+                        try {
+                          await api.patch(`/accounts/voice/${selectedVoiceAgentId}/prompt`, {
+                            begin_message: retellPrompt.begin_message,
+                            general_prompt: retellPrompt.general_prompt,
+                          });
+                          toast.success('Prompt saved');
+                        } catch {
+                          toast.error('Failed to save prompt');
+                        } finally {
+                          setPromptSaving(false);
+                        }
+                      }}
+                      className="w-full bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-sm font-medium py-2 rounded-md transition-colors"
+                    >
+                      {promptSaving ? 'Saving...' : 'Save Prompt'}
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            )}
+
+            {mode === 'flow' && selectedVoiceAgentId && (
+              <div className="mt-4 space-y-3">
+                <button
+                  onClick={() => navigate(`/campaigns/${campaignId}/voice-flow/${selectedVoiceAgentId}`)}
+                  className="w-full flex items-center justify-between bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 transition-colors"
                 >
-                  <option value="">Select a flow...</option>
-                  {(retellFlowsQuery.data || []).map((f: any) => (
-                    <option key={f.conversation_flow_id} value={f.conversation_flow_id}>
-                      {f.conversation_flow_name}
-                    </option>
-                  ))}
-                </select>
-                {retellFlowsQuery.isLoading && <p className="mt-2 text-[10px] text-slate-400 animate-pulse">Syncing with Retell...</p>}
-                <p className="mt-2 text-[10px] text-slate-400 font-medium italic">Embeds the nodal Retell architecture within this Omni step.</p>
+                  <span>Open Flow Editor</span>
+                  <span className="text-slate-400">→</span>
+                </button>
+                {flowMeta && (
+                  <p className="text-xs text-slate-500 text-center">
+                    {flowMeta.nodeCount} nodes · {flowMeta.edgeCount} edges
+                  </p>
+                )}
               </div>
             )}
           </div>
