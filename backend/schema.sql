@@ -154,6 +154,7 @@ CREATE TABLE IF NOT EXISTS leads (
     chat_id                 TEXT,
     current_node_id         UUID REFERENCES sequence_nodes(id) ON DELETE SET NULL,
     linkedin_distance       TEXT, -- FIRST_DEGREE|SECOND_DEGREE|THIRD_DEGREE
+    tags                    TEXT[] DEFAULT ARRAY[]::TEXT[],
     profile_viewed_at       TIMESTAMPTZ,
     inmail_sent_at          TIMESTAMPTZ,
     invited_at              TIMESTAMPTZ,

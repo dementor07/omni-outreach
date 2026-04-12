@@ -271,6 +271,36 @@ async def _handle_voice(task: dict, lead: dict, campaign: dict) -> None:
     await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
 
 
+async def _handle_add_tag(task: dict, lead: dict, campaign: dict) -> None:
+    node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
+    tag = (node.get("data") or {}).get("tag", "").strip()
+    if not tag:
+        raise RuntimeError("No tag specified in node config")
+
+    await execute(
+        "UPDATE leads SET tags = array_append(tags, $1) WHERE id=$2 AND NOT ($1 = ANY(tags))",
+        tag, lead["id"]
+    )
+    await _log_event(lead["id"], lead["campaign_id"], "tag_added", "add_tag", {"tag": tag})
+    await _mark_sent(task["id"])
+    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
+
+
+async def _handle_remove_tag(task: dict, lead: dict, campaign: dict) -> None:
+    node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
+    tag = (node.get("data") or {}).get("tag", "").strip()
+    if not tag:
+        raise RuntimeError("No tag specified in node config")
+
+    await execute(
+        "UPDATE leads SET tags = array_remove(tags, $1) WHERE id=$2",
+        tag, lead["id"]
+    )
+    await _log_event(lead["id"], lead["campaign_id"], "tag_removed", "remove_tag", {"tag": tag})
+    await _mark_sent(task["id"])
+    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
+
+
 async def _process_task(task: dict, worker_id: str) -> None:
     campaign = await fetch_one("SELECT * FROM campaigns WHERE id=$1", task["campaign_id"])
     lead = await fetch_one("SELECT * FROM leads WHERE id=$1", task["lead_id"])
@@ -305,6 +335,8 @@ async def _process_task(task: dict, worker_id: str) -> None:
         elif ch == "telegram": await _handle_telegram(task, lead, campaign)
         elif ch == "email": await _handle_email(task, lead, campaign)
         elif ch == "voice": await _handle_voice(task, lead, campaign)
+        elif ch == "add_tag": await _handle_add_tag(task, lead, campaign)
+        elif ch == "remove_tag": await _handle_remove_tag(task, lead, campaign)
         else: raise RuntimeError(f"Unknown channel: {ch}")
     except Exception as e:
         log.exception(f"[dispatcher] task={task['id']} failed: {e}")

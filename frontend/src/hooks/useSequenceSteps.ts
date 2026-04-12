@@ -12,12 +12,17 @@ export type NodeType =
   | 'action_instagram'
   | 'action_telegram'
   | 'action_voice'
+  | 'action_add_tag'
+  | 'action_remove_tag'
   | 'condition_replied'
   | 'condition_linkedin_distance'
+  | 'condition_tag_exists'
   | 'event_invite_accepted'
   | 'event_email_opened'
   | 'event_link_clicked'
   | 'delay'
+  | 'split'
+  | 'end'
 
 export interface SequenceNode {
   id: string

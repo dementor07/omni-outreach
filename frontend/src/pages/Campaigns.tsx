@@ -124,12 +124,17 @@ const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNode; colo
   { type: 'action_instagram',       label: 'Instagram',       icon: <Instagram size={15} />, color: 'text-pink-500',   bg: 'bg-pink-50',    border: 'border-pink-200' },
   { type: 'action_telegram',        label: 'Telegram',        icon: <Send size={15} />,     color: 'text-blue-500',    bg: 'bg-blue-50',    border: 'border-blue-200' },
   { type: 'action_voice',           label: 'Voice Call',      icon: <Phone size={15} />,    color: 'text-indigo-600',  bg: 'bg-indigo-50',  border: 'border-indigo-200' },
+  { type: 'action_add_tag',         label: 'Add Tag',         icon: <Zap size={15} />,      color: 'text-slate-600',   bg: 'bg-slate-50',   border: 'border-slate-200' },
+  { type: 'action_remove_tag',      label: 'Remove Tag',      icon: <Zap size={15} />,      color: 'text-slate-600',   bg: 'bg-slate-50',   border: 'border-slate-200' },
   { type: 'condition_replied',      label: 'Branch: Reply?',  icon: <Zap size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
   { type: 'condition_linkedin_distance', label: 'Branch: Connection Distance', icon: <Zap size={15} />, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200' },
+  { type: 'condition_tag_exists',   label: 'Branch: Has Tag?',icon: <Zap size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
   { type: 'event_invite_accepted',  label: 'Event: Invite Accepted', icon: <Zap size={15} />, color: 'text-rose-500',   bg: 'bg-rose-50',   border: 'border-rose-200' },
   { type: 'event_email_opened',     label: 'Event: Email Opened', icon: <Zap size={15} />, color: 'text-rose-500',   bg: 'bg-rose-50',   border: 'border-rose-200' },
   { type: 'event_link_clicked',     label: 'Event: Link Clicked', icon: <Zap size={15} />, color: 'text-rose-500',   bg: 'bg-rose-50',   border: 'border-rose-200' },
   { type: 'delay',                  label: 'Wait / Delay',    icon: <Clock size={15} />,    color: 'text-slate-400',   bg: 'bg-slate-50',   border: 'border-slate-200' },
+  { type: 'split',                  label: 'A/B Split',       icon: <Zap size={15} />,      color: 'text-purple-600',  bg: 'bg-purple-50',  border: 'border-purple-200' },
+  { type: 'end',                    label: 'End Sequence',    icon: <Zap size={15} />,      color: 'text-rose-600',    bg: 'bg-rose-50',    border: 'border-rose-400' },
 ]
 
 // ── React Flow Node Types ──────────────────────────────────────────────────
@@ -264,12 +269,47 @@ const DelayNode = ({ data, id, selected }: NodeProps<Node<{ delay_days?: number;
   </div>
 )
 
+const SplitNode = ({ selected }: NodeProps) => (
+  <div className={`relative min-w-[200px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-purple-200'}`}>
+    <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
+    <div className="flex items-center gap-3">
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-50 text-purple-600">
+        <Zap size={14} />
+      </div>
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-purple-600/60">Control</p>
+        <p className="text-xs font-bold text-slate-900">A/B Split (50/50)</p>
+      </div>
+    </div>
+    <div className="mt-4 grid grid-cols-2 divide-x divide-slate-50 border-t border-slate-50 pt-3">
+      <div className="flex flex-col items-center">
+        <span className="text-[9px] font-black uppercase text-purple-500">Path A</span>
+        <Handle type="source" id="true" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-purple-400" />
+      </div>
+      <div className="flex flex-col items-center">
+        <span className="text-[9px] font-black uppercase text-purple-500">Path B</span>
+        <Handle type="source" id="false" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-purple-400" />
+      </div>
+    </div>
+  </div>
+)
+
+const EndNode = ({ selected }: NodeProps) => (
+  <div className={`relative min-w-[160px] rounded-xl border-2 bg-rose-50 p-4 text-center shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-rose-200'}`}>
+    <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
+    <p className="text-[10px] font-bold uppercase tracking-widest text-rose-500">Terminal</p>
+    <p className="text-sm font-extrabold tracking-tight text-rose-700">End Sequence</p>
+  </div>
+)
+
 const nodeTypes = {
   trigger_start: TriggerNode,
   action_linkedin_invite: ActionNode,
   action_linkedin_dm: ActionNode,
   action_linkedin_inmail: ActionNode,
   action_linkedin_profile_view: ActionNode,
+  action_add_tag: ActionNode,
+  action_remove_tag: ActionNode,
   action_email: ActionNode,
   action_whatsapp: ActionNode,
   action_instagram: ActionNode,
@@ -277,10 +317,13 @@ const nodeTypes = {
   action_voice: ActionNode,
   condition_replied: ConditionNode,
   condition_linkedin_distance: ConditionNode,
+  condition_tag_exists: ConditionNode,
   event_invite_accepted: EventNode,
   event_email_opened: EventNode,
   event_link_clicked: EventNode,
   delay: DelayNode,
+  split: SplitNode,
+  end: EndNode,
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────
@@ -756,7 +799,8 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
   const isEmail = nodeType === 'action_email'
   const isVoice = nodeType === 'action_voice'
   const isDelay = nodeType === 'delay'
-  const needsTemplate = nodeType.startsWith('action_') && nodeType !== 'action_linkedin_invite' && nodeType !== 'action_voice'
+  const isTagNode = nodeType === 'action_add_tag' || nodeType === 'action_remove_tag' || nodeType === 'condition_tag_exists'
+  const needsTemplate = nodeType.startsWith('action_') && nodeType !== 'action_linkedin_invite' && nodeType !== 'action_voice' && !isTagNode
 
   return (
     <div className="h-full flex flex-col">
@@ -766,23 +810,25 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
       </div>
 
       <div className="flex-1 overflow-auto p-6 space-y-8">
-        <div>
-          <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 block">Operation Mode</label>
-          <div className="grid grid-cols-2 gap-2 p-1 bg-slate-50 rounded-xl ring-1 ring-slate-900/5">
-            <button 
-              onClick={() => onUpdate({ mode: 'standard' })}
-              className={`py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${((node.data as any).mode || 'standard') === 'standard' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-            >
-              Standard
-            </button>
-            <button 
-              onClick={() => onUpdate({ mode: 'flow' })}
-              className={`py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${((node.data as any).mode || 'standard') === 'flow' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-            >
-              Nested Flow
-            </button>
+        {isVoice && (
+          <div>
+            <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 block">Operation Mode</label>
+            <div className="grid grid-cols-2 gap-2 p-1 bg-slate-50 rounded-xl ring-1 ring-slate-900/5">
+              <button 
+                onClick={() => onUpdate({ mode: 'standard' })}
+                className={`py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${((node.data as any).mode || 'standard') === 'standard' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+              >
+                Standard
+              </button>
+              <button 
+                onClick={() => onUpdate({ mode: 'flow' })}
+                className={`py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${((node.data as any).mode || 'standard') === 'flow' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+              >
+                Nested Flow
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         <div>
           <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Module Type</label>
@@ -801,6 +847,19 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
               value={(node.data as any).delay_days || 1} 
               onChange={(e) => onUpdate({ delay_days: parseInt(e.target.value) || 1 })}
               className={inputClassName}
+            />
+          </div>
+        )}
+
+        {isTagNode && (
+          <div>
+            <label className={labelCls}>Tag Name</label>
+            <input 
+              type="text" 
+              value={(node.data as any).tag || ''} 
+              onChange={(e) => onUpdate({ tag: e.target.value })}
+              className={inputClassName}
+              placeholder="e.g., high-priority"
             />
           </div>
         )}

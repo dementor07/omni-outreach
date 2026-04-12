@@ -32,3 +32,10 @@ Ingested `raw/llm-wiki-pattern.md` from `LLM Wiki.txt`. Created `wiki/architectu
 ## [2026-04-12] ingest | Event-Driven State Machine Paradigm
 
 Ingested `raw/Clippings/Cold Outreach Script Fix.md` covering the ChatGPT architecture brainstorm. Avoided creating fragmented new files, adhering to the Karpathy method. Instead, fully synthesized the new Event-Driven State Machine paradigm (Trigger, Event, Action, Condition, Control, Subflow) directly into the existing `wiki/architecture/sequence-engine.md` and `wiki/architecture/system-overview.md` files to compound knowledge and reduce future RAG token usage.
+
+## [2026-04-12] document | Updated Vault with Functional Implementations
+
+Actively utilized the `omni-vault` to document the code changes resulting from the Event-Driven State Machine paradigm shift:
+- Updated `wiki/architecture/sequence-engine.md` to list the actual node types instantiated in the codebase (e.g., `action_linkedin_inmail`, `event_invite_accepted`, `condition_linkedin_distance`).
+- Updated `wiki/product/channels.md` to document the new `_handle_linkedin_inmail` and `_handle_linkedin_profile_view` logic running inside `dispatcher.py`.
+This ensures the LLM Wiki remains the absolute ground-truth reflection of the codebase state.

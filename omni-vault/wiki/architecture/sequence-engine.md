@@ -21,11 +21,31 @@ Omni is an event-driven state machine for outbound systems. It has evolved from 
 
 Nodes share a unified structure (`id, type, subtype, config, position, metadata`) and are categorized as:
 
-1. **Trigger Nodes**: Entry points (e.g., Lead Created, API/Webhook Trigger).
-2. **Event Nodes**: Listeners where leads park and wait (e.g., On Reply, On Email Open, On Link Click, On Timeout).
-3. **Action Nodes**: Execution steps (e.g., Send Email, Send LinkedIn DM, Start Voice Call via Retell).
-4. **Condition Nodes**: Immediate logic gates (e.g., If Replied, If Tag Exists).
-5. **Control Nodes**: Flow management (e.g., Delay, Split, End).
+1. **Trigger Nodes**: Entry points (e.g., `trigger_start`).
+2. **Event Nodes (Listeners)**: Where leads park and wait for an external signal.
+   - `event_invite_accepted`
+   - `event_email_opened`
+   - `event_link_clicked`
+3. **Action Nodes**: Execution steps.
+   - `action_linkedin_invite`
+   - `action_linkedin_dm`
+   - `action_linkedin_inmail`
+   - `action_linkedin_profile_view`
+   - `action_whatsapp`
+   - `action_email`
+   - `action_voice`
+   - `action_instagram`
+   - `action_telegram`
+   - `action_add_tag`
+   - `action_remove_tag`
+4. **Condition Nodes**: Immediate logic gates that evaluate lead state.
+   - `condition_replied` (Has the lead replied?)
+   - `condition_linkedin_distance` (Is distance FIRST_DEGREE?)
+   - `condition_tag_exists` (Does the lead have a specific tag?)
+5. **Control Nodes**: Flow management.
+   - `delay` (Wait N days)
+   - `split` (A/B test routing 50/50)
+   - `end` (Terminate sequence and mark lead as stopped)
 6. **Subflow Nodes**: Encapsulate entire sub-graphs recursively (e.g., embedding a Retell conversation flow).
 
 ## Graph Traversal & Parking System
