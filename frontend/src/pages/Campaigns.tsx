@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { Link, useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom'
-import { Plus, Save, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap, X, ChevronRight, Settings2, Trash2 } from 'lucide-react'
+import { Plus, Save, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap, X, ChevronRight, Settings2, Trash2, Radio } from 'lucide-react'
 import {
   ReactFlow,
   Background,
@@ -105,7 +105,52 @@ function CustomEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
   )
 }
 
-const edgeTypes = { custom: CustomEdge }
+function TelemetryEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, selected, data }: EdgeProps) {
+  const { deleteElements } = useReactFlow()
+  const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
+
+  const activity = (data?.activity as number) || 0
+  const backpressure = (data?.backpressure as number) || 0
+
+  const strokeColor = backpressure > 5
+    ? '#f59e0b'
+    : activity >= 10 ? '#10b981'
+    : activity >= 4 ? '#38bdf8'
+    : activity >= 1 ? '#7dd3fc'
+    : selected ? '#0ea5e9'
+    : '#e2e8f0'
+  const strokeWidth = selected ? 3 : 2 + Math.min(activity * 0.4, 3)
+  const strokeDasharray = backpressure > 5 ? '6 3' : undefined
+
+  return (
+    <>
+      <BaseEdge id={id} path={edgePath} style={{ stroke: strokeColor, strokeWidth, strokeDasharray, transition: 'stroke 0.8s, stroke-width 0.8s' }} />
+      <EdgeLabelRenderer>
+        <div style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, pointerEvents: 'all' }} className="nodrag nopan flex items-center gap-1">
+          {activity > 0 && (
+            <span className="rounded-full bg-emerald-500 px-1.5 py-0.5 text-[9px] font-black text-white shadow-sm">
+              {activity}
+            </span>
+          )}
+          {backpressure > 5 && (
+            <span className="rounded-full bg-amber-400 px-1.5 py-0.5 text-[9px] font-black text-white shadow-sm">
+              ⏳{backpressure}
+            </span>
+          )}
+          <button
+            onClick={(e) => { e.stopPropagation(); deleteElements({ edges: [{ id }] }) }}
+            style={{ display: selected ? 'flex' : 'none' }}
+            className="h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-white text-[11px] font-bold text-slate-400 shadow-sm transition hover:text-rose-500"
+          >
+            ×
+          </button>
+        </div>
+      </EdgeLabelRenderer>
+    </>
+  )
+}
+
+const edgeTypes = { custom: CustomEdge, telemetry: TelemetryEdge }
 
 const defaultEdgeOptions = {
   type: 'custom',
@@ -269,30 +314,43 @@ const DelayNode = ({ data, id, selected }: NodeProps<Node<{ delay_days?: number;
   </div>
 )
 
-const SplitNode = ({ selected }: NodeProps) => (
-  <div className={`relative min-w-[200px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-purple-200'}`}>
-    <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
-    <div className="flex items-center gap-3">
-      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-50 text-purple-600">
-        <Zap size={14} />
+const SplitNode = ({ data, selected }: NodeProps) => {
+  const weights = (data as any)?.weights
+  const tA = weights?.true?.alpha ?? 1
+  const tB = weights?.true?.beta ?? 1
+  const fA = weights?.false?.alpha ?? 1
+  const fB = weights?.false?.beta ?? 1
+  const hasLearned = weights && (tA + tB + fA + fB) > 4
+  const trueRate = Math.round((tA / (tA + tB)) * 100)
+  const falseRate = Math.round((fA / (fA + fB)) * 100)
+
+  return (
+    <div className={`relative min-w-[200px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-purple-200'}`}>
+      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
+      <div className="flex items-center gap-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-50 text-purple-600">
+          <Zap size={14} />
+        </div>
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-purple-600/60">Control · AI Split</p>
+          <p className="text-xs font-bold text-slate-900">{hasLearned ? 'Bandit Active' : 'Learning (50/50)'}</p>
+        </div>
       </div>
-      <div>
-        <p className="text-[10px] font-bold uppercase tracking-widest text-purple-600/60">Control</p>
-        <p className="text-xs font-bold text-slate-900">A/B Split (50/50)</p>
+      <div className="mt-4 grid grid-cols-2 divide-x divide-slate-50 border-t border-slate-50 pt-3">
+        <div className="flex flex-col items-center gap-0.5">
+          <span className="text-[9px] font-black uppercase text-purple-500">Path A</span>
+          {hasLearned && <span className="text-[9px] font-bold text-emerald-600">{trueRate}% win rate</span>}
+          <Handle type="source" id="true" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-purple-400" />
+        </div>
+        <div className="flex flex-col items-center gap-0.5">
+          <span className="text-[9px] font-black uppercase text-purple-500">Path B</span>
+          {hasLearned && <span className="text-[9px] font-bold text-emerald-600">{falseRate}% win rate</span>}
+          <Handle type="source" id="false" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-purple-400" />
+        </div>
       </div>
     </div>
-    <div className="mt-4 grid grid-cols-2 divide-x divide-slate-50 border-t border-slate-50 pt-3">
-      <div className="flex flex-col items-center">
-        <span className="text-[9px] font-black uppercase text-purple-500">Path A</span>
-        <Handle type="source" id="true" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-purple-400" />
-      </div>
-      <div className="flex flex-col items-center">
-        <span className="text-[9px] font-black uppercase text-purple-500">Path B</span>
-        <Handle type="source" id="false" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-purple-400" />
-      </div>
-    </div>
-  </div>
-)
+  )
+}
 
 const EndNode = ({ selected }: NodeProps) => (
   <div className={`relative min-w-[160px] rounded-xl border-2 bg-rose-50 p-4 text-center shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-rose-200'}`}>
@@ -350,6 +408,8 @@ export default function Campaigns() {
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+  const [liveMode, setLiveMode] = useState(false)
+  const [telemetry, setTelemetry] = useState<{ activity: Record<string, number>; backpressure: Record<string, number> }>({ activity: {}, backpressure: {} })
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   
   const [createOpen, setCreateOpen] = useState(false)
@@ -393,6 +453,33 @@ export default function Campaigns() {
       setEdges(rfEdges)
     }
   }, [graphQuery.data, setNodes, setEdges, updateNodeData])
+
+  // Telemetry polling — runs when Live mode is on and sequence tab is active
+  useEffect(() => {
+    if (!liveMode || !id || activeTab !== 'sequence') return
+    const poll = async () => {
+      try {
+        const { data } = await api.get<{ activity: Record<string, number>; backpressure: Record<string, number> }>(`/sequences/${id}/telemetry`)
+        setTelemetry(data)
+      } catch {}
+    }
+    void poll()
+    const timer = setInterval(() => { void poll() }, 5000)
+    return () => clearInterval(timer)
+  }, [liveMode, id, activeTab])
+
+  // Sync telemetry data onto edges
+  useEffect(() => {
+    if (!liveMode) {
+      setEdges(eds => eds.map(e => ({ ...e, type: 'custom' })))
+      return
+    }
+    setEdges(eds => eds.map(e => ({
+      ...e,
+      type: 'telemetry',
+      data: { ...e.data, activity: telemetry.activity[e.source] ?? 0, backpressure: telemetry.backpressure[e.source] ?? 0 },
+    })))
+  }, [telemetry, liveMode, setEdges])
 
   const onConnect = useCallback((params: Connection) => setEdges((eds) => addEdge({ ...params, type: 'custom' }, eds)), [setEdges])
 
@@ -617,9 +704,16 @@ export default function Campaigns() {
                     <Panel position="top-right">
                       <div className="flex gap-2">
                         <button
+                          onClick={() => setLiveMode(m => !m)}
+                          className={`btn-tactile flex items-center px-4 py-3 text-xs font-bold shadow-xl transition ${liveMode ? 'bg-emerald-500 text-white shadow-emerald-200 hover:bg-emerald-600' : 'bg-white text-slate-600 shadow-slate-200 hover:bg-slate-50'}`}
+                        >
+                          <Radio size={13} className={`mr-1.5 ${liveMode ? 'animate-pulse' : ''}`} />
+                          Live
+                        </button>
+                        <button
                           onClick={onSaveCanvas}
                           disabled={saveGraph.isPending}
-                          className="btn-tactile bg-slate-900 px-6 py-3 text-xs font-bold text-white shadow-xl shadow-slate-200 transition hover:bg-slate-800"
+                          className="btn-tactile flex items-center bg-slate-900 px-6 py-3 text-xs font-bold text-white shadow-xl shadow-slate-200 transition hover:bg-slate-800"
                         >
                           <Save size={16} className="mr-2" />
                           {saveGraph.isPending ? 'Syncing...' : 'Deploy Canvas'}

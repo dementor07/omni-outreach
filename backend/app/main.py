@@ -12,6 +12,8 @@ from app.routers import auth, campaigns, leads, sequences, templates, accounts, 
 async def lifespan(app: FastAPI):
     await init_pool(settings.get_asyncpg_dsn())
     await init_redis("redis://redis:6379")
+    from app.db import execute
+    await execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS path_history JSONB DEFAULT '[]'")
     yield
     await close_pool()
     await close_redis()

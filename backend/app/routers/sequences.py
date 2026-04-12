@@ -96,6 +96,36 @@ async def save_graph(body: SequenceGraph, user_id: str = Depends(get_current_use
 
     return {"status": "success"}
 
+@router.get("/{campaign_id}/telemetry")
+async def get_telemetry(campaign_id: str, user_id: str = Depends(get_current_user)):
+    """Returns live edge activity and backpressure for the canvas overlay."""
+    activity_rows = await fetch_all(
+        """
+        SELECT node_id::text, COUNT(*) AS cnt
+        FROM queue
+        WHERE campaign_id = $1
+          AND status = 'sent'
+          AND sent_at >= NOW() - INTERVAL '60 seconds'
+        GROUP BY node_id
+        """,
+        campaign_id,
+    )
+    backpressure_rows = await fetch_all(
+        """
+        SELECT node_id::text, COUNT(*) AS cnt
+        FROM queue
+        WHERE campaign_id = $1
+          AND status IN ('queued', 'locked')
+        GROUP BY node_id
+        """,
+        campaign_id,
+    )
+    return {
+        "activity": {r["node_id"]: r["cnt"] for r in activity_rows},
+        "backpressure": {r["node_id"]: r["cnt"] for r in backpressure_rows},
+    }
+
+
 @router.delete("/{campaign_id}")
 async def clear_graph(campaign_id: str, user_id: str = Depends(get_current_user)):
     await execute("DELETE FROM sequence_nodes WHERE campaign_id=$1", campaign_id)

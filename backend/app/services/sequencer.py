@@ -1,4 +1,6 @@
+import json
 import logging
+import random
 from datetime import datetime, timedelta, timezone
 from app.db import execute, fetch_all, fetch_one
 
@@ -94,6 +96,26 @@ async def queue_next_nodes(
                     await queue_next_nodes(lead_id, target_id, "true", accumulated_delay)
                 else:
                     await queue_next_nodes(lead_id, target_id, "false", accumulated_delay)
+
+        elif node_type == "split":
+            weights = (node.get("data") or {}).get("weights", {
+                "true": {"alpha": 1, "beta": 1},
+                "false": {"alpha": 1, "beta": 1},
+            })
+            sample_true = random.betavariate(
+                weights["true"]["alpha"], weights["true"]["beta"]
+            )
+            sample_false = random.betavariate(
+                weights["false"]["alpha"], weights["false"]["beta"]
+            )
+            chosen_arm = "true" if sample_true >= sample_false else "false"
+            await execute(
+                "UPDATE leads SET path_history = path_history || $1::jsonb WHERE id=$2",
+                json.dumps([{"split_node_id": str(target_id), "arm": chosen_arm}]),
+                lead_id,
+            )
+            log.info(f"[sequencer] Split node {target_id}: chose arm '{chosen_arm}' for lead {lead_id}")
+            await queue_next_nodes(lead_id, target_id, chosen_arm, accumulated_delay)
 
         elif node_type.startswith("event_"):
             # All events park the lead until the webhook triggers evaluation

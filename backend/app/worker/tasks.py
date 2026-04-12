@@ -3,6 +3,7 @@ from arq.connections import RedisSettings
 from arq.cron import cron
 
 from app.services import dispatcher
+from app.services.optimization import run_optimization
 from app.worker.stream_processor import process_stream_events
 
 log = logging.getLogger(__name__)
@@ -16,6 +17,10 @@ async def dispatch_queue(ctx: dict) -> None:
 
 async def check_acceptances(ctx: dict) -> None:
     await dispatcher._check_acceptances()
+
+
+async def optimize_splits(ctx: dict) -> None:
+    await run_optimization()
 
 
 async def startup(ctx: dict) -> None:
@@ -39,6 +44,7 @@ class WorkerSettings:
         cron(dispatch_queue, second={0, 30}),
         cron(check_acceptances, minute=set(range(0, 60, 5))),
         cron(process_stream_events, second=set(range(0, 60, 5))),
+        cron(optimize_splits, minute=set(range(0, 60, 10))),
     ]
     max_jobs = 1
     job_timeout = 300
