@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle2, XCircle, X } from 'lucide-react'
 import { clsx } from 'clsx'
 
@@ -44,8 +44,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     return () => { map.forEach(clearTimeout) }
   }, [])
 
+  const value = useMemo(
+    () => ({ success: (m: string) => add('success', m), error: (m: string) => add('error', m) }),
+    [add]
+  );
+
   return (
-    <ToastContext.Provider value={{ success: (m) => add('success', m), error: (m) => add('error', m) }}>
+    <ToastContext.Provider value={value}>
       {children}
       <div className="fixed bottom-5 right-5 z-[100] flex flex-col gap-2 w-80">
         {toasts.map((toast) => (

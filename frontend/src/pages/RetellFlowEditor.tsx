@@ -466,7 +466,8 @@ export default function RetellFlowEditor() {
         setLoadError(true);
       })
       .finally(() => setLoading(false));
-  }, [agentId, setNodes, setEdges, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentId, setNodes, setEdges]);
 
   const onConnect = useCallback(
     (params: Connection) => {
@@ -555,12 +556,11 @@ export default function RetellFlowEditor() {
 
   if (loadError) {
     return (
-      <div className="h-screen bg-slate-950 flex flex-col items-center justify-center gap-4">
-        <p className="text-rose-400 font-black uppercase tracking-widest text-sm">Failed to load flow</p>
-        <p className="text-slate-500 text-xs">This agent may not be a conversation-flow type, or the Retell API is unreachable.</p>
+      <div className="h-screen bg-slate-950 flex flex-col items-center justify-center gap-6">
+        <p className="text-rose-400 font-black uppercase tracking-widest text-sm">Failed to load voice flow</p>
         <button
           onClick={() => navigate(`/campaigns/${campaignId}`)}
-          className="flex items-center gap-2 text-slate-400 hover:text-slate-100 transition text-[10px] font-black uppercase tracking-widest mt-4"
+          className="flex items-center gap-2 text-slate-400 hover:text-slate-100 transition-all text-[10px] font-black uppercase tracking-widest"
         >
           <ArrowLeft size={16} /> Back to Sequence
         </button>

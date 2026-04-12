@@ -49,6 +49,16 @@ Your role:
 - Report what you did concisely after each step
 
 The repo is at: C:\\Users\\navij\\Downloads\\omni-outreach
+The wiki is at: C:\\Users\\navij\\Downloads\\omni-outreach\\omni-vault
+Read omni-vault/index.md for a map of the codebase knowledge. Read specific wiki pages when you need context on architecture, integrations, or decisions.
+
+DESIGN SYSTEM RULES (non-negotiable — you always get these wrong):
+- Colors: slate-*, sky-*, emerald-*, rose-*, indigo-* — NEVER gray-*, blue-*, green-*, red-*
+- API client: import api from '../api/client' — has Bearer token interceptors. NEVER raw fetch/axios
+- Toast: import { useToast } from '../components/Toast' → const toast = useToast()
+- No React.FC — plain function components with interface props
+- Default exports for pages, named exports for components
+- No wrapper padding divs — Layout already provides padding
 """
 
 

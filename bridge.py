@@ -91,12 +91,39 @@ def ask_claude(prompt: str, round_n: int, label: str) -> str:
     return out
 
 
+_gemini_session_id: str | None = None  # tracks the session across rounds
+
+
+def get_latest_gemini_session() -> str | None:
+    """Return the session ID of the most recent Gemini session."""
+    out, _ = run(["gemini.cmd", "--list-sessions"], REPO)
+    for line in out.splitlines():
+        # Format: "  1. <snippet>... (<time>) [<uuid>]"
+        if line.strip().startswith("1.") and "[" in line:
+            sid = line.split("[")[-1].rstrip("]").strip()
+            return sid if sid else None
+    return None
+
+
 def ask_gemini(prompt: str, round_n: int) -> str:
-    log(f"→ Gemini implementing ...", "yellow")
+    global _gemini_session_id
+    log(f"→ Gemini implementing (round {round_n}) ...", "yellow")
     save_log(round_n, "gemini_input", prompt)
-    # Pipe full prompt via stdin — avoids Windows command line length limit
-    cmd = ["gemini.cmd", "-y", "--output-format", "text"]
-    out, code = run(cmd, REPO, input_text=prompt)
+
+    if round_n == 1 or _gemini_session_id is None:
+        # Fresh session on round 1
+        cmd = ["gemini.cmd", "-y", "--output-format", "text"]
+        out, code = run(cmd, REPO, input_text=prompt)
+        # Capture the session that was just created
+        _gemini_session_id = get_latest_gemini_session()
+        if _gemini_session_id:
+            log(f"  Gemini session: {_gemini_session_id}", "yellow")
+    else:
+        # Resume the same session for continuity
+        log(f"  Resuming Gemini session: {_gemini_session_id}", "yellow")
+        cmd = ["gemini.cmd", "-y", "--output-format", "text", "--resume", _gemini_session_id]
+        out, code = run(cmd, REPO, input_text=prompt)
+
     if code != 0 and not out:
         out = f"[Gemini exited {code} with no output]"
     out = truncate(out)
@@ -174,9 +201,25 @@ Do NOT include any preamble. Start directly with the spec."""
         print()
 
         # ── Step 2: Gemini implements ──
-        gemini_prompt = f"""You are an expert React/TypeScript and FastAPI engineer implementing a feature.
+        # Load wiki index for Gemini context
+        wiki_index = ""
+        wiki_index_path = REPO / "omni-vault" / "index.md"
+        if wiki_index_path.exists():
+            wiki_index = wiki_index_path.read_text(encoding="utf-8")
+
+        gemini_prompt = f"""You are an expert React/TypeScript and FastAPI engineer implementing a feature on the Omni platform.
+
+OMNI WIKI INDEX (use [[PageName]] links to understand the codebase):
+{wiki_index}
 
 {spec}
+
+DESIGN SYSTEM RULES (non-negotiable):
+- Colors: slate-*, sky-*, emerald-*, rose-*, indigo-* — NEVER gray-*, blue-*, green-*, red-*
+- API client: import api from '../api/client' — has Bearer token. NEVER raw fetch/axios
+- Toast: import {{ useToast }} from '../components/Toast' → const toast = useToast()
+- No React.FC — plain function components with interface props
+- Default exports for pages, named exports for components
 
 IMPORTANT RULES:
 - Only modify the files listed in FILES TO CHANGE
@@ -228,6 +271,13 @@ Be concise. Focus on issues, not praise."""
                 run(["git", "add", "-A"], REPO)
                 run(["git", "commit", "-m", f"feat(bridge): round {round_n} — {goal[:60]}"], REPO)
                 log("  Auto-committed uncommitted changes.", "green")
+            # Append to wiki log
+            wiki_log_path = REPO / "omni-vault" / "log.md"
+            if wiki_log_path.exists():
+                from datetime import date
+                entry = f"\n## [{date.today()}] bridge round {round_n} approved | {goal[:80]}\n\nGemini summary: {truncate(gemini_out, 300)}\n"
+                with open(wiki_log_path, "a", encoding="utf-8") as wf:
+                    wf.write(entry)
             extra_context = f"Round {round_n} approved. Gemini output summary:\n{truncate(gemini_out, 1000)}"
             if round_n == max_rounds:
                 log("All rounds complete.", "green")
