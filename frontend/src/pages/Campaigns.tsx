@@ -665,19 +665,19 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
 
-  const [retellPrompt, setRetellPrompt] = useState<RetellPrompt | null>(null);
+  const [agentPrompt, setAgentPrompt] = useState<RetellPrompt | null>(null);
   const [promptLoading, setPromptLoading] = useState(false);
   const [promptSaving, setPromptSaving] = useState(false);
-  const [flowMeta, setFlowMeta] = useState<{ nodeCount: number; edgeCount: number } | null>(null);
+  const [flowMeta, setFlowMeta] = useState<{ node_count: number; edge_count: number } | null>(null);
 
   const selectedVoiceAgentId = (node?.data as any)?.voice_agent_id;
-  const mode = (node?.data as any)?.mode || 'simple';
+  const mode = (node?.data as any)?.mode || 'standard';
 
   useEffect(() => {
-    if (mode !== 'simple' || !selectedVoiceAgentId) return;
+    if (mode !== 'standard' || !selectedVoiceAgentId) return;
     setPromptLoading(true);
     api.get(`/accounts/voice/${selectedVoiceAgentId}/prompt`)
-      .then(r => setRetellPrompt(r.data))
+      .then(r => setAgentPrompt(r.data))
       .catch(() => toast.error('Failed to load agent prompt'))
       .finally(() => setPromptLoading(false));
   }, [selectedVoiceAgentId, mode, toast]);
@@ -688,7 +688,7 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
       .then(r => {
         const nodes = r.data.nodes ?? [];
         const edges = nodes.flatMap((n: any) => [...(n.edges ?? []), ...(n.edge ? [n.edge] : [])]);
-        setFlowMeta({ nodeCount: nodes.length, edgeCount: edges.length });
+        setFlowMeta({ node_count: nodes.length, edge_count: edges.length });
       })
       .catch(() => setFlowMeta(null));
   }, [selectedVoiceAgentId, mode]);
@@ -722,14 +722,14 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
           <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 block">Operation Mode</label>
           <div className="grid grid-cols-2 gap-2 p-1 bg-slate-50 rounded-xl ring-1 ring-slate-900/5">
             <button 
-              onClick={() => onUpdate({ mode: 'simple' })}
-              className={`py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${((node.data as any).mode || 'simple') === 'simple' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+              onClick={() => onUpdate({ mode: 'standard' })}
+              className={`py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${((node.data as any).mode || 'standard') === 'standard' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
             >
               Standard
             </button>
             <button 
               onClick={() => onUpdate({ mode: 'flow' })}
-              className={`py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${((node.data as any).mode || 'simple') === 'flow' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+              className={`py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${((node.data as any).mode || 'standard') === 'flow' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
             >
               Nested Flow
             </button>
@@ -785,7 +785,7 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
               </select>
             </div>
             
-            {mode === 'simple' && selectedVoiceAgentId && (
+            {mode === 'standard' && selectedVoiceAgentId && (
               <div className="space-y-4 mt-6">
                 {promptLoading ? (
                   <div className="space-y-3 animate-pulse">
@@ -794,33 +794,33 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
                     <div className="h-4 bg-slate-100 rounded w-1/4" />
                     <div className="h-32 bg-slate-50 rounded" />
                   </div>
-                ) : retellPrompt ? (
+                ) : agentPrompt ? (
                   <>
                     <div>
                       <label className={labelCls}>Begin Message</label>
                       <input
                         className={inputClassName}
-                        value={retellPrompt.begin_message}
-                        onChange={e => setRetellPrompt(p => p ? { ...p, begin_message: e.target.value } : p)}
+                        value={agentPrompt.begin_message}
+                        onChange={e => setAgentPrompt(p => p ? { ...p, begin_message: e.target.value } : p)}
                       />
                     </div>
                     <div>
                       <label className={labelCls}>System Prompt</label>
                       <textarea
                         className={`${inputClassName} min-h-[200px] resize-none`}
-                        value={retellPrompt.general_prompt}
-                        onChange={e => setRetellPrompt(p => p ? { ...p, general_prompt: e.target.value } : p)}
+                        value={agentPrompt.general_prompt}
+                        onChange={e => setAgentPrompt(p => p ? { ...p, general_prompt: e.target.value } : p)}
                       />
                     </div>
                     <button
                       disabled={promptSaving}
                       onClick={async () => {
-                        if (!retellPrompt) return;
+                        if (!agentPrompt) return;
                         setPromptSaving(true);
                         try {
                           await api.patch(`/accounts/voice/${selectedVoiceAgentId}/prompt`, {
-                            begin_message: retellPrompt.begin_message,
-                            general_prompt: retellPrompt.general_prompt,
+                            begin_message: agentPrompt.begin_message,
+                            general_prompt: agentPrompt.general_prompt,
                           });
                           toast.success('Prompt saved');
                         } catch {
@@ -849,7 +849,7 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
                 </button>
                 {flowMeta && (
                   <p className="text-[10px] font-bold text-slate-400 text-center uppercase tracking-widest">
-                    {flowMeta.nodeCount} nodes · {flowMeta.edgeCount} edges
+                    {flowMeta.node_count} nodes · {flowMeta.edge_count} edges
                   </p>
                 )}
               </div>

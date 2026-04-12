@@ -106,9 +106,15 @@ class VoiceAgentCreate(BaseModel):
     retell_agent_id: str
     name: str
 
-class PromptUpdate(BaseModel):
+class UpdatePromptRequest(BaseModel):
     begin_message: str
     general_prompt: str
+
+class VoiceAgentPrompt(BaseModel):
+    llm_id: str
+    begin_message: str
+    general_prompt: str
+    model: str
 
 class FlowUpdate(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -161,7 +167,7 @@ async def delete_voice_agent(agent_id: str, user_id: str = Depends(get_current_u
     await execute("UPDATE voice_agents SET is_active=FALSE WHERE id=$1", agent_id)
 
 
-@router.get("/voice/{agent_id}/prompt")
+@router.get("/voice/{agent_id}/prompt", response_model=VoiceAgentPrompt)
 async def get_voice_agent_prompt(agent_id: str, user_id: str = Depends(get_current_user)):
     agent = await fetch_one("SELECT retell_agent_id FROM voice_agents WHERE id = $1", agent_id)
     if not agent:
@@ -191,7 +197,7 @@ async def get_voice_agent_prompt(agent_id: str, user_id: str = Depends(get_curre
 
 
 @router.patch("/voice/{agent_id}/prompt")
-async def update_voice_agent_prompt(agent_id: str, body: PromptUpdate, user_id: str = Depends(get_current_user)):
+async def update_voice_agent_prompt(agent_id: str, body: UpdatePromptRequest, user_id: str = Depends(get_current_user)):
     agent = await fetch_one("SELECT retell_agent_id FROM voice_agents WHERE id = $1", agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Voice agent not found")
@@ -211,7 +217,7 @@ async def update_voice_agent_prompt(agent_id: str, body: PromptUpdate, user_id: 
         if not resp.is_success:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)
         
-        return {"ok": True}
+        return {"success": True}
 
 
 @router.get("/voice/{agent_id}/flow")
@@ -238,7 +244,7 @@ async def get_voice_agent_flow(agent_id: str, user_id: str = Depends(get_current
 
 
 @router.patch("/voice/{agent_id}/flow")
-async def update_voice_agent_flow(agent_id: str, body: FlowUpdate, user_id: str = Depends(get_current_user)):
+async def update_voice_agent_flow(agent_id: str, body: dict, user_id: str = Depends(get_current_user)):
     agent = await fetch_one("SELECT retell_agent_id FROM voice_agents WHERE id = $1", agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Voice agent not found")
@@ -253,10 +259,10 @@ async def update_voice_agent_flow(agent_id: str, body: FlowUpdate, user_id: str 
         resp = await client.patch(
             f"https://api.retellai.com/update-conversation-flow/{flow_id}",
             headers={"Authorization": f"Bearer {RETELL_API_KEY}"},
-            json=body.model_dump(exclude_unset=True),
+            json=body,
         )
         if not resp.is_success:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)
         
-        return {"ok": True}
+        return {"success": True}
 
