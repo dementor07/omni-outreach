@@ -315,13 +315,17 @@ export default function Campaigns() {
     try {
       await saveGraph.mutateAsync({
         campaign_id: id,
-        nodes: nodes.map(n => ({
-          id: n.id,
-          node_type: n.type as NodeType,
-          position_x: n.position.x,
-          position_y: n.position.y,
-          data: n.data
-        })),
+        nodes: nodes.map(n => {
+          // Strip non-serializable React callbacks before persisting
+          const { onChange, onEditTemplate, onDelete, ...serializableData } = n.data as any
+          return {
+            id: n.id,
+            node_type: n.type as NodeType,
+            position_x: n.position.x,
+            position_y: n.position.y,
+            data: serializableData,
+          }
+        }),
         edges: edges.map(e => ({
           source_node_id: e.source,
           target_node_id: e.target,
@@ -546,7 +550,7 @@ export default function Campaigns() {
                       setEdges(newEdges)
                       saveGraph.mutate({
                         campaign_id: id!,
-                        nodes: newNodes.map(n => ({ id: n.id, node_type: n.type as NodeType, position_x: n.position.x, position_y: n.position.y, data: n.data })),
+                        nodes: newNodes.map(n => { const { onChange, onEditTemplate, onDelete, ...d } = n.data as any; return { id: n.id, node_type: n.type as NodeType, position_x: n.position.x, position_y: n.position.y, data: d } }),
                         edges: newEdges.map(e => ({ source_node_id: e.source, target_node_id: e.target, source_handle: e.sourceHandle || 'default', target_handle: e.targetHandle || 'default' }))
                       })
                     }}

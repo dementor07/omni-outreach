@@ -24,17 +24,19 @@ async def schedule_sequence(lead_id: str) -> None:
 
     await queue_next_nodes(lead_id, start_node["id"])
 
-async def queue_next_nodes(lead_id: str, source_node_id: str, handle: str = "default") -> None:
+async def queue_next_nodes(
+    lead_id: str,
+    source_node_id: str,
+    handle: str = "default",
+    accumulated_delay: timedelta = timedelta(0),
+) -> None:
     """Finds target nodes from source_node and handles them (queue or recursive evaluate)."""
     lead = await fetch_one("SELECT * FROM leads WHERE id=$1", lead_id)
     if not lead: return
 
     edges = await fetch_all(
-        """
-        SELECT target_node_id FROM sequence_edges 
-        WHERE source_node_id=$1 AND source_handle=$2
-        """,
-        source_node_id, handle
+        "SELECT target_node_id FROM sequence_edges WHERE source_node_id=$1 AND source_handle=$2",
+        source_node_id, handle,
     )
 
     for edge in edges:
@@ -43,35 +45,31 @@ async def queue_next_nodes(lead_id: str, source_node_id: str, handle: str = "def
         if not node: continue
 
         node_type = node["node_type"]
-        
+
         if node_type.startswith("action_"):
             channel = node_type.replace("action_", "")
-            delay_days = node.get("data", {}).get("delay_days", 0)
-            scheduled_at = datetime.now(timezone.utc) + timedelta(days=delay_days)
-            
+            scheduled_at = datetime.now(timezone.utc) + accumulated_delay
             await execute(
                 """
                 INSERT INTO queue (campaign_id, lead_id, node_id, channel, status, scheduled_at)
                 VALUES ($1, $2, $3, $4, 'queued', $5)
                 ON CONFLICT DO NOTHING
                 """,
-                lead["campaign_id"], lead_id, target_id, channel, scheduled_at
+                lead["campaign_id"], lead_id, target_id, channel, scheduled_at,
             )
             log.info(f"[sequencer] Queued {channel} for lead {lead_id} at {scheduled_at}")
 
         elif node_type == "delay":
-            # Delay node is passive in this impl, or we can treat it as a trigger for next
-            # Simplified: just move to next after delay
-            delay_days = node.get("data", {}).get("delay_days", 1)
-            # For delay nodes, we might need a specific queue task or just schedule next action with more delay
-            await queue_next_nodes(lead_id, target_id) # Recursive for now (will need better temporal handling)
+            # Accumulate delay and continue graph traversal — do NOT recurse immediately
+            delay_days = (node["data"] or {}).get("delay_days", 1)
+            new_delay = accumulated_delay + timedelta(days=delay_days)
+            await queue_next_nodes(lead_id, target_id, "default", new_delay)
 
         elif node_type == "condition_replied":
-            # Evaluate immediately if they already replied, or wait
             if lead["replied_at"]:
-                await queue_next_nodes(lead_id, target_id, "true")
+                await queue_next_nodes(lead_id, target_id, "true", accumulated_delay)
             else:
-                # Lead stays here until webhook triggers evaluate_conditions
+                # Park lead here; webhook will call evaluate_conditions when reply arrives
                 await execute("UPDATE leads SET current_node_id=$1 WHERE id=$2", target_id, lead_id)
 
 async def evaluate_conditions(lead_id: str) -> None:
