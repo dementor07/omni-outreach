@@ -209,13 +209,19 @@ const retellDefaultEdgeOptions = {
 function NodeConfigPanel({
   node,
   allNodes,
+  edges,
   onChange,
+  onEdgeUpdate,
+  onEdgeDestinationChange,
   onClose,
   onDelete
 }: {
   node: Node<RetellNode>;
   allNodes: Node<RetellNode>[];
+  edges: Edge<RetellEdge>[];
   onChange: (updated: Node<RetellNode>) => void;
+  onEdgeUpdate: (edgeId: string, condition: { type: string; prompt: string }) => void;
+  onEdgeDestinationChange: (edgeId: string, destinationNodeId: string) => void;
   onClose: () => void;
   onDelete: () => void;
 }) {
@@ -276,29 +282,21 @@ function NodeConfigPanel({
         {data.type === 'conversation' && (
           <div className="space-y-4 pt-4 border-t border-slate-800">
             <h4 className="text-[9px] font-black uppercase tracking-widest text-slate-500">Outgoing Edges</h4>
-            {(data.edges || []).map((edge, idx) => (
+            {edges.filter(e => e.source === node.id).map((edge) => (
               <div key={edge.id} className="p-3 bg-slate-800/50 rounded-xl border border-slate-700/50 space-y-3">
                 <div>
                   <label className="text-[8px] font-bold uppercase text-slate-600 mb-1 block">Condition</label>
                   <textarea
-                    value={edge.transition_condition?.prompt || ''}
-                    onChange={(e) => {
-                      const newEdges = [...(data.edges || [])];
-                      newEdges[idx] = { ...edge, transition_condition: { type: 'prompt', prompt: e.target.value } };
-                      updateData({ edges: newEdges });
-                    }}
+                    value={edge.data?.transition_condition?.prompt || ''}
+                    onChange={(e) => onEdgeUpdate(edge.id, { type: 'prompt', prompt: e.target.value })}
                     className="w-full bg-slate-900 border-none rounded-lg px-2 py-1.5 text-[11px] text-slate-300 focus:ring-1 focus:ring-sky-500 outline-none resize-none"
                   />
                 </div>
                 <div>
                   <label className="text-[8px] font-bold uppercase text-slate-600 mb-1 block">Destination</label>
                   <select
-                    value={edge.destination_node_id}
-                    onChange={(e) => {
-                      const newEdges = [...(data.edges || [])];
-                      newEdges[idx] = { ...edge, destination_node_id: e.target.value };
-                      updateData({ edges: newEdges });
-                    }}
+                    value={edge.target}
+                    onChange={(e) => onEdgeDestinationChange(edge.id, e.target.value)}
                     className="w-full bg-slate-900 border-none rounded-lg px-2 py-1.5 text-[11px] text-slate-300 focus:ring-1 focus:ring-sky-500 outline-none"
                   >
                     {allNodes.map((n) => (
@@ -326,6 +324,8 @@ interface RetellFlowInnerProps {
   globalPrompt: string;
   setGlobalPrompt: (v: string) => void;
   handleNodeChange: (n: Node<RetellNode>) => void;
+  handleEdgeUpdate: (edgeId: string, condition: { type: string; prompt: string }) => void;
+  handleEdgeDestinationChange: (edgeId: string, destinationNodeId: string) => void;
   addNode: (type: RetellNode['type']) => void;
 }
 
@@ -340,6 +340,8 @@ function RetellFlowInner({
   globalPrompt,
   setGlobalPrompt,
   handleNodeChange,
+  handleEdgeUpdate,
+  handleEdgeDestinationChange,
   addNode,
 }: RetellFlowInnerProps) {
   const { deleteElements } = useReactFlow();
@@ -416,7 +418,10 @@ function RetellFlowInner({
         <NodeConfigPanel
           node={selectedNode}
           allNodes={nodes}
+          edges={edges}
           onChange={handleNodeChange}
+          onEdgeUpdate={handleEdgeUpdate}
+          onEdgeDestinationChange={handleEdgeDestinationChange}
           onClose={() => setSelectedNode(null)}
           onDelete={() => {
             deleteElements({ nodes: [{ id: selectedNode.id }] });
@@ -505,24 +510,23 @@ export default function RetellFlowEditor() {
   const handleNodeChange = (updatedNode: Node<RetellNode>) => {
     setNodes(nds => nds.map(n => n.id === updatedNode.id ? updatedNode : n));
     setSelectedNode(updatedNode);
-    
-    // If it's a conversation node, we might need to update ReactFlow edges if destinations changed in the config panel
-    if (updatedNode.data.type === 'conversation') {
-      const nodeData = updatedNode.data;
-      setEdges(eds => {
-        const otherEdges = eds.filter(e => e.source !== updatedNode.id);
-        const nodeEdges = (nodeData.edges || []).map(e => ({
-          id: e.id,
-          source: updatedNode.id,
-          target: e.destination_node_id,
-          label: e.transition_condition?.prompt?.slice(0, 40) ?? '',
-          type: 'custom',
-          data: e
-        }));
-        return [...otherEdges, ...nodeEdges];
-      });
-    }
   };
+
+  const handleEdgeUpdate = useCallback((edgeId: string, condition: { type: string; prompt: string }) => {
+    setEdges(eds => eds.map(e =>
+      e.id === edgeId
+        ? { ...e, label: condition.prompt.slice(0, 40), data: { ...e.data!, transition_condition: condition } }
+        : e
+    ));
+  }, [setEdges]);
+
+  const handleEdgeDestinationChange = useCallback((edgeId: string, destinationNodeId: string) => {
+    setEdges(eds => eds.map(e =>
+      e.id === edgeId
+        ? { ...e, target: destinationNodeId, data: { ...e.data!, destination_node_id: destinationNodeId } }
+        : e
+    ));
+  }, [setEdges]);
 
   const addNode = useCallback((type: RetellNode['type']) => {
     const id = `node-${Date.now()}`;
@@ -542,6 +546,7 @@ export default function RetellFlowEditor() {
       data: { ...newRetellNode },
     };
     setNodes((nds) => [...nds, rfNode]);
+    setSelectedNode(rfNode);
   }, [setNodes]);
 
   if (loading) {
@@ -586,6 +591,8 @@ export default function RetellFlowEditor() {
           globalPrompt={globalPrompt}
           setGlobalPrompt={setGlobalPrompt}
           handleNodeChange={handleNodeChange}
+          handleEdgeUpdate={handleEdgeUpdate}
+          handleEdgeDestinationChange={handleEdgeDestinationChange}
           addNode={addNode}
         />
       </ReactFlowProvider>
