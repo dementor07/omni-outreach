@@ -64,3 +64,19 @@ Discovered three major structural gaps between clusters. Generated two novel arc
 - `wiki/decisions/autonomous-feedback-loops.md`: An ADR detailing how to feed Reinforcement Learning rewards back into the Apify Lead Generation pipeline, and how to grant Retell AI the `update_omni_lead_tags` tool to bridge conversational discoveries into Omni's tag-based routing logic.
 - `wiki/architecture/telemetry-overlay.md`: A blueprint for solving the Event Bus observability gap by piping live Webhook/Stream throughput directly into the ReactFlow edge styles (glowing paths, backpressure halos).
 Updated `index.md`.
+
+## [2026-04-12] session end | HEAD af31cd7
+
+Last commit: af31cd7 — Redis Streams Event Bus implemented.
+Active TODO: Lead Generation Pipeline (Apify+Serper). Pending: Canvas Telemetry Overlay, Auto-Optimization Engine.
+Next session: start fresh Claude Code chat, read omni-vault/index.md first.
+
+## [2026-04-12] fix & deploy | Lead Gen DAG injection completed — HEAD 0679d5c
+
+- Fixed syntax error in `job_search.py` (stray `...` and misplaced import).
+- Added `sequencer.schedule_new_lead(lead_id)` — DAG entry that does not require `accepted_at`, designed for freshly scraped leads.
+- `schedule_sequence()` retained for post-acceptance resume path.
+- `upsert_leads()` now calls `schedule_new_lead()` so every Apify/Serper lead is automatically injected into the campaign DAG at `trigger_start`.
+- Pushed to `outreach-threading`, deployed to VPS. Backend + worker healthy.
+- Lead Generation Pipeline (Apify+Serper → DAG injection): COMPLETE.
+- Next: Canvas Telemetry Overlay or Auto-Optimization Engine.
