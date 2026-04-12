@@ -679,6 +679,7 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
     setAgentPrompt(null);
     setPromptError(null);
     setPromptSaving(false);
+    setFlowMeta(null);
     if (mode !== 'standard' || !selectedVoiceAgentId) return;
     setPromptLoading(true);
     api.get(`/accounts/voice/${selectedVoiceAgentId}/prompt`)

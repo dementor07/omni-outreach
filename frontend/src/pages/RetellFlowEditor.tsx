@@ -467,7 +467,7 @@ export default function RetellFlowEditor() {
       })
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentId, setNodes, setEdges]);
+  }, [agentId]);
 
   const onConnect = useCallback(
     (params: Connection) => {
