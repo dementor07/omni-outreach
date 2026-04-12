@@ -1,50 +1,102 @@
 ---
 title: Auto-Optimization Engine (Reinforcement Learning)
 category: architecture
-tags: [reinforcement-learning, a-b-testing, ml, dag, routing]
+tags: [reinforcement-learning, a-b-testing, ml, dag, routing, bandit]
 sources: []
 updated: 2026-04-12
 ---
 
-# Auto-Optimization Engine (Reinforcement Learning)
+# Auto-Optimization Engine (Multi-Armed Bandit)
 
-Omni's DAG sequencer currently supports static logic gates, notably the `split` control node which routes leads down Path A or Path B at a hardcoded 50/50 ratio. 
+`backend/app/services/optimization.py`
 
-To fulfill the vision of an autonomous outbound operating system, we will upgrade the `split` node to function as a **Multi-Armed Bandit** powered by Reinforcement Learning.
+Upgrades every `split` node from static 50/50 routing into a **Thompson Sampling Multi-Armed Bandit**. Runs as a background cron every 10 minutes.
 
-## The Concept: Dynamic Edge Weights
+## Status: Implemented
 
-Instead of static 50/50 splits, every outgoing edge from an optimization node has a dynamic "Weight" (Probability of Selection). 
+## Architecture
 
-### 1. Initialization
-A new campaign starts with a `split` node branching to two different paths:
-- **Path A (LinkedIn DM)**: Weight 50%
-- **Path B (Cold Email)**: Weight 50%
+### Data Flow
 
-### 2. Reward Signals (The Feedback Loop)
-We define "Rewards" based on downstream Event Nodes:
-- Lead reaches `event_invite_accepted` = +1 point
-- Lead reaches `event_email_opened` = +2 points
-- Lead reaches `condition_replied` (True) = +10 points
-- Lead reaches `action_voice` (Positive Sentiment) = +50 points
+```
+leads.path_history (bandit trace)
+         ↓
+  run_optimization() [cron, every 10min]
+         ↓
+  _update_node_weights(split_node)
+         ↓
+  sequence_nodes.data.weights (Beta params updated)
+         ↓
+  next lead hits split node → Thompson Sample → better arm chosen
+```
 
-### 3. The Optimization Loop
-A background cron job (the Optimization Engine) continuously queries the `events` audit table. It traces backward from a positive Reward Signal up the DAG to see which branch of the `split` node the lead originally took.
+### Beta Distribution Params
 
-Using an algorithm like **Thompson Sampling** or **Upper Confidence Bound (UCB)**, the engine dynamically adjusts the edge weights in `sequence_nodes.data`.
+Stored in `sequence_nodes.data.weights`:
+```json
+{
+  "true":  { "alpha": float, "beta": float },
+  "false": { "alpha": float, "beta": float }
+}
+```
+Default when no data: `alpha=1, beta=1` (uniform prior → pure 50/50).
 
-### 4. Autonomous Convergence
-Over time (e.g., after 500 leads), the engine might discover that for this specific target audience, Path A (LinkedIn) generates replies at a much higher rate than Path B (Email). 
+### Reward Schedule
 
-The engine will automatically adjust the split:
-- **Path A**: Weight 85%
-- **Path B**: Weight 15% (Kept active for continuous exploration against changing trends).
+| Event type | Reward |
+|-----------|--------|
+| `invite_accepted` | 1 |
+| `email_sent` | 1 |
+| `dm_sent` | 1 |
+| `reply_received` | 5 |
 
-## Implementation Requirements
-1. **Traceability**: `leads` must maintain an array of `path_history` (UUIDs of edges traversed) so rewards can be accurately attributed back to the split nodes.
-2. **Algorithm Service**: A new `optimization.py` service running alongside the [[dispatcher]] to recalculate weights periodically.
-3. **UI Updates**: The [[canvas-editor]] will display live, pulsing percentage indicators on the edges leaving an optimization node, showing operators how the AI is routing traffic in real-time.
+### Weight Update Formula
+
+For each arm: query all leads whose `path_history` contains `{"split_node_id": X, "arm": "true|false"}`, sum their reward signals from the `events` table.
+
+```
+alpha = reward_sum + 1
+beta  = max(0, total_leads_on_arm - reward_sum) + 1
+```
+
+Minimum `MIN_SAMPLES = 10` per arm required before weights shift — prevents thrashing on small data.
+
+## Sampling at Runtime (sequencer.py)
+
+```python
+sample_true  = random.betavariate(weights["true"]["alpha"],  weights["true"]["beta"])
+sample_false = random.betavariate(weights["false"]["alpha"], weights["false"]["beta"])
+chosen_arm   = "true" if sample_true >= sample_false else "false"
+```
+
+Leads are always routed to exactly one arm. Choice is stored in `leads.path_history`.
+
+## Traceability
+
+`leads.path_history JSONB DEFAULT '[]'` — appended on every split traversal:
+```json
+[
+  {"split_node_id": "uuid-of-split-node", "arm": "true"},
+  {"split_node_id": "uuid-of-another-split", "arm": "false"}
+]
+```
+Supports multi-split campaigns. Each entry is independently traceable.
+
+## Canvas UI
+
+`SplitNode` in `Campaigns.tsx` reads `node.data.weights` and displays per-arm expected win rates:
+- `trueRate = Math.round(alpha / (alpha + beta) * 100)%`
+- Shows "Learning (50/50)" until `MIN_SAMPLES` reached, then "Bandit Active" with live %
+
+## Cron Registration
+
+`backend/app/worker/tasks.py`:
+```python
+cron(optimize_splits, minute=set(range(0, 60, 10)))  # every 10 min
+```
 
 ## Related Pages
 - [[sequence-engine]]
 - [[omnichannel-logic-loops]]
+- [[autonomous-feedback-loops]]
+- [[canvas-editor]]

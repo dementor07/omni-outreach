@@ -8,26 +8,55 @@ updated: 2026-04-12
 
 # Canvas Telemetry Overlay
 
-## Context (Knowledge Graph Insight)
-Network analysis of the `omni-vault` ontology exposed **Gap B**: The `[Event Bus]` (Redis/Kafka handling thousands of webhooks per second) is completely disconnected from the `[Canvas Editor]` UI. The massive throughput and backpressure of the outreach engine are invisible to the human operator, defeating the purpose of a "Control Plane."
+## Status: Implemented
 
-## The Insight: Data as Flow
-Instead of hiding the event throughput in a separate "Analytics" dashboard or `queue.py` list, we must pipe the live Redis Stream metrics directly onto the edges of the ReactFlow graph.
+## Backend
 
-## Architectural Implementation
+`GET /sequences/{campaign_id}/telemetry` in `backend/app/routers/sequences.py`
 
-### 1. Live Edge Weights (The "Glowing" Paths)
-The `CustomEdge` component in `@xyflow/react` will subscribe to a Server-Sent Events (SSE) or WebSocket endpoint driven by the Event Bus.
-- As webhooks fire (e.g., `event_email_opened`), the edge connecting `action_email` to the next node will physically pulse or thicken.
-- The color temperature of the edge will shift from cool (slate) to hot (sky/emerald) based on the velocity of leads traversing it in the last 60 seconds.
+Returns:
+```json
+{
+  "activity":    { "<node_id>": <count_sent_in_last_60s> },
+  "backpressure": { "<node_id>": <count_queued_or_locked> }
+}
+```
 
-### 2. Node Backpressure Indicators
-If the Dispatcher queue for `action_linkedin_dm` hits the daily cap, the node will render a "Pressure" halo (e.g., amber warning outline), instantly alerting the operator that a bottleneck has formed in the DAG.
+Queries `queue` table grouped by `node_id` (source node). No joins needed — `node_id` IS the source node of the completed/pending task.
 
-### 3. The ReactFlow `EdgeLabelRenderer` Update
-We will update the `edgeTypes` to include a `TelemetryEdge` which floats a live counter of leads currently parked or traversing that specific path, completely eliminating the need for a separate analytics screen.
+## Frontend
+
+`frontend/src/pages/Campaigns.tsx`
+
+### TelemetryEdge component
+
+Replaces `CustomEdge` when Live mode is on. Reads `data.activity` and `data.backpressure` (merged into edge state by the polling effect).
+
+| Activity | Stroke color |
+|----------|-------------|
+| 0 | slate (`#e2e8f0`) |
+| 1–3 | sky-300 (`#7dd3fc`) |
+| 4–9 | sky-400 (`#38bdf8`) |
+| 10+ | emerald-500 (`#10b981`) |
+| backpressure > 5 | amber (`#f59e0b`) + dashed stroke |
+
+Stroke width scales: `2 + min(activity × 0.4, 3)`. Transition: `stroke 0.8s`.
+
+Shows a floating green pill with lead count if `activity > 0`. Shows amber `⏳N` pill if `backpressure > 5`.
+
+### Live Toggle
+
+"Live" button (with pulsing `<Radio />` icon) in the canvas Panel (top-right). Toggles `liveMode` boolean.
+
+### Polling Effect
+
+When `liveMode && activeTab === 'sequence' && id`:
+- Polls `GET /sequences/{id}/telemetry` immediately + every 5s
+- On update: `setEdges(eds => eds.map(e => ({ ...e, type: 'telemetry', data: { ...e.data, activity: ..., backpressure: ... } })))`
+
+When `liveMode` off: edges reset to `type: 'custom'`.
 
 ## Related Pages
-- [[knowledge-graphs]]
 - [[event-bus-architecture]]
 - [[canvas-editor]]
+- [[dispatcher]]

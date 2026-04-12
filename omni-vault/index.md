@@ -7,20 +7,22 @@ Last updated: 2026-04-12
 | Page | Summary |
 |------|---------|
 | [[system-overview]] | Stack, Docker services, directory structure |
-| [[sequence-engine]] | Graph traversal, node types, queue, parking/re-evaluation |
-| [[dispatcher]] | Queue locking, channel routing, task execution |
+| [[sequence-engine]] | Graph traversal, node types, all functions, queue/parking/re-evaluation, split bandit |
+| [[dispatcher]] | Queue locking, all channel handlers, retry logic, background crons |
+| [[worker]] | arq cron schedule, stream processor, Redis consumer group |
+| [[job-search-pipeline]] | Apify → Serper → upsert leads → DAG injection |
 | [[event-bus-architecture]] | Kafka/Redis Streams for high-throughput webhooks and scalability |
-| [[auto-optimization-engine]] | Reinforcement learning, multi-armed bandit for dynamic A/B splits |
+| [[auto-optimization-engine]] | Thompson Sampling bandit, Beta params, reward schedule, cron |
+| [[telemetry-overlay]] | Live edge heat-map on canvas, polling, TelemetryEdge component |
 | [[bridge-agent]] | Claude ↔ Gemini autonomous development loop |
 | [[llm-wiki-method]] | The Karpathy method for persistent LLM knowledge bases |
 | [[knowledge-graphs]] | Enhancing the LLM Wiki with structural self-awareness and gap detection |
-| [[telemetry-overlay]] | Piping live Event Bus throughput directly onto ReactFlow edges |
 
 ## Product
 
 | Page | Summary |
 |------|---------|
-| [[canvas-editor]] | ReactFlow canvas, node palette, ConfigSidebar, serialization |
+| [[canvas-editor]] | ReactFlow canvas, all node components, TelemetryEdge, SplitNode bandit UI, serialization |
 | [[voice-node]] | Standard vs Nested Flow modes, Retell editor UX |
 | [[channels]] | Breakdown of LinkedIn, WhatsApp, Email, and Voice outreach |
 | [[campaigns]] | Campaign configurations, execution constraints, and account assignments |

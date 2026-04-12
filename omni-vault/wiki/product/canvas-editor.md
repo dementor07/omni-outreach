@@ -1,54 +1,71 @@
 ---
 title: Canvas Editor
 category: product
-tags: [canvas, ReactFlow, xyflow, UX, sequences]
+tags: [canvas, ReactFlow, xyflow, UX, sequences, telemetry, bandit]
 sources: []
 updated: 2026-04-12
 ---
 
 # Canvas Editor
 
-The campaign sequence canvas is the core UX for building outreach sequences. Built with `@xyflow/react`.
+`frontend/src/pages/Campaigns.tsx` — sequence tab when `campaign.sequence_mode === 'canvas'`
 
-## Location
+## Node Types & Components
 
-`frontend/src/pages/Campaigns.tsx` — the sequence tab when `campaign.sequence_mode === 'canvas'`
+| node_type | Component | Notes |
+|-----------|-----------|-------|
+| `trigger_start` | `TriggerNode` | Dark slate card, no target handle |
+| `action_*` | `ActionNode` | Shows Simple/Flow mode badge, configured/draft status |
+| `condition_*` | `ConditionNode` | True/False source handles |
+| `event_*` | `EventNode` | Single bottom source handle |
+| `delay` | `DelayNode` | Inline number input for `delay_days` |
+| `split` | `SplitNode` | Shows "Bandit Active" + per-arm win rate % once learned |
+| `end` | `EndNode` | Rose terminal card |
 
-## Node Palette
+## Edge Types
 
-Draggable from a sidebar palette:
-- LinkedIn Invite, LinkedIn DM, WhatsApp, Email, Instagram (stub), Telegram (stub)
-- Voice Call
-- Branch: Reply? (condition node)
-- Wait / Delay
+| type | Component | When used |
+|------|-----------|-----------|
+| `custom` | `CustomEdge` | Default. Bezier with ✕ delete button on select. |
+| `telemetry` | `TelemetryEdge` | Active when Live mode on. Heat-colored, floating pill, dashed on backpressure. See [[telemetry-overlay]]. |
 
-## Custom Edge
+## SplitNode — Bandit Display
 
-`CustomEdge` component — Bezier curve with a ✕ delete button on hover. Clicking deletes the edge via `deleteElements()`.
+Reads `node.data.weights` (`{true: {alpha, beta}, false: {alpha, beta}}`).
+- No data or default (sum ≤ 4): shows "Learning (50/50)"
+- Learned: shows "Bandit Active" + `Math.round(alpha/(alpha+beta)*100)% win rate` per arm
 
-## Config Sidebar (`ConfigSidebar`)
+## ConfigSidebar
 
-Right-side panel, opens when a node is selected. Slides in/out. Fields vary by node type:
-- All: node type display
-- Delay: `delay_days` number input
-- Email: account selector + subject + body textarea
-- Voice: Standard/Flow toggle + agent selector + (Standard: prompt editor) / (Flow: open editor button)
-- Other action nodes: body textarea only
+Right-side panel opens on node click (`selectedNodeId`). Fields:
+- All: node type label
+- `delay`: `delay_days` input (calls `updateNodeData`)
+- `action_email`: account selector + subject + body
+- `action_voice`: Standard/Flow toggle + agent + prompt editor / Retell editor link
+- Other action nodes: body textarea + template save
 
-## Serialization
+## Serialization (Critical)
 
-**Critical:** React callbacks (`onChange`, `onDelete`, `onEditTemplate`) are stripped from `node.data` before saving to DB:
+React callbacks are stripped before DB save:
 ```ts
 const { onChange, onDelete, onEditTemplate, ...serializableData } = n.data as any
 ```
-This prevents non-serializable functions from being persisted to `sequence_nodes.data JSONB`.
+Prevents non-serializable functions persisting to `sequence_nodes.data JSONB`.
 
 ## Save / Load
 
-- Load: `GET /sequences/{campaign_id}` → sets ReactFlow nodes + edges state
-- Save: `POST /sequences/save` — deletes all existing nodes/edges for campaign, re-inserts
+- Load: `GET /sequences/{campaign_id}` → React Flow nodes + edges
+- Save: `POST /sequences/save` — full replace (delete + re-insert all nodes/edges for campaign)
+
+## Live Telemetry Toggle
+
+"Live" button in Panel (top-right). When active:
+- Polls `GET /sequences/{id}/telemetry` every 5s
+- Edges switch to `type: 'telemetry'`, colored by activity/backpressure
+- Radio icon pulses while active
 
 ## Related Pages
 - [[sequence-engine]]
+- [[telemetry-overlay]]
+- [[auto-optimization-engine]]
 - [[voice-node]]
-- [[decisions/voice-node-architecture]]

@@ -71,6 +71,23 @@ Last commit: af31cd7 — Redis Streams Event Bus implemented.
 Active TODO: Lead Generation Pipeline (Apify+Serper). Pending: Canvas Telemetry Overlay, Auto-Optimization Engine.
 Next session: start fresh Claude Code chat, read omni-vault/index.md first.
 
+## [2026-04-12] ingest | Code modules promoted to vault nodes
+
+All major backend services and the canvas editor promoted from thin stubs to full code-level wiki pages. Vault is now the primary reference — files are secondary.
+
+Updated:
+- `dispatcher.md` — all 11 channel handlers documented, cron behaviors, retry logic
+- `sequence-engine.md` — all node types, all function signatures, split/bandit behavior, path_history schema
+- `auto-optimization-engine.md` — blueprint → implemented; Beta params, reward schedule, cron registration
+- `telemetry-overlay.md` — blueprint → implemented; TelemetryEdge color table, polling effect, edge type switching
+- `canvas-editor.md` — all node/edge components, SplitNode bandit display, Live toggle, serialization notes
+
+Created:
+- `job-search-pipeline.md` — full Apify→Serper→upsert→DAG injection pipeline
+- `worker.md` — arq cron schedule (all 4 jobs), stream processor, consumer group
+
+Updated `index.md` with all new/updated pages.
+
 ## [2026-04-12] feat & deploy | Canvas Telemetry Overlay + Auto-Optimization Engine — HEAD 6304bd3
 
 **Telemetry Overlay:**
