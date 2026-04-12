@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ReactFlow,
@@ -319,7 +319,7 @@ interface RetellFlowInnerProps {
   onEdgesChange: OnEdgesChange<Edge<RetellEdge>>;
   onConnect: (params: Connection) => void;
   selectedNode: Node<RetellNode> | null;
-  setSelectedNode: (n: Node<RetellNode> | null) => void;
+  setSelectedNodeId: (id: string | null) => void;
   globalPrompt: string;
   setGlobalPrompt: (v: string) => void;
   handleNodeChange: (n: Node<RetellNode>) => void;
@@ -335,7 +335,7 @@ function RetellFlowInner({
   onEdgesChange,
   onConnect,
   selectedNode,
-  setSelectedNode,
+  setSelectedNodeId,
   globalPrompt,
   setGlobalPrompt,
   handleNodeChange,
@@ -357,8 +357,8 @@ function RetellFlowInner({
           nodeTypes={nodeTypes}
           edgeTypes={retellEdgeTypes}
           defaultEdgeOptions={retellDefaultEdgeOptions}
-          onNodeClick={(_, node) => setSelectedNode(node)}
-          onPaneClick={() => setSelectedNode(null)}
+          onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+          onPaneClick={() => setSelectedNodeId(null)}
           fitView
           className="bg-slate-950"
         >
@@ -421,10 +421,10 @@ function RetellFlowInner({
           onChange={handleNodeChange}
           onEdgeUpdate={handleEdgeUpdate}
           onEdgeDestinationChange={handleEdgeDestinationChange}
-          onClose={() => setSelectedNode(null)}
+          onClose={() => setSelectedNodeId(null)}
           onDelete={() => {
             deleteElements({ nodes: [{ id: selectedNode.id }] });
-            setSelectedNode(null);
+            setSelectedNodeId(null);
           }}
         />
       )}
@@ -443,7 +443,11 @@ export default function RetellFlowEditor() {
   const [globalPrompt, setGlobalPrompt] = useState('');
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<RetellNode>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge<RetellEdge>>([]);
-  const [selectedNode, setSelectedNode] = useState<Node<RetellNode> | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const selectedNode = useMemo(
+    () => (selectedNodeId ? nodes.find(n => n.id === selectedNodeId) ?? null : null),
+    [nodes, selectedNodeId]
+  );
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -492,10 +496,13 @@ export default function RetellFlowEditor() {
     }
   };
 
-  const handleNodeChange = (updatedNode: Node<RetellNode>) => {
-    setNodes(nds => nds.map(n => n.id === updatedNode.id ? updatedNode : n));
-    setSelectedNode(updatedNode);
-  };
+  const handleNodeChange = useCallback((updatedNode: Node<RetellNode>) => {
+    setNodes(nds => nds.map(n =>
+      n.id === updatedNode.id
+        ? { ...updatedNode, position: n.position }  // preserve drag position
+        : n
+    ));
+  }, [setNodes]);
 
   const handleEdgeUpdate = useCallback((edgeId: string, condition: { type: string; prompt: string }) => {
     setEdges(eds => eds.map(e =>
@@ -531,7 +538,7 @@ export default function RetellFlowEditor() {
       data: { ...newRetellNode },
     };
     setNodes((nds) => [...nds, rfNode]);
-    setSelectedNode(rfNode);
+    setSelectedNodeId(id);
   }, [setNodes]);
 
   if (loading) {
@@ -572,7 +579,7 @@ export default function RetellFlowEditor() {
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           selectedNode={selectedNode}
-          setSelectedNode={setSelectedNode}
+          setSelectedNodeId={setSelectedNodeId}
           globalPrompt={globalPrompt}
           setGlobalPrompt={setGlobalPrompt}
           handleNodeChange={handleNodeChange}

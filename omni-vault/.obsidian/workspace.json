@@ -74,7 +74,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 300
+    "width": 200
   },
   "right": {
     "id": "947d35bbf6ed4215",
@@ -178,6 +178,15 @@
   },
   "active": "1cccf6b5934c6ba8",
   "lastOpenFiles": [
+    "index.md",
+    "wiki/integrations/unipile-integration.md",
+    "wiki/product/canvas-editor.md",
+    "wiki/decisions/voice-node-architecture.md",
+    "wiki/product/voice-node.md",
+    "wiki/integrations/retell-integration.md",
+    "wiki/architecture/sequence-engine.md",
+    "wiki/architecture/system-overview.md",
+    "log.md",
     "CLAUDE.md",
     "CLAUDE.md.tmp.28148.1775993918027",
     "wiki/campaigns",
