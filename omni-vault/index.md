@@ -33,6 +33,7 @@ Last updated: 2026-04-12
 | Page | Summary |
 |------|---------|
 | [[voice-node-architecture]] | Why Standard/Nested Flow toggle maps to Retell agent types |
+| [[omnichannel-logic-loops]] | How tags, split tests, and events power cross-channel routing |
 
 ## Competitors
 

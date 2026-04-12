@@ -39,3 +39,7 @@ Actively utilized the `omni-vault` to document the code changes resulting from t
 - Updated `wiki/architecture/sequence-engine.md` to list the actual node types instantiated in the codebase (e.g., `action_linkedin_inmail`, `event_invite_accepted`, `condition_linkedin_distance`).
 - Updated `wiki/product/channels.md` to document the new `_handle_linkedin_inmail` and `_handle_linkedin_profile_view` logic running inside `dispatcher.py`.
 This ensures the LLM Wiki remains the absolute ground-truth reflection of the codebase state.
+
+## [2026-04-12] document | Created ADR for Omnichannel Logic Loops
+
+Following the Karpathy "Vault First" method, created `wiki/decisions/omnichannel-logic-loops.md` to architect how tag-based routing, channel-agnostic event listeners, and A/B split nodes will be used to create robust cross-channel loops. Updated `index.md`.

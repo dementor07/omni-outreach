@@ -178,6 +178,8 @@
   },
   "active": "1cccf6b5934c6ba8",
   "lastOpenFiles": [
+    "index.md",
+    "wiki/decisions/omnichannel-logic-loops.md",
     "Untitled.canvas",
     "wiki/competitors/landscape.md",
     "Welcome.md",
@@ -196,7 +198,6 @@
     "wiki/product/voice-node.md",
     "wiki/product/canvas-editor.md",
     "wiki/integrations/retell-integration.md",
-    "index.md",
     "wiki/integrations/unipile-integration.md",
     "wiki/decisions/voice-node-architecture.md",
     "wiki/architecture/system-overview.md",
