@@ -28,13 +28,13 @@ import { api } from '../api/client';
 import { useToast } from '../components/Toast';
 import { ArrowLeft, X } from 'lucide-react';
 
-interface RetellEdge {
+type RetellEdge = {
   id: string;
   destination_node_id: string;
   transition_condition: { type: string; prompt: string };
 }
 
-interface RetellNode {
+type RetellNode = {
   id: string;
   type: 'conversation' | 'transfer_call' | 'end';
   name: string;
@@ -46,7 +46,7 @@ interface RetellNode {
   transfer_option?: { type: string; enable_bridge_audio_cue: boolean };
 }
 
-interface RetellFlow {
+type RetellFlow = {
   conversation_flow_id: string;
   global_prompt: string;
   start_node_id: string;
@@ -55,7 +55,7 @@ interface RetellFlow {
 
 // Conversion helpers
 
-function retellNodesToFlow(nodes: RetellNode[]): Node[] {
+function retellNodesToFlow(nodes: RetellNode[]): Node<RetellNode>[] {
   return nodes.map(n => ({
     id: n.id,
     type: n.type,
@@ -64,8 +64,8 @@ function retellNodesToFlow(nodes: RetellNode[]): Node[] {
   }));
 }
 
-function retellEdgesToFlow(nodes: RetellNode[]): Edge[] {
-  const rfEdges: Edge[] = [];
+function retellEdgesToFlow(nodes: RetellNode[]): Edge<RetellEdge>[] {
+  const rfEdges: Edge<RetellEdge>[] = [];
   nodes.forEach(n => {
     const outgoing = [...(n.edges ?? []), ...(n.edge ? [n.edge] : [])];
     outgoing.forEach(e => {
@@ -82,15 +82,15 @@ function retellEdgesToFlow(nodes: RetellNode[]): Edge[] {
   return rfEdges;
 }
 
-function flowToRetellNodes(rfNodes: Node[], rfEdges: Edge[]): RetellNode[] {
+function flowToRetellNodes(rfNodes: Node<RetellNode>[], rfEdges: Edge<RetellEdge>[]): RetellNode[] {
   return rfNodes.map(rn => {
-    const data = rn.data as RetellNode;
+    const data = rn.data;
     const nodeEdges = rfEdges.filter(e => e.source === rn.id);
     
     const retellEdges: RetellEdge[] = nodeEdges.map(e => ({
       id: e.id,
       destination_node_id: e.target,
-      transition_condition: (e.data as RetellEdge)?.transition_condition ?? { type: 'prompt', prompt: e.label as string || '' }
+      transition_condition: e.data?.transition_condition ?? { type: 'prompt', prompt: e.label as string || '' }
     }));
 
     const updatedNode: RetellNode = {
@@ -209,12 +209,12 @@ function NodeConfigPanel({
   onChange,
   onClose
 }: {
-  node: Node;
-  allNodes: Node[];
-  onChange: (updated: Node) => void;
+  node: Node<RetellNode>;
+  allNodes: Node<RetellNode>[];
+  onChange: (updated: Node<RetellNode>) => void;
   onClose: () => void;
 }) {
-  const data = node.data as RetellNode;
+  const data = node.data;
 
   const updateData = (updates: Partial<RetellNode>) => {
     onChange({ ...node, data: { ...data, ...updates } });
@@ -288,7 +288,7 @@ function NodeConfigPanel({
                     className="w-full bg-slate-900 border-none rounded-lg px-2 py-1.5 text-[11px] text-slate-300 focus:ring-1 focus:ring-sky-500 outline-none"
                   >
                     {allNodes.map((n) => (
-                      <option key={n.id} value={n.id}>{(n.data as RetellNode).name} ({n.id.slice(0, 4)})</option>
+                      <option key={n.id} value={n.id}>{n.data.name} ({n.id.slice(0, 4)})</option>
                     ))}
                   </select>
                 </div>
@@ -310,9 +310,9 @@ export default function RetellFlowEditor() {
 
   const [flow, setFlow] = useState<RetellFlow | null>(null);
   const [globalPrompt, setGlobalPrompt] = useState('');
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node<RetellNode>>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge<RetellEdge>>([]);
+  const [selectedNode, setSelectedNode] = useState<Node<RetellNode> | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -352,13 +352,13 @@ export default function RetellFlowEditor() {
     }
   };
 
-  const handleNodeChange = (updatedNode: Node) => {
+  const handleNodeChange = (updatedNode: Node<RetellNode>) => {
     setNodes(nds => nds.map(n => n.id === updatedNode.id ? updatedNode : n));
     setSelectedNode(updatedNode);
     
     // If it's a conversation node, we might need to update ReactFlow edges if destinations changed in the config panel
-    if ((updatedNode.data as RetellNode).type === 'conversation') {
-      const nodeData = updatedNode.data as RetellNode;
+    if (updatedNode.data.type === 'conversation') {
+      const nodeData = updatedNode.data;
       setEdges(eds => {
         const otherEdges = eds.filter(e => e.source !== updatedNode.id);
         const nodeEdges = (nodeData.edges || []).map(e => ({
@@ -385,7 +385,7 @@ export default function RetellFlowEditor() {
       ...(type === 'conversation' ? { edges: [] } : {}),
       ...(type === 'transfer_call' ? { transfer_destination: { type: 'predefined', number: '' } } : {}),
     };
-    const rfNode: Node = {
+    const rfNode: Node<RetellNode> = {
       id,
       type,
       position: newRetellNode.display_position,
