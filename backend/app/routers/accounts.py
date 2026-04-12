@@ -140,6 +140,22 @@ async def create_voice_agent(body: VoiceAgentCreate, user_id: str = Depends(get_
     )
 
 
+@router.get("/voice/flows")
+async def list_retell_flows(user_id: str = Depends(get_current_user)):
+    """Proxy to fetch conversation flows directly from Retell AI."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                "https://api.retellai.com/list-conversation-flows",
+                headers={"Authorization": f"Bearer {RETELL_API_KEY}"},
+            )
+        if resp.is_success:
+            return resp.json()
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.delete("/voice/{agent_id}", status_code=204)
 async def delete_voice_agent(agent_id: str, user_id: str = Depends(get_current_user)):
     await execute("UPDATE voice_agents SET is_active=FALSE WHERE id=$1", agent_id)

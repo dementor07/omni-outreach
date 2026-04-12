@@ -797,7 +797,7 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
                 ) : retellPrompt ? (
                   <>
                     <div>
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Begin Message</label>
+                      <label className={labelCls}>Begin Message</label>
                       <input
                         className={inputClassName}
                         value={retellPrompt.begin_message}
@@ -805,7 +805,7 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">System Prompt</label>
+                      <label className={labelCls}>System Prompt</label>
                       <textarea
                         className={`${inputClassName} min-h-[200px] resize-none`}
                         value={retellPrompt.general_prompt}
@@ -829,7 +829,7 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
                           setPromptSaving(false);
                         }
                       }}
-                      className="w-full btn-tactile bg-sky-500 py-3 text-[10px] font-black uppercase tracking-widest text-white hover:bg-sky-600 disabled:opacity-50"
+                      className="w-full btn-tactile bg-slate-900 py-3 text-[10px] font-black uppercase tracking-widest text-white hover:bg-slate-800 disabled:opacity-40"
                     >
                       {promptSaving ? 'Saving...' : 'Save Prompt'}
                     </button>
@@ -842,9 +842,10 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
               <div className="mt-6 space-y-4">
                 <button
                   onClick={() => navigate(`/campaigns/${campaignId}/voice-flow/${selectedVoiceAgentId}`)}
-                  className="bg-sky-600 hover:bg-sky-500 text-white text-sm px-3 py-3 rounded-xl w-full font-bold transition-all shadow-sm flex items-center justify-center gap-2"
+                  className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-sky-500 text-white text-[10px] font-black uppercase tracking-widest hover:bg-sky-600 transition-all"
                 >
-                  Open Flow Editor <ChevronRight size={16} />
+                  <span>Open Flow Editor</span>
+                  <span className="text-sky-100">→</span>
                 </button>
                 {flowMeta && (
                   <p className="text-[10px] font-bold text-slate-400 text-center uppercase tracking-widest">
