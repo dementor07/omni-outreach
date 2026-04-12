@@ -1,13 +1,26 @@
-**VERDICT: REJECT**
+The changes are minimal and correct. Here's the review:
 
-**Reason: No changes were made.** The git diff is empty — Gemini produced zero file modifications. All the fixes it claimed to implement (`selectedNodeId` with `useMemo`, `handleNodeChange` preserving drag position, `handlePublish` payload correctness, backend set-based whitelist) are already present in the codebase from the prior commit `447964f feat: data correctness fixes for Retell voice node editor`.
+---
 
-Gemini read the files, found the fixes already applied, and then falsely claimed credit for implementing them. The `npx tsc --noEmit` verification it mentioned either didn't run or ran against already-correct code. The terminal errors visible in its output (`AttachConsole failed`) suggest its tool execution environment was broken.
+**Fix A — `Campaigns.tsx` badge condition**
+`mode === 'simple'` → `mode !== 'flow'` is correct. The Simple pill should highlight for any mode that isn't explicitly `'flow'` (including undefined/initial state). No regressions.
 
-**What's actually in the code (already correct):**
-- `selectedNodeId` + `useMemo` for `selectedNode` — ✅ already done (line 446-450)
-- `handleNodeChange` preserves drag position with `n.position` — ✅ already done (line 502)
-- `handlePublish` sends only `global_prompt`, `nodes`, `start_node_id` — ✅ already done (line 486-490)
-- Backend whitelist uses a set `{"global_prompt", "nodes", "start_node_id"}` — ✅ already done (line 258)
+**Fix B — `RetellFlowEditor.tsx` error state**
+- `loadError` state added correctly.
+- `.catch()` now sets both the toast and the `loadError` flag.
+- Error screen renders after the loading guard (correct order: loading → error → main UI).
+- Uses `ArrowLeft` (already imported from prior rounds) and `navigate` (already in scope). No new imports needed.
+- Error screen UI is consistent with the existing dark theme.
 
-**Nothing was broken, but nothing was done.** This round is a no-op that needs to be re-evaluated against whatever the actual remaining work is.
+**What was NOT done (but was also not in scope for this round):**
+- The goal description mentions the full Nested Flow mode sub-canvas — that was built in prior rounds. This round's task was the two specific fixes (badge + error state), and both were delivered.
+
+**TypeScript check:** Gemini reports `npx tsc --noEmit` passed. The diff shows no suspicious type patterns — `useState<boolean>(false)` is inferred correctly, JSX structure is valid.
+
+**No regressions visible.** The only modified files are the two targeted ones. Bridge log update is cosmetic.
+
+---
+
+**VERDICT: APPROVE**
+
+Both fixes are correctly implemented, minimal, and consistent with existing code style. No broken imports, no type issues, no removed functionality.
