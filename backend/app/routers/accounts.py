@@ -96,10 +96,36 @@ async def delete_email_account(account_id: str, user_id: str = Depends(get_curre
 
 # ── Voice agents ──────────────────────────────────────────────────────────────
 
+import os
+from typing import Optional
+from pydantic import ConfigDict
+
+RETELL_API_KEY = os.environ["RETELL_API_KEY"]
+
 class VoiceAgentCreate(BaseModel):
     retell_agent_id: str
     name: str
 
+class PromptUpdate(BaseModel):
+    begin_message: str
+    general_prompt: str
+
+class FlowUpdate(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    global_prompt: Optional[str] = None
+    nodes: Optional[list] = None
+    start_node_id: Optional[str] = None
+
+async def _get_retell_agent(retell_agent_id: str) -> dict:
+    """GET https://api.retellai.com/get-agent/{retell_agent_id}"""
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(
+            f"https://api.retellai.com/get-agent/{retell_agent_id}",
+            headers={"Authorization": f"Bearer {RETELL_API_KEY}"},
+        )
+        if not resp.is_success:
+            raise HTTPException(status_code=502, detail=f"Retell error: {resp.text}")
+        return resp.json()
 
 @router.get("/voice")
 async def list_voice_agents(user_id: str = Depends(get_current_user)):
@@ -125,70 +151,49 @@ async def get_voice_agent_prompt(agent_id: str, user_id: str = Depends(get_curre
     if not agent:
         raise HTTPException(status_code=404, detail="Voice agent not found")
     
-    retell_agent_id = agent["retell_agent_id"]
+    agent_data = await _get_retell_agent(agent["retell_agent_id"])
+    engine = agent_data.get("response_engine")
+    if not engine or engine.get("type") != "retell-llm":
+        raise HTTPException(status_code=400, detail="Agent is not a standard LLM agent")
+    
+    llm_id = engine["llm_id"]
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
-            f"https://api.retellai.com/get-agent/{retell_agent_id}",
-            headers={"Authorization": f"Bearer {settings.retell_api_key}"},
+            f"https://api.retellai.com/get-retell-llm/{llm_id}",
+            headers={"Authorization": f"Bearer {RETELL_API_KEY}"},
         )
         if not resp.is_success:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)
         
-        agent_data = resp.json()
-        engine = agent_data.get("response_engine")
-        if not engine or engine.get("type") != "retell-llm":
-            raise HTTPException(status_code=400, detail="Agent is not a retell-llm type")
-        
-        llm_id = engine["llm_id"]
-        resp_llm = await client.get(
-            f"https://api.retellai.com/get-retell-llm/{llm_id}",
-            headers={"Authorization": f"Bearer {settings.retell_api_key}"},
-        )
-        if not resp_llm.is_success:
-            raise HTTPException(status_code=resp_llm.status_code, detail=resp_llm.text)
-        
-        llm_data = resp_llm.json()
+        llm_data = resp.json()
         return {
+            "llm_id": llm_id,
             "begin_message": llm_data.get("begin_message"),
             "general_prompt": llm_data.get("general_prompt"),
-            "llm_id": llm_id,
             "model": llm_data.get("model"),
         }
 
 
-class UpdatePromptRequest(BaseModel):
-    begin_message: str
-    general_prompt: str
-
-
 @router.patch("/voice/{agent_id}/prompt")
-async def update_voice_agent_prompt(agent_id: str, body: UpdatePromptRequest, user_id: str = Depends(get_current_user)):
+async def update_voice_agent_prompt(agent_id: str, body: PromptUpdate, user_id: str = Depends(get_current_user)):
     agent = await fetch_one("SELECT retell_agent_id FROM voice_agents WHERE id = $1", agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Voice agent not found")
     
-    retell_agent_id = agent["retell_agent_id"]
+    agent_data = await _get_retell_agent(agent["retell_agent_id"])
+    engine = agent_data.get("response_engine")
+    if not engine or engine.get("type") != "retell-llm":
+        raise HTTPException(status_code=400, detail="Agent is not a standard LLM agent")
+    
+    llm_id = engine["llm_id"]
     async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(
-            f"https://api.retellai.com/get-agent/{retell_agent_id}",
-            headers={"Authorization": f"Bearer {settings.retell_api_key}"},
+        resp = await client.patch(
+            f"https://api.retellai.com/update-retell-llm/{llm_id}",
+            headers={"Authorization": f"Bearer {RETELL_API_KEY}"},
+            json={"begin_message": body.begin_message, "general_prompt": body.general_prompt},
         )
         if not resp.is_success:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)
-        
-        agent_data = resp.json()
-        engine = agent_data.get("response_engine")
-        if not engine or engine.get("type") != "retell-llm":
-            raise HTTPException(status_code=400, detail="Agent is not a retell-llm type")
-        
-        llm_id = engine["llm_id"]
-        resp_patch = await client.patch(
-            f"https://api.retellai.com/update-retell-llm/{llm_id}",
-            headers={"Authorization": f"Bearer {settings.retell_api_key}"},
-            json={"begin_message": body.begin_message, "general_prompt": body.general_prompt},
-        )
-        if not resp_patch.is_success:
-            raise HTTPException(status_code=resp_patch.status_code, detail=resp_patch.text)
         
         return {"ok": True}
 
@@ -199,74 +204,43 @@ async def get_voice_agent_flow(agent_id: str, user_id: str = Depends(get_current
     if not agent:
         raise HTTPException(status_code=404, detail="Voice agent not found")
     
-    retell_agent_id = agent["retell_agent_id"]
+    agent_data = await _get_retell_agent(agent["retell_agent_id"])
+    engine = agent_data.get("response_engine")
+    if not engine or engine.get("type") != "conversation-flow":
+        raise HTTPException(status_code=400, detail="Agent is not a conversation-flow agent")
+    
+    flow_id = engine["conversation_flow_id"]
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
-            f"https://api.retellai.com/get-agent/{retell_agent_id}",
-            headers={"Authorization": f"Bearer {settings.retell_api_key}"},
+            f"https://api.retellai.com/get-conversation-flow/{flow_id}",
+            headers={"Authorization": f"Bearer {RETELL_API_KEY}"},
         )
         if not resp.is_success:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)
         
-        agent_data = resp.json()
-        engine = agent_data.get("response_engine")
-        if not engine or engine.get("type") != "conversation-flow":
-            raise HTTPException(status_code=400, detail="Agent is not a conversation-flow type")
-        
-        flow_id = engine["conversation_flow_id"]
-        resp_flow = await client.get(
-            f"https://api.retellai.com/get-conversation-flow/{flow_id}",
-            headers={"Authorization": f"Bearer {settings.retell_api_key}"},
-        )
-        if not resp_flow.is_success:
-            raise HTTPException(status_code=resp_flow.status_code, detail=resp_flow.text)
-        
-        return resp_flow.json()
+        return resp.json()
 
 
 @router.patch("/voice/{agent_id}/flow")
-async def update_voice_agent_flow(agent_id: str, body: dict, user_id: str = Depends(get_current_user)):
+async def update_voice_agent_flow(agent_id: str, body: FlowUpdate, user_id: str = Depends(get_current_user)):
     agent = await fetch_one("SELECT retell_agent_id FROM voice_agents WHERE id = $1", agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Voice agent not found")
     
-    retell_agent_id = agent["retell_agent_id"]
+    agent_data = await _get_retell_agent(agent["retell_agent_id"])
+    engine = agent_data.get("response_engine")
+    if not engine or engine.get("type") != "conversation-flow":
+        raise HTTPException(status_code=400, detail="Agent is not a conversation-flow agent")
+    
+    flow_id = engine["conversation_flow_id"]
     async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(
-            f"https://api.retellai.com/get-agent/{retell_agent_id}",
-            headers={"Authorization": f"Bearer {settings.retell_api_key}"},
+        resp = await client.patch(
+            f"https://api.retellai.com/update-conversation-flow/{flow_id}",
+            headers={"Authorization": f"Bearer {RETELL_API_KEY}"},
+            json=body.model_dump(exclude_unset=True),
         )
         if not resp.is_success:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)
         
-        agent_data = resp.json()
-        engine = agent_data.get("response_engine")
-        if not engine or engine.get("type") != "conversation-flow":
-            raise HTTPException(status_code=400, detail="Agent is not a conversation-flow type")
-        
-        flow_id = engine["conversation_flow_id"]
-        resp_patch = await client.patch(
-            f"https://api.retellai.com/update-conversation-flow/{flow_id}",
-            headers={"Authorization": f"Bearer {settings.retell_api_key}"},
-            json=body,
-        )
-        if not resp_patch.is_success:
-            raise HTTPException(status_code=resp_patch.status_code, detail=resp_patch.text)
-        
         return {"ok": True}
 
-
-@router.get("/voice/flows")
-async def list_retell_flows(user_id: str = Depends(get_current_user)):
-    """Proxy to fetch conversation flows directly from Retell AI."""
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(
-                "https://api.retellai.com/list-conversation-flows",
-                headers={"Authorization": f"Bearer {settings.retell_api_key}"},
-            )
-        if resp.is_success:
-            return resp.json()
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))

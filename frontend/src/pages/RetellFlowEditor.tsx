@@ -1,16 +1,14 @@
-import { useState, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ReactFlow,
   Node,
   Edge,
-  addEdge,
   useNodesState,
   useEdgesState,
   Background,
   Controls,
-  Connection,
-  NodeTypes,
+  MiniMap,
   Handle,
   Position,
   NodeProps,
@@ -18,7 +16,13 @@ import {
 import '@xyflow/react/dist/style.css';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
-import { X, Save, ArrowLeft, Phone, Share2, LogOut } from 'lucide-react';
+import { ArrowLeft, X } from 'lucide-react';
+
+interface RetellEdge {
+  id: string;
+  destination_node_id: string;
+  transition_condition?: { type: string; prompt: string };
+}
 
 interface RetellNode {
   id: string;
@@ -29,273 +33,307 @@ interface RetellNode {
   edges?: RetellEdge[];
   edge?: RetellEdge;
   transfer_destination?: { type: string; number: string };
-  transfer_option?: any;
+  transfer_option?: Record<string, unknown>;
 }
 
-interface RetellEdge {
-  id: string;
-  destination_node_id: string;
-  transition_condition?: { type: string; prompt: string };
-}
-
-interface RetellFlow {
+interface RetellFlowResponse {
   conversation_flow_id: string;
   global_prompt: string;
   start_node_id: string;
   nodes: RetellNode[];
 }
 
-function retellFlowToReactFlow(flow: RetellFlow): { nodes: Node[]; edges: Edge[] } {
-  const nodes: Node[] = flow.nodes.map(n => ({
-    id: n.id,
-    type: 'retellNode',
-    position: { x: n.display_position.x, y: n.display_position.y },
-    data: { retellNode: n },
-  }));
-
-  const edges: Edge[] = [];
-  for (const n of flow.nodes) {
-    const outEdges = [...(n.edges ?? []), ...(n.edge ? [n.edge] : [])];
-    for (const e of outEdges) {
-      edges.push({
-        id: e.id,
-        source: n.id,
-        target: e.destination_node_id,
-        label: e.transition_condition?.prompt
-          ? e.transition_condition.prompt.slice(0, 40)
-          : undefined,
-        type: 'default',
-      });
-    }
-  }
-  return { nodes, edges };
-}
-
-function reactFlowToRetellNodes(rfNodes: Node[], rfEdges: Edge[], originalNodes: RetellNode[]): RetellNode[] {
-  const origMap = new Map(originalNodes.map(n => [n.id, n]));
-
-  return rfNodes.map(rfNode => {
-    const orig = origMap.get(rfNode.id) ?? rfNode.data.retellNode as RetellNode;
-    const outEdges = rfEdges
-      .filter(e => e.source === rfNode.id)
-      .map(e => ({
-        id: e.id,
-        destination_node_id: e.target,
-        transition_condition: orig.edges?.find(oe => oe.id === e.id)?.transition_condition
-          ?? orig.edge?.transition_condition
-          ?? { type: 'prompt', prompt: '' },
-      }));
-
-    const updated: RetellNode = {
-      ...orig,
-      display_position: { x: Math.round(rfNode.position.x), y: Math.round(rfNode.position.y) },
-    };
-
-    if (updated.type === 'end') {
-      delete (updated as any).edges;
-      delete (updated as any).edge;
-    } else if (outEdges.length === 1 && orig.edge !== undefined) {
-      updated.edge = outEdges[0];
-      delete updated.edges;
-    } else {
-      updated.edges = outEdges;
-      delete updated.edge;
-    }
-
-    return updated;
-  });
-}
-
-const RetellNodeUI = ({ data, selected }: NodeProps) => {
-  const node = data.retellNode as RetellNode;
-  const isStart = false; // We could pass this in data if needed
-
-  return (
-    <div className={`min-w-[200px] bg-slate-900 border-2 rounded-xl p-4 shadow-2xl transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/20' : 'border-slate-800'}`}>
-      <Handle type="target" position={Position.Top} className="!bg-slate-700 !border-slate-900" />
-      
-      <div className="flex items-center gap-3 mb-3">
-        <div className={`p-2 rounded-lg ${
-          node.type === 'conversation' ? 'bg-sky-500/10 text-sky-400' :
-          node.type === 'transfer_call' ? 'bg-emerald-500/10 text-emerald-400' :
-          'bg-rose-500/10 text-rose-400'
-        }`}>
-          {node.type === 'conversation' && <Phone size={14} />}
-          {node.type === 'transfer_call' && <Share2 size={14} />}
-          {node.type === 'end' && <LogOut size={14} />}
-        </div>
-        <div>
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">{node.type}</p>
-          <p className="text-sm font-bold text-white">{node.name}</p>
-        </div>
-      </div>
-
-      {node.instruction && (
-        <p className="text-[10px] text-slate-400 line-clamp-2 italic bg-slate-800/50 p-2 rounded border border-slate-700/50">
-          {node.instruction.text}
-        </p>
-      )}
-
-      <Handle type="source" position={Position.Bottom} className="!bg-slate-700 !border-slate-900" />
+// Custom Node Components
+export const ConversationNodeCard = ({ data }: { data: RetellNode }) => (
+  <div className="w-64 bg-slate-800 border border-slate-700 rounded-lg p-3 shadow-xl">
+    <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-slate-500" />
+    <div className="mb-2">
+      <h4 className="font-medium text-slate-100 text-sm truncate">{data.name}</h4>
+      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Conversation</p>
     </div>
-  );
-};
+    <div className="bg-slate-900/50 rounded p-2 border border-slate-700/50">
+      <p className="text-xs text-slate-400 line-clamp-2">
+        {data.instruction?.text || 'No instructions set'}
+      </p>
+    </div>
+    <Handle type="source" position={Position.Bottom} className="w-2 h-2 !bg-slate-500" />
+  </div>
+);
 
-const nodeTypes: NodeTypes = {
-  retellNode: RetellNodeUI,
+export const TransferCallNodeCard = ({ data }: { data: RetellNode }) => (
+  <div className="w-64 bg-indigo-950 border border-indigo-900 rounded-lg p-3 shadow-xl">
+    <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-indigo-500" />
+    <div className="mb-2">
+      <h4 className="font-medium text-slate-100 text-sm truncate">{data.name}</h4>
+      <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider">Transfer Call</p>
+    </div>
+    <div className="bg-indigo-900/30 rounded p-2 border border-indigo-800/50">
+      <p className="text-xs text-slate-300">
+        To: {data.transfer_destination?.number || 'No number'}
+      </p>
+    </div>
+    <Handle type="source" position={Position.Bottom} className="w-2 h-2 !bg-indigo-500" />
+  </div>
+);
+
+export const EndNodeCard = ({ data }: { data: RetellNode }) => (
+  <div className="w-64 bg-rose-950 border border-rose-900 rounded-lg p-3 shadow-xl">
+    <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-rose-500" />
+    <div className="mb-2">
+      <h4 className="font-medium text-slate-100 text-sm truncate">{data.name}</h4>
+      <p className="text-[10px] text-rose-400 font-bold uppercase tracking-wider">End Call</p>
+    </div>
+    <div className="bg-rose-900/30 rounded p-2 border border-rose-800/50">
+      <p className="text-xs text-slate-400">End Call</p>
+    </div>
+  </div>
+);
+
+const nodeTypes = {
+  conversation: ConversationNodeCard,
+  transfer_call: TransferCallNodeCard,
+  end: EndNodeCard,
 };
 
 export default function RetellFlowEditor() {
-  const { id: campaignId, agentId } = useParams();
+  const { campaignId, agentId } = useParams<{ campaignId: string; agentId: string }>();
   const navigate = useNavigate();
   const toast = useToast();
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-  const [originalFlow, setOriginalFlow] = useState<RetellFlow | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [flowData, setFlowData] = useState<RetellFlowResponse | null>(null);
+  const [selectedNode, setSelectedNode] = useState<RetellNode | null>(null);
   const [saving, setSaving] = useState(false);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+
+  const fetchFlow = useCallback(async () => {
+    try {
+      const resp = await api.get<RetellFlowResponse>(`/accounts/voice/${agentId}/flow`);
+      setFlowData(resp.data);
+      
+      const rfNodes: Node[] = resp.data.nodes.map((n) => ({
+        id: n.id,
+        type: n.type,
+        position: n.display_position,
+        data: { ...n },
+      }));
+
+      const rfEdges: Edge[] = [];
+      resp.data.nodes.forEach((n) => {
+        const outgoing = [...(n.edges ?? []), ...(n.edge ? [n.edge] : [])];
+        outgoing.forEach((e) => {
+          rfEdges.push({
+            id: e.id,
+            source: n.id,
+            target: e.destination_node_id,
+            label: e.transition_condition?.prompt?.slice(0, 40) ?? '',
+            type: 'default',
+          });
+        });
+      });
+
+      setNodes(rfNodes);
+      setEdges(rfEdges);
+    } catch (err) {
+      toast.error('Failed to load flow');
+    }
+  }, [agentId, setNodes, setEdges, toast]);
 
   useEffect(() => {
-    if (!agentId) return;
-    api.get(`/accounts/voice/${agentId}/flow`)
-      .then(r => {
-        setOriginalFlow(r.data);
-        const { nodes: rfNodes, edges: rfEdges } = retellFlowToReactFlow(r.data);
-        setNodes(rfNodes);
-        setEdges(rfEdges);
-      })
-      .catch(() => toast.error('Failed to load conversation flow'))
-      .finally(() => setLoading(false));
-  }, [agentId, toast, setNodes, setEdges]);
+    fetchFlow();
+  }, [fetchFlow]);
 
-  const onConnect = useCallback((params: Connection) => {
-    setEdges((eds) => addEdge(params, eds));
-  }, [setEdges]);
+  const onNodeClick = (_: any, node: Node) => {
+    setSelectedNode(node.data as RetellNode);
+  };
 
-  const onSave = async () => {
-    if (!originalFlow || !agentId) return;
+  const handlePublish = async () => {
+    if (!flowData) return;
     setSaving(true);
     try {
-      const updatedNodes = reactFlowToRetellNodes(nodes, edges, originalFlow.nodes);
-      const payload = {
-        ...originalFlow,
-        nodes: updatedNodes,
-      };
-      await api.patch(`/accounts/voice/${agentId}/flow`, payload);
-      toast.success('Flow published to Retell');
+      // Re-construct the Retell nodes from ReactFlow nodes and edges
+      const updatedRetellNodes: RetellNode[] = nodes.map((rn) => {
+        const data = rn.data as RetellNode;
+        const nodeEdges = edges.filter((e) => e.source === rn.id);
+        
+        const retellEdges: RetellEdge[] = nodeEdges.map((e) => {
+          // Find if this edge existed in original data to preserve its transition_condition if not edited
+          // For simplicity, we assume the label is the prompt if edited in the panel
+          // But actually the panel should update the data object in nodes.
+          return {
+            id: e.id,
+            destination_node_id: e.target,
+            transition_condition: (data.edges?.find(oe => oe.id === e.id) || data.edge)?.transition_condition ?? { type: 'prompt', prompt: e.label as string || '' }
+          };
+        });
+
+        const updatedNode: RetellNode = {
+          ...data,
+          display_position: { x: Math.round(rn.position.x), y: Math.round(rn.position.y) },
+        };
+
+        if (updatedNode.type === 'conversation') {
+          updatedNode.edges = retellEdges;
+          delete updatedNode.edge;
+        } else if (updatedNode.type === 'transfer_call') {
+          updatedNode.edge = retellEdges[0];
+          delete updatedNode.edges;
+        } else {
+          delete updatedNode.edges;
+          delete updatedNode.edge;
+        }
+
+        return updatedNode;
+      });
+
+      await api.patch(`/accounts/voice/${agentId}/flow`, {
+        ...flowData,
+        nodes: updatedRetellNodes,
+      });
+      toast.success('Published successfully');
     } catch (err) {
-      toast.error('Failed to save flow');
+      toast.error('Failed to publish');
     } finally {
       setSaving(false);
     }
   };
 
-  if (loading) return (
-    <div className="h-screen w-screen bg-slate-950 flex items-center justify-center">
-      <div className="text-center">
-        <div className="h-12 w-12 border-4 border-sky-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-        <p className="text-slate-400 font-medium">Syncing architecture...</p>
-      </div>
-    </div>
-  );
-
-  const selectedNode = nodes.find(n => n.id === selectedNodeId)?.data.retellNode as RetellNode | undefined;
+  const updateSelectedNode = (updates: Partial<RetellNode>) => {
+    if (!selectedNode) return;
+    const newNodeData = { ...selectedNode, ...updates };
+    setSelectedNode(newNodeData);
+    setNodes((nds) =>
+      nds.map((n) => (n.id === selectedNode.id ? { ...n, data: newNodeData } : n))
+    );
+  };
 
   return (
-    <div className="h-screen w-screen bg-slate-950 flex flex-col overflow-hidden">
-      <header className="h-16 border-b border-slate-800 bg-slate-900/50 backdrop-blur-xl flex items-center justify-between px-6 z-10">
+    <div className="flex flex-col h-screen bg-slate-950 text-slate-200">
+      <header className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900">
         <div className="flex items-center gap-4">
           <button 
-            onClick={() => navigate(`/campaigns/${campaignId}?tab=sequence`)}
-            className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors"
+            onClick={() => navigate(-1)}
+            className="flex items-center gap-1 text-slate-400 hover:text-slate-200 transition-colors text-sm font-medium"
           >
-            <ArrowLeft size={20} />
+            <ArrowLeft size={18} /> Back
           </button>
-          <div>
-            <h1 className="text-sm font-black uppercase tracking-widest text-white">Retell Flow Editor</h1>
-            <p className="text-[10px] text-slate-500 font-bold">AGENT ID: {agentId}</p>
-          </div>
+          <div className="h-4 w-px bg-slate-700" />
+          <h1 className="text-sm font-bold text-slate-100">Voice Flow Editor</h1>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onSave}
-            disabled={saving}
-            className="flex items-center gap-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-sky-900/20"
-          >
-            <Save size={16} />
-            {saving ? 'Publishing...' : 'Publish Changes'}
-          </button>
-        </div>
+        <button
+          onClick={handlePublish}
+          disabled={saving}
+          className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm px-4 py-2 rounded-lg font-bold transition-all"
+        >
+          {saving ? 'Publishing...' : 'Publish to Retell'}
+        </button>
       </header>
 
-      <div className="flex-1 relative">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          nodeTypes={nodeTypes}
-          onNodeClick={(_, n) => setSelectedNodeId(n.id)}
-          onPaneClick={() => setSelectedNodeId(null)}
-          fitView
-          colorMode="dark"
-        >
-          <Background color="#1e293b" gap={20} />
-          <Controls />
-        </ReactFlow>
+      <div className="flex flex-1 overflow-hidden">
+        <div className="flex-1 relative">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            nodeTypes={nodeTypes}
+            onNodeClick={onNodeClick}
+            fitView
+            className="bg-slate-950"
+          >
+            <Background color="#334155" gap={20} />
+            <Controls />
+            <MiniMap 
+              nodeColor={(n) => {
+                if (n.type === 'end') return '#9f1239';
+                if (n.type === 'transfer_call') return '#312e81';
+                return '#334155';
+              }}
+              style={{ backgroundColor: '#020617' }}
+            />
+          </ReactFlow>
+        </div>
 
         {selectedNode && (
-          <div className="absolute top-6 right-6 w-80 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 z-10 max-h-[calc(100%-48px)] overflow-auto">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xs font-black uppercase tracking-widest text-white">Node Properties</h3>
-              <button onClick={() => setSelectedNodeId(null)} className="text-slate-500 hover:text-white"><X size={18} /></button>
+          <aside className="w-80 border-l border-slate-800 bg-slate-900 p-4 overflow-y-auto flex flex-col gap-6 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-slate-100 text-xs uppercase tracking-widest">Node Settings</h3>
+              <button onClick={() => setSelectedNode(null)} className="text-slate-500 hover:text-slate-300 transition-colors">
+                <X size={20} />
+              </button>
             </div>
 
-            <div className="space-y-6">
+            <div className="space-y-4">
               <div>
-                <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">Node Name</label>
-                <input 
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500/50"
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1.5 block">Name</label>
+                <input
                   value={selectedNode.name}
-                  onChange={e => {
-                    const val = e.target.value;
-                    setNodes(nds => nds.map(n => n.id === selectedNode.id ? { ...n, data: { ...n.data as any, retellNode: { ...(n.data as any).retellNode, name: val } } } : n));
-                  }}
+                  onChange={(e) => updateSelectedNode({ name: e.target.value })}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500/50"
                 />
               </div>
 
-              {selectedNode.instruction && (
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1.5 block">Instructions</label>
+                <textarea
+                  value={selectedNode.instruction?.text || ''}
+                  onChange={(e) => updateSelectedNode({ instruction: { type: 'text', text: e.target.value } })}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500/50 min-h-[120px] resize-none"
+                />
+              </div>
+
+              {selectedNode.type === 'transfer_call' && (
                 <div>
-                  <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">Instructions</label>
-                  <textarea 
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500/50 min-h-[150px]"
-                    value={selectedNode.instruction.text}
-                    onChange={e => {
-                      const val = e.target.value;
-                      setNodes(nds => nds.map(n => n.id === selectedNode.id ? { ...n, data: { ...n.data as any, retellNode: { ...(n.data as any).retellNode, instruction: { ...(n.data as any).retellNode.instruction, text: val } } } } : n));
-                    }}
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1.5 block">Phone Number</label>
+                  <input
+                    value={selectedNode.transfer_destination?.number || ''}
+                    onChange={(e) => updateSelectedNode({ transfer_destination: { type: 'number', number: e.target.value } })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500/50"
                   />
                 </div>
               )}
 
-              {selectedNode.type === 'transfer_call' && selectedNode.transfer_destination && (
-                <div>
-                  <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">Transfer Number</label>
-                  <input 
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500/50"
-                    value={selectedNode.transfer_destination.number}
-                    onChange={e => {
-                      const val = e.target.value;
-                      setNodes(nds => nds.map(n => n.id === selectedNode.id ? { ...n, data: { ...n.data as any, retellNode: { ...(n.data as any).retellNode, transfer_destination: { ...(n.data as any).retellNode.transfer_destination, number: val } } } } : n));
-                    }}
-                  />
+              {selectedNode.type === 'conversation' && (
+                <div className="space-y-4 pt-4 border-t border-slate-800">
+                  <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500">Outgoing Edges</h4>
+                  {(selectedNode.edges || []).map((edge, idx) => (
+                    <div key={edge.id} className="p-3 bg-slate-800/50 rounded-lg border border-slate-700/50 space-y-3">
+                      <div>
+                        <label className="text-[9px] font-bold uppercase text-slate-600 mb-1 block">Condition</label>
+                        <textarea
+                          value={edge.transition_condition?.prompt || ''}
+                          onChange={(e) => {
+                            const newEdges = [...(selectedNode.edges || [])];
+                            newEdges[idx] = { ...edge, transition_condition: { type: 'prompt', prompt: e.target.value } };
+                            updateSelectedNode({ edges: newEdges });
+                          }}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-md px-2 py-1.5 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-bold uppercase text-slate-600 mb-1 block">Destination</label>
+                        <select
+                          value={edge.destination_node_id}
+                          onChange={(e) => {
+                            const newEdges = [...(selectedNode.edges || [])];
+                            newEdges[idx] = { ...edge, destination_node_id: e.target.value };
+                            updateSelectedNode({ edges: newEdges });
+                            // Also update ReactFlow edge target
+                            setEdges((eds) => eds.map((re) => re.id === edge.id ? { ...re, target: e.target.value } : re));
+                          }}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-md px-2 py-1.5 text-xs text-slate-300 focus:outline-none"
+                        >
+                          {flowData?.nodes.map((n) => (
+                            <option key={n.id} value={n.id}>{n.name} ({n.id.slice(0, 4)})</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
-          </div>
+          </aside>
         )}
       </div>
     </div>

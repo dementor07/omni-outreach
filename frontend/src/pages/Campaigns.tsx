@@ -661,11 +661,6 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
     queryKey: ['accounts', 'voice'],
     queryFn: async () => (await api.get<VoiceAgent[]>('/accounts/voice')).data,
   })
-  const retellFlowsQuery = useQuery({
-    queryKey: ['accounts', 'voice-flows'],
-    queryFn: async () => (await api.get<any[]>('/accounts/voice/flows')).data,
-    enabled: !!node && node.type === 'action_voice' && ((node.data as any).mode === 'flow'),
-  })
 
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
@@ -791,24 +786,28 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
             </div>
             
             {mode === 'simple' && selectedVoiceAgentId && (
-              <div className="space-y-3 mt-4">
+              <div className="space-y-4 mt-6">
                 {promptLoading ? (
-                  <p className="text-slate-400 text-sm">Loading prompt...</p>
+                  <div className="space-y-3 animate-pulse">
+                    <div className="h-4 bg-slate-100 rounded w-1/4" />
+                    <div className="h-10 bg-slate-50 rounded" />
+                    <div className="h-4 bg-slate-100 rounded w-1/4" />
+                    <div className="h-32 bg-slate-50 rounded" />
+                  </div>
                 ) : retellPrompt ? (
                   <>
                     <div>
-                      <label className="block text-xs font-medium text-slate-300 mb-1">Begin Message</label>
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Begin Message</label>
                       <input
-                        className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                        className={inputClassName}
                         value={retellPrompt.begin_message}
                         onChange={e => setRetellPrompt(p => p ? { ...p, begin_message: e.target.value } : p)}
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-300 mb-1">System Prompt</label>
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">System Prompt</label>
                       <textarea
-                        className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-sky-500 resize-y"
-                        style={{ minHeight: '200px' }}
+                        className={`${inputClassName} min-h-[200px] resize-none`}
                         value={retellPrompt.general_prompt}
                         onChange={e => setRetellPrompt(p => p ? { ...p, general_prompt: e.target.value } : p)}
                       />
@@ -830,7 +829,7 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
                           setPromptSaving(false);
                         }
                       }}
-                      className="w-full bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-sm font-medium py-2 rounded-md transition-colors"
+                      className="w-full btn-tactile bg-sky-500 py-3 text-[10px] font-black uppercase tracking-widest text-white hover:bg-sky-600 disabled:opacity-50"
                     >
                       {promptSaving ? 'Saving...' : 'Save Prompt'}
                     </button>
@@ -840,16 +839,15 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
             )}
 
             {mode === 'flow' && selectedVoiceAgentId && (
-              <div className="mt-4 space-y-3">
+              <div className="mt-6 space-y-4">
                 <button
                   onClick={() => navigate(`/campaigns/${campaignId}/voice-flow/${selectedVoiceAgentId}`)}
-                  className="w-full flex items-center justify-between bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 transition-colors"
+                  className="bg-sky-600 hover:bg-sky-500 text-white text-sm px-3 py-3 rounded-xl w-full font-bold transition-all shadow-sm flex items-center justify-center gap-2"
                 >
-                  <span>Open Flow Editor</span>
-                  <span className="text-slate-400">→</span>
+                  Open Flow Editor <ChevronRight size={16} />
                 </button>
                 {flowMeta && (
-                  <p className="text-xs text-slate-500 text-center">
+                  <p className="text-[10px] font-bold text-slate-400 text-center uppercase tracking-widest">
                     {flowMeta.nodeCount} nodes · {flowMeta.edgeCount} edges
                   </p>
                 )}
