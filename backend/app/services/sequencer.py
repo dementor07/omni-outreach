@@ -4,20 +4,38 @@ from app.db import execute, fetch_all, fetch_one
 
 log = logging.getLogger(__name__)
 
+async def schedule_new_lead(lead_id: str) -> None:
+    """Entry point: Inject a freshly scraped lead into the DAG from trigger_start."""
+    lead = await fetch_one(
+        "SELECT id, campaign_id FROM leads WHERE id=$1", lead_id
+    )
+    if not lead:
+        return
+
+    start_node = await fetch_one(
+        "SELECT id FROM sequence_nodes WHERE campaign_id=$1 AND node_type='trigger_start' LIMIT 1",
+        lead["campaign_id"],
+    )
+    if not start_node:
+        log.warning(f"[sequencer] No trigger_start for campaign {lead['campaign_id']}")
+        return
+
+    log.info(f"[sequencer] Injecting new lead {lead_id} into DAG")
+    await queue_next_nodes(lead_id, start_node["id"])
+
+
 async def schedule_sequence(lead_id: str) -> None:
-    """Entry point: Start the sequence for a lead (usually after acceptance)."""
+    """Entry point: Resume the sequence for a lead after invite acceptance."""
     lead = await fetch_one(
         "SELECT id, campaign_id, accepted_at FROM leads WHERE id=$1", lead_id
     )
     if not lead or not lead["accepted_at"]:
         return
 
-    # Find trigger_start node
     start_node = await fetch_one(
         "SELECT id FROM sequence_nodes WHERE campaign_id=$1 AND node_type='trigger_start' LIMIT 1",
-        lead["campaign_id"]
+        lead["campaign_id"],
     )
-    
     if not start_node:
         log.warning(f"[sequencer] No trigger_start for campaign {lead['campaign_id']}")
         return
