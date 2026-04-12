@@ -1,28 +1,17 @@
-The closing brace has inconsistent indentation (`  }` instead of `}`) but TypeScript compiled clean so it's cosmetic only.
+All five fixes are correctly implemented. Here's the review:
 
 ---
 
-**Review**
+**Fix A (unused `useMemo`):** Correctly removed from both `RetellFlowEditor.tsx` and `Campaigns.tsx`. `ConnectionLineType` in `Campaigns.tsx` is used, so it was correctly left alone.
 
-**1. Did Gemini implement the goal correctly?**
+**Fix B (dead code in `onConnect`):** The `setNodes` block that was mirroring edge data into `n.data.edges` is cleanly removed. Dependency array updated from `[setEdges, setNodes]` to `[setEdges]`. Correct — ReactFlow manages edges independently; storing them in node data was redundant and error-prone.
 
-Partially. The goal was to build the Retell voice node editor with Standard mode showing editable `begin_message` + `general_prompt` in `ConfigSidebar`, and Nested Flow mode opening a full ReactFlow sub-canvas at `/campaigns/:id/voice-flow/:agentId`. Looking at the git diff, Gemini only did round 6 polish/UX fixes — clearing stale state on agent switch, inline error for agent-type mismatch, refreshing flow count on navigation back, and removing an unused import. The core feature (the full sub-canvas route) was already built in prior rounds.
+**Fix C (forbidden fields in PATCH body):** Changed from `...flow` spread (which would include read-only fields) to explicit `{ global_prompt, nodes, start_node_id: flow.start_node_id }`. The `if (!flow) return` guard at line 478 means `flow.start_node_id` is safe.
 
-**2. Did it break or remove anything?**
+**Fix D (backend allow-list):** Dictionary comprehension filters to only `["global_prompt", "nodes", "start_node_id"]` before forwarding to Retell API. Correct and defensive.
 
-No regressions. `ConnectionLineType` removal is safe — it was unused.
+**Fix E (stale prompt on agent switch):** `setAgentPrompt(null)` is already at line 679 (from prior round), and `toast` was correctly removed from the `useEffect` dependency array — `toast` from `react-hot-toast` is stable but was causing unnecessary re-triggers.
 
-**3. TypeScript errors?**
+**No issues found.** All changes are surgical and correct.
 
-None — `tsc --noEmit` passes clean.
-
-**4. What is missing or wrong?**
-
-- **Minor style issue**: `RetellFlowEditor.tsx` line 27 — closing `}` of the import block is indented with 2 spaces (`  }`) instead of flush left. Cosmetically wrong, harmless.
-- **`location.key` dependency** is used to refresh `flowMeta` when navigating back from the sub-canvas. This is a valid trick but fragile — `location.key` changes on *every* navigation, not just back-from-flow-editor. The effect fires more than needed. Low risk in practice.
-- **`promptError` doesn't reset** when `mode` changes (e.g., switching from standard → flow). The dependency array is `[selectedVoiceAgentId, mode, toast]`, so it does reset when mode changes. Actually this is fine — the `setPromptError(null)` is at the top of the effect.
-- **Missing**: Gemini's commit message says "polish retell voice node editor and fix ux bugs" — that's accurate for round 6. Nothing functionally missing relative to this round's task spec.
-
-**5. Verdict: APPROVE**
-
-All round 6 UX polish changes are correctly implemented and verified. The cosmetic indentation issue in the import block is trivial. No regressions, no TypeScript errors, behavior matches the spec.
+**VERDICT: APPROVE**
