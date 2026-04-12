@@ -4,15 +4,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.db import init_pool, close_pool
+from app.db import init_pool, close_pool, init_redis, close_redis
 from app.routers import auth, campaigns, leads, sequences, templates, accounts, queue, job_search, settings as settings_router, overview, webhooks
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_pool(settings.get_asyncpg_dsn())
+    await init_redis("redis://redis:6379")
     yield
     await close_pool()
+    await close_redis()
 
 
 app = FastAPI(title="Omni Outreach", version="0.1.0", lifespan=lifespan)

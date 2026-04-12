@@ -1,0 +1,99 @@
+import json
+import logging
+from redis import asyncio as aioredis
+from redis.exceptions import ResponseError
+
+from app.db import execute, fetch_one
+from app.services import sequencer
+from app.config import settings
+
+log = logging.getLogger(__name__)
+
+STREAM_NAME = "omni_inbound_events"
+GROUP_NAME = "event_router_group"
+CONSUMER_NAME = "worker_1"
+
+async def _process_unipile_payload(payload: dict) -> None:
+    event_type = payload.get("event")
+    if event_type != "message.received":
+        return
+
+    body = payload.get("body", {})
+    sender = body.get("sender", {})
+    
+    if sender.get("is_me"):
+        log.info("[stream_processor] Skipping message sent by self.")
+        return
+
+    chat_id = body.get("chat_id")
+    if not chat_id:
+        return
+
+    # In a real batching scenario we might process multiple messages for different leads at once
+    lead = await fetch_one("SELECT id, campaign_id, status FROM leads WHERE chat_id = $1", chat_id)
+    if not lead:
+        log.debug(f"[stream_processor] Lead not found for chat_id {chat_id}")
+        return
+
+    log.info(f"[stream_processor] Received reply for lead {lead['id']} on channel {body.get('channel')}")
+    
+    # Update lead state
+    await execute(
+        "UPDATE leads SET replied_at = NOW(), status = 'replied' WHERE id = $1",
+        lead["id"]
+    )
+    
+    # Log inbound message
+    await execute(
+        """
+        INSERT INTO inbound_messages (lead_id, campaign_id, channel, body, raw)
+        VALUES ($1, $2, $3, $4, $5)
+        """,
+        lead["id"], lead["campaign_id"], body.get("channel"), 
+        body.get("text") or body.get("body"), payload
+    )
+    
+    # Evaluate sequence logic
+    await sequencer.evaluate_conditions(str(lead["id"]))
+
+
+async def process_stream_events(ctx: dict) -> None:
+    """Cron job to consume events from the Redis stream."""
+    redis = aioredis.from_url("redis://redis:6379", decode_responses=True)
+    
+    # Ensure consumer group exists
+    try:
+        await redis.xgroup_create(STREAM_NAME, GROUP_NAME, id="0", mkstream=True)
+    except ResponseError as e:
+        if "BUSYGROUP" not in str(e):
+            log.error(f"[stream_processor] Error creating consumer group: {e}")
+
+    # Read messages
+    try:
+        # > means messages never delivered to other consumers in this group
+        # block=0 means don't block
+        streams = await redis.xreadgroup(
+            GROUP_NAME, CONSUMER_NAME, {STREAM_NAME: ">"}, count=50, block=0
+        )
+        
+        if not streams:
+            return
+            
+        for stream, messages in streams:
+            for message_id, message_data in messages:
+                source = message_data.get("source")
+                payload_str = message_data.get("payload")
+                
+                if source == "unipile" and payload_str:
+                    try:
+                        payload = json.loads(payload_str)
+                        await _process_unipile_payload(payload)
+                        # Acknowledge the message so it's removed from pending
+                        await redis.xack(STREAM_NAME, GROUP_NAME, message_id)
+                    except Exception as ex:
+                        log.exception(f"[stream_processor] Error processing message {message_id}: {ex}")
+                        
+    except Exception as e:
+        log.exception(f"[stream_processor] Error reading from stream: {e}")
+    finally:
+        await redis.aclose()

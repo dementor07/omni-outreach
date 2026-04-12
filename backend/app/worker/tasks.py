@@ -3,6 +3,7 @@ from arq.connections import RedisSettings
 from arq.cron import cron
 
 from app.services import dispatcher
+from app.worker.stream_processor import process_stream_events
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ class WorkerSettings:
     cron_jobs = [
         cron(dispatch_queue, second={0, 30}),
         cron(check_acceptances, minute=set(range(0, 60, 5))),
+        cron(process_stream_events, second=set(range(0, 60, 5))),
     ]
     max_jobs = 1
     job_timeout = 300
