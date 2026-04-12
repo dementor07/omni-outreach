@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState, useCallback, useMemo } from 'react'
+import { FormEvent, useEffect, useState, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { Link, useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom'
@@ -692,7 +692,7 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
         }
       })
       .finally(() => setPromptLoading(false));
-  }, [selectedVoiceAgentId, mode, toast]);
+  }, [selectedVoiceAgentId, mode]);
 
   useEffect(() => {
     if (mode !== 'flow' || !selectedVoiceAgentId) return;

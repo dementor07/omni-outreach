@@ -255,11 +255,12 @@ async def update_voice_agent_flow(agent_id: str, body: dict, user_id: str = Depe
         raise HTTPException(status_code=400, detail="Agent is not a conversation-flow agent")
     
     flow_id = engine["conversation_flow_id"]
+    payload = {k: v for k, v in body.items() if k in ["global_prompt", "nodes", "start_node_id"]}
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.patch(
             f"https://api.retellai.com/update-conversation-flow/{flow_id}",
             headers={"Authorization": f"Bearer {RETELL_API_KEY}"},
-            json=body,
+            json=payload,
         )
         if not resp.is_success:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)

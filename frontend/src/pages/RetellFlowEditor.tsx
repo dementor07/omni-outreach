@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ReactFlow,
@@ -470,22 +470,8 @@ export default function RetellFlowEditor() {
       setEdges((eds) =>
         addEdge({ ...params, id: newRetellEdge.id, data: newRetellEdge, label: '' }, eds)
       );
-      setNodes((nds) =>
-        nds.map((n) => {
-          if (n.id === params.source && n.data.type === 'conversation') {
-            return {
-              ...n,
-              data: {
-                ...n.data,
-                edges: [...(n.data.edges ?? []), newRetellEdge],
-              },
-            };
-          }
-          return n;
-        })
-      );
     },
-    [setEdges, setNodes]
+    [setEdges]
   );
 
   const handlePublish = async () => {
@@ -494,9 +480,9 @@ export default function RetellFlowEditor() {
     try {
       const updatedNodes = flowToRetellNodes(nodes, edges);
       await api.patch(`/accounts/voice/${agentId}/flow`, {
-        ...flow,
         global_prompt: globalPrompt,
-        nodes: updatedNodes
+        nodes: updatedNodes,
+        start_node_id: flow.start_node_id
       });
       toast.success('Flow published to Retell');
     } catch {
