@@ -4,14 +4,16 @@ import {
   ReactFlow,
   Node,
   Edge,
+  Connection,
   useNodesState,
   useEdgesState,
+  addEdge,
   Background,
   Controls,
   MiniMap,
+  Panel,
   Handle,
   Position,
-  NodeProps,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { api } from '../api/client';
@@ -100,17 +102,20 @@ export default function RetellFlowEditor() {
   const navigate = useNavigate();
   const toast = useToast();
 
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [flowData, setFlowData] = useState<RetellFlowResponse | null>(null);
   const [selectedNode, setSelectedNode] = useState<RetellNode | null>(null);
   const [saving, setSaving] = useState(false);
+  const [globalPrompt, setGlobalPrompt] = useState('');
+  const [globalPromptSaving, setGlobalPromptSaving] = useState(false);
 
   const fetchFlow = useCallback(async () => {
     try {
       const resp = await api.get<RetellFlowResponse>(`/accounts/voice/${agentId}/flow`);
       setFlowData(resp.data);
-      
+      setGlobalPrompt(resp.data.global_prompt ?? '');
+
       const rfNodes: Node[] = resp.data.nodes.map((n) => ({
         id: n.id,
         type: n.type,
@@ -143,8 +148,30 @@ export default function RetellFlowEditor() {
     fetchFlow();
   }, [fetchFlow]);
 
-  const onNodeClick = (_: any, node: Node) => {
-    setSelectedNode(node.data as RetellNode);
+  const onConnect = useCallback(
+    (connection: Connection) => setEdges((eds) => addEdge(connection, eds)),
+    [setEdges],
+  );
+
+  const onNodeClick = (_: React.MouseEvent, node: Node) => {
+    setSelectedNode(node.data as unknown as RetellNode);
+  };
+
+  const handleSaveGlobalPrompt = async () => {
+    if (!flowData) return;
+    setGlobalPromptSaving(true);
+    try {
+      await api.patch(`/accounts/voice/${agentId}/flow`, {
+        global_prompt: globalPrompt,
+        nodes: flowData.nodes,
+        start_node_id: flowData.start_node_id,
+      });
+      toast.success('Global prompt saved');
+    } catch {
+      toast.error('Failed to save global prompt');
+    } finally {
+      setGlobalPromptSaving(false);
+    }
   };
 
   const handlePublish = async () => {
@@ -153,13 +180,11 @@ export default function RetellFlowEditor() {
     try {
       // Re-construct the Retell nodes from ReactFlow nodes and edges
       const updatedRetellNodes: RetellNode[] = nodes.map((rn) => {
-        const data = rn.data as RetellNode;
+        const data = rn.data as unknown as RetellNode;
         const nodeEdges = edges.filter((e) => e.source === rn.id);
         
         const retellEdges: RetellEdge[] = nodeEdges.map((e) => {
           // Find if this edge existed in original data to preserve its transition_condition if not edited
-          // For simplicity, we assume the label is the prompt if edited in the panel
-          // But actually the panel should update the data object in nodes.
           return {
             id: e.id,
             destination_node_id: e.target,
@@ -236,6 +261,7 @@ export default function RetellFlowEditor() {
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
             nodeTypes={nodeTypes}
             onNodeClick={onNodeClick}
             fitView
@@ -243,7 +269,7 @@ export default function RetellFlowEditor() {
           >
             <Background color="#334155" gap={20} />
             <Controls />
-            <MiniMap 
+            <MiniMap
               nodeColor={(n) => {
                 if (n.type === 'end') return '#9f1239';
                 if (n.type === 'transfer_call') return '#312e81';
@@ -251,6 +277,24 @@ export default function RetellFlowEditor() {
               }}
               style={{ backgroundColor: '#020617' }}
             />
+            <Panel position="top-right">
+              <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 shadow-2xl w-72 flex flex-col gap-3">
+                <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Global Prompt</h4>
+                <textarea
+                  value={globalPrompt}
+                  onChange={(e) => setGlobalPrompt(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 min-h-[120px] resize-none"
+                  placeholder="System-level instructions for the entire flow..."
+                />
+                <button
+                  onClick={handleSaveGlobalPrompt}
+                  disabled={globalPromptSaving}
+                  className="w-full bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-lg transition-all"
+                >
+                  {globalPromptSaving ? 'Saving...' : 'Save Global Prompt'}
+                </button>
+              </div>
+            </Panel>
           </ReactFlow>
         </div>
 
