@@ -8,6 +8,9 @@ Last updated: 2026-04-12
 |------|---------|
 | [[system-overview]] | Stack, Docker services, directory structure |
 | [[sequence-engine]] | Graph traversal, node types, queue, parking/re-evaluation |
+| [[dispatcher]] | Queue locking, channel routing, task execution |
+| [[bridge-agent]] | Claude ↔ Gemini autonomous development loop |
+| [[llm-wiki-method]] | The Karpathy method for persistent LLM knowledge bases |
 
 ## Product
 
@@ -15,6 +18,8 @@ Last updated: 2026-04-12
 |------|---------|
 | [[canvas-editor]] | ReactFlow canvas, node palette, ConfigSidebar, serialization |
 | [[voice-node]] | Standard vs Nested Flow modes, Retell editor UX |
+| [[channels]] | Breakdown of LinkedIn, WhatsApp, Email, and Voice outreach |
+| [[campaigns]] | Campaign configurations, execution constraints, and account assignments |
 
 ## Integrations
 
@@ -29,10 +34,8 @@ Last updated: 2026-04-12
 |------|---------|
 | [[voice-node-architecture]] | Why Standard/Nested Flow toggle maps to Retell agent types |
 
-## Stubs (pages to create)
+## Competitors
 
-- `channels` — full breakdown of each outreach channel + dispatcher handler
-- `dispatcher` — how queue tasks are dequeued and sent
-- `competitors` — Instantly, Apollo, Clay, Lemlist, etc.
-- `campaigns` — campaign config, constants, account assignment
-- `bridge-agent` — the Claude↔Gemini bridge system
+| Page | Summary |
+|------|---------|
+| [[landscape]] | Analysis of Apollo, Instantly, Lemlist, Clay |

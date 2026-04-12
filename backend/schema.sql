@@ -153,8 +153,13 @@ CREATE TABLE IF NOT EXISTS leads (
     linkedin_account_id     UUID REFERENCES linkedin_accounts(id),
     chat_id                 TEXT,
     current_node_id         UUID REFERENCES sequence_nodes(id) ON DELETE SET NULL,
+    linkedin_distance       TEXT, -- FIRST_DEGREE|SECOND_DEGREE|THIRD_DEGREE
+    profile_viewed_at       TIMESTAMPTZ,
+    inmail_sent_at          TIMESTAMPTZ,
     invited_at              TIMESTAMPTZ,
     accepted_at             TIMESTAMPTZ,
+    email_opened_at         TIMESTAMPTZ,
+    link_clicked_at         TIMESTAMPTZ,
     replied_at              TIMESTAMPTZ,
     stopped_at              TIMESTAMPTZ,
     created_at              TIMESTAMPTZ DEFAULT NOW(),

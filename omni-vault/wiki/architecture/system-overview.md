@@ -8,7 +8,14 @@ updated: 2026-04-12
 
 # System Overview
 
-Omni is a multi-channel outreach automation SaaS. It sequences and sends messages across LinkedIn, WhatsApp, email, and voice — driven by a visual nodal canvas.
+Omni is a multi-channel outreach automation SaaS evolving into a programmable outbound operating system. It sequences and sends messages across LinkedIn, WhatsApp, email, and voice — driven by a visual nodal canvas functioning as an Event-Driven State Machine.
+
+## Core Abstractions
+
+- **Lead**: A stateful entity traversing the graph.
+- **Node**: A state transformer (Trigger, Action, Event/Listener, Condition, Control, Subflow).
+- **Edge**: A transition rule defining logic paths.
+- **Event**: A trigger for execution (e.g., webhook, timeout) that resumes parked leads.
 
 ## Stack
 

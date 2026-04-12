@@ -211,13 +211,20 @@ export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate
 function StepIcon({ type }: { type: NodeType }) {
   switch (type) {
     case 'action_linkedin_invite':
-    case 'action_linkedin_dm': return <Linkedin size={20} className="text-sky-500" />
+    case 'action_linkedin_dm': 
+    case 'action_linkedin_inmail':
+    case 'action_linkedin_profile_view': return <Linkedin size={20} className="text-sky-500" />
     case 'action_email': return <Mail size={20} className="text-slate-500" />
     case 'action_whatsapp': return <MessageSquare size={20} className="text-emerald-500" />
     case 'action_instagram': return <Instagram size={20} className="text-pink-500" />
     case 'action_telegram': return <Send size={20} className="text-blue-400" />
     case 'action_voice': return <Phone size={20} className="text-indigo-500" />
     case 'delay': return <Clock size={20} className="text-amber-500" />
+    case 'condition_replied':
+    case 'condition_linkedin_distance':
+    case 'event_invite_accepted':
+    case 'event_email_opened':
+    case 'event_link_clicked': return <Zap size={20} className="text-rose-500" />
     default: return <Zap size={20} />
   }
 }

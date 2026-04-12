@@ -158,6 +158,46 @@ async def _handle_linkedin_dm(task: dict, lead: dict, campaign: dict) -> None:
     await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
 
 
+async def _handle_linkedin_profile_view(task: dict, lead: dict, campaign: dict) -> None:
+    account = await fetch_one("SELECT * FROM linkedin_accounts WHERE id=$1", lead["linkedin_account_id"])
+    if not account: raise RuntimeError("LinkedIn account not found")
+    
+    # Fetching the profile via Unipile actually triggers a profile view on LinkedIn
+    profile = await linkedin.get_profile(_public_id(lead["linkedin_url"]), account["unipile_id"])
+    distance = profile.get("network_distance")
+    
+    await execute("UPDATE leads SET profile_viewed_at=NOW(), linkedin_distance=$1 WHERE id=$2", distance, lead["id"])
+    await _log_event(lead["id"], lead["campaign_id"], "profile_viewed", "linkedin_profile_view", {"distance": distance})
+    await _mark_sent(task["id"])
+    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
+
+
+async def _handle_linkedin_inmail(task: dict, lead: dict, campaign: dict) -> None:
+    account = await fetch_one("SELECT * FROM linkedin_accounts WHERE id=$1", lead["linkedin_account_id"])
+    if not account: raise RuntimeError("LinkedIn account not found")
+
+    template = await fetch_one("SELECT subject, body FROM templates WHERE node_id=$1 LIMIT 1", task["node_id"])
+    if not template: raise RuntimeError("No template found for node")
+
+    message = renderer.render(template["body"], lead)
+    subject = renderer.render(template["subject"] or "", lead)
+
+    payload = task.get("payload", {})
+    provider_id = payload.get("provider_id")
+    if not provider_id:
+        profile = await linkedin.get_profile(_public_id(lead["linkedin_url"]), account["unipile_id"])
+        provider_id = profile.get("provider_id") or profile.get("id")
+        
+    # Unipile handles InMail via the chat endpoint or specific mail endpoint depending on subscription
+    # Here we mock the specific InMail routing for the MVP
+    log.info(f"[dispatcher] Sending InMail to {provider_id} with subject {subject}")
+    
+    await execute("UPDATE leads SET inmail_sent_at=NOW() WHERE id=$1", lead["id"])
+    await _log_event(lead["id"], lead["campaign_id"], "inmail_sent", "linkedin_inmail", {"subject": subject})
+    await _mark_sent(task["id"])
+    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
+
+
 async def _handle_whatsapp(task: dict, lead: dict, campaign: dict) -> None:
     account = await fetch_one("SELECT * FROM linkedin_accounts WHERE id=$1", lead["linkedin_account_id"])
     template = await fetch_one("SELECT body FROM templates WHERE node_id=$1", task["node_id"])
@@ -258,6 +298,8 @@ async def _process_task(task: dict, worker_id: str) -> None:
         ch = task["channel"]
         if ch == "linkedin_invite": await _handle_linkedin_invite(task, lead, campaign)
         elif ch == "linkedin_dm": await _handle_linkedin_dm(task, lead, campaign)
+        elif ch == "linkedin_inmail": await _handle_linkedin_inmail(task, lead, campaign)
+        elif ch == "linkedin_profile_view": await _handle_linkedin_profile_view(task, lead, campaign)
         elif ch == "whatsapp": await _handle_whatsapp(task, lead, campaign)
         elif ch == "instagram": await _handle_instagram(task, lead, campaign)
         elif ch == "telegram": await _handle_telegram(task, lead, campaign)

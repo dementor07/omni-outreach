@@ -65,17 +65,33 @@ async def queue_next_nodes(
             new_delay = accumulated_delay + timedelta(days=delay_days)
             await queue_next_nodes(lead_id, target_id, "default", new_delay)
 
-        elif node_type == "condition_replied":
-            if lead["replied_at"]:
+        elif node_type.startswith("condition_"):
+            if node_type == "condition_replied":
+                if lead["replied_at"]:
+                    await queue_next_nodes(lead_id, target_id, "true", accumulated_delay)
+                else:
+                    await execute("UPDATE leads SET current_node_id=$1 WHERE id=$2", target_id, lead_id)
+            elif node_type == "condition_linkedin_distance":
+                if lead.get("linkedin_distance") == "FIRST_DEGREE":
+                    await queue_next_nodes(lead_id, target_id, "true", accumulated_delay)
+                else:
+                    await queue_next_nodes(lead_id, target_id, "false", accumulated_delay)
+
+        elif node_type.startswith("event_"):
+            # All events park the lead until the webhook triggers evaluation
+            if node_type == "event_invite_accepted" and lead.get("accepted_at"):
+                await queue_next_nodes(lead_id, target_id, "true", accumulated_delay)
+            elif node_type == "event_email_opened" and lead.get("email_opened_at"):
+                await queue_next_nodes(lead_id, target_id, "true", accumulated_delay)
+            elif node_type == "event_link_clicked" and lead.get("link_clicked_at"):
                 await queue_next_nodes(lead_id, target_id, "true", accumulated_delay)
             else:
-                # Park lead here; webhook will call evaluate_conditions when reply arrives
                 await execute("UPDATE leads SET current_node_id=$1 WHERE id=$2", target_id, lead_id)
 
 async def evaluate_conditions(lead_id: str) -> None:
-    """Called when lead state changes (e.g. reply received)."""
+    """Called when lead state changes (e.g. reply received, invite accepted)."""
     log.info(f"[sequencer] Re-evaluating conditions for lead {lead_id}")
-    lead = await fetch_one("SELECT id, current_node_id, replied_at FROM leads WHERE id=$1", lead_id)
+    lead = await fetch_one("SELECT * FROM leads WHERE id=$1", lead_id)
     
     if not lead:
         log.warning(f"[sequencer] Lead {lead_id} not found during evaluate_conditions")
@@ -90,14 +106,23 @@ async def evaluate_conditions(lead_id: str) -> None:
         log.warning(f"[sequencer] current_node_id {lead['current_node_id']} not found for lead {lead_id}")
         return
 
-    log.debug(f"[sequencer] Lead {lead_id} currently at node {node['node_type']} ({lead['current_node_id']})")
+    node_type = node["node_type"]
+    log.debug(f"[sequencer] Lead {lead_id} currently at node {node_type} ({lead['current_node_id']})")
 
-    if node["node_type"] == "condition_replied":
-        if lead["replied_at"]:
-            log.info(f"[sequencer] Lead {lead_id} has replied (at {lead['replied_at']}). Advancing True branch.")
-            await queue_next_nodes(lead_id, lead["current_node_id"], "true")
-            await execute("UPDATE leads SET current_node_id=NULL WHERE id=$1", lead_id)
-        else:
-            log.info(f"[sequencer] Lead {lead_id} at condition_replied but replied_at is NULL; staying parked.")
+    should_advance = False
+    
+    if node_type == "condition_replied" and lead.get("replied_at"):
+        should_advance = True
+    elif node_type == "event_invite_accepted" and lead.get("accepted_at"):
+        should_advance = True
+    elif node_type == "event_email_opened" and lead.get("email_opened_at"):
+        should_advance = True
+    elif node_type == "event_link_clicked" and lead.get("link_clicked_at"):
+        should_advance = True
+
+    if should_advance:
+        log.info(f"[sequencer] Lead {lead_id} satisfied {node_type}. Advancing True branch.")
+        await queue_next_nodes(lead_id, lead["current_node_id"], "true")
+        await execute("UPDATE leads SET current_node_id=NULL WHERE id=$1", lead_id)
     else:
-        log.debug(f"[sequencer] Lead {lead_id} is at {node['node_type']}, not a condition node; no-op.")
+        log.debug(f"[sequencer] Lead {lead_id} is at {node_type} but condition not met yet; no-op.")

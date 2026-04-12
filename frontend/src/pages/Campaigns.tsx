@@ -117,16 +117,46 @@ const defaultEdgeOptions = {
 const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNode; color: string; bg: string; border: string }[] = [
   { type: 'action_linkedin_invite', label: 'LinkedIn Invite', icon: <Linkedin size={15} />, color: 'text-sky-600',     bg: 'bg-sky-50',     border: 'border-sky-200' },
   { type: 'action_linkedin_dm',     label: 'LinkedIn DM',     icon: <Linkedin size={15} />, color: 'text-sky-500',     bg: 'bg-sky-50',     border: 'border-sky-200' },
+  { type: 'action_linkedin_inmail', label: 'LinkedIn InMail', icon: <Linkedin size={15} />, color: 'text-indigo-500',  bg: 'bg-indigo-50',  border: 'border-indigo-200' },
+  { type: 'action_linkedin_profile_view', label: 'LinkedIn View Profile', icon: <Linkedin size={15} />, color: 'text-slate-500', bg: 'bg-slate-50', border: 'border-slate-200' },
   { type: 'action_email',           label: 'Email',           icon: <Mail size={15} />,     color: 'text-slate-600',   bg: 'bg-slate-50',   border: 'border-slate-200' },
   { type: 'action_whatsapp',        label: 'WhatsApp',        icon: <MessageSquare size={15} />, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' },
   { type: 'action_instagram',       label: 'Instagram',       icon: <Instagram size={15} />, color: 'text-pink-500',   bg: 'bg-pink-50',    border: 'border-pink-200' },
   { type: 'action_telegram',        label: 'Telegram',        icon: <Send size={15} />,     color: 'text-blue-500',    bg: 'bg-blue-50',    border: 'border-blue-200' },
   { type: 'action_voice',           label: 'Voice Call',      icon: <Phone size={15} />,    color: 'text-indigo-600',  bg: 'bg-indigo-50',  border: 'border-indigo-200' },
   { type: 'condition_replied',      label: 'Branch: Reply?',  icon: <Zap size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
+  { type: 'condition_linkedin_distance', label: 'Branch: Connection Distance', icon: <Zap size={15} />, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200' },
+  { type: 'event_invite_accepted',  label: 'Event: Invite Accepted', icon: <Zap size={15} />, color: 'text-rose-500',   bg: 'bg-rose-50',   border: 'border-rose-200' },
+  { type: 'event_email_opened',     label: 'Event: Email Opened', icon: <Zap size={15} />, color: 'text-rose-500',   bg: 'bg-rose-50',   border: 'border-rose-200' },
+  { type: 'event_link_clicked',     label: 'Event: Link Clicked', icon: <Zap size={15} />, color: 'text-rose-500',   bg: 'bg-rose-50',   border: 'border-rose-200' },
   { type: 'delay',                  label: 'Wait / Delay',    icon: <Clock size={15} />,    color: 'text-slate-400',   bg: 'bg-slate-50',   border: 'border-slate-200' },
 ]
 
 // ── React Flow Node Types ──────────────────────────────────────────────────
+
+const EventNode = ({ data, selected }: NodeProps) => {
+  const nodeType = data.node_type as NodeType
+  const cfg = NODE_PALETTE.find(p => p.type === nodeType)
+  
+  return (
+    <div className={`relative min-w-[200px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-rose-200'}`}>
+      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
+      <div className="flex items-center gap-3">
+        <div className={`flex h-8 w-8 items-center justify-center rounded-lg bg-rose-50 text-rose-500`}>
+          <Zap size={14} />
+        </div>
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-rose-500/60">Listener Event</p>
+          <p className="text-xs font-bold text-slate-900">{cfg?.label ?? nodeType}</p>
+        </div>
+      </div>
+      <div className="mt-4 flex items-center justify-center border-t border-slate-50 pt-3">
+        <span className="text-[9px] font-black uppercase text-rose-500">Trigger</span>
+        <Handle type="source" position={Position.Bottom} className="!static !ml-2 !h-2 !w-2 !border-none !bg-rose-400" />
+      </div>
+    </div>
+  )
+}
 
 const ActionNode = ({ data, id, selected }: NodeProps) => {
   const nodeType = data.node_type as NodeType
@@ -238,12 +268,18 @@ const nodeTypes = {
   trigger_start: TriggerNode,
   action_linkedin_invite: ActionNode,
   action_linkedin_dm: ActionNode,
+  action_linkedin_inmail: ActionNode,
+  action_linkedin_profile_view: ActionNode,
   action_email: ActionNode,
   action_whatsapp: ActionNode,
   action_instagram: ActionNode,
   action_telegram: ActionNode,
   action_voice: ActionNode,
   condition_replied: ConditionNode,
+  condition_linkedin_distance: ConditionNode,
+  event_invite_accepted: EventNode,
+  event_email_opened: EventNode,
+  event_link_clicked: EventNode,
   delay: DelayNode,
 }
 
