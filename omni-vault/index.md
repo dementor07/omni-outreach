@@ -14,6 +14,7 @@ Last updated: 2026-04-12
 | [[bridge-agent]] | Claude ↔ Gemini autonomous development loop |
 | [[llm-wiki-method]] | The Karpathy method for persistent LLM knowledge bases |
 | [[knowledge-graphs]] | Enhancing the LLM Wiki with structural self-awareness and gap detection |
+| [[telemetry-overlay]] | Piping live Event Bus throughput directly onto ReactFlow edges |
 
 ## Product
 
@@ -39,6 +40,7 @@ Last updated: 2026-04-12
 | [[voice-node-architecture]] | Why Standard/Nested Flow toggle maps to Retell agent types |
 | [[omnichannel-logic-loops]] | How tags, split tests, and events power cross-channel routing |
 | [[lead-generation-injection]] | Apify + Serper autonomous scraping and DAG injection |
+| [[autonomous-feedback-loops]] | Closing the knowledge gaps between Retell, tags, and Lead Gen |
 
 ## Competitors
 

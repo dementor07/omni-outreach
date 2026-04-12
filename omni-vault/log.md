@@ -56,3 +56,11 @@ Updated `index.md` with these links.
 ## [2026-04-12] ingest | Knowledge Graph Integration
 
 Ingested `raw/Clippings/Supercharging LLM Wiki with Knowledge Graphs Build a Self-Evolving Research System.md`. Synthesized the concepts into `wiki/architecture/knowledge-graphs.md` to document how Network Science (via InfraNodus MCP/plugins) can be applied to the LLM Wiki to detect content gaps, reveal conceptual blind spots, and proactively guide the LLM to generate novel insights rather than just passively retrieving information. Updated `index.md`.
+
+## [2026-04-12] generate | Gap Analysis & Insight Generation
+
+Executed the Knowledge Graph workflow by extracting the vault's ontology into `infranodus/ontology.md`. 
+Discovered three major structural gaps between clusters. Generated two novel architectural blueprints to bridge them:
+- `wiki/decisions/autonomous-feedback-loops.md`: An ADR detailing how to feed Reinforcement Learning rewards back into the Apify Lead Generation pipeline, and how to grant Retell AI the `update_omni_lead_tags` tool to bridge conversational discoveries into Omni's tag-based routing logic.
+- `wiki/architecture/telemetry-overlay.md`: A blueprint for solving the Event Bus observability gap by piping live Webhook/Stream throughput directly into the ReactFlow edge styles (glowing paths, backpressure halos).
+Updated `index.md`.
