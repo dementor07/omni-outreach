@@ -374,6 +374,26 @@ export default function RetellFlowEditor() {
     }
   };
 
+  const addNode = useCallback((type: RetellNode['type']) => {
+    const id = `node-${Date.now()}`;
+    const newRetellNode: RetellNode = {
+      id,
+      type,
+      name: type === 'conversation' ? 'New Conversation' : type === 'transfer_call' ? 'Transfer Call' : 'End Call',
+      display_position: { x: 200 + Math.random() * 200, y: 200 + Math.random() * 200 },
+      instruction: { type: 'prompt', text: '' },
+      ...(type === 'conversation' ? { edges: [] } : {}),
+      ...(type === 'transfer_call' ? { transfer_destination: { type: 'predefined', number: '' } } : {}),
+    };
+    const rfNode: Node = {
+      id,
+      type,
+      position: newRetellNode.display_position,
+      data: { ...newRetellNode },
+    };
+    setNodes((nds) => [...nds, rfNode]);
+  }, [setNodes]);
+
   if (loading) {
     return (
       <div className="h-screen bg-slate-950 flex items-center justify-center">
@@ -413,6 +433,8 @@ export default function RetellFlowEditor() {
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             nodeTypes={nodeTypes}
+            edgeTypes={retellEdgeTypes}
+            defaultEdgeOptions={retellDefaultEdgeOptions}
             onNodeClick={(_, node) => setSelectedNode(node)}
             fitView
             className="bg-slate-950"
@@ -437,6 +459,32 @@ export default function RetellFlowEditor() {
                   className="w-full bg-slate-800 border-none rounded-xl px-4 py-3 text-xs text-slate-200 focus:ring-2 focus:ring-sky-500/50 outline-none min-h-[160px] resize-none leading-relaxed"
                   placeholder="Universal instructions for this agent..."
                 />
+              </div>
+            </Panel>
+            <Panel position="bottom-center">
+              <div className="flex items-center gap-2 bg-slate-900/95 border border-slate-700 rounded-xl px-3 py-2 shadow-2xl backdrop-blur">
+                <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 mr-1">Add Node</span>
+                <button
+                  onClick={() => addNode('conversation')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 hover:border-slate-500 text-slate-300 text-[10px] font-bold transition-all"
+                >
+                  <span className="w-2 h-2 rounded-full bg-slate-500 inline-block" />
+                  Conversation
+                </button>
+                <button
+                  onClick={() => addNode('transfer_call')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-950 border border-indigo-800 hover:border-indigo-600 text-indigo-300 text-[10px] font-bold transition-all"
+                >
+                  <span className="w-2 h-2 rounded-full bg-indigo-500 inline-block" />
+                  Transfer
+                </button>
+                <button
+                  onClick={() => addNode('end')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-950 border border-rose-900 hover:border-rose-700 text-rose-300 text-[10px] font-bold transition-all"
+                >
+                  <span className="w-2 h-2 rounded-full bg-rose-500 inline-block" />
+                  End Call
+                </button>
               </div>
             </Panel>
           </ReactFlow>
