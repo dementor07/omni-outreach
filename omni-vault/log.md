@@ -71,6 +71,21 @@ Last commit: af31cd7 — Redis Streams Event Bus implemented.
 Active TODO: Lead Generation Pipeline (Apify+Serper). Pending: Canvas Telemetry Overlay, Auto-Optimization Engine.
 Next session: start fresh Claude Code chat, read omni-vault/index.md first.
 
+## [2026-04-12] feat & deploy | Canvas Telemetry Overlay + Auto-Optimization Engine — HEAD 6304bd3
+
+**Telemetry Overlay:**
+- `GET /sequences/{id}/telemetry` — returns activity (sent in 60s) and backpressure (queued/locked) counts per source node_id.
+- `TelemetryEdge` component: live-colored edges (slate→sky→emerald on activity, amber dashed on backpressure), floating lead count pill.
+- Live toggle button in canvas Panel polls every 5s and syncs telemetry data into ReactFlow edge state.
+
+**Auto-Optimization Engine (Thompson Sampling):**
+- `split` node handler in sequencer: samples Beta(α,β) for each arm, routes to the winning arm, records choice in `leads.path_history JSONB`.
+- DB migration: `ALTER TABLE leads ADD COLUMN IF NOT EXISTS path_history JSONB DEFAULT '[]'` runs on backend startup.
+- `optimization.py`: cron every 10min, traces rewards (invite_accepted, reply_received, dm_sent) back through path_history, updates Beta params in `sequence_nodes.data.weights`.
+- `SplitNode` UI: shows live win-rate % per arm once the bandit has enough data.
+
+Deployed. All three items from the Active TODO list are now complete.
+
 ## [2026-04-12] fix & deploy | Lead Gen DAG injection completed — HEAD 0679d5c
 
 - Fixed syntax error in `job_search.py` (stray `...` and misplaced import).
