@@ -43,3 +43,12 @@ This ensures the LLM Wiki remains the absolute ground-truth reflection of the co
 ## [2026-04-12] document | Created ADR for Omnichannel Logic Loops
 
 Following the Karpathy "Vault First" method, created `wiki/decisions/omnichannel-logic-loops.md` to architect how tag-based routing, channel-agnostic event listeners, and A/B split nodes will be used to create robust cross-channel loops. Updated `index.md`.
+
+## [2026-04-12] document | Massive Vault Additions (Architectural Blueprints)
+
+Created four significant architectural nodes in the vault before writing code:
+- `wiki/architecture/event-bus-architecture.md`: Blueprint for Kafka/Redis Streams to handle high-throughput webhooks and prevent database locking.
+- `wiki/architecture/auto-optimization-engine.md`: Blueprint for upgrading split nodes into Multi-Armed Bandits via Reinforcement Learning.
+- `wiki/integrations/instagram-telegram-integration.md`: Spec for mapping Unipile endpoints to the stubbed IG/TG actions.
+- `wiki/decisions/lead-generation-injection.md`: ADR on creating an autonomous pipeline via Apify and Serper to feed the DAG.
+Updated `index.md` with these links.

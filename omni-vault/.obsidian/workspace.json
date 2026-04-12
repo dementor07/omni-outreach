@@ -178,6 +178,10 @@
   },
   "active": "1cccf6b5934c6ba8",
   "lastOpenFiles": [
+    "wiki/architecture/auto-optimization-engine.md",
+    "wiki/integrations/instagram-telegram-integration.md",
+    "wiki/architecture/event-bus-architecture.md",
+    "wiki/decisions/lead-generation-injection.md",
     "index.md",
     "wiki/decisions/omnichannel-logic-loops.md",
     "Untitled.canvas",
