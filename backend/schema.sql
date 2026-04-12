@@ -46,6 +46,22 @@ CREATE TABLE IF NOT EXISTS voice_agents (
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS instagram_accounts (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    unipile_id      TEXT NOT NULL UNIQUE,
+    name            TEXT NOT NULL,
+    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS telegram_accounts (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    unipile_id      TEXT NOT NULL UNIQUE,
+    name            TEXT NOT NULL,
+    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ── Campaigns ─────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS campaigns (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -147,11 +163,17 @@ CREATE TABLE IF NOT EXISTS leads (
     company_linkedin_url    TEXT,
     job_url                 TEXT,
     location                TEXT,
+    instagram_username      TEXT,
+    telegram_username       TEXT,
     source                  TEXT NOT NULL DEFAULT 'job_search', -- job_search|manual|csv
     status                  TEXT NOT NULL DEFAULT 'active',     -- active|stopped|bounced
     stop_reason             TEXT,
     linkedin_account_id     UUID REFERENCES linkedin_accounts(id),
+    instagram_account_id    UUID REFERENCES instagram_accounts(id),
+    telegram_account_id     UUID REFERENCES telegram_accounts(id),
     chat_id                 TEXT,
+    ig_chat_id              TEXT,
+    tg_chat_id              TEXT,
     current_node_id         UUID REFERENCES sequence_nodes(id) ON DELETE SET NULL,
     linkedin_distance       TEXT, -- FIRST_DEGREE|SECOND_DEGREE|THIRD_DEGREE
     tags                    TEXT[] DEFAULT ARRAY[]::TEXT[],

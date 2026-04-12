@@ -216,17 +216,82 @@ async def _handle_whatsapp(task: dict, lead: dict, campaign: dict) -> None:
 
 
 async def _handle_instagram(task: dict, lead: dict, campaign: dict) -> None:
-    raise NotImplementedError(
-        "Instagram DM not yet implemented. "
-        "Requires a Unipile account with Instagram connected and an attendee_id resolver."
-    )
+    node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
+    ig_acct_id = (node.get("data") or {}).get("instagram_account_id")
+    if not ig_acct_id:
+        raise RuntimeError("No instagram_account_id specified in node config")
+        
+    account = await fetch_one("SELECT * FROM instagram_accounts WHERE id=$1", ig_acct_id)
+    if not account: raise RuntimeError("Instagram account not found")
+
+    template = await fetch_one("SELECT body FROM templates WHERE node_id=$1 LIMIT 1", task["node_id"])
+    if not template: raise RuntimeError("No template found for node")
+
+    message = renderer.render(template["body"], lead)
+
+    if not lead.get("instagram_username"):
+        raise RuntimeError("Lead has no Instagram username")
+
+    try:
+        if not lead.get("ig_chat_id"):
+            username = lead["instagram_username"]
+            profile = await linkedin.get_profile(username, account["unipile_id"])
+            provider_id = profile.get("provider_id") or profile.get("id")
+            if not provider_id:
+                raise RuntimeError("Could not resolve Instagram provider_id from username")
+
+            data = await linkedin.start_chat_with_message(account["unipile_id"], provider_id, message)
+            await execute("UPDATE leads SET ig_chat_id=$1 WHERE id=$2", data["chat_id"], lead["id"])
+        else:
+            payload = task.get("payload", {})
+            provider_id = payload.get("provider_id", "")
+            await linkedin.send_message(lead["ig_chat_id"], message, account["unipile_id"], provider_id)
+
+        await _log_event(lead["id"], lead["campaign_id"], "dm_sent", "instagram")
+        await _mark_sent(task["id"])
+        await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
+    except linkedin.InvalidRecipientError as e:
+        log.warning(f"Instagram DM failed for lead {lead['id']}: {e}")
+        await execute("UPDATE leads SET tags = array_append(tags, 'ig_dm_failed') WHERE id=$1 AND NOT ('ig_dm_failed' = ANY(tags))", lead["id"])
+        await execute("UPDATE queue SET status='skipped', failure_reason=$1 WHERE id=$2", str(e), task["id"])
+        await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
 
 
 async def _handle_telegram(task: dict, lead: dict, campaign: dict) -> None:
-    raise NotImplementedError(
-        "Telegram not yet implemented. "
-        "Requires a Unipile account with Telegram connected and an attendee_id resolver."
-    )
+    node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
+    tg_acct_id = (node.get("data") or {}).get("telegram_account_id")
+    if not tg_acct_id:
+        raise RuntimeError("No telegram_account_id specified in node config")
+        
+    account = await fetch_one("SELECT * FROM telegram_accounts WHERE id=$1", tg_acct_id)
+    if not account: raise RuntimeError("Telegram account not found")
+
+    template = await fetch_one("SELECT body FROM templates WHERE node_id=$1 LIMIT 1", task["node_id"])
+    if not template: raise RuntimeError("No template found for node")
+
+    message = renderer.render(template["body"], lead)
+
+    identifier = lead.get("telegram_username") or lead.get("phone")
+    if not identifier:
+        raise RuntimeError("Lead has no Telegram username or phone number")
+
+    try:
+        if not lead.get("tg_chat_id"):
+            data = await linkedin.start_chat_with_message(account["unipile_id"], identifier, message)
+            await execute("UPDATE leads SET tg_chat_id=$1 WHERE id=$2", data["chat_id"], lead["id"])
+        else:
+            payload = task.get("payload", {})
+            provider_id = payload.get("provider_id", "")
+            await linkedin.send_message(lead["tg_chat_id"], message, account["unipile_id"], provider_id)
+
+        await _log_event(lead["id"], lead["campaign_id"], "dm_sent", "telegram")
+        await _mark_sent(task["id"])
+        await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
+    except linkedin.InvalidRecipientError as e:
+        log.warning(f"Telegram DM failed for lead {lead['id']}: {e}")
+        await execute("UPDATE leads SET tags = array_append(tags, 'tg_dm_failed') WHERE id=$1 AND NOT ('tg_dm_failed' = ANY(tags))", lead["id"])
+        await execute("UPDATE queue SET status='skipped', failure_reason=$1 WHERE id=$2", str(e), task["id"])
+        await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
 
 
 async def _handle_email(task: dict, lead: dict, campaign: dict) -> None:
