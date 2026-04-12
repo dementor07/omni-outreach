@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState, useCallback, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom'
 import { Plus, Save, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap, X, ChevronRight, Settings2, Trash2 } from 'lucide-react'
 import {
   ReactFlow,
@@ -649,7 +649,8 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
   const toast = useToast()
   const { id: campaignId } = useParams()
   const navigate = useNavigate()
-  
+  const location = useLocation()
+
   const templateQuery = useGetTemplate(nodeId || undefined)
   const upsertTemplate = useUpsertTemplate()
 
@@ -666,6 +667,7 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
   const [body, setBody] = useState('')
 
   const [agentPrompt, setAgentPrompt] = useState<RetellPrompt | null>(null);
+  const [promptError, setPromptError] = useState<string | null>(null);
   const [promptLoading, setPromptLoading] = useState(false);
   const [promptSaving, setPromptSaving] = useState(false);
   const [flowMeta, setFlowMeta] = useState<{ node_count: number; edge_count: number } | null>(null);
@@ -674,11 +676,21 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
   const mode = (node?.data as any)?.mode || 'standard';
 
   useEffect(() => {
+    setAgentPrompt(null);
+    setPromptError(null);
+    setPromptSaving(false);
     if (mode !== 'standard' || !selectedVoiceAgentId) return;
     setPromptLoading(true);
     api.get(`/accounts/voice/${selectedVoiceAgentId}/prompt`)
-      .then(r => setAgentPrompt(r.data))
-      .catch(() => toast.error('Failed to load agent prompt'))
+      .then(r => { setAgentPrompt(r.data); setPromptError(null); })
+      .catch((err) => {
+        const status = err?.response?.status;
+        if (status === 400) {
+          setPromptError('This agent uses Nested Flow and cannot be edited in Standard mode. Switch to Nested Flow mode above.');
+        } else {
+          toast.error('Failed to load agent prompt');
+        }
+      })
       .finally(() => setPromptLoading(false));
   }, [selectedVoiceAgentId, mode, toast]);
 
@@ -686,13 +698,12 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
     if (mode !== 'flow' || !selectedVoiceAgentId) return;
     api.get(`/accounts/voice/${selectedVoiceAgentId}/flow`)
       .then(r => {
-        const nodes = r.data.nodes ?? [];
-        const edges = nodes.flatMap((n: any) => [...(n.edges ?? []), ...(n.edge ? [n.edge] : [])]);
-        setFlowMeta({ node_count: nodes.length, edge_count: edges.length });
+        const flowNodes = r.data.nodes ?? [];
+        const flowEdges = flowNodes.flatMap((n: any) => [...(n.edges ?? []), ...(n.edge ? [n.edge] : [])]);
+        setFlowMeta({ node_count: flowNodes.length, edge_count: flowEdges.length });
       })
       .catch(() => setFlowMeta(null));
-  }, [selectedVoiceAgentId, mode]);
-
+  }, [selectedVoiceAgentId, mode, location.key]);
   useEffect(() => {
     if (templateQuery.data) {
       setSubject(templateQuery.data.subject ?? '')
@@ -793,6 +804,10 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
                     <div className="h-10 bg-slate-50 rounded" />
                     <div className="h-4 bg-slate-100 rounded w-1/4" />
                     <div className="h-32 bg-slate-50 rounded" />
+                  </div>
+                ) : promptError ? (
+                  <div className="rounded-xl bg-rose-950/40 border border-rose-800/50 p-4">
+                    <p className="text-[11px] text-rose-300 leading-relaxed">{promptError}</p>
                   </div>
                 ) : agentPrompt ? (
                   <>

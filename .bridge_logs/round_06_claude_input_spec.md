@@ -5,13 +5,10 @@ GOAL: Build the Retell voice node editor: Standard mode shows editable begin_mes
 
 EXTRA CONTEXT FROM PREVIOUS ROUNDS:
 Round 5 approved. Gemini output summary:
-I will read `frontend/src/pages/RetellFlowEditor.tsx` to understand the current implementation and locate the areas for modification.
-I will search for `type: 'text'` and `type: 'number'` in `frontend/src/pages/RetellFlowEditor.tsx` to verify if Fix 1 and Fix 2 are necessary.
-I will update the imports in `frontend/src/pages/RetellFlowEditor.tsx` to include `ReactFlowProvider`, `OnNodesChange`, `OnEdgesChange`, and `Trash2`.
-I will update the `NodeConfigPanel` component to include the `onDelete` prop and add the delete button to its header.
-I will update the `onConnect` callback in `RetellFlowEditor` to sync the source node's `data.edges` when a new connection is made.
-I will now refactor `RetellFlowEditor` by extracting the `RetellFlowInner` component, wrapping it in a `ReactFlowProvider`, and adding the `onPaneClick` handler to deselect nodes when clicking the background. I will also implement the node deletion logic within `RetellFlowInner`.
-I will update the `RetellFlowEditor` compo
+I will start by reading `frontend/src/pages/RetellFlowEditor.tsx` to understand the current implementation and locate the sections that need modification.
+I will now update the `NodeConfigPanel` component. I'll update its props interface to include the new edge-related callbacks and the `edges` state, and I'll modify the "Outgoing Edges" section to use these edges as the single source of truth, as specified in the engineering spec. I will also make sure to include `onDelete` in the props interface and usage, as it's present in the current code and its removal might be an oversight in the spec's snippets.
+I will now update the `RetellFlowInnerProps` interface and the `RetellFlowInner` component to include the new `onEdgeUpdate` and `onEdgeDestinationChange` callbacks, and I'll pass these along with the `edges` state to the `NodeConfigPanel` as required by the engineering spec.
+I will now update the `RetellFlowEditor` component by implementing the `handleEdgeUpdate` and `handleEdgeDestin
 
 [... truncated 11032 chars ...]
 

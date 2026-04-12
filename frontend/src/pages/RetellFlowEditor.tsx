@@ -21,11 +21,10 @@ import {
   getBezierPath,
   useReactFlow,
   MarkerType,
-  ConnectionLineType,
   type EdgeProps,
   type OnNodesChange,
   type OnEdgesChange,
-} from '@xyflow/react';
+  } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
