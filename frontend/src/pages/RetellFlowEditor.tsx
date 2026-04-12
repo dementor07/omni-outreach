@@ -243,7 +243,7 @@ function NodeConfigPanel({
           <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Instructions</label>
           <textarea
             value={data.instruction?.text || ''}
-            onChange={(e) => updateData({ instruction: { type: 'text', text: e.target.value } })}
+            onChange={(e) => updateData({ instruction: { type: 'prompt', text: e.target.value } })}
             className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-xs text-white focus:ring-2 focus:ring-sky-500/50 outline-none min-h-[120px] resize-none"
           />
         </div>
@@ -253,7 +253,7 @@ function NodeConfigPanel({
             <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Phone Number</label>
             <input
               value={data.transfer_destination?.number || ''}
-              onChange={(e) => updateData({ transfer_destination: { type: 'number', number: e.target.value } })}
+              onChange={(e) => updateData({ transfer_destination: { type: 'predefined', number: e.target.value } })}
               className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-xs text-white focus:ring-2 focus:ring-sky-500/50 outline-none"
             />
           </div>
@@ -330,7 +330,24 @@ export default function RetellFlowEditor() {
   }, [agentId, setNodes, setEdges, toast]);
 
   const onConnect = useCallback(
-    (params: Connection) => setEdges((eds) => addEdge(params, eds)),
+    (params: Connection) => {
+      const edgeId = `edge-${params.source}-${params.target}-${Date.now()}`;
+      const newEdge: Edge<RetellEdge> = {
+        id: edgeId,
+        source: params.source!,
+        target: params.target!,
+        sourceHandle: params.sourceHandle ?? null,
+        targetHandle: params.targetHandle ?? null,
+        type: 'custom',
+        label: '',
+        data: {
+          id: edgeId,
+          destination_node_id: params.target!,
+          transition_condition: { type: 'prompt', prompt: '' },
+        },
+      };
+      setEdges((eds) => addEdge(newEdge, eds));
+    },
     [setEdges]
   );
 
