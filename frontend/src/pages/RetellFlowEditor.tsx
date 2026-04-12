@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ReactFlow,
+  ReactFlowProvider,
   Background,
   Controls,
   MiniMap,
@@ -22,11 +23,13 @@ import {
   MarkerType,
   ConnectionLineType,
   type EdgeProps,
+  type OnNodesChange,
+  type OnEdgesChange,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
-import { ArrowLeft, X } from 'lucide-react';
+import { ArrowLeft, X, Trash2 } from 'lucide-react';
 
 type RetellEdge = {
   id: string;
@@ -207,12 +210,14 @@ function NodeConfigPanel({
   node,
   allNodes,
   onChange,
-  onClose
+  onClose,
+  onDelete
 }: {
   node: Node<RetellNode>;
   allNodes: Node<RetellNode>[];
   onChange: (updated: Node<RetellNode>) => void;
   onClose: () => void;
+  onDelete: () => void;
 }) {
   const data = node.data;
 
@@ -224,9 +229,18 @@ function NodeConfigPanel({
     <aside className="w-80 border-l border-slate-800 bg-slate-900 flex flex-col shadow-2xl">
       <div className="flex items-center justify-between p-4 border-b border-slate-800">
         <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-100">Node Settings</h3>
-        <button onClick={onClose} className="text-slate-500 hover:text-slate-300 transition-colors">
-          <X size={18} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onDelete}
+            className="text-slate-600 hover:text-rose-400 transition-colors"
+            title="Delete node"
+          >
+            <Trash2 size={15} />
+          </button>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 transition-colors">
+            <X size={18} />
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
@@ -301,6 +315,119 @@ function NodeConfigPanel({
   );
 }
 
+interface RetellFlowInnerProps {
+  nodes: Node<RetellNode>[];
+  edges: Edge<RetellEdge>[];
+  onNodesChange: OnNodesChange<Node<RetellNode>>;
+  onEdgesChange: OnEdgesChange<Edge<RetellEdge>>;
+  onConnect: (params: Connection) => void;
+  selectedNode: Node<RetellNode> | null;
+  setSelectedNode: (n: Node<RetellNode> | null) => void;
+  globalPrompt: string;
+  setGlobalPrompt: (v: string) => void;
+  handleNodeChange: (n: Node<RetellNode>) => void;
+  addNode: (type: RetellNode['type']) => void;
+}
+
+function RetellFlowInner({
+  nodes,
+  edges,
+  onNodesChange,
+  onEdgesChange,
+  onConnect,
+  selectedNode,
+  setSelectedNode,
+  globalPrompt,
+  setGlobalPrompt,
+  handleNodeChange,
+  addNode,
+}: RetellFlowInnerProps) {
+  const { deleteElements } = useReactFlow();
+
+  return (
+    <div className="flex flex-1 overflow-hidden">
+      <div className="flex-1 relative">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          nodeTypes={nodeTypes}
+          edgeTypes={retellEdgeTypes}
+          defaultEdgeOptions={retellDefaultEdgeOptions}
+          onNodeClick={(_, node) => setSelectedNode(node)}
+          onPaneClick={() => setSelectedNode(null)}
+          fitView
+          className="bg-slate-950"
+        >
+          <Background color="#334155" gap={20} size={1} />
+          <Controls className="!bg-slate-900 !border-slate-800 !fill-slate-400" />
+          <MiniMap
+            nodeColor={(n) => {
+              if (n.type === 'end') return '#9f1239';
+              if (n.type === 'transfer_call') return '#312e81';
+              return '#1e293b';
+            }}
+            style={{ backgroundColor: '#0f172a' }}
+            maskColor="rgba(2, 6, 23, 0.7)"
+          />
+          <Panel position="top-right">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl w-80 ring-1 ring-white/5">
+              <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Global System Prompt</h4>
+              <textarea
+                value={globalPrompt}
+                onChange={(e) => setGlobalPrompt(e.target.value)}
+                className="w-full bg-slate-800 border-none rounded-xl px-4 py-3 text-xs text-slate-200 focus:ring-2 focus:ring-sky-500/50 outline-none min-h-[160px] resize-none leading-relaxed"
+                placeholder="Universal instructions for this agent..."
+              />
+            </div>
+          </Panel>
+          <Panel position="bottom-center">
+            <div className="flex items-center gap-2 bg-slate-900/95 border border-slate-700 rounded-xl px-3 py-2 shadow-2xl backdrop-blur">
+              <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 mr-1">Add Node</span>
+              <button
+                onClick={() => addNode('conversation')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 hover:border-slate-500 text-slate-300 text-[10px] font-bold transition-all"
+              >
+                <span className="w-2 h-2 rounded-full bg-slate-500 inline-block" />
+                Conversation
+              </button>
+              <button
+                onClick={() => addNode('transfer_call')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-950 border border-indigo-800 hover:border-indigo-600 text-indigo-300 text-[10px] font-bold transition-all"
+              >
+                <span className="w-2 h-2 rounded-full bg-indigo-500 inline-block" />
+                Transfer
+              </button>
+              <button
+                onClick={() => addNode('end')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-950 border border-rose-900 hover:border-rose-700 text-rose-300 text-[10px] font-bold transition-all"
+              >
+                <span className="w-2 h-2 rounded-full bg-rose-500 inline-block" />
+                End Call
+              </button>
+            </div>
+          </Panel>
+        </ReactFlow>
+      </div>
+
+      {selectedNode && (
+        <NodeConfigPanel
+          node={selectedNode}
+          allNodes={nodes}
+          onChange={handleNodeChange}
+          onClose={() => setSelectedNode(null)}
+          onDelete={() => {
+            deleteElements({ nodes: [{ id: selectedNode.id }] });
+            setSelectedNode(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 // Main Page Component
 
 export default function RetellFlowEditor() {
@@ -331,24 +458,30 @@ export default function RetellFlowEditor() {
 
   const onConnect = useCallback(
     (params: Connection) => {
-      const edgeId = `edge-${params.source}-${params.target}-${Date.now()}`;
-      const newEdge: Edge<RetellEdge> = {
-        id: edgeId,
-        source: params.source!,
-        target: params.target!,
-        sourceHandle: params.sourceHandle ?? null,
-        targetHandle: params.targetHandle ?? null,
-        type: 'custom',
-        label: '',
-        data: {
-          id: edgeId,
-          destination_node_id: params.target!,
-          transition_condition: { type: 'prompt', prompt: '' },
-        },
+      const newRetellEdge: RetellEdge = {
+        id: `edge-${Date.now()}`,
+        destination_node_id: params.target!,
+        transition_condition: { type: 'prompt', prompt: '' },
       };
-      setEdges((eds) => addEdge(newEdge, eds));
+      setEdges((eds) =>
+        addEdge({ ...params, id: newRetellEdge.id, data: newRetellEdge, label: '' }, eds)
+      );
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id === params.source && n.data.type === 'conversation') {
+            return {
+              ...n,
+              data: {
+                ...n.data,
+                edges: [...(n.data.edges ?? []), newRetellEdge],
+              },
+            };
+          }
+          return n;
+        })
+      );
     },
-    [setEdges]
+    [setEdges, setNodes]
   );
 
   const handlePublish = async () => {
@@ -441,81 +574,21 @@ export default function RetellFlowEditor() {
         </button>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        <div className="flex-1 relative">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            nodeTypes={nodeTypes}
-            edgeTypes={retellEdgeTypes}
-            defaultEdgeOptions={retellDefaultEdgeOptions}
-            onNodeClick={(_, node) => setSelectedNode(node)}
-            fitView
-            className="bg-slate-950"
-          >
-            <Background color="#334155" gap={20} size={1} />
-            <Controls className="!bg-slate-900 !border-slate-800 !fill-slate-400" />
-            <MiniMap
-              nodeColor={(n) => {
-                if (n.type === 'end') return '#9f1239';
-                if (n.type === 'transfer_call') return '#312e81';
-                return '#1e293b';
-              }}
-              style={{ backgroundColor: '#0f172a' }}
-              maskColor="rgba(2, 6, 23, 0.7)"
-            />
-            <Panel position="top-right">
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl w-80 ring-1 ring-white/5">
-                <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Global System Prompt</h4>
-                <textarea
-                  value={globalPrompt}
-                  onChange={(e) => setGlobalPrompt(e.target.value)}
-                  className="w-full bg-slate-800 border-none rounded-xl px-4 py-3 text-xs text-slate-200 focus:ring-2 focus:ring-sky-500/50 outline-none min-h-[160px] resize-none leading-relaxed"
-                  placeholder="Universal instructions for this agent..."
-                />
-              </div>
-            </Panel>
-            <Panel position="bottom-center">
-              <div className="flex items-center gap-2 bg-slate-900/95 border border-slate-700 rounded-xl px-3 py-2 shadow-2xl backdrop-blur">
-                <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 mr-1">Add Node</span>
-                <button
-                  onClick={() => addNode('conversation')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 hover:border-slate-500 text-slate-300 text-[10px] font-bold transition-all"
-                >
-                  <span className="w-2 h-2 rounded-full bg-slate-500 inline-block" />
-                  Conversation
-                </button>
-                <button
-                  onClick={() => addNode('transfer_call')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-950 border border-indigo-800 hover:border-indigo-600 text-indigo-300 text-[10px] font-bold transition-all"
-                >
-                  <span className="w-2 h-2 rounded-full bg-indigo-500 inline-block" />
-                  Transfer
-                </button>
-                <button
-                  onClick={() => addNode('end')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-950 border border-rose-900 hover:border-rose-700 text-rose-300 text-[10px] font-bold transition-all"
-                >
-                  <span className="w-2 h-2 rounded-full bg-rose-500 inline-block" />
-                  End Call
-                </button>
-              </div>
-            </Panel>
-          </ReactFlow>
-        </div>
-
-        {selectedNode && (
-          <NodeConfigPanel
-            node={selectedNode}
-            allNodes={nodes}
-            onChange={handleNodeChange}
-            onClose={() => setSelectedNode(null)}
-          />
-        )}
-      </div>
+      <ReactFlowProvider>
+        <RetellFlowInner
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          selectedNode={selectedNode}
+          setSelectedNode={setSelectedNode}
+          globalPrompt={globalPrompt}
+          setGlobalPrompt={setGlobalPrompt}
+          handleNodeChange={handleNodeChange}
+          addNode={addNode}
+        />
+      </ReactFlowProvider>
     </div>
   );
 }
