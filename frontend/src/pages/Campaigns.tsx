@@ -605,10 +605,27 @@ export default function Campaigns() {
                 <Badge label={campaignQuery.data?.status || 'active'} asStatus />
                 <span>•</span>
                 <span>{campaignQuery.data?.timezone}</span>
+                {campaignQuery.data?.simulation_mode && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-600 font-bold">Simulation</span>}
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-6">
+            {statsQuery.data && (
+              <div className="hidden lg:flex items-center divide-x divide-slate-100 rounded-2xl border border-slate-200 bg-slate-50 px-1">
+                {[
+                  { label: 'Leads', value: statsQuery.data.total },
+                  { label: 'Invited', value: statsQuery.data.invited },
+                  { label: 'Accepted', value: statsQuery.data.accepted },
+                  { label: 'Stopped', value: statsQuery.data.stopped },
+                ].map(({ label, value }) => (
+                  <div key={label} className="flex flex-col items-center px-4 py-2">
+                    <span className="text-lg font-black tabular-nums text-slate-900">{value ?? 0}</span>
+                    <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">{label}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex items-center gap-3">
             {activeTab === 'sequence' && campaignQuery.data && (
               <div className="flex rounded-full border border-slate-200 bg-slate-100 p-0.5 text-xs font-semibold">
                 {(['sequential', 'canvas'] as const).map((mode) => (
@@ -639,6 +656,7 @@ export default function Campaigns() {
                 {tab === 'sequence' ? 'Canvas' : tab.charAt(0).toUpperCase() + tab.slice(1)}
               </button>
             ))}
+            </div>
           </div>
         </div>
       </section>
@@ -654,8 +672,10 @@ export default function Campaigns() {
                 </div>
                 <DataTable
                   columns={[
-                    { key: 'name', header: 'Lead', render: (row) => `${row.first_name || ''} ${row.last_name || ''}` },
+                    { key: 'name', header: 'Lead', render: (row) => <div><p className="font-medium text-slate-900">{`${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Unknown'}</p><p className="text-xs text-slate-400">{row.company || '—'}</p></div> },
                     { key: 'status', header: 'Status', render: (row) => <Badge label={row.status || 'active'} asStatus /> },
+                    { key: 'invited_at', header: 'Invited', render: (row) => formatDate(row.invited_at) },
+                    { key: 'accepted_at', header: 'Accepted', render: (row) => formatDate(row.accepted_at) },
                     { key: 'replied_at', header: 'Replied', render: (row) => formatDate(row.replied_at) },
                   ]}
                   rows={leadsQuery.data?.leads || []}
@@ -1177,8 +1197,19 @@ function CampaignSettings({ campaignId }: { campaignId: string }) {
         <div className="grid grid-cols-2 gap-4">
           <label className="block"><span className={labelCls}>Name</span><input value={form.name ?? ''} onChange={e => { setForm({ ...form, name: e.target.value }); setDirty(true); }} className={inputClassName} required /></label>
           <label className="block"><span className={labelCls}>Timezone</span><input value={form.timezone ?? ''} onChange={e => { setForm({ ...form, timezone: e.target.value }); setDirty(true); }} className={inputClassName} required /></label>
+          <label className="block"><span className={labelCls}>Daily Lead Cap</span><input type="number" min="1" value={form.daily_lead_cap ?? 50} onChange={e => { setForm({ ...form, daily_lead_cap: parseInt(e.target.value) || 1 }); setDirty(true); }} className={inputClassName} /></label>
+          <label className="block"><span className={labelCls}>Daily Invite Cap</span><input type="number" min="1" value={form.invite_daily_cap ?? 20} onChange={e => { setForm({ ...form, invite_daily_cap: parseInt(e.target.value) || 1 }); setDirty(true); }} className={inputClassName} /></label>
+          <label className="block"><span className={labelCls}>Active Hours Start (0–23)</span><input type="number" min="0" max="23" value={form.active_hours_start ?? 9} onChange={e => { setForm({ ...form, active_hours_start: parseInt(e.target.value) }); setDirty(true); }} className={inputClassName} /></label>
+          <label className="block"><span className={labelCls}>Active Hours End (0–23)</span><input type="number" min="0" max="23" value={form.active_hours_end ?? 18} onChange={e => { setForm({ ...form, active_hours_end: parseInt(e.target.value) }); setDirty(true); }} className={inputClassName} /></label>
         </div>
-        <button type="submit" disabled={!dirty} className="btn-tactile bg-sky-500 px-6 py-2.5 text-xs text-white">Save Changes</button>
+        <label className="block"><span className={labelCls}>Screening Prompt</span><textarea value={form.screening_prompt ?? ''} onChange={e => { setForm({ ...form, screening_prompt: e.target.value }); setDirty(true); }} className={`${inputClassName} min-h-[120px] resize-none`} placeholder="Describe what makes a good lead for this campaign…" /></label>
+        <label className="flex items-center gap-3 cursor-pointer select-none">
+          <div onClick={() => { setForm({ ...form, simulation_mode: !form.simulation_mode }); setDirty(true); }} className={`relative h-6 w-11 rounded-full transition-colors ${form.simulation_mode ? 'bg-amber-400' : 'bg-slate-200'}`}>
+            <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${form.simulation_mode ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          </div>
+          <span className={labelCls + ' mb-0'}>Simulation Mode {form.simulation_mode ? <span className="text-amber-500">(dry-run — no real sends)</span> : ''}</span>
+        </label>
+        <button type="submit" disabled={!dirty} className="btn-tactile bg-sky-500 px-6 py-2.5 text-xs text-white disabled:opacity-40">Save Changes</button>
       </form>
 
       <div className="pt-8 border-t border-slate-100">

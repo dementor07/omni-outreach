@@ -23,7 +23,7 @@ interface JobSearchConfig {
 interface JobSearchRun {
   id: string
   config_id: string
-  status: 'pending' | 'running' | 'completed' | 'failed'
+  status: 'running' | 'done' | 'completed' | 'failed' | 'pending'
   leads_found: number
   started_at: string
   completed_at: string | null
@@ -39,9 +39,10 @@ interface CreateConfigPayload {
 
 // ── Run status badge ──────────────────────────────────────────────────────────
 
-const runStatusVariant: Record<JobSearchRun['status'], 'muted' | 'info' | 'success' | 'error'> = {
+const runStatusVariant: Partial<Record<JobSearchRun['status'], 'muted' | 'info' | 'success' | 'error'>> = {
   pending:   'muted',
   running:   'info',
+  done:      'success',
   completed: 'success',
   failed:    'error',
 }
@@ -132,7 +133,7 @@ function CreateConfigModal({ campaignId, onClose, onSubmit, isLoading }: CreateC
 function RunHistoryPanel({ configId }: { configId: string }) {
   const { data: runs, isLoading } = useQuery<JobSearchRun[]>({
     queryKey: ['job-search-runs', configId],
-    queryFn: () => api.get(`/job-search/runs?config_id=${configId}`).then(r => r.data),
+    queryFn: () => api.get('/job-search/runs', { params: { config_id: configId } }).then(r => r.data),
   })
 
   if (isLoading) {
@@ -159,11 +160,11 @@ function RunHistoryPanel({ configId }: { configId: string }) {
         return (
           <div key={run.id} className="flex items-center justify-between text-xs text-slate-500">
             <div className="flex items-center gap-2">
-              <Badge label={run.status} variant={runStatusVariant[run.status]} />
+              <Badge label={run.status} variant={runStatusVariant[run.status] ?? 'muted'} />
               <span>{new Date(run.started_at).toLocaleString()}</span>
             </div>
             <div className="flex items-center gap-3">
-              {run.status === 'completed' && (
+              {(run.status === 'completed' || run.status === 'done') && (
                 <span className="text-emerald-600 font-medium">{run.leads_found} leads</span>
               )}
               {duration !== null && <span>{duration}s</span>}
@@ -262,13 +263,13 @@ export default function JobSearch() {
   const { data: configs, isLoading: configsLoading } = useQuery<JobSearchConfig[]>({
     queryKey: ['job-search-configs', selectedCampaignId],
     queryFn: () =>
-      api.get(`/job-search/configs?campaign_id=${selectedCampaignId}`).then(r => r.data),
+      api.get(`/job-search/configs/${selectedCampaignId}`).then(r => r.data),
     enabled: !!selectedCampaignId,
   })
 
   const createMutation = useMutation({
     mutationFn: (data: CreateConfigPayload) =>
-      api.post('/job-search/configs', data).then(r => r.data),
+      api.post('/job-search/configs', { ...data, campaign_id: selectedCampaignId }).then(r => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['job-search-configs', selectedCampaignId] })
       setShowCreateModal(false)
@@ -279,7 +280,7 @@ export default function JobSearch() {
 
   const runMutation = useMutation({
     mutationFn: (configId: string) =>
-      api.post('/job-search/run', { config_id: configId }).then(r => r.data),
+      api.post('/job-search/trigger', { campaign_id: selectedCampaignId, config_id: configId }).then(r => r.data),
     onSuccess: (_, configId) => {
       setRunningConfigId(null)
       toast.success('Run started')
