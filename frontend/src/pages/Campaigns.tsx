@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { Link, useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom'
-import { Plus, Save, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap, X, ChevronRight, Settings2, Trash2, Radio } from 'lucide-react'
+import { Plus, Save, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap, X, ChevronRight, Settings2, Trash2, Radio, Tag, TagX, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle } from 'lucide-react'
 import {
   ReactFlow,
   Background,
@@ -160,26 +160,28 @@ const defaultEdgeOptions = {
 // ── Node palette config ────────────────────────────────────────────────────
 
 const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNode; color: string; bg: string; border: string }[] = [
-  { type: 'action_linkedin_invite', label: 'LinkedIn Invite', icon: <Linkedin size={15} />, color: 'text-sky-600',     bg: 'bg-sky-50',     border: 'border-sky-200' },
-  { type: 'action_linkedin_dm',     label: 'LinkedIn DM',     icon: <Linkedin size={15} />, color: 'text-sky-500',     bg: 'bg-sky-50',     border: 'border-sky-200' },
-  { type: 'action_linkedin_inmail', label: 'LinkedIn InMail', icon: <Linkedin size={15} />, color: 'text-indigo-500',  bg: 'bg-indigo-50',  border: 'border-indigo-200' },
-  { type: 'action_linkedin_profile_view', label: 'LinkedIn View Profile', icon: <Linkedin size={15} />, color: 'text-slate-500', bg: 'bg-slate-50', border: 'border-slate-200' },
-  { type: 'action_email',           label: 'Email',           icon: <Mail size={15} />,     color: 'text-slate-600',   bg: 'bg-slate-50',   border: 'border-slate-200' },
-  { type: 'action_whatsapp',        label: 'WhatsApp',        icon: <MessageSquare size={15} />, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' },
-  { type: 'action_instagram',       label: 'Instagram',       icon: <Instagram size={15} />, color: 'text-pink-500',   bg: 'bg-pink-50',    border: 'border-pink-200' },
-  { type: 'action_telegram',        label: 'Telegram',        icon: <Send size={15} />,     color: 'text-blue-500',    bg: 'bg-blue-50',    border: 'border-blue-200' },
-  { type: 'action_voice',           label: 'Voice Call',      icon: <Phone size={15} />,    color: 'text-indigo-600',  bg: 'bg-indigo-50',  border: 'border-indigo-200' },
-  { type: 'action_add_tag',         label: 'Add Tag',         icon: <Zap size={15} />,      color: 'text-slate-600',   bg: 'bg-slate-50',   border: 'border-slate-200' },
-  { type: 'action_remove_tag',      label: 'Remove Tag',      icon: <Zap size={15} />,      color: 'text-slate-600',   bg: 'bg-slate-50',   border: 'border-slate-200' },
-  { type: 'condition_replied',      label: 'Branch: Reply?',  icon: <Zap size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
-  { type: 'condition_linkedin_distance', label: 'Branch: Connection Distance', icon: <Zap size={15} />, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200' },
-  { type: 'condition_tag_exists',   label: 'Branch: Has Tag?',icon: <Zap size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
-  { type: 'event_invite_accepted',  label: 'Event: Invite Accepted', icon: <Zap size={15} />, color: 'text-rose-500',   bg: 'bg-rose-50',   border: 'border-rose-200' },
-  { type: 'event_email_opened',     label: 'Event: Email Opened', icon: <Zap size={15} />, color: 'text-rose-500',   bg: 'bg-rose-50',   border: 'border-rose-200' },
-  { type: 'event_link_clicked',     label: 'Event: Link Clicked', icon: <Zap size={15} />, color: 'text-rose-500',   bg: 'bg-rose-50',   border: 'border-rose-200' },
-  { type: 'delay',                  label: 'Wait / Delay',    icon: <Clock size={15} />,    color: 'text-slate-400',   bg: 'bg-slate-50',   border: 'border-slate-200' },
-  { type: 'split',                  label: 'A/B Split',       icon: <Zap size={15} />,      color: 'text-purple-600',  bg: 'bg-purple-50',  border: 'border-purple-200' },
-  { type: 'end',                    label: 'End Sequence',    icon: <Zap size={15} />,      color: 'text-rose-600',    bg: 'bg-rose-50',    border: 'border-rose-400' },
+  { type: 'action_linkedin_invite',       label: 'Send Invite',       icon: <Linkedin size={15} />,       color: 'text-sky-600',     bg: 'bg-sky-50',     border: 'border-sky-200' },
+  { type: 'action_linkedin_dm',            label: 'LinkedIn DM',       icon: <Linkedin size={15} />,       color: 'text-sky-500',     bg: 'bg-sky-50',     border: 'border-sky-200' },
+  { type: 'action_linkedin_inmail',        label: 'InMail',            icon: <Linkedin size={15} />,       color: 'text-indigo-500',  bg: 'bg-indigo-50',  border: 'border-indigo-200' },
+  { type: 'action_linkedin_profile_view',  label: 'View Profile',      icon: <Linkedin size={15} />,       color: 'text-slate-500',   bg: 'bg-slate-50',   border: 'border-slate-200' },
+  { type: 'action_email',                  label: 'Email',             icon: <Mail size={15} />,           color: 'text-slate-600',   bg: 'bg-slate-50',   border: 'border-slate-200' },
+  { type: 'action_whatsapp',               label: 'WhatsApp',          icon: <MessageSquare size={15} />,  color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' },
+  { type: 'action_sms',                    label: 'SMS',               icon: <MessageCircle size={15} />,  color: 'text-teal-600',    bg: 'bg-teal-50',    border: 'border-teal-200' },
+  { type: 'action_instagram',              label: 'Instagram',         icon: <Instagram size={15} />,      color: 'text-pink-500',    bg: 'bg-pink-50',    border: 'border-pink-200' },
+  { type: 'action_telegram',               label: 'Telegram',          icon: <Send size={15} />,           color: 'text-blue-500',    bg: 'bg-blue-50',    border: 'border-blue-200' },
+  { type: 'action_voice',                  label: 'AI Voice Call',     icon: <Phone size={15} />,          color: 'text-indigo-600',  bg: 'bg-indigo-50',  border: 'border-indigo-200' },
+  { type: 'action_webhook',                label: 'Webhook / CRM',     icon: <Webhook size={15} />,        color: 'text-orange-600',  bg: 'bg-orange-50',  border: 'border-orange-200' },
+  { type: 'action_add_tag',                label: 'Add Tag',           icon: <Tag size={15} />,            color: 'text-slate-600',   bg: 'bg-slate-50',   border: 'border-slate-200' },
+  { type: 'action_remove_tag',             label: 'Remove Tag',        icon: <TagX size={15} />,           color: 'text-slate-500',   bg: 'bg-slate-50',   border: 'border-slate-200' },
+  { type: 'condition_replied',             label: 'If Replied',        icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
+  { type: 'condition_linkedin_distance',   label: 'If 1st Degree',     icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
+  { type: 'condition_tag_exists',          label: 'If Has Tag',        icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
+  { type: 'event_invite_accepted',         label: 'Invite Accepted',   icon: <Bell size={15} />,           color: 'text-violet-500',  bg: 'bg-violet-50',  border: 'border-violet-200' },
+  { type: 'event_email_opened',            label: 'Email Opened',      icon: <Bell size={15} />,           color: 'text-violet-500',  bg: 'bg-violet-50',  border: 'border-violet-200' },
+  { type: 'event_link_clicked',            label: 'Link Clicked',      icon: <Bell size={15} />,           color: 'text-violet-500',  bg: 'bg-violet-50',  border: 'border-violet-200' },
+  { type: 'delay',                         label: 'Wait',              icon: <Clock size={15} />,          color: 'text-slate-400',   bg: 'bg-slate-50',   border: 'border-slate-200' },
+  { type: 'split',                         label: 'A/B Split',         icon: <Shuffle size={15} />,        color: 'text-purple-600',  bg: 'bg-purple-50',  border: 'border-purple-200' },
+  { type: 'end',                           label: 'End',               icon: <StopCircle size={15} />,     color: 'text-rose-600',    bg: 'bg-rose-50',    border: 'border-rose-400' },
 ]
 
 // ── React Flow Node Types ──────────────────────────────────────────────────
@@ -258,8 +260,8 @@ const TriggerNode = ({ selected }: NodeProps) => (
         <Zap size={14} fill="currentColor" />
       </div>
       <div>
-        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Inception</p>
-        <p className="text-xs font-bold uppercase tracking-tight">Lead Accepted</p>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Trigger</p>
+        <p className="text-xs font-bold uppercase tracking-tight">Sequence Start</p>
       </div>
     </div>
     <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-none !bg-white/20" />
@@ -373,6 +375,8 @@ const nodeTypes = {
   action_instagram: ActionNode,
   action_telegram: ActionNode,
   action_voice: ActionNode,
+  action_sms: ActionNode,
+  action_webhook: ActionNode,
   condition_replied: ConditionNode,
   condition_linkedin_distance: ConditionNode,
   condition_tag_exists: ConditionNode,
@@ -725,7 +729,7 @@ export default function Campaigns() {
                       <div className="flex gap-2">
                         <button
                           onClick={() => setLiveMode(m => !m)}
-                          className={`btn-tactile flex items-center px-4 py-3 text-xs font-bold shadow-xl transition ${liveMode ? 'bg-emerald-500 text-white shadow-emerald-200 hover:bg-emerald-600' : 'bg-white text-slate-600 shadow-slate-200 hover:bg-slate-50'}`}
+                          className={`btn-tactile flex items-center rounded-xl px-4 py-2.5 text-xs font-bold shadow-lg transition ${liveMode ? 'bg-emerald-500 text-white shadow-emerald-100 hover:bg-emerald-600' : 'bg-white text-slate-600 shadow-slate-100 border border-slate-200 hover:bg-slate-50'}`}
                         >
                           <Radio size={13} className={`mr-1.5 ${liveMode ? 'animate-pulse' : ''}`} />
                           Live
@@ -733,10 +737,10 @@ export default function Campaigns() {
                         <button
                           onClick={onSaveCanvas}
                           disabled={saveGraph.isPending}
-                          className="btn-tactile flex items-center bg-slate-900 px-6 py-3 text-xs font-bold text-white shadow-xl shadow-slate-200 transition hover:bg-slate-800"
+                          className="btn-tactile flex items-center rounded-xl bg-sky-500 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-sky-100 transition hover:bg-sky-600"
                         >
-                          <Save size={16} className="mr-2" />
-                          {saveGraph.isPending ? 'Syncing...' : 'Deploy Canvas'}
+                          <Save size={14} className="mr-2" />
+                          {saveGraph.isPending ? 'Saving...' : 'Save Canvas'}
                         </button>
                       </div>
                     </Panel>
@@ -805,25 +809,43 @@ export default function Campaigns() {
 }
 
 function NodePalette({ onAdd }: { onAdd: (type: NodeType) => void }) {
+  const groups: { heading: string; types: NodeType[] }[] = [
+    { heading: 'LinkedIn',   types: ['action_linkedin_invite', 'action_linkedin_dm', 'action_linkedin_inmail', 'action_linkedin_profile_view'] },
+    { heading: 'Messaging',  types: ['action_email', 'action_whatsapp', 'action_sms', 'action_instagram', 'action_telegram'] },
+    { heading: 'Voice',      types: ['action_voice'] },
+    { heading: 'Actions',    types: ['action_add_tag', 'action_remove_tag', 'action_webhook'] },
+    { heading: 'Conditions', types: ['condition_replied', 'condition_linkedin_distance', 'condition_tag_exists'] },
+    { heading: 'Events',     types: ['event_invite_accepted', 'event_email_opened', 'event_link_clicked'] },
+    { heading: 'Flow',       types: ['delay', 'split', 'end'] },
+  ]
+
   return (
-    <div className="absolute left-4 top-4 z-10 flex w-48 flex-col gap-1 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
-      <p className="px-3 pb-2 pt-1 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Add Module</p>
+    <div className="absolute left-4 top-4 z-10 flex w-52 flex-col rounded-2xl border border-slate-200 bg-white shadow-xl" style={{ maxHeight: 'calc(100vh - 160px)' }}>
+      <p className="shrink-0 px-3 pb-2 pt-3 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Add Module</p>
       <button
         onClick={() => onAdd('trigger_start')}
-        className="flex items-center gap-3 rounded-xl bg-slate-900 px-4 py-3 text-xs font-bold text-white transition hover:bg-slate-800"
+        className="mx-2 mb-1 shrink-0 flex items-center gap-3 rounded-xl bg-slate-900 px-4 py-3 text-xs font-bold text-white transition hover:bg-slate-800"
       >
-        <Zap size={14} fill="currentColor" /> Genesis Trigger
+        <Zap size={14} fill="currentColor" /> Sequence Start
       </button>
-      <div className="my-2 h-px bg-slate-100" />
-      <div className="space-y-1">
-        {NODE_PALETTE.map(({ type, label, icon, color, bg, border }) => (
-          <button
-            key={type}
-            onClick={() => onAdd(type)}
-            className={`flex w-full items-center gap-3 rounded-xl border border-transparent px-4 py-2.5 text-xs font-bold transition hover:border-slate-200 hover:bg-slate-50 ${color}`}
-          >
-            {icon} {label}
-          </button>
+      <div className="h-px shrink-0 bg-slate-100 mx-2 my-1" />
+      <div className="overflow-y-auto flex-1 pb-2 px-1">
+        {groups.map(({ heading, types }) => (
+          <div key={heading} className="mb-1">
+            <p className="px-3 pt-2 pb-1 text-[9px] font-black uppercase tracking-[0.18em] text-slate-300">{heading}</p>
+            {types.map((type) => {
+              const p = NODE_PALETTE.find(n => n.type === type)!
+              return (
+                <button
+                  key={type}
+                  onClick={() => onAdd(type)}
+                  className={`flex w-full items-center gap-3 rounded-xl border border-transparent px-3 py-2 text-xs font-bold transition hover:border-slate-200 hover:bg-slate-50 ${p.color}`}
+                >
+                  {p.icon} {p.label}
+                </button>
+              )
+            })}
+          </div>
         ))}
       </div>
     </div>

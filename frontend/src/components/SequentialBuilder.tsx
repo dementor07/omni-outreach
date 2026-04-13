@@ -1,5 +1,5 @@
 import React from 'react'
-import { Plus, Trash2, ChevronUp, ChevronDown, Linkedin, Mail, MessageSquare, Instagram, Send, Phone, Clock, Zap, Save } from 'lucide-react'
+import { Plus, Trash2, ChevronUp, ChevronDown, Linkedin, Mail, MessageSquare, Instagram, Send, Phone, Clock, Zap, Save, Tag, TagX, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle } from 'lucide-react'
 import { Node, Edge } from '@xyflow/react'
 import { NodeType } from '../hooks/useSequenceSteps'
 import Badge from './Badge'
@@ -16,6 +16,32 @@ interface Props {
   onSave: (nodes: Node[], edges: Edge[]) => void
   onEditTemplate: (id: string) => void
   isSaving?: boolean
+}
+
+const STEP_LABELS: Partial<Record<NodeType, string>> = {
+  trigger_start: 'Sequence Start',
+  action_linkedin_invite: 'Send Invite',
+  action_linkedin_dm: 'LinkedIn DM',
+  action_linkedin_inmail: 'InMail',
+  action_linkedin_profile_view: 'View Profile',
+  action_email: 'Email',
+  action_whatsapp: 'WhatsApp',
+  action_sms: 'SMS',
+  action_instagram: 'Instagram',
+  action_telegram: 'Telegram',
+  action_voice: 'AI Voice Call',
+  action_webhook: 'Webhook / CRM',
+  action_add_tag: 'Add Tag',
+  action_remove_tag: 'Remove Tag',
+  condition_replied: 'If Replied',
+  condition_linkedin_distance: 'If 1st Degree',
+  condition_tag_exists: 'If Has Tag',
+  event_invite_accepted: 'Invite Accepted',
+  event_email_opened: 'Email Opened',
+  event_link_clicked: 'Link Clicked',
+  delay: 'Wait',
+  split: 'A/B Split',
+  end: 'End',
 }
 
 export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate, isSaving }: Props) {
@@ -172,7 +198,7 @@ export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate
               </div>
 
               <div className="flex-1">
-                <p className="text-sm font-bold text-slate-900 capitalize">{step.type.replace('action_', '').replace('_', ' ')}</p>
+                <p className="text-sm font-bold text-slate-900">{STEP_LABELS[step.type] ?? step.type}</p>
                 {step.type === 'delay' ? (
                   <div className="mt-1 flex items-center gap-2">
                     <span className="text-xs text-slate-400">Wait</span>
@@ -217,11 +243,19 @@ export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <AddButton icon={<Linkedin className="text-sky-500" />} label="LinkedIn DM" onClick={() => addStep('action_linkedin_dm')} />
-        <AddButton icon={<Mail className="text-slate-500" />} label="Email" onClick={() => addStep('action_email')} />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <AddButton icon={<Linkedin className="text-sky-600" />} label="Send Invite"   onClick={() => addStep('action_linkedin_invite')} />
+        <AddButton icon={<Linkedin className="text-sky-500" />} label="LinkedIn DM"   onClick={() => addStep('action_linkedin_dm')} />
+        <AddButton icon={<Linkedin className="text-indigo-500" />} label="InMail"     onClick={() => addStep('action_linkedin_inmail')} />
+        <AddButton icon={<Mail className="text-slate-500" />}    label="Email"        onClick={() => addStep('action_email')} />
         <AddButton icon={<MessageSquare className="text-emerald-500" />} label="WhatsApp" onClick={() => addStep('action_whatsapp')} />
-        <AddButton icon={<Clock className="text-amber-500" />} label="Delay" onClick={() => addStep('delay')} />
+        <AddButton icon={<MessageCircle className="text-teal-500" />} label="SMS"     onClick={() => addStep('action_sms')} />
+        <AddButton icon={<Phone className="text-indigo-500" />}  label="AI Voice"     onClick={() => addStep('action_voice')} />
+        <AddButton icon={<Webhook className="text-orange-500" />} label="Webhook"    onClick={() => addStep('action_webhook')} />
+        <AddButton icon={<Tag className="text-slate-500" />}     label="Add Tag"      onClick={() => addStep('action_add_tag')} />
+        <AddButton icon={<TagX className="text-slate-400" />}    label="Remove Tag"   onClick={() => addStep('action_remove_tag')} />
+        <AddButton icon={<Clock className="text-amber-500" />}   label="Wait"         onClick={() => addStep('delay')} />
+        <AddButton icon={<StopCircle className="text-rose-500" />} label="End"        onClick={() => addStep('end')} />
       </div>
     </div>
   )
@@ -229,22 +263,29 @@ export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate
 
 function StepIcon({ type }: { type: NodeType }) {
   switch (type) {
-    case 'action_linkedin_invite':
-    case 'action_linkedin_dm': 
-    case 'action_linkedin_inmail':
-    case 'action_linkedin_profile_view': return <Linkedin size={20} className="text-sky-500" />
-    case 'action_email': return <Mail size={20} className="text-slate-500" />
-    case 'action_whatsapp': return <MessageSquare size={20} className="text-emerald-500" />
-    case 'action_instagram': return <Instagram size={20} className="text-pink-500" />
-    case 'action_telegram': return <Send size={20} className="text-blue-400" />
-    case 'action_voice': return <Phone size={20} className="text-indigo-500" />
-    case 'delay': return <Clock size={20} className="text-amber-500" />
+    case 'action_linkedin_invite':       return <Linkedin size={20} className="text-sky-600" />
+    case 'action_linkedin_dm':           return <Linkedin size={20} className="text-sky-500" />
+    case 'action_linkedin_inmail':       return <Linkedin size={20} className="text-indigo-500" />
+    case 'action_linkedin_profile_view': return <Linkedin size={20} className="text-slate-400" />
+    case 'action_email':                 return <Mail size={20} className="text-slate-500" />
+    case 'action_whatsapp':              return <MessageSquare size={20} className="text-emerald-500" />
+    case 'action_sms':                   return <MessageCircle size={20} className="text-teal-500" />
+    case 'action_instagram':             return <Instagram size={20} className="text-pink-500" />
+    case 'action_telegram':              return <Send size={20} className="text-blue-400" />
+    case 'action_voice':                 return <Phone size={20} className="text-indigo-500" />
+    case 'action_webhook':               return <Webhook size={20} className="text-orange-500" />
+    case 'action_add_tag':               return <Tag size={20} className="text-slate-500" />
+    case 'action_remove_tag':            return <TagX size={20} className="text-slate-400" />
     case 'condition_replied':
     case 'condition_linkedin_distance':
+    case 'condition_tag_exists':         return <GitBranch size={20} className="text-amber-500" />
     case 'event_invite_accepted':
     case 'event_email_opened':
-    case 'event_link_clicked': return <Zap size={20} className="text-rose-500" />
-    default: return <Zap size={20} />
+    case 'event_link_clicked':           return <Bell size={20} className="text-violet-500" />
+    case 'delay':                        return <Clock size={20} className="text-amber-500" />
+    case 'split':                        return <Shuffle size={20} className="text-purple-500" />
+    case 'end':                          return <StopCircle size={20} className="text-rose-500" />
+    default:                             return <Zap size={20} />
   }
 }
 
