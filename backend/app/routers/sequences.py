@@ -9,16 +9,27 @@ from app.db import execute, fetch_all, fetch_one
 router = APIRouter()
 
 NodeType = Literal[
-    "trigger_start", 
-    "action_linkedin_invite", 
-    "action_linkedin_dm", 
-    "action_email", 
-    "action_whatsapp", 
-    "action_instagram", 
-    "action_telegram", 
-    "action_voice", 
-    "condition_replied", 
-    "delay"
+    "trigger_start",
+    "action_linkedin_invite",
+    "action_linkedin_dm",
+    "action_linkedin_inmail",
+    "action_linkedin_profile_view",
+    "action_email",
+    "action_whatsapp",
+    "action_instagram",
+    "action_telegram",
+    "action_voice",
+    "action_add_tag",
+    "action_remove_tag",
+    "condition_replied",
+    "condition_linkedin_distance",
+    "condition_tag_exists",
+    "event_invite_accepted",
+    "event_email_opened",
+    "event_link_clicked",
+    "delay",
+    "split",
+    "end",
 ]
 
 class NodeCreate(BaseModel):
