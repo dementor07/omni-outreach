@@ -1,5 +1,5 @@
 import React from 'react'
-import { Plus, Trash2, ChevronUp, ChevronDown, Linkedin, Mail, MessageSquare, Instagram, Send, Phone, Clock, Zap, Save, Tag, TagX, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle } from 'lucide-react'
+import { Plus, Trash2, ChevronUp, ChevronDown, Linkedin, Mail, MessageSquare, Instagram, Send, Phone, Clock, Zap, Save, Tag, MinusCircle, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle } from 'lucide-react'
 import { Node, Edge } from '@xyflow/react'
 import { NodeType } from '../hooks/useSequenceSteps'
 import Badge from './Badge'
@@ -253,7 +253,7 @@ export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate
         <AddButton icon={<Phone className="text-indigo-500" />}  label="AI Voice"     onClick={() => addStep('action_voice')} />
         <AddButton icon={<Webhook className="text-orange-500" />} label="Webhook"    onClick={() => addStep('action_webhook')} />
         <AddButton icon={<Tag className="text-slate-500" />}     label="Add Tag"      onClick={() => addStep('action_add_tag')} />
-        <AddButton icon={<TagX className="text-slate-400" />}    label="Remove Tag"   onClick={() => addStep('action_remove_tag')} />
+        <AddButton icon={<MinusCircle className="text-slate-400" />} label="Remove Tag"   onClick={() => addStep('action_remove_tag')} />
         <AddButton icon={<Clock className="text-amber-500" />}   label="Wait"         onClick={() => addStep('delay')} />
         <AddButton icon={<StopCircle className="text-rose-500" />} label="End"        onClick={() => addStep('end')} />
       </div>
@@ -275,7 +275,7 @@ function StepIcon({ type }: { type: NodeType }) {
     case 'action_voice':                 return <Phone size={20} className="text-indigo-500" />
     case 'action_webhook':               return <Webhook size={20} className="text-orange-500" />
     case 'action_add_tag':               return <Tag size={20} className="text-slate-500" />
-    case 'action_remove_tag':            return <TagX size={20} className="text-slate-400" />
+    case 'action_remove_tag':            return <MinusCircle size={20} className="text-slate-400" />
     case 'condition_replied':
     case 'condition_linkedin_distance':
     case 'condition_tag_exists':         return <GitBranch size={20} className="text-amber-500" />
