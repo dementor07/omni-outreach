@@ -170,3 +170,12 @@ Deployed. All three items from the Active TODO list are now complete.
 - Live backend API exposes voice/account routes, but is missing /sequences/{campaign_id}/telemetry.
 - Production leads table does not contain path_history, so the documented optimization path is not live in DB.
 - Conclusion: vault and local codebase are ahead of deployed runtime for telemetry/optimization-related features; redeploy/migration is still needed for full parity.
+
+
+## [2026-04-13] deploy | Runtime parity restored on VPS
+
+- Pushed local master to origin/master through commit e38b29e.
+- Updated /home/omni-outreach on VPS to e38b29e and rebuilt/restarted ackend, worker, and rontend.
+- Verified live backend now exposes /sequences/{campaign_id}/telemetry, /accounts/voice/flows, and /accounts/voice/{agent_id}.
+- Verified production leads table now contains path_history.
+- Result: vault, local codebase, deployed server, and production schema are back in sync on the previously drifting telemetry/optimization markers.
