@@ -68,6 +68,7 @@ When asked to health-check:
 - Keep pages focused — one concept per page, link to related pages
 - When a decision is made (architectural, product, business), write an ADR in `wiki/decisions/`
 - Source of truth for code: the actual repo files. Wiki describes intent, decisions, and context — not a copy of the code.
+- Use MCP/API as the default interface for vault operations (read, list, and write when available). Use direct filesystem access only as fallback when MCP/API is unavailable.
 
 ## Domain Knowledge
 

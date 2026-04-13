@@ -1,6 +1,6 @@
 # Omni Wiki — Index
 
-Last updated: 2026-04-12
+Last updated: 2026-04-13
 
 ## Architecture
 
@@ -14,8 +14,9 @@ Last updated: 2026-04-12
 | [[event-bus-architecture]] | Kafka/Redis Streams for high-throughput webhooks and scalability |
 | [[auto-optimization-engine]] | Thompson Sampling bandit, Beta params, reward schedule, cron |
 | [[telemetry-overlay]] | Live edge heat-map on canvas, polling, TelemetryEdge component |
-| [[bridge-agent]] | Claude ↔ Gemini autonomous development loop |
+| [[bridge-agent]] | Copilot ↔ Claude ↔ Gemini autonomous development loop |
 | [[llm-wiki-method]] | The Karpathy method for persistent LLM knowledge bases |
+| [[agent-operations-protocol]] | Enforced multi-agent operating model with lane locks and session templates |
 | [[knowledge-graphs]] | Enhancing the LLM Wiki with structural self-awareness and gap detection |
 
 ## Product

@@ -120,3 +120,43 @@ Deployed. All three items from the Active TODO list are now complete.
 - Ensured state consistency by mapping the linear list changes back to the unified `nodes` and `edges` graph state.
 - Deployed to VPS. The Sequential mode is now fully functional and in sync with the Nodal Canvas capabilities.
 
+## [2026-04-13] enforce | Karpathy method operationalized
+
+- Created `wiki/architecture/agent-operations-protocol.md` as the canonical execution policy for concurrent multi-agent work.
+- Enforced hard lane separation: Executor (single-writer), Planner, Reviewer.
+- Added mandatory session template (start/during/end), cross-agent handoff format, and done criteria.
+- Added fast-failure conditions to stop drift when architecture, validation, or readiness signals conflict.
+- Updated `index.md` to register `agent-operations-protocol` as a first-class architecture node.
+
+## [2026-04-13] lint | Index naming consistency
+
+- Aligned `index.md` bridge-agent summary with the enforced three-agent scope (Copilot, Claude, Gemini).
+- No policy violations found in append-only logging or index synchronization.
+
+## [2026-04-13] enforce | MCP-first vault operations
+
+- Reviewed Obsidian clipping (`raw/Clippings/Clippings/Claude Code + Obsidian - How I use it & Short Guide.md`) and adopted MCP-first workflow.
+- Updated `CLAUDE.md` rules: vault operations default to MCP/API, filesystem access is fallback-only.
+- Updated `wiki/architecture/agent-operations-protocol.md` with an explicit MCP-first control rule for all agents (Copilot, Claude Code, Gemini).
+
+
+
+## [2026-04-13] cleanup | Vault junk removed
+
+- Deleted _api_read_report.json (generated temporary MCP read report artifact).
+- Deleted create a link.md (empty placeholder note, 0 chars).
+- Cleanup executed via MCP/API only.
+
+
+## [2026-04-13] sync | Git/code aligned with Obsidian workflow
+
+- Sync audit completed against git branch master at HEAD c1610ce.
+- Enforced clean boundary: Obsidian local runtime files moved out of version-control scope via .gitignore (omni-vault/.obsidian/).
+- Untracked previously tracked local state files (.obsidian/graph.json, .obsidian/workspace.json) to prevent settings drift and secret leakage in commits.
+- Vault content nodes remain tracked (wiki/, raw/, index.md, log.md, CLAUDE.md).
+
+
+## [2026-04-13] sync | Finalize Obsidian git boundary
+
+- Untracked remaining local Obsidian state files from git index (.obsidian/app.json, .obsidian/appearance.json, .obsidian/core-plugins.json).
+- Confirmed no .obsidian paths remain tracked in git (git ls-files check).

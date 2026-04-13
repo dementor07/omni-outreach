@@ -6,3 +6,6 @@ dist/
 .venv/
 *.egg-info/
 *.tsbuildinfo
+
+# Obsidian local app/runtime state (contains machine-local settings and secrets)
+omni-vault/.obsidian/
