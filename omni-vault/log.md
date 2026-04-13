@@ -175,7 +175,7 @@ Deployed. All three items from the Active TODO list are now complete.
 ## [2026-04-13] deploy | Runtime parity restored on VPS
 
 - Pushed local master to origin/master through commit e38b29e.
-- Updated /home/omni-outreach on VPS to e38b29e and rebuilt/restarted ackend, worker, and rontend.
+- Updated /home/omni-outreach on VPS to e38b29e and rebuilt/restarted backend, worker, and frontend.
 - Verified live backend now exposes /sequences/{campaign_id}/telemetry, /accounts/voice/flows, and /accounts/voice/{agent_id}.
 - Verified production leads table now contains path_history.
 - Result: vault, local codebase, deployed server, and production schema are back in sync on the previously drifting telemetry/optimization markers.
