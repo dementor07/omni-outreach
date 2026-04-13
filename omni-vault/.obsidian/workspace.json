@@ -178,6 +178,7 @@
   },
   "active": "1cccf6b5934c6ba8",
   "lastOpenFiles": [
+    "wiki/product/sequential-builder.md",
     "wiki/architecture/event-bus-architecture.md",
     "raw/Clippings/omniagenticailinkedin-leadgen-pipeline Lead generation tool that scrapes LinkedIn job postings, filters companies by industry & size, and extracts decision-maker profiles.md",
     "raw/Clippings/Cold Outreach Script Fix.md",
@@ -213,7 +214,6 @@
     "raw/Clippings",
     "raw/llm-wiki-pattern.md",
     "wiki/architecture/llm-wiki-method.md",
-    "CLAUDE.md",
     "CLAUDE.md.tmp.28148.1775993918027"
   ]
 }

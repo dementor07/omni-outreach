@@ -23,6 +23,7 @@ Last updated: 2026-04-12
 | Page | Summary |
 |------|---------|
 | [[canvas-editor]] | ReactFlow canvas, all node components, TelemetryEdge, SplitNode bandit UI, serialization |
+| [[sequential-builder]] | Linear sequence builder UI, reordering, inline wait duration edit |
 | [[voice-node]] | Standard vs Nested Flow modes, Retell editor UX |
 | [[channels]] | Breakdown of LinkedIn, WhatsApp, Email, and Voice outreach |
 | [[campaigns]] | Campaign configurations, execution constraints, and account assignments |

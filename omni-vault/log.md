@@ -112,3 +112,11 @@ Deployed. All three items from the Active TODO list are now complete.
 - Pushed to `outreach-threading`, deployed to VPS. Backend + worker healthy.
 - Lead Generation Pipeline (Apify+Serper → DAG injection): COMPLETE.
 - Next: Canvas Telemetry Overlay or Auto-Optimization Engine.
+
+## [2026-04-12] fix & deploy | SequentialBuilder Wait Duration Edit — HEAD fab5c33
+
+- Fixed a TypeScript type-inference error in `SequentialBuilder.tsx` during production build by casting `node.data` to `any`.
+- Added `updateStep()` function and an interactive numeric input to allow users to directly edit the "Wait" duration for `delay` nodes in the Sequential list view.
+- Ensured state consistency by mapping the linear list changes back to the unified `nodes` and `edges` graph state.
+- Deployed to VPS. The Sequential mode is now fully functional and in sync with the Nodal Canvas capabilities.
+
