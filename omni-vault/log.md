@@ -160,3 +160,13 @@ Deployed. All three items from the Active TODO list are now complete.
 
 - Untracked remaining local Obsidian state files from git index (.obsidian/app.json, .obsidian/appearance.json, .obsidian/core-plugins.json).
 - Confirmed no .obsidian paths remain tracked in git (git ls-files check).
+
+
+## [2026-04-13] audit | Vault vs runtime drift check
+
+- Local repository now includes Obsidian sync commits on master (99e8152, 6bc6bb9).
+- Live server checkout at /home/omni-outreach is still on master HEAD c1610ce.
+- Running containers are healthy, but runtime parity is incomplete.
+- Live backend API exposes voice/account routes, but is missing /sequences/{campaign_id}/telemetry.
+- Production leads table does not contain path_history, so the documented optimization path is not live in DB.
+- Conclusion: vault and local codebase are ahead of deployed runtime for telemetry/optimization-related features; redeploy/migration is still needed for full parity.
