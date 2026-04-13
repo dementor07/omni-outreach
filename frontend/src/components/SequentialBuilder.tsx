@@ -127,6 +127,16 @@ export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate
     onSave(newNodes, newEdges)
   }
 
+  const updateStep = (id: string, data: any) => {
+    const newNodes = nodes.map(n => {
+      if (n.id === id) {
+        return { ...n, data: { ...n.data, ...data } }
+      }
+      return n
+    })
+    onSave(newNodes, edges)
+  }
+
   return (
     <div className="flex flex-col gap-6 p-8">
       <div className="flex items-center justify-between">
@@ -166,9 +176,21 @@ export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate
 
               <div className="flex-1">
                 <p className="text-sm font-bold text-slate-900 capitalize">{step.type.replace('action_', '').replace('_', ' ')}</p>
-                <p className="text-xs text-slate-400">
-                  {step.type === 'delay' ? `Wait ${step.delay_days} days` : 'Immediate action'}
-                </p>
+                {step.type === 'delay' ? (
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className="text-xs text-slate-400">Wait</span>
+                    <input 
+                      type="number"
+                      min="1"
+                      value={step.delay_days}
+                      onChange={(e) => updateStep(step.id, { delay_days: parseInt(e.target.value) || 1 })}
+                      className="w-12 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-center text-xs font-bold text-slate-900 focus:border-sky-400 focus:outline-none focus:ring-4 focus:ring-sky-100"
+                    />
+                    <span className="text-xs text-slate-400">days</span>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400">Immediate action</p>
+                )}
               </div>
 
               <div className="flex items-center gap-2">
