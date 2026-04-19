@@ -68,21 +68,22 @@ app.include_router(inbox.router, prefix="/inbox", tags=["inbox"])
 
 @app.get("/health")
 async def health():
+    from app.db import fetch_one, redis_client
     checks = {"api": "ok"}
     try:
-        from app.db import fetch_one, redis_client
         row = await fetch_one("SELECT 1 AS ok")
         checks["db"] = "ok" if row else "error"
-    except Exception:
+    except Exception as e:
+        logger.warning("Health check DB failed: %s", e)
         checks["db"] = "error"
     try:
-        from app.db import redis_client
         if redis_client:
             await redis_client.ping()
             checks["redis"] = "ok"
         else:
             checks["redis"] = "not_connected"
-    except Exception:
+    except Exception as e:
+        logger.warning("Health check Redis failed: %s", e)
         checks["redis"] = "error"
     status = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
     return {"status": status, "checks": checks}
