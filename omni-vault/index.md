@@ -1,6 +1,6 @@
 # Omni Wiki — Index
 
-Last updated: 2026-04-19 (23-node canvas, 12-button sequential builder, SMS/Webhook channels, icon audit, multi-source lead gen)
+Last updated: 2026-04-19 (20-cycle system gaps sprint, 25 canvas nodes, 7 new backend routers, 6 new frontend pages, TS fixes deployed)
 
 ## Architecture
 
@@ -55,6 +55,7 @@ Last updated: 2026-04-19 (23-node canvas, 12-button sequential builder, SMS/Webh
 | [[canvas-ux-decisions]] | Apr 2026 canvas overhaul: naming convention, palette grouping, icon semantics, btn-tactile, lucide-react version constraints |
 | [[lead-gen-canvas-integration]] | Apr 2026 plan: 4 new canvas nodes (AI screen, source router, enrichment, field check), scheduled runs, Settings integrations UI, visual link between LeadSources and Canvas |
 | [[stubbed-channels-policy]] | Why SMS/Webhook/Instagram/Telegram are fully typed but have no dispatcher handler; pending work |
+| [[system-gaps-sprint]] | Apr 2026 20-cycle sprint closing 140+ gaps: notifications, activity log, blacklist, tracking, analytics, template library, inbox, reply classifier, CSV import, bulk actions, dark mode, campaign cloning |
 
 ## Competitors
 

@@ -305,3 +305,41 @@ Recommended sprint order: 1A → 3 → 1B → 4 → 1C → 2A → 2B (screening 
 - Sections: Dashboard (overview, campaigns, queue), Campaign (get, stats), Leads (list), Canvas (load, save Phase 1A graph, reload+verify persistence, telemetry), Accounts (email, voice, LinkedIn), Lead Gen (sources, configs, runs), Job Search (configs, runs), Frontend (HTML+JS bundle).
 - Result: **20/20 PASS**, 0 FAIL, 0 ERROR.
 - Phase 1A node data verified: `screening_prompt` and `sources[]` persist and round-trip correctly through save→reload.
+
+## [2026-04-19] feat & deploy | 20-Cycle System Gaps Sprint — HEAD ac578c3
+
+Executed a 20-cycle brainstorm→implement sprint to close 140+ gaps identified in a full codebase audit against competitors (Apollo, Instantly, Lemlist). ADR filed vault-first as `wiki/decisions/system-gaps-sprint.md`.
+
+**Backend — 7 new routers, 1 new service:**
+- `routers/notifications.py` — `notifications` table, mark-read/dismiss, SSE push
+- `routers/activity.py` — `activity_log` table, recent events endpoint
+- `routers/blacklist.py` — `blacklists` table, CRUD, domain/email/company types, check endpoint
+- `routers/tracking.py` — Email open pixel + click redirect, `email_tracking` table
+- `routers/analytics.py` — Time-series campaign stats, funnel metrics, per-node performance, export CSV
+- `routers/template_library.py` — Global templates CRUD, search, performance ranking, variable extraction
+- `routers/inbox.py` — Unified inbox aggregating replies across all channels
+- `services/reply_classifier.py` — AI-powered reply intent detection (interested/not-interested/OOO/bounce/auto-reply)
+
+**Backend — existing router extensions:**
+- `campaigns.py` — Campaign cloning endpoint, schedule start/end, campaign stats mini-bar
+- `leads.py` — Bulk actions (stop/requeue/move/delete/tag), CSV import, search/filter/pagination, lead detail with timeline
+- `overview.py` — Enhanced dashboard with channel breakdown, time-series data, sparkline stats
+- `webhooks.py` — Reply classification hook, goal/conversion tracking, webhook dispatcher handler
+- `main.py` — All 7 new routers registered, CREATE TABLE IF NOT EXISTS for all new tables
+
+**Frontend — 6 new pages, 2 new components, 8 new hooks:**
+- Pages: `Analytics.tsx`, `Activity.tsx`, `Blacklist.tsx`, `Inbox.tsx`, `Templates.tsx` (global library)
+- Components: `CsvImport.tsx` (file upload + field mapping), `NotificationCenter.tsx` (bell + drawer)
+- Hooks: `useAnalytics`, `useBlacklist`, `useCanvasHistory` (undo/redo), `useInbox`, `useNotifications`, `useTemplateLibrary`, `useTheme` (dark mode)
+- Existing page upgrades: Dashboard (recharts, sparklines), Campaigns (clone, schedule, settings), Leads (bulk actions, CSV import, search/filter, drawer)
+
+**TypeScript fixes (post-sprint):**
+- `Leads.tsx` — stray `</div>` removed
+- `DataTable.tsx` — `Column.header` widened to `ReactNode`
+- `CsvImport.tsx` — const tuple `required` check
+- `Blacklist/Inbox/Templates` — missing `icon` prop on EmptyState
+- `Inbox.tsx` — BadgeVariant `'danger'` → `'error'`
+
+**Deployment:** All containers rebuilt and healthy on VPS 145.223.21.222 (backend, worker, frontend). `GET /health` → `{"status":"ok"}`.
+
+Updated `index.md` and `canvas-editor.md` with sprint additions.
