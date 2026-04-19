@@ -195,7 +195,7 @@ const EventNode = ({ data, selected }: NodeProps) => {
       <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
       <div className="flex items-center gap-3">
         <div className={`flex h-8 w-8 items-center justify-center rounded-lg bg-rose-50 text-rose-500`}>
-          <Zap size={14} />
+          {cfg?.icon ?? <Bell size={14} />}
         </div>
         <div>
           <p className="text-[10px] font-bold uppercase tracking-widest text-rose-500/60">Listener Event</p>
@@ -273,7 +273,7 @@ const ConditionNode = ({ selected }: NodeProps) => (
     <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
     <div className="flex items-center gap-3">
       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 text-amber-500">
-        <Zap size={14} />
+        <GitBranch size={14} />
       </div>
       <div>
         <p className="text-[10px] font-bold uppercase tracking-widest text-amber-500/60">Condition</p>
@@ -331,7 +331,7 @@ const SplitNode = ({ data, selected }: NodeProps) => {
       <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
       <div className="flex items-center gap-3">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-50 text-purple-600">
-          <Zap size={14} />
+          <Shuffle size={14} />
         </div>
         <div>
           <p className="text-[10px] font-bold uppercase tracking-widest text-purple-600/60">Control · AI Split</p>
