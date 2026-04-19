@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     proxycurl_api_key: str = ""
     github_token: str = ""  # optional, raises rate limit from 60→5000 req/hr
 
-    redis_password: str = ""
+    redis_password: str = "changeme"
 
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24  # 24h
