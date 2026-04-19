@@ -66,9 +66,10 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
-      # - "443:443"  # Uncomment after SSL setup
+      - "443:443"
     volumes:
       - ./certs:/etc/nginx/certs:ro
+      - ./certbot/www:/var/www/certbot:ro
     depends_on:
       backend:
         condition: service_healthy
