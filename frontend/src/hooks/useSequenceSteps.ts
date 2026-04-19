@@ -25,7 +25,9 @@ export type NodeType =
   | 'event_email_opened'
   | 'event_link_clicked'
   | 'delay'
+  | 'wait_until'
   | 'split'
+  | 'goal'
   | 'end'
 
 export interface SequenceNode {

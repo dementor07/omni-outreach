@@ -109,3 +109,16 @@ export function useDeleteCampaign() {
     },
   })
 }
+
+export function useCloneCampaign() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data } = await api.post<Campaign>(`/campaigns/${id}/clone`)
+      return data
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['campaigns'] })
+    },
+  })
+}

@@ -8,6 +8,11 @@ import Settings from './pages/Settings'
 import Login from './pages/Login'
 import JobSearch from './pages/JobSearch'
 import LeadSources from './pages/LeadSources'
+import Activity from './pages/Activity'
+import Blacklist from './pages/Blacklist'
+import Analytics from './pages/Analytics'
+import Templates from './pages/Templates'
+import Inbox from './pages/Inbox'
 import RetellFlowEditor from './pages/RetellFlowEditor'
 
 function RequireAuth() {
@@ -39,6 +44,11 @@ export default function App() {
         <Route path="/settings" element={<Settings />} />
         <Route path="/job-search" element={<JobSearch />} />
         <Route path="/lead-sources" element={<LeadSources />} />
+        <Route path="/activity" element={<Activity />} />
+        <Route path="/blacklist" element={<Blacklist />} />
+        <Route path="/analytics" element={<Analytics />} />
+        <Route path="/templates" element={<Templates />} />
+        <Route path="/inbox" element={<Inbox />} />
       </Route>
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>

@@ -1,4 +1,4 @@
-import { Activity, CheckCircle2, ListTodo, Megaphone, Send, Users } from 'lucide-react'
+import { Activity, CheckCircle2, ListTodo, Megaphone, Send, Users, TrendingUp } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import Badge from '../components/Badge'
@@ -7,13 +7,15 @@ import EmptyState from '../components/EmptyState'
 import StatCard from '../components/StatCard'
 import { useListCampaigns } from '../hooks/useCampaigns'
 import { useQueueStats } from '../hooks/useQueue'
-import { useOverviewStats } from '../hooks/useOverview'
+import { useOverviewStats, useDailyActivity, useResponseRates } from '../hooks/useOverview'
 import { formatRelative, formatScheduled } from '../lib/time'
 
 export default function Dashboard() {
   const campaignsQuery = useListCampaigns()
   const queueStatsQuery = useQueueStats()
   const overviewQuery = useOverviewStats()
+  const dailyQuery = useDailyActivity()
+  const ratesQuery = useResponseRates()
 
   const campaigns = campaignsQuery.data || []
   const queueStats = queueStatsQuery.data || []
@@ -106,6 +108,109 @@ export default function Dashboard() {
         <StatCard label="Active Campaigns" value={activeCampaigns} icon={Megaphone} accent="emerald" loading={campaignsQuery.isLoading} />
         <StatCard label="Queued Tasks" value={queuedTasks} icon={ListTodo} accent="sky" loading={queueStatsQuery.isLoading} />
         <StatCard label="Failed Tasks" value={failedTasks} icon={ListTodo} accent="rose" loading={queueStatsQuery.isLoading} />
+      </section>
+
+      {/* Activity chart + Response rates */}
+      <section className="grid gap-6 xl:grid-cols-2">
+        {/* Daily Activity Chart */}
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-900">Daily Activity</h2>
+          <p className="text-sm text-slate-500">Queue executions over the last 14 days</p>
+          <div className="mt-5">
+            {dailyQuery.isLoading ? (
+              <div className="h-40 animate-pulse rounded-xl bg-slate-100" />
+            ) : (() => {
+              const rows = dailyQuery.data || []
+              // aggregate by day
+              const byDay: Record<string, { sent: number; failed: number; queued: number }> = {}
+              rows.forEach((r) => {
+                const d = r.day?.slice(0, 10) || ''
+                if (!byDay[d]) byDay[d] = { sent: 0, failed: 0, queued: 0 }
+                if (r.status === 'sent') byDay[d].sent += r.cnt
+                else if (r.status === 'failed') byDay[d].failed += r.cnt
+                else byDay[d].queued += r.cnt
+              })
+              const days = Object.keys(byDay).sort()
+              if (days.length === 0) return <p className="py-8 text-center text-sm text-slate-400">No activity data</p>
+              const maxVal = Math.max(1, ...days.map((d) => byDay[d].sent + byDay[d].failed + byDay[d].queued))
+              return (
+                <div className="flex items-end gap-1" style={{ height: 140 }}>
+                  {days.map((d) => {
+                    const { sent, failed, queued } = byDay[d]
+                    const total = sent + failed + queued
+                    const pct = (total / maxVal) * 100
+                    return (
+                      <div key={d} className="group relative flex flex-1 flex-col items-center">
+                        <div className="absolute -top-8 hidden rounded-lg bg-slate-800 px-2 py-1 text-[10px] text-white group-hover:block">
+                          {d.slice(5)}: {sent}s / {failed}f
+                        </div>
+                        <div className="flex w-full flex-col" style={{ height: `${pct}%`, minHeight: 4 }}>
+                          {sent > 0 && <div className="w-full rounded-t bg-emerald-400" style={{ flex: sent }} />}
+                          {failed > 0 && <div className="w-full bg-rose-400" style={{ flex: failed }} />}
+                          {queued > 0 && <div className="w-full rounded-b bg-sky-300" style={{ flex: queued }} />}
+                        </div>
+                        <span className="mt-1 text-[9px] text-slate-400">{d.slice(8)}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()}
+            <div className="mt-3 flex gap-4 text-[10px] text-slate-400">
+              <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-emerald-400" />Sent</span>
+              <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-rose-400" />Failed</span>
+              <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-sky-300" />Queued</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Response Rates */}
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-900">Response Rates</h2>
+          <p className="text-sm text-slate-500">Invite → Accept → Reply funnel per campaign</p>
+          <div className="mt-5 space-y-4">
+            {ratesQuery.isLoading ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-xl bg-slate-100" />)}
+              </div>
+            ) : (ratesQuery.data || []).length === 0 ? (
+              <p className="py-8 text-center text-sm text-slate-400">No campaign data</p>
+            ) : (
+              (ratesQuery.data || []).map((c) => {
+                const acceptRate = c.invited > 0 ? Math.round((c.accepted / c.invited) * 100) : 0
+                const replyRate = c.accepted > 0 ? Math.round((c.replied / c.accepted) * 100) : 0
+                return (
+                  <div key={c.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div className="flex items-center justify-between">
+                      <span className="truncate text-sm font-medium text-slate-900">{c.name}</span>
+                      <span className="text-xs text-slate-400">{c.total} leads</span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-3">
+                      <div>
+                        <div className="flex items-center justify-between text-[10px] text-slate-400">
+                          <span>Accept rate</span>
+                          <span className="font-semibold text-emerald-600">{acceptRate}%</span>
+                        </div>
+                        <div className="mt-1 h-1.5 rounded-full bg-slate-200">
+                          <div className="h-full rounded-full bg-emerald-400 transition-all" style={{ width: `${acceptRate}%` }} />
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between text-[10px] text-slate-400">
+                          <span>Reply rate</span>
+                          <span className="font-semibold text-sky-600">{replyRate}%</span>
+                        </div>
+                        <div className="mt-1 h-1.5 rounded-full bg-slate-200">
+                          <div className="h-full rounded-full bg-sky-400 transition-all" style={{ width: `${replyRate}%` }} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </div>
       </section>
 
       {/* Bottom panels */}

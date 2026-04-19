@@ -2,7 +2,9 @@ import { FormEvent, useEffect, useState, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { Link, useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom'
-import { Plus, Save, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap, X, ChevronRight, Settings2, Trash2, Radio, Tag, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle, MinusCircle, Brain, Route } from 'lucide-react'
+import { Plus, Save, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap, X, ChevronRight, Settings2, Trash2, Radio, Tag, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle, MinusCircle, Brain, Route, Upload, Undo2, Redo2, Copy } from 'lucide-react'
+import CsvImport from '../components/CsvImport'
+import { useCanvasHistory } from '../hooks/useCanvasHistory'
 import {
   ReactFlow,
   Background,
@@ -40,6 +42,7 @@ import {
   useCampaignStats,
   useCreateCampaign,
   useDeleteCampaign,
+  useCloneCampaign,
   useGetCampaign,
   useListCampaigns,
   useUpdateCampaign,
@@ -182,7 +185,9 @@ const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNode; colo
   { type: 'event_email_opened',            label: 'Email Opened',      icon: <Bell size={15} />,           color: 'text-violet-500',  bg: 'bg-violet-50',  border: 'border-violet-200' },
   { type: 'event_link_clicked',            label: 'Link Clicked',      icon: <Bell size={15} />,           color: 'text-violet-500',  bg: 'bg-violet-50',  border: 'border-violet-200' },
   { type: 'delay',                         label: 'Wait',              icon: <Clock size={15} />,          color: 'text-slate-400',   bg: 'bg-slate-50',   border: 'border-slate-200' },
+  { type: 'wait_until',                    label: 'Wait Until',        icon: <Clock size={15} />,          color: 'text-orange-500',  bg: 'bg-orange-50',  border: 'border-orange-200' },
   { type: 'split',                         label: 'A/B Split',         icon: <Shuffle size={15} />,        color: 'text-purple-600',  bg: 'bg-purple-50',  border: 'border-purple-200' },
+  { type: 'goal',                          label: 'Goal',              icon: <Zap size={15} />,            color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' },
   { type: 'end',                           label: 'End',               icon: <StopCircle size={15} />,     color: 'text-rose-600',    bg: 'bg-rose-50',    border: 'border-rose-400' },
 ]
 
@@ -318,6 +323,31 @@ const DelayNode = ({ data, id, selected }: NodeProps<Node<{ delay_days?: number;
   </div>
 )
 
+const WaitUntilNode = ({ data, id, selected }: NodeProps<Node<{ wait_until_date?: string; wait_until_time?: string; onChange?: (id: string, field: string, val: string) => void }>>) => (
+  <div className={`relative min-w-[200px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-orange-200'}`}>
+    <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
+    <div className="flex items-center gap-2 mb-2">
+      <Clock size={14} className="text-orange-500" />
+      <span className="text-[10px] font-bold uppercase tracking-widest text-orange-500">Wait Until</span>
+    </div>
+    <div className="space-y-1.5">
+      <input
+        type="date"
+        value={data.wait_until_date || ''}
+        onChange={(e) => data.onChange?.(id, 'wait_until_date', e.target.value)}
+        className="w-full rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700 focus:ring-2 focus:ring-orange-300/30"
+      />
+      <input
+        type="time"
+        value={data.wait_until_time || '09:00'}
+        onChange={(e) => data.onChange?.(id, 'wait_until_time', e.target.value)}
+        className="w-full rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700 focus:ring-2 focus:ring-orange-300/30"
+      />
+    </div>
+    <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-none !bg-slate-300" />
+  </div>
+)
+
 const SplitNode = ({ data, selected }: NodeProps) => {
   const weights = (data as any)?.weights
   const tA = weights?.true?.alpha ?? 1
@@ -356,6 +386,18 @@ const SplitNode = ({ data, selected }: NodeProps) => {
   )
 }
 
+const GoalNode = ({ data, selected }: NodeProps) => (
+  <div className={`relative min-w-[180px] rounded-xl border-2 bg-emerald-50 p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-emerald-200'}`}>
+    <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
+    <div className="flex items-center gap-2 mb-1">
+      <Zap size={14} className="text-emerald-600" />
+      <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-500">Conversion Goal</span>
+    </div>
+    <p className="text-xs font-bold text-slate-900">{(data as any).goal_name || 'Meeting booked'}</p>
+    <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-none !bg-slate-300" />
+  </div>
+)
+
 const EndNode = ({ selected }: NodeProps) => (
   <div className={`relative min-w-[160px] rounded-xl border-2 bg-rose-50 p-4 text-center shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-rose-200'}`}>
     <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
@@ -388,7 +430,9 @@ const nodeTypes = {
   event_email_opened: EventNode,
   event_link_clicked: EventNode,
   delay: DelayNode,
+  wait_until: WaitUntilNode,
   split: SplitNode,
+  goal: GoalNode,
   end: EndNode,
 }
 
@@ -407,6 +451,7 @@ export default function Campaigns() {
   const createCampaign = useCreateCampaign()
   const updateCampaign = useUpdateCampaign()
   const deleteCampaign = useDeleteCampaign()
+  const cloneCampaign = useCloneCampaign()
   const importLeads = useImportLeads()
   const leadsQuery = useListLeads(id, 1, 50)
   const queueQuery = useQueueList({ campaignId: id, limit: 100 })
@@ -417,11 +462,13 @@ export default function Campaigns() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [liveMode, setLiveMode] = useState(false)
+  const canvasHistory = useCanvasHistory()
   const [telemetry, setTelemetry] = useState<{ activity: Record<string, number>; backpressure: Record<string, number> }>({ activity: {}, backpressure: {} })
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   
   const [createOpen, setCreateOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [importMode, setImportMode] = useState<'json' | 'csv'>('json')
   const [form, setForm] = useState<CampaignPayload>(defaultCampaignForm)
   const [importPayload, setImportPayload] = useState('')
 
@@ -529,7 +576,11 @@ export default function Campaigns() {
       data: { 
         node_type: type, 
         delay_days: type === 'delay' ? 1 : 0,
-        onChange: (id: string, val: number) => updateNodeData(id, { delay_days: val })
+        wait_until_date: type === 'wait_until' ? '' : undefined,
+        wait_until_time: type === 'wait_until' ? '09:00' : undefined,
+        onChange: type === 'wait_until'
+          ? (id: string, field: string, val: string) => updateNodeData(id, { [field]: val })
+          : (id: string, val: number) => updateNodeData(id, { delay_days: val }),
       },
     }
     setNodes(nds => nds.concat(newNode))
@@ -664,6 +715,18 @@ export default function Campaigns() {
                 {tab === 'sequence' ? 'Canvas' : tab.charAt(0).toUpperCase() + tab.slice(1)}
               </button>
             ))}
+            <button
+              type="button"
+              onClick={async () => {
+                const cloned = await cloneCampaign.mutateAsync(id!)
+                toast.success(`Cloned as "${cloned.name}"`)
+                navigate(`/campaigns/${cloned.id}?tab=sequence`)
+              }}
+              className="flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-200 transition"
+              title="Clone campaign"
+            >
+              <Copy size={13} /> Clone
+            </button>
             </div>
           </div>
         </div>
@@ -732,6 +795,22 @@ export default function Campaigns() {
                     <Panel position="top-right">
                       <div className="flex gap-2">
                         <button
+                          onClick={() => { const s = canvasHistory.undo(); if (s) { setNodes(s.nodes); setEdges(s.edges) } }}
+                          disabled={!canvasHistory.canUndo}
+                          className="btn-tactile flex items-center rounded-xl bg-white px-3 py-2.5 text-xs font-bold text-slate-600 shadow-lg shadow-slate-100 border border-slate-200 hover:bg-slate-50 disabled:opacity-30"
+                          title="Undo (Ctrl+Z)"
+                        >
+                          <Undo2 size={14} />
+                        </button>
+                        <button
+                          onClick={() => { const s = canvasHistory.redo(); if (s) { setNodes(s.nodes); setEdges(s.edges) } }}
+                          disabled={!canvasHistory.canRedo}
+                          className="btn-tactile flex items-center rounded-xl bg-white px-3 py-2.5 text-xs font-bold text-slate-600 shadow-lg shadow-slate-100 border border-slate-200 hover:bg-slate-50 disabled:opacity-30"
+                          title="Redo (Ctrl+Y)"
+                        >
+                          <Redo2 size={14} />
+                        </button>
+                        <button
                           onClick={() => setLiveMode(m => !m)}
                           className={`btn-tactile flex items-center rounded-xl px-4 py-2.5 text-xs font-bold shadow-lg transition ${liveMode ? 'bg-emerald-500 text-white shadow-emerald-100 hover:bg-emerald-600' : 'bg-white text-slate-600 shadow-slate-100 border border-slate-200 hover:bg-slate-50'}`}
                         >
@@ -791,22 +870,46 @@ export default function Campaigns() {
       </div>
 
       <Modal title="Import leads" open={importOpen} onClose={() => setImportOpen(false)} width="lg">
-        <form className="space-y-4" onSubmit={async (e: FormEvent) => {
-          e.preventDefault()
-          const parsed = JSON.parse(importPayload)
-          await importLeads.mutateAsync({ campaignId: id!, leads: parsed })
-          setImportOpen(false)
-          setImportPayload('')
-          toast.success('Leads imported.')
-        }}>
-          <textarea
-            value={importPayload}
-            onChange={(e) => setImportPayload(e.target.value)}
-            className="min-h-[260px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
-            placeholder='[{"linkedin_url":"..."}]'
+        {importMode === 'csv' ? (
+          <CsvImport
+            campaignId={id!}
+            onComplete={() => { setImportOpen(false); toast.success('Leads imported from CSV.') }}
+            onCancel={() => setImportMode('json')}
           />
-          <button type="submit" className="w-full rounded-xl bg-sky-500 py-3 font-semibold text-white">Import Leads</button>
-        </form>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <button
+                onClick={() => setImportMode('json')}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${importMode === 'json' ? 'bg-sky-100 text-sky-700' : 'text-slate-500 hover:bg-slate-100'}`}
+              >
+                JSON
+              </button>
+              <button
+                onClick={() => setImportMode('csv')}
+                className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-100"
+              >
+                CSV Upload
+              </button>
+            </div>
+            <form className="space-y-4" onSubmit={async (e: FormEvent) => {
+              e.preventDefault()
+              const parsed = JSON.parse(importPayload)
+              await importLeads.mutateAsync({ campaignId: id!, leads: parsed })
+              setImportOpen(false)
+              setImportPayload('')
+              toast.success('Leads imported.')
+            }}>
+              <textarea
+                value={importPayload}
+                onChange={(e) => setImportPayload(e.target.value)}
+                className="min-h-[260px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
+                placeholder='[{"linkedin_url":"..."}]'
+              />
+              <button type="submit" className="w-full rounded-xl bg-sky-500 py-3 font-semibold text-white">Import Leads</button>
+            </form>
+          </div>
+        )}
       </Modal>
     </div>
   )
@@ -988,6 +1091,60 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
               onChange={(e) => onUpdate({ delay_days: parseInt(e.target.value) || 1 })}
               className={inputClassName}
             />
+          </div>
+        )}
+
+        {nodeType === 'wait_until' && (
+          <div className="space-y-4">
+            <div>
+              <label className={labelCls}>Wait Until Date</label>
+              <input
+                type="date"
+                value={(node.data as any).wait_until_date || ''}
+                onChange={(e) => onUpdate({ wait_until_date: e.target.value })}
+                className={inputClassName}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Time of Day</label>
+              <input
+                type="time"
+                value={(node.data as any).wait_until_time || '09:00'}
+                onChange={(e) => onUpdate({ wait_until_time: e.target.value })}
+                className={inputClassName}
+              />
+              <p className="mt-1 text-[10px] text-slate-400">Lead proceeds after this datetime (campaign timezone)</p>
+            </div>
+          </div>
+        )}
+
+        {nodeType === 'goal' && (
+          <div className="space-y-4">
+            <div>
+              <label className={labelCls}>Goal Name</label>
+              <input
+                type="text"
+                value={(node.data as any).goal_name || ''}
+                onChange={(e) => onUpdate({ goal_name: e.target.value })}
+                className={inputClassName}
+                placeholder="e.g., Meeting booked, Demo scheduled"
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Goal Event Type</label>
+              <select
+                value={(node.data as any).goal_event || 'reply'}
+                onChange={(e) => onUpdate({ goal_event: e.target.value })}
+                className={inputClassName}
+              >
+                <option value="reply">Reply received</option>
+                <option value="positive_reply">Positive reply</option>
+                <option value="meeting_booked">Meeting booked</option>
+                <option value="link_clicked">Link clicked</option>
+                <option value="custom">Custom event</option>
+              </select>
+              <p className="mt-1 text-[10px] text-slate-400">Lead is marked as converted when this event fires</p>
+            </div>
           </div>
         )}
 

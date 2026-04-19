@@ -50,13 +50,13 @@ export interface LeadListResponse {
   page_size: number
 }
 
-export function useListLeads(campaignId?: string, page = 1, pageSize = 50) {
+export function useListLeads(campaignId?: string, page = 1, pageSize = 50, search?: string, status?: string) {
   return useQuery({
-    queryKey: ['leads', campaignId, page, pageSize],
+    queryKey: ['leads', campaignId, page, pageSize, search, status],
     enabled: !!campaignId,
     queryFn: async () => {
       const { data } = await api.get<LeadListResponse>('/leads', {
-        params: { campaign_id: campaignId, page, page_size: pageSize },
+        params: { campaign_id: campaignId, page, page_size: pageSize, search: search || undefined, status: status || undefined },
       })
       return data
     },
@@ -102,6 +102,20 @@ export function useStopLead() {
       void queryClient.invalidateQueries({ queryKey: ['leads', campaignId] })
       void queryClient.invalidateQueries({ queryKey: ['lead', leadId] })
       void queryClient.invalidateQueries({ queryKey: ['campaign-stats', campaignId] })
+      void queryClient.invalidateQueries({ queryKey: ['queue'] })
+    },
+  })
+}
+
+export function useBulkLeadAction() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: { lead_ids: string[]; action: string; target_campaign_id?: string; tag?: string }) => {
+      const { data } = await api.post<{ affected: number; action: string }>('/leads/bulk', payload)
+      return data
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['leads'] })
       void queryClient.invalidateQueries({ queryKey: ['queue'] })
     },
   })

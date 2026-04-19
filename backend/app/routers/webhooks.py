@@ -1,10 +1,28 @@
 import json
 import logging
 from fastapi import APIRouter, Request, HTTPException
+from pydantic import BaseModel
 import app.db as db
+from app.services.reply_classifier import classify_reply, get_suggested_action
 
 router = APIRouter()
 log = logging.getLogger(__name__)
+
+
+class ClassifyRequest(BaseModel):
+    subject: str = ""
+    body: str
+
+
+@router.post("/classify-reply")
+async def classify_reply_endpoint(req: ClassifyRequest):
+    """Classify an inbound reply message. Returns category, confidence, and suggested action."""
+    category, confidence = classify_reply(req.subject, req.body)
+    return {
+        "category": category.value,
+        "confidence": round(confidence, 2),
+        "suggested_action": get_suggested_action(category),
+    }
 
 @router.post("/unipile")
 async def unipile_webhook(request: Request):
@@ -24,3 +42,85 @@ async def unipile_webhook(request: Request):
     except Exception as e:
         log.exception("Failed to queue webhook payload")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/events/inbound")
+async def generic_inbound_event(request: Request):
+    """
+    Generic inbound event webhook. Accepts events from any integration
+    and routes them into the events table + triggers sequence processing.
+
+    Expected JSON:
+    {
+      "event_type": "reply" | "email_opened" | "link_clicked" | "invite_accepted" | "bounce" | "unsubscribe",
+      "channel": "email" | "linkedin" | "whatsapp" | "sms",
+      "lead_email": "...",         # optional, for lead lookup
+      "lead_linkedin_url": "...",  # optional, for lead lookup
+      "lead_id": "...",            # optional, direct ID
+      "meta": { ... }             # any additional payload
+    }
+    """
+    payload = await request.json()
+    event_type = payload.get("event_type")
+    channel = payload.get("channel", "unknown")
+    meta = payload.get("meta", {})
+
+    if not event_type:
+        raise HTTPException(400, "event_type is required")
+
+    # Resolve lead
+    lead_id = payload.get("lead_id")
+    if not lead_id and payload.get("lead_email"):
+        row = await db.fetch_one(
+            "SELECT id FROM leads WHERE email=$1 LIMIT 1",
+            payload["lead_email"]
+        )
+        lead_id = str(row["id"]) if row else None
+
+    if not lead_id and payload.get("lead_linkedin_url"):
+        row = await db.fetch_one(
+            "SELECT id FROM leads WHERE linkedin_url=$1 LIMIT 1",
+            payload["lead_linkedin_url"]
+        )
+        lead_id = str(row["id"]) if row else None
+
+    if not lead_id:
+        return {"status": "ignored", "reason": "lead not found"}
+
+    # Insert event
+    await db.execute(
+        """
+        INSERT INTO events (lead_id, event_type, channel, meta)
+        VALUES ($1, $2, $3, $4)
+        """,
+        lead_id, event_type, channel, json.dumps(meta),
+    )
+
+    # Update lead timestamps based on event type
+    if event_type == "invite_accepted":
+        await db.execute(
+            "UPDATE leads SET accepted_at=NOW() WHERE id=$1 AND accepted_at IS NULL",
+            lead_id,
+        )
+    elif event_type == "reply":
+        await db.execute(
+            "UPDATE leads SET replied_at=NOW() WHERE id=$1 AND replied_at IS NULL",
+            lead_id,
+        )
+    elif event_type == "bounce":
+        await db.execute(
+            "UPDATE leads SET status='bounced' WHERE id=$1",
+            lead_id,
+        )
+
+    # Queue for sequence event processing (if Redis available)
+    if db.redis_client:
+        try:
+            await db.redis_client.xadd(
+                "omni_sequence_events",
+                {"lead_id": lead_id, "event_type": event_type, "channel": channel, "meta": json.dumps(meta)},
+            )
+        except Exception:
+            log.warning("Failed to queue sequence event to Redis")
+
+    return {"status": "processed", "lead_id": lead_id, "event_type": event_type}

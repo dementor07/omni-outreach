@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
-import { Search, UserRound, X } from 'lucide-react'
+import { Search, UserRound, X, CheckSquare, Square, StopCircle, RotateCcw, Trash2, ArrowRightLeft } from 'lucide-react'
 
 import Badge from '../components/Badge'
 import DataTable from '../components/DataTable'
 import EmptyState from '../components/EmptyState'
 import { useListCampaigns } from '../hooks/useCampaigns'
-import { Lead, useGetLead, useListLeads, useStopLead } from '../hooks/useLeads'
+import { Lead, useGetLead, useListLeads, useStopLead, useBulkLeadAction } from '../hooks/useLeads'
 
 function formatDate(iso?: string | null) {
   return iso ? new Date(iso).toLocaleDateString() : '—'
@@ -15,10 +15,15 @@ export default function Leads() {
   const campaignsQuery = useListCampaigns()
   const [campaignId, setCampaignId] = useState('')
   const [page, setPage] = useState(1)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkTarget, setBulkTarget] = useState('')
 
-  const leadsQuery = useListLeads(campaignId || undefined, page, 25)
+  const leadsQuery = useListLeads(campaignId || undefined, page, 25, search || undefined, statusFilter || undefined)
   const stopLead = useStopLead()
+  const bulkAction = useBulkLeadAction()
   const selectedLead = useGetLead(selectedLeadId || undefined)
 
   const rows = leadsQuery.data?.leads || []
@@ -27,6 +32,43 @@ export default function Leads() {
 
   const columns = useMemo(
     () => [
+      {
+        key: 'select',
+        header: (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              if (selectedIds.size === rows.length && rows.length > 0) {
+                setSelectedIds(new Set())
+              } else {
+                setSelectedIds(new Set(rows.map((r) => r.id)))
+              }
+            }}
+            className="text-slate-400 hover:text-sky-600"
+          >
+            {selectedIds.size === rows.length && rows.length > 0 ? <CheckSquare size={16} /> : <Square size={16} />}
+          </button>
+        ),
+        className: 'w-10',
+        render: (row: Lead) => (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              setSelectedIds((prev) => {
+                const next = new Set(prev)
+                if (next.has(row.id)) next.delete(row.id)
+                else next.add(row.id)
+                return next
+              })
+            }}
+            className="text-slate-400 hover:text-sky-600"
+          >
+            {selectedIds.has(row.id) ? <CheckSquare size={16} className="text-sky-600" /> : <Square size={16} />}
+          </button>
+        ),
+      },
       {
         key: 'name',
         header: 'Lead',
@@ -67,7 +109,7 @@ export default function Leads() {
         ),
       },
     ],
-    [stopLead],
+    [stopLead, selectedIds, rows],
   )
 
   return (
@@ -100,6 +142,37 @@ export default function Leads() {
             </select>
           </div>
         </div>
+
+        {/* Search + Filter bar */}
+        {campaignId && (
+          <div className="mt-4 flex flex-wrap gap-3">
+            <div className="flex flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+              <Search size={14} className="text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search leads by name, company, email..."
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+                className="w-full text-sm text-slate-700 outline-none placeholder:text-slate-400"
+              />
+              {search && (
+                <button onClick={() => setSearch('')} className="text-slate-400 hover:text-slate-600">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            <select
+              value={statusFilter}
+              onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none"
+            >
+              <option value="">All statuses</option>
+              <option value="active">Active</option>
+              <option value="stopped">Stopped</option>
+              <option value="bounced">Bounced</option>
+            </select>
+          </div>
+        )}
       </section>
 
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -107,6 +180,70 @@ export default function Leads() {
           <EmptyState icon={UserRound} title="Choose a campaign first" description="The leads view is scoped by campaign so the table stays operationally useful." />
         ) : (
           <>
+            {/* Bulk action toolbar */}
+            {selectedIds.size > 0 && (
+              <div className="mb-4 flex items-center gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
+                <span className="text-sm font-medium text-sky-700">{selectedIds.size} selected</span>
+                <div className="ml-auto flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void bulkAction.mutateAsync({ lead_ids: [...selectedIds], action: 'stop' })
+                      setSelectedIds(new Set())
+                    }}
+                    className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50"
+                  >
+                    <StopCircle size={13} /> Stop
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void bulkAction.mutateAsync({ lead_ids: [...selectedIds], action: 'requeue' })
+                      setSelectedIds(new Set())
+                    }}
+                    className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+                  >
+                    <RotateCcw size={13} /> Re-activate
+                  </button>
+                  <select
+                    value={bulkTarget}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        void bulkAction.mutateAsync({ lead_ids: [...selectedIds], action: 'move_campaign', target_campaign_id: e.target.value })
+                        setSelectedIds(new Set())
+                        setBulkTarget('')
+                      }
+                    }}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 outline-none"
+                  >
+                    <option value="">Move to campaign...</option>
+                    {(campaignsQuery.data || []).filter((c) => c.id !== campaignId).map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm(`Delete ${selectedIds.size} leads permanently?`)) {
+                        void bulkAction.mutateAsync({ lead_ids: [...selectedIds], action: 'delete' })
+                        setSelectedIds(new Set())
+                      }
+                    }}
+                    className="flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50"
+                  >
+                    <Trash2 size={13} /> Delete
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedIds(new Set())}
+                    className="ml-2 text-xs text-slate-400 hover:text-slate-600"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+            )}
+
             <DataTable
               columns={columns}
               rows={rows}
@@ -194,9 +331,24 @@ function LeadDrawer({
                 <Detail label="Status" value={<Badge label={lead.status || 'active'} asStatus />} />
                 <Detail label="Headline" value={lead.headline || '—'} />
                 <Detail label="Source" value={lead.source || '—'} />
+                <Detail label="Email" value={lead.email || '—'} />
+                <Detail label="Phone" value={lead.phone || '—'} />
                 <Detail label="Invited" value={formatDate(lead.invited_at)} />
                 <Detail label="Accepted" value={formatDate(lead.accepted_at)} />
+                <Detail label="Replied" value={formatDate(lead.replied_at)} />
+                <Detail label="Created" value={formatDate(lead.created_at)} />
               </section>
+
+              {(lead as any).tags?.length > 0 && (
+                <section>
+                  <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Tags</h3>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {((lead as any).tags as string[]).map((tag) => (
+                      <span key={tag} className="rounded-full bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-700">{tag}</span>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               <section>
                 <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Timeline</h3>

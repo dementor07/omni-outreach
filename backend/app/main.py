@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import init_pool, close_pool, init_redis, close_redis
-from app.routers import auth, campaigns, leads, sequences, templates, accounts, queue, job_search, lead_gen, settings as settings_router, overview, webhooks
+from app.routers import auth, campaigns, leads, sequences, templates, accounts, queue, job_search, lead_gen, settings as settings_router, overview, webhooks, notifications, activity, blacklist, tracking, analytics, template_library, inbox
 
 
 @asynccontextmanager
@@ -41,6 +41,62 @@ async def lifespan(app: FastAPI):
         )
     """)
     await execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS email TEXT")
+    await execute("""
+        CREATE TABLE IF NOT EXISTS notifications (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT,
+            link TEXT,
+            is_read BOOLEAN DEFAULT FALSE,
+            meta JSONB DEFAULT '{}',
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    await execute("CREATE INDEX IF NOT EXISTS idx_notif_user_unread ON notifications(user_id, is_read, created_at DESC)")
+    await execute("""
+        CREATE TABLE IF NOT EXISTS activity_log (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id UUID,
+            campaign_id UUID,
+            lead_id UUID,
+            action TEXT NOT NULL,
+            detail TEXT,
+            meta JSONB DEFAULT '{}',
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    await execute("CREATE INDEX IF NOT EXISTS idx_activity_time ON activity_log(created_at DESC)")
+    await execute("""
+        CREATE TABLE IF NOT EXISTS blacklists (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            entry_type TEXT NOT NULL,
+            value TEXT NOT NULL,
+            reason TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            UNIQUE(entry_type, value)
+        )
+    """)
+    await execute("""
+        CREATE TABLE IF NOT EXISTS template_library (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id UUID NOT NULL,
+            name TEXT NOT NULL,
+            channel TEXT NOT NULL DEFAULT 'email',
+            category TEXT NOT NULL DEFAULT 'general',
+            subject TEXT,
+            body TEXT NOT NULL,
+            variables TEXT[] DEFAULT '{}',
+            is_public BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    # Add scheduling columns to campaigns if not exist
+    await execute("ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS active_days INTEGER[] DEFAULT '{1,2,3,4,5,6}'")
+    await execute("ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS scheduled_start TIMESTAMPTZ")
+    await execute("ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS scheduled_pause TIMESTAMPTZ")
     yield
     await close_pool()
     await close_redis()
@@ -68,6 +124,13 @@ app.include_router(lead_gen.router, prefix="/lead-gen", tags=["lead-gen"])
 app.include_router(settings_router.router, prefix="/settings", tags=["settings"])
 app.include_router(overview.router, prefix="/overview", tags=["overview"])
 app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
+app.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
+app.include_router(activity.router, prefix="/activity", tags=["activity"])
+app.include_router(blacklist.router, prefix="/blacklist", tags=["blacklist"])
+app.include_router(tracking.router, prefix="/track", tags=["tracking"])
+app.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
+app.include_router(template_library.router, prefix="/template-library", tags=["template-library"])
+app.include_router(inbox.router, prefix="/inbox", tags=["inbox"])
 
 
 @app.get("/health")
