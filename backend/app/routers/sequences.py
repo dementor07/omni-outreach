@@ -1,3 +1,4 @@
+import json
 from typing import Literal, List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -90,7 +91,7 @@ async def save_graph(body: SequenceGraph, user_id: str = Depends(get_current_use
             VALUES ($1, $2, $3, $4, $5)
             RETURNING id
             """,
-            body.campaign_id, node.node_type, node.position_x, node.position_y, node.data
+            body.campaign_id, node.node_type, node.position_x, node.position_y, json.dumps(node.data)
         )
         if node.id:
             node_id_map[node.id] = inserted["id"]
