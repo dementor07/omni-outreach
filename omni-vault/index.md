@@ -50,6 +50,8 @@ Last updated: 2026-04-19 (23-node canvas, 12-button sequential builder, SMS/Webh
 | [[omnichannel-logic-loops]] | How tags, split tests, and events power cross-channel routing |
 | [[lead-generation-injection]] | Apify + Serper autonomous scraping and DAG injection |
 | [[autonomous-feedback-loops]] | Closing the knowledge gaps between Retell, tags, and Lead Gen |
+| [[canvas-ux-decisions]] | Apr 2026 canvas overhaul: naming convention, palette grouping, icon semantics, btn-tactile, lucide-react version constraints |
+| [[stubbed-channels-policy]] | Why SMS/Webhook/Instagram/Telegram are fully typed but have no dispatcher handler; pending work |
 
 ## Competitors
 

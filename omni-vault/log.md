@@ -224,3 +224,20 @@ Deployed. All three items from the Active TODO list are now complete.
 - Updated channels.md: added SMS and Webhook/CRM to Stubbed Channels section.
 - Updated index.md: corrected canvas-editor summary to 23 nodes, updated channels summary, updated last-updated date.
 - Cleaned duplicate/malformatted log entries (converted bullet points to proper `## [date]` headings, removed duplicate wiki entries).
+
+## [2026-04-19] retrospective | Vault usage failure identified and corrected
+
+Identified 5 ways the vault was being misused:
+1. Agents never read index.md/log.md at session start — skipping the compounding memory entirely.
+2. Questions were answered from code, not from wiki pages with [[citations]].
+3. Zero ADRs were written for decisions made during implementation (naming, icon choices, palette grouping, stubbed channel policy).
+4. Wiki updates happened as after-the-fact cleanup, not vault-first design.
+5. MCP/API was never used — filesystem tools were always used directly.
+
+Corrective actions taken:
+- Created `wiki/decisions/canvas-ux-decisions.md` — captures all April 2026 UX naming, palette, icon, and tooling decisions.
+- Created `wiki/decisions/stubbed-channels-policy.md` — captures why SMS/Webhook/IG/TG are fully typed but no-op at dispatcher level.
+- Rewrote `Start-of-session` section of `wiki/architecture/agent-operations-protocol.md` — explicit READ-FIRST mandate, query workflow, and ADR-at-decision-time rule.
+- Updated index.md with both new ADR pages.
+
+Going forward: decisions go in the vault at decision time, not in a cleanup pass.

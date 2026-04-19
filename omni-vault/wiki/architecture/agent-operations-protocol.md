@@ -60,26 +60,55 @@ Create one compounding memory system where:
 
 ## Session Template (Mandatory)
 
-### Start-of-session
+### Start-of-session (READ-FIRST — non-negotiable)
 
-1. Read `omni-vault/index.md` and latest `omni-vault/log.md` section.
-2. Restate current objective in one paragraph.
-3. Assign active lanes:
-- Executor:
-- Planner:
-- Reviewer:
-4. Define completion criteria:
-- Functional:
-- Validation:
-- Documentation:
+**Agents must do this before writing any code or answering any question:**
+
+1. Read `omni-vault/index.md` — establish the map.
+2. Read the last 3 `## [date]` entries in `omni-vault/log.md` — establish current state.
+3. Identify which wiki pages are relevant to the session objective and read them.
+4. Synthesize answers and decisions from wiki pages, citing `[[WikiLinks]]`.
+5. Restate current objective in one paragraph grounded in wiki context.
+6. Assign active lanes:
+   - Executor:
+   - Planner:
+   - Reviewer:
+7. Define completion criteria:
+   - Functional:
+   - Validation:
+   - Documentation (which wiki pages will be updated):
+
+> **Why this matters**: the vault is the compounding memory. If agents read code directly and skip the vault, each session restarts from scratch. Reading the vault first ensures decisions compound rather than repeat.
+
+### Answering a question from the user
+
+Do NOT answer from code or memory alone. Follow this sequence:
+
+1. Read `index.md` → identify relevant page(s).
+2. Read those pages.
+3. Synthesize the answer citing `[[PageName]]` for every claim.
+4. If the answer involves a non-trivial decision or synthesis that doesn't exist in the vault, offer to create a new wiki page.
+
+### Filing a decision (ADR)
+
+Every non-trivial decision (architectural, product, naming, tooling) must become an ADR in `wiki/decisions/` **at the time the decision is made**, not in a cleanup pass. The vault is the design space. Code implements what the vault decided.
+
+ADR checklist:
+- [ ] Status (Proposed / Accepted / Superseded)
+- [ ] Context (what problem, what constraints)
+- [ ] Decision (what was chosen and what alternatives were rejected)
+- [ ] Rationale (why this over alternatives)
+- [ ] Consequences (what changes, what pending work)
+- [ ] Related pages with `[[WikiLinks]]`
 
 ### During session
 
-1. Planner outputs a compact plan and risk list.
+1. Planner outputs a compact plan and risk list grounded in current wiki pages.
 2. Reviewer pre-mortem identifies likely breakpoints and missing tests.
 3. Executor performs implementation in small batches with validation after each batch.
 4. Reviewer audits each completed batch before next batch starts.
 5. Vault gets incremental synthesis only for durable knowledge, not every micro-step.
+6. Any decision made during implementation must be filed as an ADR immediately — not deferred to end-of-session.
 
 ### End-of-session
 
