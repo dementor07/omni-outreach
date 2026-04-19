@@ -26,6 +26,8 @@ NodeType = Literal[
     "condition_replied",
     "condition_linkedin_distance",
     "condition_tag_exists",
+    "condition_ai_screen",
+    "condition_lead_source",
     "event_invite_accepted",
     "event_email_opened",
     "event_link_clicked",

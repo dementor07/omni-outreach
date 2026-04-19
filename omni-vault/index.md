@@ -1,6 +1,6 @@
 # Omni Wiki — Index
 
-Last updated: 2026-04-19 (23-node canvas, 12-button sequential builder, SMS/Webhook channels, icon audit)
+Last updated: 2026-04-19 (23-node canvas, 12-button sequential builder, SMS/Webhook channels, icon audit, multi-source lead gen)
 
 ## Architecture
 
@@ -53,6 +53,7 @@ Last updated: 2026-04-19 (23-node canvas, 12-button sequential builder, SMS/Webh
 | [[autonomous-feedback-loops]] | Closing the knowledge gaps between Retell, tags, and Lead Gen |
 | [[multi-source-lead-gen]] | Apr 2026 lead gen architecture: provider protocol, RawLead schema, 5 sources (Apify, Apollo, Hunter, ProxyCurl, GitHub), registry, new DB tables |
 | [[canvas-ux-decisions]] | Apr 2026 canvas overhaul: naming convention, palette grouping, icon semantics, btn-tactile, lucide-react version constraints |
+| [[lead-gen-canvas-integration]] | Apr 2026 plan: 4 new canvas nodes (AI screen, source router, enrichment, field check), scheduled runs, Settings integrations UI, visual link between LeadSources and Canvas |
 | [[stubbed-channels-policy]] | Why SMS/Webhook/Instagram/Telegram are fully typed but have no dispatcher handler; pending work |
 
 ## Competitors

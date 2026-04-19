@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { Link, useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom'
-import { Plus, Save, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap, X, ChevronRight, Settings2, Trash2, Radio, Tag, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle, MinusCircle } from 'lucide-react'
+import { Plus, Save, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap, X, ChevronRight, Settings2, Trash2, Radio, Tag, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle, MinusCircle, Brain, Route } from 'lucide-react'
 import {
   ReactFlow,
   Background,
@@ -176,6 +176,8 @@ const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNode; colo
   { type: 'condition_replied',             label: 'If Replied',        icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
   { type: 'condition_linkedin_distance',   label: 'If 1st Degree',     icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
   { type: 'condition_tag_exists',          label: 'If Has Tag',        icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
+  { type: 'condition_ai_screen',           label: 'AI Screen',         icon: <Brain size={15} />,          color: 'text-violet-600',  bg: 'bg-violet-50',  border: 'border-violet-200' },
+  { type: 'condition_lead_source',         label: 'Source Router',     icon: <Route size={15} />,          color: 'text-cyan-600',    bg: 'bg-cyan-50',    border: 'border-cyan-200' },
   { type: 'event_invite_accepted',         label: 'Invite Accepted',   icon: <Bell size={15} />,           color: 'text-violet-500',  bg: 'bg-violet-50',  border: 'border-violet-200' },
   { type: 'event_email_opened',            label: 'Email Opened',      icon: <Bell size={15} />,           color: 'text-violet-500',  bg: 'bg-violet-50',  border: 'border-violet-200' },
   { type: 'event_link_clicked',            label: 'Link Clicked',      icon: <Bell size={15} />,           color: 'text-violet-500',  bg: 'bg-violet-50',  border: 'border-violet-200' },
@@ -380,6 +382,8 @@ const nodeTypes = {
   condition_replied: ConditionNode,
   condition_linkedin_distance: ConditionNode,
   condition_tag_exists: ConditionNode,
+  condition_ai_screen: ConditionNode,
+  condition_lead_source: ConditionNode,
   event_invite_accepted: EventNode,
   event_email_opened: EventNode,
   event_link_clicked: EventNode,
@@ -814,7 +818,7 @@ function NodePalette({ onAdd }: { onAdd: (type: NodeType) => void }) {
     { heading: 'Messaging',  types: ['action_email', 'action_whatsapp', 'action_sms', 'action_instagram', 'action_telegram'] },
     { heading: 'Voice',      types: ['action_voice'] },
     { heading: 'Actions',    types: ['action_add_tag', 'action_remove_tag', 'action_webhook'] },
-    { heading: 'Conditions', types: ['condition_replied', 'condition_linkedin_distance', 'condition_tag_exists'] },
+    { heading: 'Conditions', types: ['condition_replied', 'condition_linkedin_distance', 'condition_tag_exists', 'condition_ai_screen', 'condition_lead_source'] },
     { heading: 'Events',     types: ['event_invite_accepted', 'event_email_opened', 'event_link_clicked'] },
     { heading: 'Flow',       types: ['delay', 'split', 'end'] },
   ]
@@ -997,6 +1001,45 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
               className={inputClassName}
               placeholder="e.g., high-priority"
             />
+          </div>
+        )}
+
+        {nodeType === 'condition_ai_screen' && (
+          <div>
+            <label className={labelCls}>Screening Prompt</label>
+            <textarea
+              value={(node.data as any).screening_prompt || ''}
+              onChange={(e) => onUpdate({ screening_prompt: e.target.value })}
+              className={inputClassName + ' min-h-[120px]'}
+              placeholder="e.g., Accept leads who are VP/Director level at B2B SaaS companies with 50-500 employees. Reject others."
+              rows={5}
+            />
+            <p className="mt-2 text-[10px] text-slate-400">Claude AI will evaluate each lead's headline against this prompt and route to True (ACCEPT) or False (REJECT).</p>
+          </div>
+        )}
+
+        {nodeType === 'condition_lead_source' && (
+          <div>
+            <label className={labelCls}>Source Handles</label>
+            <p className="mb-3 text-[10px] text-slate-400">Select which lead sources get their own output handle. Unselected sources route to "default".</p>
+            {['apify_jobs', 'apollo', 'hunter', 'proxycurl', 'github', 'csv_import', 'manual'].map(src => {
+              const sources: string[] = (node.data as any).sources || []
+              const checked = sources.includes(src)
+              return (
+                <label key={src} className="flex items-center gap-3 rounded-xl px-3 py-2 hover:bg-slate-50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => {
+                      const next = checked ? sources.filter((s: string) => s !== src) : [...sources, src]
+                      onUpdate({ sources: next })
+                    }}
+                    className="h-4 w-4 rounded border-slate-300 text-sky-500 focus:ring-sky-500"
+                  />
+                  <span className="text-sm font-medium text-slate-700 capitalize">{src.replace('_', ' ')}</span>
+                </label>
+              )
+            })}
           </div>
         )}
 

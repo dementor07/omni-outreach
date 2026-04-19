@@ -96,6 +96,19 @@ async def queue_next_nodes(
                     await queue_next_nodes(lead_id, target_id, "true", accumulated_delay)
                 else:
                     await queue_next_nodes(lead_id, target_id, "false", accumulated_delay)
+            elif node_type == "condition_ai_screen":
+                from app.services.screener import screen_lead
+                prompt = (node["data"] or {}).get("screening_prompt", "")
+                verdict = await screen_lead(lead.get("headline", ""), prompt)
+                branch = "true" if verdict == "ACCEPT" else "false"
+                log.info(f"[sequencer] AI screen for lead {lead_id}: {verdict} → {branch}")
+                await queue_next_nodes(lead_id, target_id, branch, accumulated_delay)
+            elif node_type == "condition_lead_source":
+                configured_sources = (node["data"] or {}).get("sources", [])
+                lead_source = lead.get("source", "")
+                branch = lead_source if lead_source in configured_sources else "default"
+                log.info(f"[sequencer] Source router for lead {lead_id}: source={lead_source} → handle={branch}")
+                await queue_next_nodes(lead_id, target_id, branch, accumulated_delay)
 
         elif node_type == "split":
             weights = (node.get("data") or {}).get("weights", {

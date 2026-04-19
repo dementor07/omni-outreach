@@ -265,3 +265,24 @@ Frontend implemented:
 - `Sidebar.tsx` — added "Lead Sources" nav item (Database icon)
 
 Old `/job-search/` router and `JobSearch.tsx` preserved for backward compatibility.
+
+## [2026-04-19] plan | Lead Gen → Canvas/Sequence integration ADR
+
+Filed `wiki/decisions/lead-gen-canvas-integration.md` — vault-first planning before implementation.
+
+Identified 6 gaps between the new multi-source lead gen and the existing sequence engine/canvas:
+1. All sources dump into the same `trigger_start` — no source-based routing
+2. No quality gate — `screener.py` exists but is orphaned (not wired to any node)
+3. No enrichment step — thin leads hit outreach immediately
+4. LeadSources page and Canvas are visually disconnected
+5. Lead gen is manual-trigger only — no cron/schedule
+6. API keys are env vars only — no Settings UI
+
+Plan covers 4 phases:
+- **Phase 1A**: `condition_ai_screen` (wires screener.py) + `condition_lead_source` (routes by source type) — quality gate + source routing
+- **Phase 1B/C**: `condition_has_field` + `action_enrich` — waterfall enrichment
+- **Phase 2**: Visual integration — trigger_start source badge, campaign Sources tab, telemetry source breakdown
+- **Phase 3**: Scheduled lead gen — cron column + arq worker job + schedule UI
+- **Phase 4**: Settings → Integrations UI — encrypted API key storage, verification
+
+Recommended sprint order: 1A → 3 → 1B → 4 → 1C → 2A → 2B (screening gate first, then scheduling, then enrichment, then polish).
