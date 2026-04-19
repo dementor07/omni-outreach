@@ -362,7 +362,7 @@ function RunHistory({ configId }: { configId: string }) {
         {runs.map(run => (
           <tr key={run.id} className="border-b border-slate-50 last:border-0">
             <td className="py-1.5 pr-3">
-              <Badge variant={runStatusVariant[run.status]}>{run.status}</Badge>
+              <Badge variant={runStatusVariant[run.status]} label={run.status} />
             </td>
             <td className="py-1.5 pr-3 text-slate-700 font-medium">{run.leads_found}</td>
             <td className="py-1.5 pr-3 text-emerald-600 font-semibold">{run.leads_added}</td>
@@ -404,11 +404,9 @@ function ConfigCard({ config, onRun, onDelete, isRunning }: ConfigCardProps) {
             <span className="text-sm font-semibold text-slate-900">
               {config.label ?? config.source_display_name}
             </span>
-            <Badge variant={config.source_type === 'apify_jobs' ? 'info' : 'muted'}>
-              {config.source_display_name}
-            </Badge>
+            <Badge variant={config.source_type === 'apify_jobs' ? 'info' : 'muted'} label={config.source_display_name} />
             {!config.source_available && (
-              <Badge variant="error">Not configured</Badge>
+              <Badge variant="error" label="Not configured" />
             )}
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
