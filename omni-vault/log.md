@@ -179,3 +179,48 @@ Deployed. All three items from the Active TODO list are now complete.
 - Verified live backend now exposes /sequences/{campaign_id}/telemetry, /accounts/voice/flows, and /accounts/voice/{agent_id}.
 - Verified production leads table now contains path_history.
 - Result: vault, local codebase, deployed server, and production schema are back in sync on the previously drifting telemetry/optimization markers.
+
+## [2026-04-13] fix | UI parity restored — HEAD 6bb545c
+
+- Expanded backend `NodeType` Literal from 10 → 21 types to match frontend palette.
+- Rebuilt backend + worker on VPS.
+
+## [2026-04-13] fix | UI parity pass 2 — HEAD 5d26679
+
+- Fixed 6 broken job-search APIs: path param, create config, trigger URL, runs filter, column aliases, response shapes.
+- `CampaignSettings` now exposes all 8 editable fields.
+- Campaign stats mini-bar added to detail view header.
+
+## [2026-04-13] wiki | UI product docs expanded
+
+- Created 5 new pages: dashboard, leads-page, queue-page, settings-page, job-search-ui.
+- Rewrote campaigns.md with full UX detail (tabs, Settings form 8 fields, stats bar).
+- Expanded canvas-editor.md to all 21 node types.
+- Updated index.md.
+
+## [2026-04-13] fix | Canvas UX overhaul — HEAD c798e5e
+
+- Defined `btn-tactile` CSS utility class.
+- Renamed "Genesis Trigger" → "Sequence Start"; TriggerNode "Inception/Lead Accepted" → "Trigger/Sequence Start".
+- NodePalette: grouped by 7 categories, scrollable (`maxHeight: calc(100vh-160px)`).
+- Renamed "Deploy Canvas" → "Save Canvas" (sky-500 styling).
+- Sequential builder: expanded from 4 → 12 add buttons.
+- Added `action_sms` and `action_webhook` to backend `NodeType` Literal, frontend union, `nodeTypes` map, NODE_PALETTE, and SequentialBuilder.
+- Replaced placeholder icons with semantically correct icons throughout canvas and builder.
+- Hotfix: `TagX` (not exported by installed lucide-react) → `MinusCircle`. Deployed to VPS.
+
+## [2026-04-19] fix | Remaining canvas icon cleanup — HEAD 4d495d3
+
+- `ConditionNode` icon: `<Zap>` → `<GitBranch>`.
+- `SplitNode` icon: `<Zap>` → `<Shuffle>`.
+- `EventNode` icon: static `<Zap>` → dynamic `cfg?.icon` from NODE_PALETTE (Bell fallback).
+- Deployed to VPS. All placeholder icons eliminated from canvas node components.
+
+## [2026-04-19] wiki | Vault audit and update
+
+- Audited all product pages against live codebase.
+- Updated canvas-editor.md: 21 → 23 node types, correct palette groups (7 headings), Canvas UX Controls section, icon corrections, updated date.
+- Updated sequential-builder.md: documented 12 add buttons, STEP_LABELS map, StepIcon component, corrected "Script" → "Edit Template".
+- Updated channels.md: added SMS and Webhook/CRM to Stubbed Channels section.
+- Updated index.md: corrected canvas-editor summary to 23 nodes, updated channels summary, updated last-updated date.
+- Cleaned duplicate/malformatted log entries (converted bullet points to proper `## [date]` headings, removed duplicate wiki entries).

@@ -1,6 +1,6 @@
 # Omni Wiki — Index
 
-Last updated: 2026-04-13
+Last updated: 2026-04-19 (23-node canvas, 12-button sequential builder, SMS/Webhook channels, icon audit)
 
 ## Architecture
 
@@ -23,11 +23,16 @@ Last updated: 2026-04-13
 
 | Page | Summary |
 |------|---------|
-| [[canvas-editor]] | ReactFlow canvas, all node components, TelemetryEdge, SplitNode bandit UI, serialization |
-| [[sequential-builder]] | Linear sequence builder UI, reordering, inline wait duration edit |
+| [[dashboard]] | Mission-control overview: stat cards, channel breakdown table, campaign footprint, first-run onboarding |
+| [[campaigns]] | Campaign list + detail view (leads/queue/sequence/settings tabs), CampaignSettings form (8 fields), stats mini-bar, simulation badge |
+| [[canvas-editor]] | ReactFlow canvas, all 23 node types, palette grouped by 7 categories, TelemetryEdge, SplitNode bandit UI, ConfigSidebar, Save Canvas button, serialization |
+| [[sequential-builder]] | Linear sequence builder UI, 12 add buttons (expanded Apr 2026), STEP_LABELS map, StepIcon, reordering, inline wait duration edit |
 | [[voice-node]] | Standard vs Nested Flow modes, Retell editor UX |
-| [[channels]] | Breakdown of LinkedIn, WhatsApp, Email, and Voice outreach |
-| [[campaigns]] | Campaign configurations, execution constraints, and account assignments |
+| [[channels]] | Active: LinkedIn (4 types), WhatsApp, Email, Voice. Stubbed: SMS, Webhook/CRM, Instagram, Telegram |
+| [[leads-page]] | Global lead inspector: campaign filter, lead table, stop action, lead drawer with profile + timeline |
+| [[queue-page]] | Live task queue inspector: stat cards, 3-way filter (campaign/channel/status), task table with retry count |
+| [[settings-page]] | Account surfaces: LinkedIn accounts (with test hook), email SMTP accounts, Retell voice agents; shared AccountModal |
+| [[job-search-ui]] | Job search control panel: config create, run trigger, run history panel; Apify/Serper pipeline entry point |
 
 ## Integrations
 

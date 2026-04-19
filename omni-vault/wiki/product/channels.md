@@ -3,7 +3,7 @@ title: Channels
 category: product
 tags: [outreach, messaging, voice, email]
 sources: []
-updated: 2026-04-12
+updated: 2026-04-19
 ---
 
 # Outreach Channels
@@ -23,9 +23,12 @@ Omni is a multi-channel platform. Every action node in the [[sequence-engine]] m
 | **Voice**                 | `_handle_voice`                 | [[retell-integration]]  | Triggers an AI phone call. Supports Standard mode (`retell-llm`) or Nested Flow mode (`conversation-flow`). |
 
 ## Stubbed Channels
-These channels exist in the [[canvas-editor]] palette but the dispatcher logic is pending implementation:
-- **Instagram** (`action_instagram`)
-- **Telegram** (`action_telegram`)
+These channels exist in the [[canvas-editor]] palette and the [[sequential-builder]] add-button grid, and are wired through the frontend `NodeType` union and backend `NodeType` Literal — but the dispatcher has no handler yet (tasks will silently no-op):
+
+- **SMS** (`action_sms`) — MessageCircle icon, teal colour
+- **Webhook / CRM** (`action_webhook`) — Webhook icon, orange colour; intended for CRM push/Zapier triggers
+- **Instagram** (`action_instagram`) — stubbed since initial canvas build
+- **Telegram** (`action_telegram`) — stubbed since initial canvas build
 
 ## Shared Characteristics
 All channel templates support variable interpolation (e.g., `{{first_name}}`) via the `renderer.py` service.
