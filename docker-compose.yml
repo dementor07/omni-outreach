@@ -53,6 +53,8 @@ services:
     restart: unless-stopped
     command: python -m app.worker.main
     env_file: .env
+    healthcheck:
+      disable: true
     depends_on:
       db:
         condition: service_healthy
