@@ -343,3 +343,37 @@ Executed a 20-cycle brainstorm→implement sprint to close 140+ gaps identified 
 **Deployment:** All containers rebuilt and healthy on VPS 145.223.21.222 (backend, worker, frontend). `GET /health` → `{"status":"ok"}`.
 
 Updated `index.md` and `canvas-editor.md` with sprint additions.
+
+## [2026-04-19] security & feat | Integrations Security Architecture + Key Management
+
+Filed `wiki/decisions/integrations-security-architecture.md` ADR vault-first.
+
+**Security audit and hardening (Phase 1):**
+- CORS: Replaced `allow_origins=["*"]` with configurable `frontend_url` split origins
+- Rate limiting: Added `slowapi` with `SlowAPIMiddleware`; auth endpoints limited (`5/hour` register, `10/min` login)
+- Open redirect: Fixed `tracking.py` redirect — validates scheme+netloc via `urlparse()`
+- JSON injection: Fixed `tracking.py` pixel event — `json.dumps()` instead of f-string
+- Webhook signature: Added HMAC-SHA256 verification for Unipile webhooks in `webhooks.py`
+- SSE type bug: Fixed `notifications.py` `user: dict` → `user_id: str` for `get_current_user` return type
+- Email validation: `EmailStr` on auth register/login models
+- Dependencies: Added `slowapi>=0.1.9`, `cryptography>=43.0`
+
+**Integration key management (Phase 2):**
+- `services/encryption.py` — Fernet encrypt/decrypt/mask, key derived from SHA-256(SECRET_KEY)
+- `routers/settings.py` — Full CRUD for encrypted integration keys:
+  - `GET /settings/integrations/providers` — 11 providers (Unipile, Retell, Resend, Anthropic, Apify, Serper, Apollo, Hunter, ProxyCurl, GitHub, Twilio)
+  - `GET /settings/integrations` — List keys with masked values
+  - `PUT /settings/integrations` — Upsert encrypted key (UNIQUE constraint on user+provider+field)
+  - `DELETE /settings/integrations` — Remove key
+  - `POST /settings/integrations/{provider}/verify` — Lightweight HTTP test per provider
+  - `get_integration_key()` — DB-first with env var fallback for service consumption
+- `main.py` — `integration_keys` table auto-created in lifespan, with FK to users and index on user_id
+
+**Docker hardening (Phase 3):**
+- Backend: `ports: "8000:8000"` → `expose: "8000"` (only reachable via nginx proxy)
+- Redis: Added `--requirepass` and healthcheck with auth
+- Networks: Isolated `internal` (db/redis/backend/worker) + `external` (frontend/nginx only)
+- Config: `get_redis_url()` method supports authenticated Redis
+
+**Frontend:**
+- `Settings.tsx` — New "Integrations" tab with provider card grid, masked key display, Save/Delete/Verify per field, shield status icons (ShieldCheck/ShieldX/Shield)

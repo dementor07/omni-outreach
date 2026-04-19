@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Shield, ShieldCheck, ShieldX, Eye, EyeOff, Trash2 } from 'lucide-react'
 
 import { api } from '../api/client'
 import Badge from '../components/Badge'
@@ -9,7 +9,7 @@ import Modal from '../components/Modal'
 import { useToast } from '../components/Toast'
 import { formatDate } from '../lib/time'
 
-type SettingsTab = 'linkedin' | 'email' | 'voice'
+type SettingsTab = 'linkedin' | 'email' | 'voice' | 'integrations'
 
 type LinkedInAccount = {
   id: string
@@ -134,7 +134,7 @@ export default function Settings() {
       </section>
 
       <div className="flex flex-wrap gap-2">
-        {(['linkedin', 'email', 'voice'] as SettingsTab[]).map((tab) => (
+        {(['linkedin', 'email', 'voice', 'integrations'] as SettingsTab[]).map((tab) => (
           <button
             key={tab}
             type="button"
@@ -143,7 +143,7 @@ export default function Settings() {
               activeTab === tab ? 'bg-sky-500 text-white' : 'bg-white text-slate-500 hover:bg-slate-100'
             }`}
           >
-            {tab === 'linkedin' ? 'LinkedIn Accounts' : tab === 'email' ? 'Email Accounts' : 'Voice Agents'}
+            {tab === 'linkedin' ? 'LinkedIn Accounts' : tab === 'email' ? 'Email Accounts' : tab === 'voice' ? 'Voice Agents' : 'Integrations'}
           </button>
         ))}
       </div>
@@ -264,6 +264,8 @@ export default function Settings() {
             emptyMessage="No voice agents configured."
           />
         )}
+
+        {activeTab === 'integrations' && <IntegrationsPanel />}
       </section>
 
       <AccountModal
@@ -355,3 +357,220 @@ function AccountModal({
 
 const inputCls =
   'w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100'
+
+
+// ── Integrations Panel ────────────────────────────────────────────────
+
+interface ProviderConfig {
+  label: string
+  fields: string[]
+  required: string[]
+}
+
+interface IntegrationKey {
+  id: string
+  provider: string
+  field_name: string
+  masked_value: string
+  is_verified: boolean
+  updated_at: string | null
+}
+
+function IntegrationsPanel() {
+  const queryClient = useQueryClient()
+  const toast = useToast()
+  const [editProvider, setEditProvider] = useState<string | null>(null)
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>({})
+  const [showValues, setShowValues] = useState<Record<string, boolean>>({})
+  const [verifying, setVerifying] = useState<string | null>(null)
+
+  const providersQuery = useQuery<Record<string, ProviderConfig>>({
+    queryKey: ['settings', 'integrations', 'providers'],
+    queryFn: async () => (await api.get('/settings/integrations/providers')).data,
+  })
+
+  const keysQuery = useQuery<IntegrationKey[]>({
+    queryKey: ['settings', 'integrations', 'keys'],
+    queryFn: async () => (await api.get('/settings/integrations')).data,
+  })
+
+  const upsertKey = useMutation({
+    mutationFn: async (payload: { provider: string; field_name: string; value: string }) =>
+      (await api.put('/settings/integrations', payload)).data,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['settings', 'integrations', 'keys'] })
+      toast.success('Key saved and encrypted.')
+    },
+    onError: () => toast.error('Failed to save key.'),
+  })
+
+  const deleteKey = useMutation({
+    mutationFn: async (payload: { provider: string; field_name: string }) =>
+      (await api.delete('/settings/integrations', { data: payload })).data,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['settings', 'integrations', 'keys'] })
+      toast.success('Key removed.')
+    },
+    onError: () => toast.error('Failed to remove key.'),
+  })
+
+  async function handleVerify(provider: string) {
+    setVerifying(provider)
+    try {
+      const { data } = await api.post<{ verified: boolean; detail: string }>(`/settings/integrations/${provider}/verify`)
+      void queryClient.invalidateQueries({ queryKey: ['settings', 'integrations', 'keys'] })
+      if (data.verified) toast.success(`${provider} verified!`)
+      else toast.error(`${provider} failed: ${data.detail}`)
+    } catch {
+      toast.error('Verification request failed.')
+    } finally {
+      setVerifying(null)
+    }
+  }
+
+  function handleSaveField(provider: string, fieldName: string) {
+    const val = fieldValues[`${provider}.${fieldName}`]
+    if (!val?.trim()) return
+    void upsertKey.mutateAsync({ provider, field_name: fieldName, value: val.trim() })
+    setFieldValues((prev) => ({ ...prev, [`${provider}.${fieldName}`]: '' }))
+    setEditProvider(null)
+  }
+
+  const providers = providersQuery.data || {}
+  const keys = keysQuery.data || []
+
+  function getKeyForField(provider: string, fieldName: string): IntegrationKey | undefined {
+    return keys.find((k) => k.provider === provider && k.field_name === fieldName)
+  }
+
+  function isProviderVerified(provider: string): boolean | null {
+    const providerKeys = keys.filter((k) => k.provider === provider)
+    if (providerKeys.length === 0) return null
+    return providerKeys.every((k) => k.is_verified)
+  }
+
+  if (providersQuery.isLoading) return <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-sky-500" /></div>
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-slate-500">
+          API keys are encrypted at rest (AES-256). Only masked previews are shown.
+        </p>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {Object.entries(providers).map(([providerKey, config]) => {
+          const verified = isProviderVerified(providerKey)
+          const isEditing = editProvider === providerKey
+          const hasAllKeys = config.required.every((f) => getKeyForField(providerKey, f))
+
+          return (
+            <div
+              key={providerKey}
+              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:shadow-md transition-shadow"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-slate-900">{config.label}</h3>
+                {verified === true && <ShieldCheck className="h-4 w-4 text-emerald-500" />}
+                {verified === false && <ShieldX className="h-4 w-4 text-rose-400" />}
+                {verified === null && <Shield className="h-4 w-4 text-slate-300" />}
+              </div>
+
+              {/* Fields */}
+              <div className="space-y-2">
+                {config.fields.map((fieldName) => {
+                  const existing = getKeyForField(providerKey, fieldName)
+                  const fKey = `${providerKey}.${fieldName}`
+                  const isVisible = showValues[fKey]
+
+                  return (
+                    <div key={fieldName}>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">
+                        {fieldName.replace(/_/g, ' ')}
+                        {config.required.includes(fieldName) && <span className="text-rose-400 ml-0.5">*</span>}
+                      </label>
+                      {existing && !isEditing ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-xs text-slate-600 flex-1 truncate">{existing.masked_value}</span>
+                          <button
+                            type="button"
+                            onClick={() => setShowValues((p) => ({ ...p, [fKey]: !isVisible }))}
+                            className="p-1 text-slate-400 hover:text-slate-600"
+                            title={isVisible ? 'Hide' : 'Show'}
+                          >
+                            {isVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void deleteKey.mutateAsync({ provider: providerKey, field_name: fieldName })}
+                            className="p-1 text-slate-400 hover:text-rose-500"
+                            title="Remove"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-1.5">
+                          <input
+                            type="password"
+                            className="flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-900 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                            placeholder={`Enter ${fieldName.replace(/_/g, ' ')}`}
+                            value={fieldValues[fKey] || ''}
+                            onChange={(e) => setFieldValues((p) => ({ ...p, [fKey]: e.target.value }))}
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleSaveField(providerKey, fieldName) }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleSaveField(providerKey, fieldName)}
+                            disabled={!fieldValues[fKey]?.trim() || upsertKey.isPending}
+                            className="rounded-lg bg-sky-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-50 transition-colors"
+                          >
+                            Save
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Actions */}
+              <div className="mt-4 flex gap-2">
+                {!isEditing && hasAllKeys && (
+                  <button
+                    type="button"
+                    onClick={() => setEditProvider(providerKey)}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+                  >
+                    Update
+                  </button>
+                )}
+                {isEditing && (
+                  <button
+                    type="button"
+                    onClick={() => setEditProvider(null)}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                )}
+                {hasAllKeys && (
+                  <button
+                    type="button"
+                    onClick={() => void handleVerify(providerKey)}
+                    disabled={verifying === providerKey}
+                    className="rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 transition-colors"
+                  >
+                    {verifying === providerKey ? 'Verifying...' : 'Verify'}
+                  </button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}

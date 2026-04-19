@@ -36,8 +36,7 @@ async def push_notification(user_id: str, notif: dict) -> None:
 # ── SSE stream ──────────────────────────────────────────────────────────────
 
 @router.get("/stream")
-async def notification_stream(user: dict = Depends(get_current_user)):
-    user_id = str(user["id"])
+async def notification_stream(user_id: str = Depends(get_current_user)):
     q: asyncio.Queue = asyncio.Queue()
     _subscribers.setdefault(user_id, []).append(q)
 

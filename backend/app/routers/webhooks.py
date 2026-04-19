@@ -1,8 +1,11 @@
+import hashlib
+import hmac
 import json
 import logging
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 import app.db as db
+from app.config import settings as app_settings
 from app.services.reply_classifier import classify_reply, get_suggested_action
 
 router = APIRouter()
@@ -26,7 +29,20 @@ async def classify_reply_endpoint(req: ClassifyRequest):
 
 @router.post("/unipile")
 async def unipile_webhook(request: Request):
-    payload = await request.json()
+    body = await request.body()
+
+    # Verify HMAC signature if webhook secret is configured
+    if app_settings.unipile_webhook_secret:
+        signature = request.headers.get("x-webhook-signature", "")
+        expected = hmac.new(
+            app_settings.unipile_webhook_secret.encode(),
+            body,
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    payload = json.loads(body)
     
     # We only care about message.received for now, but we just stream everything
     # and let the background stream processor filter it.

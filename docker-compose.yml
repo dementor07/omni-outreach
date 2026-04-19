@@ -12,12 +12,21 @@ services:
       test: ["CMD-SHELL", "pg_isready -U outreach"]
       interval: 5s
       retries: 5
+    networks:
+      - internal
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:-changeme}
     volumes:
       - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
+      interval: 5s
+      retries: 5
+    networks:
+      - internal
 
   backend:
     build: ./backend
@@ -27,9 +36,11 @@ services:
       db:
         condition: service_healthy
       redis:
-        condition: service_started
-    ports:
-      - "8000:8000"
+        condition: service_healthy
+    expose:
+      - "8000"
+    networks:
+      - internal
 
   worker:
     build: ./backend
@@ -40,7 +51,9 @@ services:
       db:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
+    networks:
+      - internal
 
   frontend:
     build: ./frontend
@@ -49,7 +62,16 @@ services:
       - "80:80"
     depends_on:
       - backend
+    networks:
+      - internal
+      - external
 
 volumes:
   pgdata:
   redisdata:
+
+networks:
+  internal:
+    driver: bridge
+  external:
+    driver: bridge

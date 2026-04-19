@@ -1,24 +1,28 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, EmailStr
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.auth import hash_password, verify_password, create_access_token
 from app.db import execute, fetch_one
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 
 class RegisterRequest(BaseModel):
-    email: str
+    email: EmailStr
     password: str
 
 
 class LoginRequest(BaseModel):
-    email: str
+    email: EmailStr
     password: str
 
 
 @router.post("/register", status_code=201)
-async def register(body: RegisterRequest):
+@limiter.limit("5/hour")
+async def register(request: Request, body: RegisterRequest):
     existing = await fetch_one("SELECT id FROM users WHERE email=$1", body.email)
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
@@ -30,7 +34,8 @@ async def register(body: RegisterRequest):
 
 
 @router.post("/login")
-async def login(body: LoginRequest):
+@limiter.limit("10/minute")
+async def login(request: Request, body: LoginRequest):
     user = await fetch_one("SELECT * FROM users WHERE email=$1", body.email)
     if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")

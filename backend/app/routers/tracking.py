@@ -2,10 +2,11 @@
 
 Endpoints are PUBLIC (no auth) — they're embedded in sent emails.
 """
+import json
 import uuid
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 
 from app.db import execute, fetch_one
@@ -28,8 +29,9 @@ async def _record_event(event_id: str, event_type: str, request: Request):
     )
     if not row:
         return
-    ua = request.headers.get("user-agent", "")
+    ua = request.headers.get("user-agent", "")[:512]
     ip = request.client.host if request.client else "unknown"
+    meta = json.dumps({"ip": ip, "ua": ua, "parent_event": event_id})
     await execute(
         """INSERT INTO events (lead_id, campaign_id, channel, event_type, meta)
            VALUES ($1, $2, 'email', $3, $4::jsonb)
@@ -37,7 +39,7 @@ async def _record_event(event_id: str, event_type: str, request: Request):
         row["lead_id"],
         row["campaign_id"],
         event_type,
-        f'{{"ip":"{ip}","ua":"{ua}","parent_event":"{event_id}"}}',
+        meta,
     )
 
 
@@ -60,9 +62,9 @@ async def track_click(event_id: str, url: str, request: Request):
     """Redirect link with click tracking. url param is the actual destination."""
     await _record_event(event_id, "email_clicked", request)
     destination = unquote(url)
-    # Basic URL validation to prevent open redirect
-    if not destination.startswith(("http://", "https://")):
-        destination = "https://" + destination
+    parsed = urlparse(destination)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Invalid redirect URL")
     return RedirectResponse(url=destination, status_code=302)
 
 
