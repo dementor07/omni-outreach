@@ -3,7 +3,7 @@ title: Canvas Editor
 category: product
 tags: [canvas, ReactFlow, xyflow, UX, sequences, telemetry, bandit]
 sources: []
-updated: 2026-04-19
+updated: 2026-04-20
 ---
 
 # Canvas Editor
@@ -12,7 +12,7 @@ updated: 2026-04-19
 
 ## Node Types & Components
 
-All 23 `node_type` values accepted by the backend (`NodeType` Literal in `sequences.py`) and rendered by the frontend:
+All 25 `node_type` values accepted by the backend (`NodeType` Literal in `sequences.py`) and rendered by the frontend:
 
 | node_type | Component | Palette Group | Notes |
 |-----------|-----------|---------------|-------|
@@ -33,6 +33,8 @@ All 23 `node_type` values accepted by the backend (`NodeType` Literal in `sequen
 | `condition_replied` | `ConditionNode` | Conditions | True/False fork: has the lead replied on any channel? Icon: GitBranch. |
 | `condition_linkedin_distance` | `ConditionNode` | Conditions | True/False fork: is 1st-degree connection? Requires profile view upstream. |
 | `condition_tag_exists` | `ConditionNode` | Conditions | True/False fork: does a specific tag exist on this lead? |
+| `condition_ai_screen` | `ConditionNode` | Conditions | AI quality gate. Calls `screener.screen_lead()` with a configurable `screening_prompt`. Routes to `true` (accept) or `false` (reject) handle. Icon: Brain. See [[lead-gen-canvas-integration]] Phase 1A. |
+| `condition_lead_source` | `ConditionNode` | Conditions | Routes leads by `lead.source` field. Config holds `sources[]` array. Output handles: one per configured source + `default` fallback. Icon: Route. See [[lead-gen-canvas-integration]] Phase 1A. |
 | `event_invite_accepted` | `EventNode` | Events | Waits/fires when LinkedIn invite is accepted. Icon: Bell. |
 | `event_email_opened` | `EventNode` | Events | Fires when email open tracking pixel fires. |
 | `event_link_clicked` | `EventNode` | Events | Fires when a tracked link in an email is clicked. |
@@ -52,7 +54,7 @@ The left-side palette (`w-52`, scrollable, `maxHeight: calc(100vh - 160px)`) gro
 | Messaging | email, whatsapp, sms, instagram, telegram |
 | Voice | voice |
 | Actions | add_tag, remove_tag, webhook |
-| Conditions | replied, linkedin_distance, tag_exists |
+| Conditions | replied, linkedin_distance, tag_exists, ai_screen, lead_source |
 | Events | invite_accepted, email_opened, link_clicked |
 | Flow | delay, split, end |
 
@@ -87,6 +89,8 @@ Right-side panel opens on node click (`selectedNodeId`). Fields:
 - `delay`: `delay_days` input (calls `updateNodeData`)
 - `action_email`: account selector + subject + body
 - `action_voice`: Standard/Flow toggle + agent + prompt editor / Retell editor link
+- `condition_ai_screen`: `screening_prompt` textarea (configures the AI screening criteria)
+- `condition_lead_source`: checkboxes for each available source (apollo, hunter, proxycurl, github, apify_jobs)
 - Other action nodes: body textarea + template save
 
 ## Serialization (Critical)

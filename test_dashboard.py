@@ -162,15 +162,15 @@ def main():
             
             # Verify data payloads
             for n in reloaded["nodes"]:
+                raw = n.get("data") or {}
+                d = json.loads(raw) if isinstance(raw, str) else raw
                 if n["node_type"] == "condition_ai_screen":
-                    d = n.get("data") or {}
                     if d.get("screening_prompt"):
                         print(f"    ✓ AI screen prompt persisted: '{d['screening_prompt'][:40]}...'")
                     else:
                         print(f"    ✗ AI screen prompt MISSING in data")
                         results["fail"] += 1
                 elif n["node_type"] == "condition_lead_source":
-                    d = n.get("data") or {}
                     if d.get("sources"):
                         print(f"    ✓ Source router sources persisted: {d['sources']}")
                     else:

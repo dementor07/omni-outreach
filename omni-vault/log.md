@@ -286,3 +286,22 @@ Plan covers 4 phases:
 - **Phase 4**: Settings → Integrations UI — encrypted API key storage, verification
 
 Recommended sprint order: 1A → 3 → 1B → 4 → 1C → 2A → 2B (screening gate first, then scheduling, then enrichment, then polish).
+
+## [2026-04-19] feat & deploy | Phase 1A canvas nodes + test dashboard — HEAD 4546e83
+
+**Phase 1A implemented** (from lead-gen-canvas-integration ADR):
+- `condition_ai_screen` node: wires `screener.py` into the sequence engine. Canvas node has `screening_prompt` textarea config. Sequencer handler calls `screener.screen_lead()` and routes to `true`/`false` handles.
+- `condition_lead_source` node: routes leads by `lead.source` field. Config holds `sources[]` array. Canvas node renders source checkboxes. Sequencer handler matches `lead.source` against configured sources, routes to matching handle or `default`.
+- Backend `NodeType` Literal: 23 → 25 types.
+- Frontend: NODE_PALETTE entries (Brain + Route icons), nodeTypes map, ConfigSidebar panels, SequentialBuilder entries.
+
+**Bug fix — asyncpg JSONB serialization:**
+- `node.data` (Python dict) was passed directly to asyncpg INSERT for a `jsonb` column without JSON codec registration.
+- Error: `asyncpg.exceptions.DataError: invalid input for query argument $5: {} (expected str, got dict)`.
+- Fix: `json.dumps(node.data)` before INSERT in `sequences.py`.
+
+**Test dashboard created** (`test_dashboard.py`):
+- 20 endpoint tests across 8 sections, validated against vault wiki documentation.
+- Sections: Dashboard (overview, campaigns, queue), Campaign (get, stats), Leads (list), Canvas (load, save Phase 1A graph, reload+verify persistence, telemetry), Accounts (email, voice, LinkedIn), Lead Gen (sources, configs, runs), Job Search (configs, runs), Frontend (HTML+JS bundle).
+- Result: **20/20 PASS**, 0 FAIL, 0 ERROR.
+- Phase 1A node data verified: `screening_prompt` and `sources[]` persist and round-trip correctly through save→reload.

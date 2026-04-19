@@ -25,7 +25,7 @@ Last updated: 2026-04-19 (23-node canvas, 12-button sequential builder, SMS/Webh
 |------|---------|
 | [[dashboard]] | Mission-control overview: stat cards, channel breakdown table, campaign footprint, first-run onboarding |
 | [[campaigns]] | Campaign list + detail view (leads/queue/sequence/settings tabs), CampaignSettings form (8 fields), stats mini-bar, simulation badge |
-| [[canvas-editor]] | ReactFlow canvas, all 23 node types, palette grouped by 7 categories, TelemetryEdge, SplitNode bandit UI, ConfigSidebar, Save Canvas button, serialization |
+| [[canvas-editor]] | ReactFlow canvas, all 25 node types, palette grouped by 7 categories, TelemetryEdge, SplitNode bandit UI, ConfigSidebar, Save Canvas button, serialization |
 | [[sequential-builder]] | Linear sequence builder UI, 12 add buttons (expanded Apr 2026), STEP_LABELS map, StepIcon, reordering, inline wait duration edit |
 | [[voice-node]] | Standard vs Nested Flow modes, Retell editor UX |
 | [[channels]] | Active: LinkedIn (4 types), WhatsApp, Email, Voice. Stubbed: SMS, Webhook/CRM, Instagram, Telegram |
