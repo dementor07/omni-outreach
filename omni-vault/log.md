@@ -377,3 +377,53 @@ Filed `wiki/decisions/integrations-security-architecture.md` ADR vault-first.
 
 **Frontend:**
 - `Settings.tsx` — New "Integrations" tab with provider card grid, masked key display, Save/Delete/Verify per field, shield status icons (ShieldCheck/ShieldX/Shield)
+
+## [2026-04-19] infra | Production Hardening Sprint — HEAD 7f672aa
+
+Closed all infrastructure gaps identified in vault audit. Everything except single-VPS limitation addressed.
+
+**Alembic migrations:**
+- `alembic.ini`, `alembic/env.py`, `alembic/script.py.mako` — full setup with sync DSN builder
+- `alembic/versions/001_initial_schema.py` — consolidated all 22+ tables into one baseline migration
+- Added `psycopg2-binary>=2.9` for Alembic's sync driver
+- Stamped existing production DB at `001 (head)`
+
+**Structured JSON logging:**
+- `app/logging_config.py` — `JSONFormatter` class, `setup_logging()`, `get_logger(name)`
+- All log output now structured JSON (timestamp, level, logger, message)
+- Verified in production: `docker logs` shows proper JSON format
+
+**Nginx hardening (`frontend/nginx.conf` rewrite):**
+- Gzip: level 5, all relevant MIME types
+- Security headers: X-Frame-Options SAMEORIGIN, X-Content-Type-Options nosniff, X-XSS-Protection, Referrer-Policy strict-origin-when-cross-origin, Permissions-Policy (camera/mic/geo denied)
+- Docker DNS resolver `127.0.0.11 valid=10s` for variable proxy_pass
+- `rewrite ^/api/(.*) /$1 break;` + variable `proxy_pass` (fixes path stripping with resolver)
+- Static `/assets/` caching: 1 year, immutable
+- SSE/WebSocket headers: Upgrade, Connection pass-through
+- HTTPS server block ready (commented out, needs domain + cert)
+
+**Docker hardening:**
+- Backend Dockerfile: non-root user (`app:app`), `curl` for healthcheck, copies alembic files
+- `docker-compose.yml`: backend healthcheck (30s interval, 15s start), frontend depends_on healthy, cert volume mount
+- Redis password default aligned: `config.py` `redis_password="changeme"` matches `docker-compose.yml` `${REDIS_PASSWORD:-changeme}`
+
+**CI/CD pipeline (`.github/workflows/ci.yml`):**
+- Jobs: lint (ruff) → test (postgres+redis services, pytest) → build (docker) → deploy (appleboy/ssh-action)
+- Deploy only on master push, uses `VPS_HOST` + `VPS_SSH_KEY` secrets
+- Runs `alembic upgrade head` post-deploy
+
+**Test suite foundation:**
+- `backend/tests/conftest.py` — ASGI transport fixtures with httpx.AsyncClient
+- `backend/tests/test_health.py` — smoke tests (health, register+login, unauthenticated 401/403)
+- `pyproject.toml` — pytest (asyncio_mode=auto) + ruff (py312, line-length=120) config
+
+**SSL infrastructure:**
+- `scripts/ssl-setup.sh` — Certbot standalone, copies certs, cron renewal
+- `certs/.gitkeep` — placeholder for volume mount
+
+**Bugs fixed during deploy:**
+- nginx 502 on `/api/` — variable proxy_pass wasn't stripping prefix → added rewrite rule
+- Redis health "Authentication required" — `config.py` defaulted to empty password while docker-compose defaulted to `changeme`
+- Alembic `ModuleNotFoundError: psycopg2` — added `psycopg2-binary` to requirements
+
+**Final state:** All containers healthy, `/api/health` → `{"status":"ok","checks":{"api":"ok","db":"ok","redis":"ok"}}`, Alembic at `001 (head)`, security headers verified, asset caching confirmed (1y immutable).
