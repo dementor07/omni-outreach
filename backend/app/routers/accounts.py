@@ -51,9 +51,9 @@ async def test_linkedin_account(account_id: str, user_id: str = Depends(get_curr
             )
         if resp.is_success:
             return {"ok": True, "data": resp.json()}
-        return {"ok": False, "error": resp.text}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": "Unipile API returned an error"}
+    except Exception:
+        return {"ok": False, "error": "Connection test failed"}
 
 
 # ── Email accounts ────────────────────────────────────────────────────────────
@@ -77,6 +77,8 @@ async def list_email_accounts(user_id: str = Depends(get_current_user)):
 
 @router.post("/email", status_code=201)
 async def create_email_account(body: EmailAccountCreate, user_id: str = Depends(get_current_user)):
+    from app.services.encryption import encrypt
+    encrypted_password = encrypt(body.smtp_password)
     return await fetch_one(
         """
         INSERT INTO email_accounts
@@ -85,7 +87,7 @@ async def create_email_account(body: EmailAccountCreate, user_id: str = Depends(
         RETURNING id, from_name, from_email, smtp_host, smtp_port, smtp_use_tls, is_active, created_at
         """,
         body.from_name, body.from_email,
-        body.smtp_host, body.smtp_port, body.smtp_username, body.smtp_password, body.smtp_use_tls,
+        body.smtp_host, body.smtp_port, body.smtp_username, encrypted_password, body.smtp_use_tls,
     )
 
 
@@ -96,11 +98,10 @@ async def delete_email_account(account_id: str, user_id: str = Depends(get_curre
 
 # ── Voice agents ──────────────────────────────────────────────────────────────
 
-import os
 from typing import Optional
 from pydantic import ConfigDict
 
-RETELL_API_KEY = os.environ["RETELL_API_KEY"]
+RETELL_API_KEY = settings.retell_api_key
 
 class VoiceAgentCreate(BaseModel):
     retell_agent_id: str
@@ -157,9 +158,11 @@ async def list_retell_flows(user_id: str = Depends(get_current_user)):
             )
         if resp.is_success:
             return resp.json()
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=502, detail="Retell API error")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to fetch flows from Retell")
 
 
 @router.delete("/voice/{agent_id}", status_code=204)

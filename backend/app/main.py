@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 import logging
+import uuid
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +8,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
 from app.db import init_pool, close_pool, init_redis, close_redis
@@ -17,6 +19,17 @@ setup_logging()
 logger = get_logger(__name__)
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Inject X-Request-ID into every request/response for tracing."""
+
+    async def dispatch(self, request: Request, call_next):
+        request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
 
 
 @asynccontextmanager
@@ -42,8 +55,9 @@ app.add_middleware(
     allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
+app.add_middleware(RequestIDMiddleware)
 
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(campaigns.router, prefix="/campaigns", tags=["campaigns"])

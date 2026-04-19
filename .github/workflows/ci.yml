@@ -85,7 +85,7 @@ jobs:
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
-          username: root
+          username: ${{ secrets.VPS_DEPLOY_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             cd /home/omni-outreach

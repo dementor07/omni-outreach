@@ -75,6 +75,9 @@ CREATE TABLE IF NOT EXISTS campaigns (
     active_hours_end        INTEGER NOT NULL DEFAULT 18,
     screening_prompt        TEXT,
     sequence_mode           TEXT NOT NULL DEFAULT 'sequential', -- sequential|canvas
+    active_days             INTEGER[] DEFAULT '{1,2,3,4,5,6}',
+    scheduled_start         TIMESTAMPTZ,
+    scheduled_pause         TIMESTAMPTZ,
     created_at              TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -177,6 +180,7 @@ CREATE TABLE IF NOT EXISTS leads (
     current_node_id         UUID REFERENCES sequence_nodes(id) ON DELETE SET NULL,
     linkedin_distance       TEXT, -- FIRST_DEGREE|SECOND_DEGREE|THIRD_DEGREE
     tags                    TEXT[] DEFAULT ARRAY[]::TEXT[],
+    path_history            JSONB DEFAULT '[]',
     profile_viewed_at       TIMESTAMPTZ,
     inmail_sent_at          TIMESTAMPTZ,
     invited_at              TIMESTAMPTZ,
@@ -207,6 +211,7 @@ CREATE TABLE IF NOT EXISTS queue (
     failure_reason  TEXT,
     retry_count     INTEGER NOT NULL DEFAULT 0,
     payload         JSONB NOT NULL DEFAULT '{}',
+    dead_letter_reason TEXT,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 

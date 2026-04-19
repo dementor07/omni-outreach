@@ -31,16 +31,19 @@ async def classify_reply_endpoint(req: ClassifyRequest):
 async def unipile_webhook(request: Request):
     body = await request.body()
 
-    # Verify HMAC signature if webhook secret is configured
-    if app_settings.unipile_webhook_secret:
-        signature = request.headers.get("x-webhook-signature", "")
-        expected = hmac.new(
-            app_settings.unipile_webhook_secret.encode(),
-            body,
-            hashlib.sha256,
-        ).hexdigest()
-        if not hmac.compare_digest(signature, expected):
-            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+    # HMAC verification is mandatory
+    if not app_settings.unipile_webhook_secret:
+        log.error("Webhook secret not configured — rejecting request")
+        raise HTTPException(status_code=500, detail="Webhook verification not configured")
+    
+    signature = request.headers.get("x-webhook-signature", "")
+    expected = hmac.new(
+        app_settings.unipile_webhook_secret.encode(),
+        body,
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
     payload = json.loads(body)
     

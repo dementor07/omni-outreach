@@ -1,7 +1,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.auth import get_current_user
 from app.db import execute, fetch_all, fetch_one
@@ -18,6 +18,24 @@ class LeadImport(BaseModel):
     headline: str | None = None
     company: str | None = None
     source: str = "manual"
+
+    @field_validator("linkedin_url")
+    @classmethod
+    def validate_linkedin_url(cls, v: str) -> str:
+        v = v.strip()
+        if not v.startswith("https://") or "linkedin.com/" not in v:
+            raise ValueError("Must be a valid LinkedIn URL (https://...linkedin.com/...)")
+        return v
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if v and ("@" not in v or "." not in v.split("@")[-1]):
+            raise ValueError("Invalid email format")
+        return v
 
 
 @router.get("")
@@ -89,7 +107,7 @@ async def import_leads(
                 (campaign_id, linkedin_url, email, phone, first_name, last_name,
                  headline, company, source)
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-            ON CONFLICT DO NOTHING
+            ON CONFLICT (campaign_id, linkedin_url) DO NOTHING
             """,
             campaign_id, lead.linkedin_url, lead.email, lead.phone,
             lead.first_name, lead.last_name, lead.headline, lead.company, lead.source,

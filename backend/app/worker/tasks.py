@@ -1,4 +1,5 @@
 import logging
+import os
 from arq.connections import RedisSettings
 from arq.cron import cron
 
@@ -7,6 +8,8 @@ from app.services.optimization import run_optimization
 from app.worker.stream_processor import process_stream_events
 
 log = logging.getLogger(__name__)
+
+_redis_password = os.environ.get("REDIS_PASSWORD", "changeme") or None
 
 
 async def dispatch_queue(ctx: dict) -> None:
@@ -25,19 +28,21 @@ async def optimize_splits(ctx: dict) -> None:
 
 async def startup(ctx: dict) -> None:
     from app.config import settings
-    from app.db import init_pool
+    from app.db import init_pool, init_redis
     dsn = settings.get_asyncpg_dsn()
     await init_pool(dsn)
-    log.info("[worker] DB pool initialized")
+    await init_redis(settings.get_redis_url())
+    log.info("[worker] DB pool and Redis initialized")
 
 
 async def shutdown(ctx: dict) -> None:
-    from app.db import close_pool
+    from app.db import close_pool, close_redis
     await close_pool()
+    await close_redis()
 
 
 class WorkerSettings:
-    redis_settings = RedisSettings(host="redis")
+    redis_settings = RedisSettings(host="redis", password=_redis_password)
     on_startup = startup
     on_shutdown = shutdown
     cron_jobs = [

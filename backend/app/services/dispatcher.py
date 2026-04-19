@@ -82,7 +82,8 @@ async def _fail_task(queue_id: str, reason: str, current_retry: int) -> None:
         )
     else:
         await execute(
-            "UPDATE queue SET status='failed', failure_reason=$1, locked_by=NULL WHERE id=$2",
+            """UPDATE queue SET status='failed', failure_reason=$1,
+               dead_letter_reason=$1, locked_by=NULL WHERE id=$2""",
             reason, queue_id,
         )
 
@@ -306,10 +307,18 @@ async def _handle_email(task: dict, lead: dict, campaign: dict) -> None:
     subject = renderer.render(template["subject"] or "", lead)
     body = renderer.render(template["body"], lead)
 
+    # Decrypt SMTP password (supports both encrypted and legacy plaintext)
+    smtp_password = acct["smtp_password"]
+    try:
+        from app.services.encryption import decrypt
+        smtp_password = decrypt(smtp_password)
+    except (ValueError, Exception):
+        pass  # legacy plaintext password — use as-is
+
     await email.send_email(
         from_name=acct["from_name"], from_email=acct["from_email"],
         smtp_host=acct["smtp_host"], smtp_port=acct["smtp_port"],
-        smtp_username=acct["smtp_username"], smtp_password=acct["smtp_password"],
+        smtp_username=acct["smtp_username"], smtp_password=smtp_password,
         to_email=lead["email"], subject=subject, html_body=body
     )
     await _log_event(lead["id"], lead["campaign_id"], "email_sent", "email")
