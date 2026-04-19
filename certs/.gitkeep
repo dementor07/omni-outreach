@@ -1,0 +1,2 @@
+# SSL certificates go here after running scripts/ssl-setup.sh
+# This directory is volume-mounted into the frontend container at /etc/nginx/certs
