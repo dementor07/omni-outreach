@@ -241,3 +241,27 @@ Corrective actions taken:
 - Updated index.md with both new ADR pages.
 
 Going forward: decisions go in the vault at decision time, not in a cleanup pass.
+
+## [2026-04-19] feat | Multi-source lead generation architecture
+
+Filed `wiki/decisions/multi-source-lead-gen.md` ADR before implementation (vault-first).
+
+Backend implemented:
+- `services/lead_sources/base.py` — `LeadSource` abstract protocol, `RawLead` dataclass
+- `services/lead_sources/apify_jobs.py` — existing Apify+SERPER pipeline refactored into provider
+- `services/lead_sources/apollo.py` — Apollo.io People Search (optional, APOLLO_API_KEY)
+- `services/lead_sources/hunter.py` — Hunter.io Domain Search (optional, HUNTER_API_KEY)
+- `services/lead_sources/proxycurl.py` — ProxyCurl company employees (optional, PROXYCURL_API_KEY)
+- `services/lead_sources/github.py` — GitHub org member search (free, GITHUB_TOKEN optional)
+- `services/lead_source_registry.py` — global registry, `available()` / `get()` / `all()`
+- `services/lead_gen.py` — unified pipeline dispatcher, `run_lead_gen()`, `upsert_lead()`
+- `routers/lead_gen.py` — `/lead-gen/sources`, `/lead-gen/configs`, `/lead-gen/trigger`, `/lead-gen/runs`
+- `config.py` — added `apollo_api_key`, `hunter_api_key`, `proxycurl_api_key`, `github_token`
+- `main.py` — registered `/lead-gen` router, `CREATE TABLE IF NOT EXISTS lead_gen_configs/runs`
+
+Frontend implemented:
+- `pages/LeadSources.tsx` — new page with source availability grid, schema-driven config forms, config cards, run history
+- `App.tsx` — added `/lead-sources` route
+- `Sidebar.tsx` — added "Lead Sources" nav item (Database icon)
+
+Old `/job-search/` router and `JobSearch.tsx` preserved for backward compatibility.

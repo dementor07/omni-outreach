@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     apify_api_key: str = ""
     serper_api_key: str = ""
 
+    # Optional lead gen integrations
+    apollo_api_key: str = ""
+    hunter_api_key: str = ""
+    proxycurl_api_key: str = ""
+    github_token: str = ""  # optional, raises rate limit from 60→5000 req/hr
+
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24  # 24h
 

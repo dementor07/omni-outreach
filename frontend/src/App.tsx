@@ -7,6 +7,7 @@ import Queue from './pages/Queue'
 import Settings from './pages/Settings'
 import Login from './pages/Login'
 import JobSearch from './pages/JobSearch'
+import LeadSources from './pages/LeadSources'
 import RetellFlowEditor from './pages/RetellFlowEditor'
 
 function RequireAuth() {
@@ -37,6 +38,7 @@ export default function App() {
         <Route path="/queue" element={<Queue />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/job-search" element={<JobSearch />} />
+        <Route path="/lead-sources" element={<LeadSources />} />
       </Route>
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>

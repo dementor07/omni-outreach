@@ -1,14 +1,15 @@
 import { NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Megaphone, Users, ListTodo, Settings, LogOut, Zap, Search } from 'lucide-react'
+import { LayoutDashboard, Megaphone, Users, ListTodo, Settings, LogOut, Zap, Search, Database } from 'lucide-react'
 import { clsx } from 'clsx'
 
 const navItems = [
-  { to: '/',          label: 'Overview',   icon: LayoutDashboard },
-  { to: '/campaigns', label: 'Campaigns',  icon: Megaphone },
-  { to: '/leads',     label: 'Leads',      icon: Users },
-  { to: '/queue',     label: 'Queue',      icon: ListTodo },
-  { to: '/job-search', label: 'Job Search',  icon: Search },
-  { to: '/settings',   label: 'Settings',   icon: Settings },
+  { to: '/',              label: 'Overview',      icon: LayoutDashboard },
+  { to: '/campaigns',    label: 'Campaigns',     icon: Megaphone },
+  { to: '/leads',        label: 'Leads',         icon: Users },
+  { to: '/queue',        label: 'Queue',         icon: ListTodo },
+  { to: '/lead-sources', label: 'Lead Sources',  icon: Database },
+  { to: '/job-search',   label: 'Job Search',    icon: Search },
+  { to: '/settings',     label: 'Settings',      icon: Settings },
 ]
 
 export default function Sidebar() {

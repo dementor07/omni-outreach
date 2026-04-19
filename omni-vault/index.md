@@ -32,7 +32,8 @@ Last updated: 2026-04-19 (23-node canvas, 12-button sequential builder, SMS/Webh
 | [[leads-page]] | Global lead inspector: campaign filter, lead table, stop action, lead drawer with profile + timeline |
 | [[queue-page]] | Live task queue inspector: stat cards, 3-way filter (campaign/channel/status), task table with retry count |
 | [[settings-page]] | Account surfaces: LinkedIn accounts (with test hook), email SMTP accounts, Retell voice agents; shared AccountModal |
-| [[job-search-ui]] | Job search control panel: config create, run trigger, run history panel; Apify/Serper pipeline entry point |
+| [[job-search-ui]] | Job search control panel (legacy): config create, run trigger, run history panel; Apify/Serper pipeline entry point |
+| [[lead-sources-ui]] | Multi-source lead gen page: source cards with availability, per-source config forms, unified run history |
 
 ## Integrations
 
@@ -50,6 +51,7 @@ Last updated: 2026-04-19 (23-node canvas, 12-button sequential builder, SMS/Webh
 | [[omnichannel-logic-loops]] | How tags, split tests, and events power cross-channel routing |
 | [[lead-generation-injection]] | Apify + Serper autonomous scraping and DAG injection |
 | [[autonomous-feedback-loops]] | Closing the knowledge gaps between Retell, tags, and Lead Gen |
+| [[multi-source-lead-gen]] | Apr 2026 lead gen architecture: provider protocol, RawLead schema, 5 sources (Apify, Apollo, Hunter, ProxyCurl, GitHub), registry, new DB tables |
 | [[canvas-ux-decisions]] | Apr 2026 canvas overhaul: naming convention, palette grouping, icon semantics, btn-tactile, lucide-react version constraints |
 | [[stubbed-channels-policy]] | Why SMS/Webhook/Instagram/Telegram are fully typed but have no dispatcher handler; pending work |
 
