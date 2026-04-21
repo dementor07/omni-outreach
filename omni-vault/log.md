@@ -446,3 +446,53 @@ Mitigations deployed:
 
 Operational note:
 - This materially improves crawler-visible trust signals, but permanent resolution likely still requires moving from the Hostinger VPS hostname to a dedicated custom domain and then submitting vendor false-positive reviews.
+
+
+## 2026-04-21 — Lead-gen canvas integration ADR — Phases 1B/1C/3 shipped
+
+Closed three open phases from `lead-gen-canvas-integration.md`:
+
+**Phase 1B — `condition_has_field`**
+- Backend: added to `NodeType` literal in `routers/sequences.py`; handler in `services/sequencer.py` reads `lead.get(field_name)` and routes true/false.
+- Frontend: `Campaigns.tsx` palette + `nodeTypes` map + Conditions group + ConfigSidebar field selector (email/linkedin_url/headline/company/phone/first_name/last_name). `SequentialBuilder.tsx` + `useSequenceSteps.ts` updated.
+
+**Phase 1C — `action_enrich` + `LeadSource.enrich()` capability**
+- `lead_sources/base.py`: added optional `enrich(lead_data) -> RawLead` and `supports_enrichment` property; default raises `NotImplementedError`. `describe()` now reports `supports_enrichment`.
+- Implemented `enrich()` on Apollo (`/people/match`), Hunter (`/email-finder`), ProxyCurl (`/v2/linkedin`).
+- `dispatcher.py`: new `_handle_enrich()` routes to registry, merges only empty fields on the lead, logs `lead_enriched` event. Channel `enrich` wired into `_process_task`.
+- `sequences.py`: `action_enrich` added to `NodeType`.
+- Frontend: palette entry (Database icon, indigo), `nodeTypes` map, Actions group, ConfigSidebar (provider dropdown + field checkboxes). `SequentialBuilder` add button + icon.
+
+**Phase 3 — Scheduled lead gen cron**
+- Migration `003_scheduled_lead_gen.py`: `lead_gen_configs.cron_schedule TEXT`, `last_run_at TIMESTAMPTZ`, partial index; `lead_gen_runs.triggered_by TEXT DEFAULT 'manual'`.
+- `requirements.txt`: added `croniter>=2.0`.
+- `services/lead_gen.run_lead_gen` now takes `triggered_by`, stamps `last_run_at` at dispatch.
+- `worker/tasks.py`: new `cron_lead_gen` arq cron (every 5min) iterates enabled configs, checks `croniter.get_next(last_run_at or 1y ago)` ≤ now, fires with `triggered_by="schedule"`.
+- `routers/lead_gen.py`: new `PATCH /lead-gen/configs/{id}` validates cron with `croniter.is_valid`; `_CONFIG_COLS`/`_RUN_COLS` extended.
+- Frontend: `LeadSources.tsx` ConfigCard now shows schedule preset dropdown (Manual/Hourly/6h/Daily 9am/Weekdays 9am/Weekly) in expanded view; badge next to "Created …" when scheduled; shows "Last run …" timestamp.
+
+**Remaining from this ADR:** Phase 2A/2B only — `trigger_start` Sources badge, Campaign Sources tab, telemetry source breakdown. Not blocking.
+
+Files touched: 3 migrations/requirements, 7 backend .py, 3 frontend .tsx/.ts.
+
+
+## 2026-04-21 — Lead-gen canvas ADR Phase 2 + stubbed channels (SMS/Webhook)
+
+**Phase 2A — `trigger_start` Sources badge + Campaign Sources tab**
+- `TriggerNode` now queries `/lead-gen/configs/{campaign_id}` and displays a "N sources" button (navigates to `/lead-sources`). Shows a scheduled-count indicator when cron is active. `nodrag` class so it's clickable inside ReactFlow.
+- `CampaignTab` union gained `'sources'`. New `CampaignSourcesPanel` component in `Campaigns.tsx` lists configs with "Run now" buttons, schedule/last-run metadata, and the 10 most recent runs (polled every 15s). Auto-refreshes against `/lead-gen/runs?campaign_id=…`.
+- Tab buttons and routing updated.
+
+**Phase 2B — Telemetry source breakdown**
+- Backend: `GET /sequences/{campaign_id}/telemetry` now returns `sources_recent` — `leads.source` counts from the past 60s.
+- Frontend: telemetry state extended; source breakdown injected into the `trigger_start` node's `data` on each poll. `TriggerNode` renders a live "+N in 60s" banner with per-source counts when Live mode is on.
+
+**Stubbed channels — SMS + Webhook handlers**
+- Config: added `twilio_account_sid`, `twilio_auth_token`, `twilio_from_number` to `Settings`.
+- `dispatcher._handle_sms`: POSTs to `https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json` using basic auth, renders node template against lead, logs `sms_sent` with twilio_sid + status.
+- `dispatcher._handle_webhook`: POST/PUT/PATCH to `node.data.url`, headers from `node.data.headers`, body from `node.data.body_template` (renders against lead, wraps as `{rendered: …}`) or full lead JSON by default. Validates URL scheme. Logs `webhook_sent` with url/method/status.
+- Channel router updated (`ch == "sms"`, `ch == "webhook"`).
+- ConfigSidebar: added webhook panel (url + method + body_template) and SMS body textarea. Both surface env-key requirements inline.
+- IG/TG were already fully implemented — only SMS/Webhook were pending per the stubbed-channels-policy ADR.
+
+Files touched (this batch): 2 backend (dispatcher.py, config.py, sequences router) + 1 frontend (Campaigns.tsx). No migration needed.
