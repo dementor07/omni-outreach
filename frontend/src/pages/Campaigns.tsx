@@ -1,8 +1,8 @@
 import { FormEvent, useEffect, useState, useCallback } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { Link, useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom'
-import { Plus, Save, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap, X, ChevronRight, Settings2, Trash2, Radio, Tag, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle, MinusCircle, Brain, Route, Upload, Undo2, Redo2, Copy } from 'lucide-react'
+import { Plus, Save, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap, X, ChevronRight, Settings2, Trash2, Radio, Tag, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle, MinusCircle, Brain, Route, Upload, Undo2, Redo2, Copy, Database } from 'lucide-react'
 import CsvImport from '../components/CsvImport'
 import { useCanvasHistory } from '../hooks/useCanvasHistory'
 import {
@@ -57,7 +57,7 @@ import {
   type NodeType,
 } from '../hooks/useSequenceSteps'
 
-type CampaignTab = 'leads' | 'queue' | 'sequence' | 'settings'
+type CampaignTab = 'leads' | 'queue' | 'sequence' | 'sources' | 'settings'
 
 interface RetellPrompt {
   begin_message: string;
@@ -174,6 +174,7 @@ const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNode; colo
   { type: 'action_telegram',               label: 'Telegram',          icon: <Send size={15} />,           color: 'text-blue-500',    bg: 'bg-blue-50',    border: 'border-blue-200' },
   { type: 'action_voice',                  label: 'AI Voice Call',     icon: <Phone size={15} />,          color: 'text-indigo-600',  bg: 'bg-indigo-50',  border: 'border-indigo-200' },
   { type: 'action_webhook',                label: 'Webhook / CRM',     icon: <Webhook size={15} />,        color: 'text-orange-600',  bg: 'bg-orange-50',  border: 'border-orange-200' },
+  { type: 'action_enrich',                 label: 'Enrich Lead',       icon: <Database size={15} />,       color: 'text-indigo-600',  bg: 'bg-indigo-50',  border: 'border-indigo-200' },
   { type: 'action_add_tag',                label: 'Add Tag',           icon: <Tag size={15} />,            color: 'text-slate-600',   bg: 'bg-slate-50',   border: 'border-slate-200' },
   { type: 'action_remove_tag',             label: 'Remove Tag',        icon: <MinusCircle size={15} />,     color: 'text-slate-500',   bg: 'bg-slate-50',   border: 'border-slate-200' },
   { type: 'condition_replied',             label: 'If Replied',        icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
@@ -181,6 +182,7 @@ const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNode; colo
   { type: 'condition_tag_exists',          label: 'If Has Tag',        icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
   { type: 'condition_ai_screen',           label: 'AI Screen',         icon: <Brain size={15} />,          color: 'text-violet-600',  bg: 'bg-violet-50',  border: 'border-violet-200' },
   { type: 'condition_lead_source',         label: 'Source Router',     icon: <Route size={15} />,          color: 'text-cyan-600',    bg: 'bg-cyan-50',    border: 'border-cyan-200' },
+  { type: 'condition_has_field',           label: 'If Has Field',      icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
   { type: 'event_invite_accepted',         label: 'Invite Accepted',   icon: <Bell size={15} />,           color: 'text-violet-500',  bg: 'bg-violet-50',  border: 'border-violet-200' },
   { type: 'event_email_opened',            label: 'Email Opened',      icon: <Bell size={15} />,           color: 'text-violet-500',  bg: 'bg-violet-50',  border: 'border-violet-200' },
   { type: 'event_link_clicked',            label: 'Link Clicked',      icon: <Bell size={15} />,           color: 'text-violet-500',  bg: 'bg-violet-50',  border: 'border-violet-200' },
@@ -260,20 +262,68 @@ const ActionNode = ({ data, id, selected }: NodeProps) => {
   )
 }
 
-const TriggerNode = ({ selected }: NodeProps) => (
-  <div className={`relative min-w-[180px] rounded-xl border-2 bg-slate-900 p-4 shadow-lg transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-slate-800'}`}>
-    <div className="flex items-center gap-3 text-white">
-      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/20">
-        <Zap size={14} fill="currentColor" />
+const TriggerNode = ({ selected, data }: NodeProps) => {
+  const { id: campaignId } = useParams()
+  const navigate = useNavigate()
+  const live = Boolean((data as any)?.live)
+  const sourcesRecent = ((data as any)?.sources_recent || {}) as Record<string, number>
+  const liveTotal = Object.values(sourcesRecent).reduce((a, b) => a + (b || 0), 0)
+  const configsQuery = useQuery<Array<{ id: string; source_type: string; source_display_name: string; cron_schedule: string | null }>>({
+    queryKey: ['lead-gen-configs', campaignId],
+    queryFn: () => api.get(`/lead-gen/configs/${campaignId}`).then(r => r.data),
+    enabled: !!campaignId,
+    staleTime: 30_000,
+  })
+  const configs = configsQuery.data || []
+  const sourceCount = configs.length
+  const scheduledCount = configs.filter(c => c.cron_schedule).length
+
+  return (
+    <div className={`relative min-w-[180px] rounded-xl border-2 bg-slate-900 p-4 shadow-lg transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-slate-800'}`}>
+      <div className="flex items-center gap-3 text-white">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/20">
+          <Zap size={14} fill="currentColor" />
+        </div>
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Trigger</p>
+          <p className="text-xs font-bold uppercase tracking-tight">Sequence Start</p>
+        </div>
       </div>
-      <div>
-        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Trigger</p>
-        <p className="text-xs font-bold uppercase tracking-tight">Sequence Start</p>
-      </div>
+      {campaignId && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); navigate('/lead-sources') }}
+          title="Open Lead Sources"
+          className="mt-3 flex w-full items-center justify-between rounded-lg bg-white/5 px-2.5 py-1.5 text-[10px] font-semibold text-white/80 ring-1 ring-white/10 hover:bg-white/10 transition-colors nodrag"
+        >
+          <span className="flex items-center gap-1.5">
+            <Database size={10} />
+            {sourceCount === 0 ? 'No sources' : `${sourceCount} source${sourceCount > 1 ? 's' : ''}`}
+          </span>
+          {scheduledCount > 0 && (
+            <span className="flex items-center gap-1 text-emerald-300">
+              <Clock size={10} /> {scheduledCount}
+            </span>
+          )}
+        </button>
+      )}
+      {live && liveTotal > 0 && (
+        <div className="mt-2 space-y-1 rounded-lg bg-emerald-500/10 px-2.5 py-1.5 ring-1 ring-emerald-500/20">
+          <p className="text-[9px] font-bold uppercase tracking-widest text-emerald-300 flex items-center gap-1">
+            <Radio size={9} className="animate-pulse" /> +{liveTotal} in 60s
+          </p>
+          {Object.entries(sourcesRecent).slice(0, 4).map(([source, count]) => (
+            <div key={source} className="flex items-center justify-between text-[10px] text-emerald-100/80">
+              <span className="truncate">{source}</span>
+              <span className="font-bold">{count}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-none !bg-white/20" />
     </div>
-    <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-none !bg-white/20" />
-  </div>
-)
+  )
+}
 
 const ConditionNode = ({ selected }: NodeProps) => (
   <div className={`relative min-w-[200px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-amber-200'}`}>
@@ -421,11 +471,13 @@ const nodeTypes = {
   action_voice: ActionNode,
   action_sms: ActionNode,
   action_webhook: ActionNode,
+  action_enrich: ActionNode,
   condition_replied: ConditionNode,
   condition_linkedin_distance: ConditionNode,
   condition_tag_exists: ConditionNode,
   condition_ai_screen: ConditionNode,
   condition_lead_source: ConditionNode,
+  condition_has_field: ConditionNode,
   event_invite_accepted: EventNode,
   event_email_opened: EventNode,
   event_link_clicked: EventNode,
@@ -463,7 +515,7 @@ export default function Campaigns() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [liveMode, setLiveMode] = useState(false)
   const canvasHistory = useCanvasHistory()
-  const [telemetry, setTelemetry] = useState<{ activity: Record<string, number>; backpressure: Record<string, number> }>({ activity: {}, backpressure: {} })
+  const [telemetry, setTelemetry] = useState<{ activity: Record<string, number>; backpressure: Record<string, number>; sources_recent: Record<string, number> }>({ activity: {}, backpressure: {}, sources_recent: {} })
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   
   const [createOpen, setCreateOpen] = useState(false)
@@ -514,8 +566,8 @@ export default function Campaigns() {
     if (!liveMode || !id || activeTab !== 'sequence') return
     const poll = async () => {
       try {
-        const { data } = await api.get<{ activity: Record<string, number>; backpressure: Record<string, number> }>(`/sequences/${id}/telemetry`)
-        setTelemetry(data)
+        const { data } = await api.get<{ activity: Record<string, number>; backpressure: Record<string, number>; sources_recent?: Record<string, number> }>(`/sequences/${id}/telemetry`)
+        setTelemetry({ activity: data.activity, backpressure: data.backpressure, sources_recent: data.sources_recent ?? {} })
       } catch {}
     }
     void poll()
@@ -535,6 +587,13 @@ export default function Campaigns() {
       data: { ...e.data, activity: telemetry.activity[e.source] ?? 0, backpressure: telemetry.backpressure[e.source] ?? 0 },
     })))
   }, [telemetry, liveMode, setEdges])
+
+  // Inject live source breakdown into the trigger_start node so TriggerNode can render it
+  useEffect(() => {
+    setNodes(nds => nds.map(n => n.type === 'trigger_start'
+      ? { ...n, data: { ...n.data, live: liveMode, sources_recent: liveMode ? telemetry.sources_recent : {} } }
+      : n))
+  }, [telemetry.sources_recent, liveMode, setNodes])
 
   const onConnect = useCallback((params: Connection) => setEdges((eds) => addEdge({ ...params, type: 'custom' }, eds)), [setEdges])
 
@@ -703,7 +762,7 @@ export default function Campaigns() {
                 ))}
               </div>
             )}
-            {(['leads', 'queue', 'sequence', 'settings'] as CampaignTab[]).map((tab) => (
+            {(['leads', 'queue', 'sequence', 'sources', 'settings'] as CampaignTab[]).map((tab) => (
               <button
                 key={tab}
                 type="button"
@@ -712,7 +771,7 @@ export default function Campaigns() {
                   activeTab === tab ? 'bg-sky-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                 }`}
               >
-                {tab === 'sequence' ? 'Canvas' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                {tab === 'sequence' ? 'Canvas' : tab === 'sources' ? 'Sources' : tab.charAt(0).toUpperCase() + tab.slice(1)}
               </button>
             ))}
             <button
@@ -848,6 +907,12 @@ export default function Campaigns() {
               </div>
             )}
 
+            {activeTab === 'sources' && (
+              <div className="h-full overflow-auto rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+                <CampaignSourcesPanel campaignId={id!} />
+              </div>
+            )}
+
             {activeTab === 'settings' && (
               <div className="h-full overflow-auto rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
                 <CampaignSettings campaignId={id!} />
@@ -920,8 +985,8 @@ function NodePalette({ onAdd }: { onAdd: (type: NodeType) => void }) {
     { heading: 'LinkedIn',   types: ['action_linkedin_invite', 'action_linkedin_dm', 'action_linkedin_inmail', 'action_linkedin_profile_view'] },
     { heading: 'Messaging',  types: ['action_email', 'action_whatsapp', 'action_sms', 'action_instagram', 'action_telegram'] },
     { heading: 'Voice',      types: ['action_voice'] },
-    { heading: 'Actions',    types: ['action_add_tag', 'action_remove_tag', 'action_webhook'] },
-    { heading: 'Conditions', types: ['condition_replied', 'condition_linkedin_distance', 'condition_tag_exists', 'condition_ai_screen', 'condition_lead_source'] },
+    { heading: 'Actions',    types: ['action_add_tag', 'action_remove_tag', 'action_webhook', 'action_enrich'] },
+    { heading: 'Conditions', types: ['condition_replied', 'condition_linkedin_distance', 'condition_tag_exists', 'condition_ai_screen', 'condition_lead_source', 'condition_has_field'] },
     { heading: 'Events',     types: ['event_invite_accepted', 'event_email_opened', 'event_link_clicked'] },
     { heading: 'Flow',       types: ['delay', 'split', 'end'] },
   ]
@@ -1172,6 +1237,119 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
               rows={5}
             />
             <p className="mt-2 text-[10px] text-slate-400">Claude AI will evaluate each lead's headline against this prompt and route to True (ACCEPT) or False (REJECT).</p>
+          </div>
+        )}
+
+        {nodeType === 'action_webhook' && (
+          <div className="space-y-3">
+            <div>
+              <label className={labelCls}>Webhook URL</label>
+              <input
+                type="url"
+                value={(node.data as any).url || ''}
+                onChange={(e) => onUpdate({ url: e.target.value })}
+                className={inputClassName}
+                placeholder="https://hooks.zapier.com/…"
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Method</label>
+              <select
+                value={(node.data as any).method || 'POST'}
+                onChange={(e) => onUpdate({ method: e.target.value })}
+                className={inputClassName}
+              >
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="PATCH">PATCH</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Body Template (optional)</label>
+              <textarea
+                value={(node.data as any).body_template || ''}
+                onChange={(e) => onUpdate({ body_template: e.target.value })}
+                className={inputClassName + ' min-h-[100px] font-mono text-xs'}
+                placeholder="Leave empty to POST the full lead object. Use {{first_name}}, {{email}} …"
+                rows={4}
+              />
+              <p className="mt-2 text-[10px] text-slate-400">If set, the rendered string is wrapped as {`{ "rendered": "…" }`}. Otherwise a full lead JSON is posted.</p>
+            </div>
+          </div>
+        )}
+
+        {nodeType === 'action_sms' && (
+          <div>
+            <label className={labelCls}>SMS Body</label>
+            <textarea
+              value={(node.data as any).body || ''}
+              onChange={(e) => onUpdate({ body: e.target.value })}
+              className={inputClassName + ' min-h-[100px]'}
+              placeholder="Hi {{first_name}}, quick question about {{company}}…"
+              rows={4}
+            />
+            <p className="mt-2 text-[10px] text-slate-400">Uses Twilio. Set TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_FROM_NUMBER to enable. Templates can also be managed via the Template editor.</p>
+          </div>
+        )}
+
+        {nodeType === 'action_enrich' && (
+          <div className="space-y-3">
+            <div>
+              <label className={labelCls}>Enrichment Source</label>
+              <select
+                value={(node.data as any).enrich_source || ''}
+                onChange={(e) => onUpdate({ enrich_source: e.target.value })}
+                className={inputClassName}
+              >
+                <option value="">Select provider...</option>
+                <option value="apollo">Apollo.io (email + profile)</option>
+                <option value="hunter">Hunter.io (email finder)</option>
+                <option value="proxycurl">ProxyCurl (LinkedIn profile)</option>
+              </select>
+              <p className="mt-2 text-[10px] text-slate-400">Each provider has different inputs — Apollo needs email/linkedin, Hunter needs name+domain, ProxyCurl needs linkedin_url.</p>
+            </div>
+            <div>
+              <label className={labelCls}>Fields to Fill (optional)</label>
+              <p className="mb-2 text-[10px] text-slate-400">Only fill these fields on the lead. Leave unchecked to fill any missing field.</p>
+              {['email', 'linkedin_url', 'headline', 'company', 'first_name', 'last_name'].map(f => {
+                const fields: string[] = (node.data as any).fields || []
+                const checked = fields.includes(f)
+                return (
+                  <label key={f} className="flex items-center gap-3 rounded-xl px-3 py-1.5 hover:bg-slate-50 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => {
+                        const next = checked ? fields.filter((x: string) => x !== f) : [...fields, f]
+                        onUpdate({ fields: next })
+                      }}
+                      className="h-4 w-4 rounded border-slate-300 text-sky-500 focus:ring-sky-500"
+                    />
+                    <span className="text-sm text-slate-700">{f}</span>
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {nodeType === 'condition_has_field' && (
+          <div>
+            <label className={labelCls}>Field to Check</label>
+            <select
+              value={(node.data as any).field || 'email'}
+              onChange={(e) => onUpdate({ field: e.target.value })}
+              className={inputClassName}
+            >
+              <option value="email">email</option>
+              <option value="linkedin_url">linkedin_url</option>
+              <option value="headline">headline</option>
+              <option value="company">company</option>
+              <option value="phone">phone</option>
+              <option value="first_name">first_name</option>
+              <option value="last_name">last_name</option>
+            </select>
+            <p className="mt-2 text-[10px] text-slate-400">Routes to True if the lead has a value in this field, False otherwise. Use for waterfall enrichment.</p>
           </div>
         )}
 
@@ -1477,3 +1655,145 @@ const inputClassName = 'w-full rounded-xl border-none bg-slate-50 px-4 py-3 text
 type EmailAccount = { id: string; from_name: string; from_email: string }
 type VoiceAgent = { id: string; name: string; retell_agent_id: string }
 type LinkedInAccount = { id: string; name: string; unipile_id: string; is_active: boolean }
+
+interface CampaignConfig {
+  id: string
+  campaign_id: string
+  source_type: string
+  source_display_name: string
+  source_available: boolean
+  cron_schedule: string | null
+  last_run_at: string | null
+  label: string | null
+  created_at: string
+}
+
+interface CampaignRun {
+  id: string
+  source_type: string
+  status: 'pending' | 'running' | 'done' | 'failed'
+  leads_found: number
+  leads_added: number
+  started_at: string
+  triggered_by?: string
+}
+
+function CampaignSourcesPanel({ campaignId }: { campaignId: string }) {
+  const toast = useToast()
+  const queryClient = useQueryClient()
+  const [runningId, setRunningId] = useState<string | null>(null)
+
+  const configsQuery = useQuery<CampaignConfig[]>({
+    queryKey: ['lead-gen-configs', campaignId],
+    queryFn: () => api.get(`/lead-gen/configs/${campaignId}`).then(r => r.data),
+  })
+  const runsQuery = useQuery<CampaignRun[]>({
+    queryKey: ['lead-gen-runs', 'campaign', campaignId],
+    queryFn: () => api.get(`/lead-gen/runs?campaign_id=${campaignId}&limit=10`).then(r => r.data),
+    refetchInterval: 15_000,
+  })
+
+  const runMutation = useMutation({
+    mutationFn: (configId: string) =>
+      api.post('/lead-gen/trigger', { campaign_id: campaignId, config_id: configId }).then(r => r.data),
+    onSuccess: () => {
+      setRunningId(null)
+      toast.success('Run started')
+      void queryClient.invalidateQueries({ queryKey: ['lead-gen-runs', 'campaign', campaignId] })
+    },
+    onError: (err: unknown) => {
+      setRunningId(null)
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      toast.error(msg ?? 'Failed to start run')
+    },
+  })
+
+  const configs = configsQuery.data || []
+  const runs = runsQuery.data || []
+
+  return (
+    <div className="space-y-8">
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">Lead Sources</h2>
+          <p className="text-sm text-slate-500 mt-1">Sources feeding leads into this campaign. Manage schedules and trigger runs.</p>
+        </div>
+        <Link
+          to="/lead-sources"
+          className="flex items-center gap-2 text-xs font-semibold text-sky-600 hover:text-sky-700"
+        >
+          Manage all sources <ChevronRight size={13} />
+        </Link>
+      </div>
+
+      {configsQuery.isLoading ? (
+        <div className="text-sm text-slate-400">Loading…</div>
+      ) : configs.length === 0 ? (
+        <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 p-8 text-center">
+          <p className="text-sm text-slate-500 mb-3">No lead sources configured for this campaign yet.</p>
+          <Link to="/lead-sources" className="text-sm font-semibold text-sky-600 hover:text-sky-700">
+            Add one →
+          </Link>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {configs.map(cfg => (
+            <div key={cfg.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <div className="flex items-center justify-center w-8 h-8 rounded-lg flex-shrink-0 bg-indigo-50">
+                <Database size={14} className="text-indigo-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-semibold text-slate-900">{cfg.label ?? cfg.source_display_name}</span>
+                  {!cfg.source_available && <span className="text-[10px] font-bold uppercase text-rose-500">Not configured</span>}
+                  {cfg.cron_schedule && (
+                    <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600">
+                      <Clock size={10} /> scheduled
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  {cfg.last_run_at ? `Last run ${new Date(cfg.last_run_at).toLocaleString()}` : 'Never run'}
+                </p>
+              </div>
+              <button
+                onClick={() => { setRunningId(cfg.id); runMutation.mutate(cfg.id) }}
+                disabled={runningId === cfg.id || !cfg.source_available}
+                className="btn-tactile flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+              >
+                {runningId === cfg.id ? 'Running…' : 'Run now'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div>
+        <h3 className="text-sm font-semibold text-slate-900 mb-3">Recent Runs</h3>
+        {runs.length === 0 ? (
+          <div className="text-sm text-slate-400">No runs yet.</div>
+        ) : (
+          <div className="space-y-1">
+            {runs.map(r => (
+              <div key={r.id} className="flex items-center gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs">
+                <span className="font-mono text-slate-400 w-20 truncate">{r.source_type}</span>
+                <span className={`font-semibold ${
+                  r.status === 'done' ? 'text-emerald-600' :
+                  r.status === 'failed' ? 'text-rose-600' :
+                  r.status === 'running' ? 'text-sky-600' : 'text-slate-500'
+                }`}>{r.status}</span>
+                <span className="text-slate-500">
+                  {r.leads_added}/{r.leads_found} new
+                </span>
+                {r.triggered_by && (
+                  <span className="text-[10px] uppercase tracking-wider text-slate-400">{r.triggered_by}</span>
+                )}
+                <span className="ml-auto text-slate-400">{new Date(r.started_at).toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

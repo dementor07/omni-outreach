@@ -1,5 +1,5 @@
 import React from 'react'
-import { Plus, Trash2, ChevronUp, ChevronDown, Linkedin, Mail, MessageSquare, Instagram, Send, Phone, Clock, Zap, Save, Tag, MinusCircle, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle, Brain, Route } from 'lucide-react'
+import { Plus, Trash2, ChevronUp, ChevronDown, Linkedin, Mail, MessageSquare, Instagram, Send, Phone, Clock, Zap, Save, Tag, MinusCircle, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle, Brain, Route, Database } from 'lucide-react'
 import { Node, Edge } from '@xyflow/react'
 import { NodeType } from '../hooks/useSequenceSteps'
 import Badge from './Badge'
@@ -33,11 +33,13 @@ const STEP_LABELS: Partial<Record<NodeType, string>> = {
   action_webhook: 'Webhook / CRM',
   action_add_tag: 'Add Tag',
   action_remove_tag: 'Remove Tag',
+  action_enrich: 'Enrich Lead',
   condition_replied: 'If Replied',
   condition_linkedin_distance: 'If 1st Degree',
   condition_tag_exists: 'If Has Tag',
   condition_ai_screen: 'AI Screen',
   condition_lead_source: 'Source Router',
+  condition_has_field: 'If Has Field',
   event_invite_accepted: 'Invite Accepted',
   event_email_opened: 'Email Opened',
   event_link_clicked: 'Link Clicked',
@@ -256,9 +258,11 @@ export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate
         <AddButton icon={<Webhook className="text-orange-500" />} label="Webhook"    onClick={() => addStep('action_webhook')} />
         <AddButton icon={<Tag className="text-slate-500" />}     label="Add Tag"      onClick={() => addStep('action_add_tag')} />
         <AddButton icon={<MinusCircle className="text-slate-400" />} label="Remove Tag"   onClick={() => addStep('action_remove_tag')} />
+        <AddButton icon={<Database className="text-indigo-500" />} label="Enrich Lead"  onClick={() => addStep('action_enrich')} />
         <AddButton icon={<Clock className="text-amber-500" />}   label="Wait"         onClick={() => addStep('delay')} />
         <AddButton icon={<Brain className="text-violet-500" />}   label="AI Screen"    onClick={() => addStep('condition_ai_screen')} />
         <AddButton icon={<Route className="text-cyan-500" />}     label="Source Router" onClick={() => addStep('condition_lead_source')} />
+        <AddButton icon={<GitBranch className="text-amber-500" />} label="If Has Field" onClick={() => addStep('condition_has_field')} />
         <AddButton icon={<StopCircle className="text-rose-500" />} label="End"        onClick={() => addStep('end')} />
       </div>
     </div>
@@ -280,11 +284,13 @@ function StepIcon({ type }: { type: NodeType }) {
     case 'action_webhook':               return <Webhook size={20} className="text-orange-500" />
     case 'action_add_tag':               return <Tag size={20} className="text-slate-500" />
     case 'action_remove_tag':            return <MinusCircle size={20} className="text-slate-400" />
+    case 'action_enrich':                return <Database size={20} className="text-indigo-500" />
     case 'condition_replied':
     case 'condition_linkedin_distance':
     case 'condition_tag_exists':         return <GitBranch size={20} className="text-amber-500" />
     case 'condition_ai_screen':          return <Brain size={20} className="text-violet-500" />
     case 'condition_lead_source':        return <Route size={20} className="text-cyan-500" />
+    case 'condition_has_field':          return <GitBranch size={20} className="text-amber-500" />
     case 'event_invite_accepted':
     case 'event_email_opened':
     case 'event_link_clicked':           return <Bell size={20} className="text-violet-500" />

@@ -16,6 +16,7 @@ sqlalchemy[asyncio]>=2.0
 psycopg2-binary>=2.9
 slowapi>=0.1.9
 cryptography>=43.0
+croniter>=2.0
 # Dev / test
 ruff>=0.11
 pytest>=8.0

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { PlusCircle, Play, Loader2, CheckCircle2, AlertCircle, Database, ChevronDown, ChevronUp, Trash2 } from 'lucide-react'
+import { PlusCircle, Play, Loader2, CheckCircle2, AlertCircle, Database, ChevronDown, ChevronUp, Trash2, Clock } from 'lucide-react'
 import { clsx } from 'clsx'
 
 import { api } from '../api/client'
@@ -37,8 +37,19 @@ interface LeadGenConfig {
   config: Record<string, unknown>
   label: string | null
   is_enabled: boolean
+  cron_schedule: string | null
+  last_run_at: string | null
   created_at: string
 }
+
+const CRON_PRESETS: { label: string; value: string }[] = [
+  { label: 'Manual only', value: '' },
+  { label: 'Every hour', value: '0 * * * *' },
+  { label: 'Every 6 hours', value: '0 */6 * * *' },
+  { label: 'Daily at 9am', value: '0 9 * * *' },
+  { label: 'Weekdays 9am', value: '0 9 * * 1-5' },
+  { label: 'Weekly (Mon 9am)', value: '0 9 * * 1' },
+]
 
 interface LeadGenRun {
   id: string
@@ -391,6 +402,20 @@ interface ConfigCardProps {
 function ConfigCard({ config, onRun, onDelete, isRunning }: ConfigCardProps) {
   const [expanded, setExpanded] = useState(false)
   const colour = SOURCE_COLOURS[config.source_type] ?? DEFAULT_COLOUR
+  const queryClient = useQueryClient()
+  const toast = useToast()
+
+  const scheduleMutation = useMutation({
+    mutationFn: (cron_schedule: string) =>
+      api.patch(`/lead-gen/configs/${config.id}`, { cron_schedule }).then(r => r.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['lead-gen-configs', config.campaign_id] })
+      toast.success('Schedule updated')
+    },
+    onError: () => toast.error('Failed to update schedule'),
+  })
+
+  const currentPreset = CRON_PRESETS.find(p => p.value === (config.cron_schedule ?? ''))
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -411,6 +436,11 @@ function ConfigCard({ config, onRun, onDelete, isRunning }: ConfigCardProps) {
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
             Created {new Date(config.created_at).toLocaleDateString()}
+            {config.cron_schedule && (
+              <span className="ml-2 inline-flex items-center gap-1 text-emerald-600">
+                <Clock size={10} /> {currentPreset?.label ?? config.cron_schedule}
+              </span>
+            )}
           </p>
         </div>
 
@@ -446,9 +476,31 @@ function ConfigCard({ config, onRun, onDelete, isRunning }: ConfigCardProps) {
       </div>
 
       {expanded && (
-        <div className="border-t border-slate-100 px-4 py-3">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Run History</p>
-          <RunHistory configId={config.id} />
+        <div className="border-t border-slate-100 px-4 py-3 space-y-4">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 flex items-center gap-1.5">
+              <Clock size={10} /> Schedule
+            </p>
+            <select
+              value={config.cron_schedule ?? ''}
+              onChange={e => scheduleMutation.mutate(e.target.value)}
+              disabled={scheduleMutation.isPending}
+              className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 bg-white w-64"
+            >
+              {CRON_PRESETS.map(p => (
+                <option key={p.value} value={p.value}>{p.label}</option>
+              ))}
+            </select>
+            {config.last_run_at && (
+              <span className="ml-3 text-[11px] text-slate-400">
+                Last run {new Date(config.last_run_at).toLocaleString()}
+              </span>
+            )}
+          </div>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Run History</p>
+            <RunHistory configId={config.id} />
+          </div>
         </div>
       )}
     </div>
