@@ -31,6 +31,31 @@ def app() -> FastAPI:
     return _app
 
 
+@pytest.fixture(scope="session", autouse=True)
+async def _init_db_pool() -> AsyncGenerator[None, None]:
+    """CI runs without the FastAPI lifespan, so initialise the DB pool here.
+    Redis is stubbed because CI Redis is available but the app doesn't
+    require it during these smoke tests."""
+    from app import db
+
+    dsn = os.environ["DATABASE_URL"]
+    await db.init_pool(dsn)
+    redis_url = "redis://localhost:6379"
+    try:
+        await db.init_redis(redis_url)
+    except Exception:
+        pass
+    yield
+    try:
+        await db.close_pool()
+    except Exception:
+        pass
+    try:
+        await db.close_redis()
+    except Exception:
+        pass
+
+
 @pytest.fixture()
 async def client(app: FastAPI) -> AsyncGenerator[httpx.AsyncClient, None]:
     async with httpx.AsyncClient(
