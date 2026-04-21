@@ -1,6 +1,6 @@
 # Omni Wiki — Index
 
-Last updated: 2026-04-19 (20-cycle system gaps sprint, 25 canvas nodes, 7 new backend routers, 6 new frontend pages, TS fixes deployed)
+Last updated: 2026-04-21 (integrations security ADR indexed, production hardening and suspicious-site mitigation logged, trust-signal pages and HTTPS live)
 
 ## Architecture
 
@@ -31,7 +31,7 @@ Last updated: 2026-04-19 (20-cycle system gaps sprint, 25 canvas nodes, 7 new ba
 | [[channels]] | Active: LinkedIn (4 types), WhatsApp, Email, Voice. Stubbed: SMS, Webhook/CRM, Instagram, Telegram |
 | [[leads-page]] | Global lead inspector: campaign filter, lead table, stop action, lead drawer with profile + timeline |
 | [[queue-page]] | Live task queue inspector: stat cards, 3-way filter (campaign/channel/status), task table with retry count |
-| [[settings-page]] | Account surfaces: LinkedIn accounts (with test hook), email SMTP accounts, Retell voice agents; shared AccountModal |
+| [[settings-page]] | Account surfaces: LinkedIn accounts, email SMTP accounts, Retell voice agents, and encrypted Integrations key management UI |
 | [[job-search-ui]] | Job search control panel (legacy): config create, run trigger, run history panel; Apify/Serper pipeline entry point |
 | [[lead-sources-ui]] | Multi-source lead gen page: source cards with availability, per-source config forms, unified run history |
 
@@ -53,6 +53,7 @@ Last updated: 2026-04-19 (20-cycle system gaps sprint, 25 canvas nodes, 7 new ba
 | [[autonomous-feedback-loops]] | Closing the knowledge gaps between Retell, tags, and Lead Gen |
 | [[multi-source-lead-gen]] | Apr 2026 lead gen architecture: provider protocol, RawLead schema, 5 sources (Apify, Apollo, Hunter, ProxyCurl, GitHub), registry, new DB tables |
 | [[canvas-ux-decisions]] | Apr 2026 canvas overhaul: naming convention, palette grouping, icon semantics, btn-tactile, lucide-react version constraints |
+| [[integrations-security-architecture]] | Apr 2026 security ADR: encrypted integration keys, rate limiting, CORS tightening, webhook verification, Docker isolation |
 | [[lead-gen-canvas-integration]] | Apr 2026 plan: 4 new canvas nodes (AI screen, source router, enrichment, field check), scheduled runs, Settings integrations UI, visual link between LeadSources and Canvas |
 | [[stubbed-channels-policy]] | Why SMS/Webhook/Instagram/Telegram are fully typed but have no dispatcher handler; pending work |
 | [[system-gaps-sprint]] | Apr 2026 20-cycle sprint closing 140+ gaps: notifications, activity log, blacklist, tracking, analytics, template library, inbox, reply classifier, CSV import, bulk actions, dark mode, campaign cloning |
