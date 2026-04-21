@@ -44,7 +44,7 @@ export default function Login() {
               <div>
                 <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em]">
                   <Shield size={14} />
-                  Omni
+                  Omni Outreach
                 </div>
                 <h1 className="mt-8 max-w-md text-4xl font-semibold tracking-tight">
                   Multi-channel outreach, operated from one calm control surface.
@@ -69,7 +69,7 @@ export default function Login() {
           <div className="flex items-center justify-center px-8 py-12 sm:px-12">
             <div className="w-full max-w-md">
               <div className="mb-8">
-                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-500">Admin Login</p>
+                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-500">Omni Outreach Admin</p>
                 <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">Welcome back</h2>
                 <p className="mt-2 text-sm leading-6 text-slate-500">
                   Sign in to manage campaigns, inspect leads, and keep the queue moving.
