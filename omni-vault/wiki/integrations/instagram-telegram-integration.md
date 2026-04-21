@@ -3,12 +3,12 @@ title: Instagram & Telegram Integration
 category: integrations
 tags: [instagram, telegram, unipile, messaging, channels]
 sources: []
-updated: 2026-04-12
+updated: 2026-04-21
 ---
 
 # Instagram & Telegram Integration
 
-Currently, `action_instagram` and `action_telegram` are stubbed in the [[sequence-engine]] taxonomy and the [[canvas-editor]] palette. 
+`action_instagram` and `action_telegram` now have live dispatcher handlers. This page documents the provider-specific constraints and account-resolution rules behind those handlers.
 
 Because Omni leverages Unipile's Unified Messaging API, extending support to these channels requires minimal structural changes, but demands specific formatting for attendee identification.
 
@@ -41,10 +41,11 @@ Telegram outreach is typically based on phone numbers or public usernames.
 
 ## 4. Architectural Next Steps
 
-1. Add `instagram_accounts` and `telegram_accounts` tables (or a unified `messaging_accounts` table with a `provider_type` enum).
-2. Update `pages/Settings.tsx` to allow Unipile QR code provisioning for IG/TG.
-3. Write `_handle_instagram` and `_handle_telegram` in `services/dispatcher.py` to replicate the `_handle_whatsapp` logic, applying the specific attendee resolution steps outlined above.
+1. Improve account-management UX so IG/TG account provisioning is visible in settings rather than implicit in Unipile-linked accounts.
+2. Add clearer operator-facing error surfacing for privacy/rate-limit failures returned by Meta and Telegram.
+3. Expand fallback routing patterns so repeated IG/TG failures can auto-route into email or webhook actions using [[omnichannel-logic-loops]].
 
 ## Related Pages
 - [[unipile-integration]]
 - [[channels]]
+- [[dispatcher]]

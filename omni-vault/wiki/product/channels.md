@@ -1,34 +1,54 @@
 ---
 title: Channels
 category: product
-tags: [outreach, messaging, voice, email]
+tags: [outreach, messaging, voice, email, sms, webhook]
 sources: []
-updated: 2026-04-19
+updated: 2026-04-21
 ---
 
 # Outreach Channels
 
-Omni is a multi-channel platform. Every action node in the [[sequence-engine]] maps to a specific outreach channel.
+Omni is a multi-channel platform. Every delivery-oriented action node in the [[sequence-engine]] maps to one concrete handler in the [[dispatcher]].
 
-## Active Channels
+As of 2026-04-21 there are no remaining palette channels that are wired in UI/backend but missing in the dispatcher path. SMS and Webhook closed the last gap documented in [[stubbed-channels-policy]].
 
-| Channel                   | Backend Handler                 | Integration             | Description                                                                                                 |
-| ------------------------- | ------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------- |
-| **LinkedIn Invite**       | `_handle_linkedin_invite`       | [[unipile-integration]] | Sends connection request. Sequencer automatically waits for acceptance before continuing the DAG.           |
-| **LinkedIn DM**           | `_handle_linkedin_dm`           | [[unipile-integration]] | Sends a direct message. Either starts a new chat or replies to an existing thread.                          |
-| **LinkedIn InMail**       | `_handle_linkedin_inmail`       | [[unipile-integration]] | Dispatches premium InMails. Bypasses connection requirements.                                               |
-| **LinkedIn Profile View** | `_handle_linkedin_profile_view` | [[unipile-integration]] | Checks prospect profile, counting as a view on LinkedIn. Populates `linkedin_distance` for logic branching. |
-| **WhatsApp**              | `_handle_whatsapp`              | [[unipile-integration]] | Sends WhatsApp message using the `phone@s.whatsapp.net` attendee format.                                    |
-| **Email**                 | `_handle_email`                 | Native SMTP             | Bypasses third-party APIs. Uses `email_accounts` credentials to send directly via Python `smtplib`.         |
-| **Voice**                 | `_handle_voice`                 | [[retell-integration]]  | Triggers an AI phone call. Supports Standard mode (`retell-llm`) or Nested Flow mode (`conversation-flow`). |
+## Active Delivery Channels
 
-## Stubbed Channels
-These channels exist in the [[canvas-editor]] palette and the [[sequential-builder]] add-button grid, and are wired through the frontend `NodeType` union and backend `NodeType` Literal — but the dispatcher has no handler yet (tasks will silently no-op):
+| Channel | Backend Handler | Integration | Description |
+|---------|-----------------|-------------|-------------|
+| **LinkedIn Invite** | `_handle_linkedin_invite` | [[unipile-integration]] | Sends a connection request. The sequencer later resumes the DAG on acceptance. |
+| **LinkedIn DM** | `_handle_linkedin_dm` | [[unipile-integration]] | Sends or replies in a LinkedIn chat thread. |
+| **LinkedIn InMail** | `_handle_linkedin_inmail` | [[unipile-integration]] | Sends a premium InMail. |
+| **LinkedIn Profile View** | `_handle_linkedin_profile_view` | [[unipile-integration]] | Triggers a profile lookup/view and populates `linkedin_distance`. |
+| **WhatsApp** | `_handle_whatsapp` | [[unipile-integration]] | Sends WhatsApp messages using the Unipile attendee format. |
+| **Email** | `_handle_email` | Native SMTP | Sends directly via SMTP credentials stored in `email_accounts`. |
+| **SMS** | `_handle_sms` | Twilio | Posts to Twilio `Messages.json` using env-backed credentials and logs `sms_sent`. |
+| **Instagram** | `_handle_instagram` | [[unipile-integration]] | Sends Instagram DM via the configured Instagram account mapping. |
+| **Telegram** | `_handle_telegram` | [[unipile-integration]] | Sends Telegram DM via username/phone resolution plus configured account ID. |
+| **Voice** | `_handle_voice` | [[retell-integration]] | Triggers an AI phone call in Standard or Nested Flow mode. |
+| **Webhook / CRM** | `_handle_webhook` | Generic HTTP endpoint | Sends POST/PUT/PATCH with rendered payload or raw lead JSON to external CRM/automation systems. |
 
-- **SMS** (`action_sms`) — MessageCircle icon, teal colour
-- **Webhook / CRM** (`action_webhook`) — Webhook icon, orange colour; intended for CRM push/Zapier triggers
-- **Instagram** (`action_instagram`) — stubbed since initial canvas build
-- **Telegram** (`action_telegram`) — stubbed since initial canvas build
+## Sequence Actions That Are Not Delivery Channels
+
+These still run through queue + dispatcher, but they mutate state rather than contacting a human channel.
+
+| Action | Handler | Behaviour |
+|--------|---------|-----------|
+| **Add Tag** | `_handle_add_tag` | Appends a tag idempotently |
+| **Remove Tag** | `_handle_remove_tag` | Removes a tag from `leads.tags[]` |
+| **Enrich Lead** | `_handle_enrich` | Calls a lead-source provider enrichment path and fills only missing fields |
 
 ## Shared Characteristics
-All channel templates support variable interpolation (e.g., `{{first_name}}`) via the `renderer.py` service.
+
+- Templates render through `renderer.py`, so variables like `{{first_name}}` work across email, DMs, SMS, and webhook bodies.
+- Every successful handler logs an immutable event, marks the queue row sent, and calls `sequencer.queue_next_nodes()`.
+- All channels obey campaign active hours and simulation mode.
+- Final failures dead-letter into the queue record rather than disappearing silently.
+
+## Related Pages
+
+- [[dispatcher]]
+- [[sequence-engine]]
+- [[canvas-editor]]
+- [[retell-integration]]
+- [[unipile-integration]]

@@ -3,21 +3,21 @@ title: "ADR: Stubbed Channels Policy"
 category: decisions
 tags: [channels, SMS, webhook, dispatcher, NodeType, typing]
 sources: []
-updated: 2026-04-19
+updated: 2026-04-21
 ---
 
 # ADR: Stubbed Channels Policy
 
 ## Status
-Accepted — applies to `action_sms`, `action_webhook`, `action_instagram`, `action_telegram`
+Superseded — historical staging ADR from the period before SMS/Webhook/Instagram/Telegram handlers were implemented
 
 ## Context
 
-Omni supports more outreach channels as UI-selectable options than the backend dispatcher can currently handle. The question is: how should channels that are not yet implemented in the dispatcher be treated in the type system, UI, and runtime?
+At the time this ADR was written, Omni supported more outreach channels in the UI/type system than the backend dispatcher could actually execute. The question was how to stage those channels safely before real handlers existed.
 
 ## Decision
 
-**Wire the full type surface up front; stub only the dispatcher handler.**
+**Historical decision:** wire the full type surface up front, then stub the dispatcher handler until the channel is implemented.
 
 Specifically:
 1. The channel's `node_type` string is included in the backend `NodeType` Literal (`sequences.py`)
@@ -25,7 +25,7 @@ Specifically:
 3. The channel appears in `NODE_PALETTE` with a real icon and colour
 4. The channel appears in the `SequentialBuilder` add-button grid where it makes sense (actions/messaging only — not conditions/events)
 5. The channel's `node_type` is in the `nodeTypes` map pointing at `ActionNode`
-6. The dispatcher has **no handler** — tasks for this type will be silently skipped or logged as unhandled
+6. The dispatcher initially had **no handler** — tasks for this type would be staged for later execution support
 
 ## Rationale
 
@@ -38,26 +38,25 @@ Specifically:
 
 ### Why not block the UI if there's no handler?
 
-We will add visual indicators ("Coming soon" badge or tooltip) in a future pass. For now the silent skip is acceptable because no real leads are queued against unimplemented channels in production — campaigns are configured manually.
+At the time, the goal was to avoid data-loss and type-drift while letting the UI expose planned channels.
 
 ### Why not add a dummy handler that logs?
 
-Added to the dispatcher task list; this should be the next step after this ADR is filed. A no-op handler that logs a warning is better than silent dispatch failure.
+That was the next intended step when this ADR was filed. The system has since moved past that stage and now has live handlers.
 
 ## Channels and their stub status
 
 | node_type | UI wired | Backend typed | Dispatcher handler |
 |-----------|----------|---------------|--------------------|
-| `action_sms` | ✅ | ✅ | ❌ (no-op) |
-| `action_webhook` | ✅ | ✅ | ❌ (no-op) |
-| `action_instagram` | ✅ | ✅ | ❌ (no-op) |
-| `action_telegram` | ✅ | ✅ | ❌ (no-op) |
+| `action_sms` | ✅ | ✅ | ✅ live |
+| `action_webhook` | ✅ | ✅ | ✅ live |
+| `action_instagram` | ✅ | ✅ | ✅ live |
+| `action_telegram` | ✅ | ✅ | ✅ live |
 
-## Pending Work
+## Superseded By
 
-1. Add a `_handle_sms` and `_handle_webhook` no-op stub to `dispatcher.py` that logs a `WARNING` so stubbed tasks are visible in logs
-2. Add a "Coming soon" badge in the palette or builder for these channel types
-3. File separate ADRs when each channel is implemented: `sms-implementation.md`, `webhook-crm-integration.md`
+- Live dispatcher handlers for SMS, Webhook, Instagram, and Telegram
+- Updated canonical channel/runtime docs in [[channels]], [[dispatcher]], and [[instagram-telegram-integration]]
 
 ## Related Pages
 - [[channels]]

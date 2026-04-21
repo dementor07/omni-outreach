@@ -3,23 +3,24 @@ title: Sequential Builder
 category: product
 tags: [builder, UI, sequences, linear, delay]
 sources: []
-updated: 2026-04-19
+updated: 2026-04-21
 ---
 
 # Sequential Builder
 
-When a campaign is set to `sequence_mode: 'sequential'`, the UI renders the `SequentialBuilder.tsx` component instead of the ReactFlow nodal canvas.
+When a campaign uses `sequence_mode: 'sequential'`, the UI renders `SequentialBuilder.tsx` instead of the full ReactFlow canvas.
 
 ## Dual-Mode Compatibility
 
-The Sequential Builder provides a simpler, top-down linear list interface for creating outreach flows. Under the hood it shares the exact same database architecture and Directed Acyclic Graph (DAG) state structure as the [[canvas-editor]].
+The builder is a simpler top-down list view over the same underlying graph model used by the [[canvas-editor]].
 
-- **Compilation**: Adding, moving, or removing steps in the linear list dynamically computes and re-wires the underlying `nodes` and `edges` arrays.
-- **Save Payload**: Saving the sequential list posts the identical JSON structure to `POST /sequences/save` as the canvas does.
+- **Compilation**: adding, moving, or removing steps recalculates the underlying `nodes` and `edges` arrays.
+- **Save payload**: saving posts the same `POST /sequences/save` graph payload as the canvas.
+- **Shared templates**: action nodes still use the same template/config sidebar as canvas mode.
 
-## Add-Step Grid
+## Curated Add-Step Grid
 
-A 2-column (lg: 4-column) grid at the bottom of the builder surfaces 12 add buttons (expanded Apr 2026 from 4):
+The bottom 2-column (lg: 4-column) add grid now exposes a curated 16-button subset of the most common linear actions and conditions.
 
 | Button label | node_type | Icon colour |
 |---|---|---|
@@ -33,27 +34,32 @@ A 2-column (lg: 4-column) grid at the bottom of the builder surfaces 12 add butt
 | Webhook | `action_webhook` | orange-500 |
 | Add Tag | `action_add_tag` | slate-500 |
 | Remove Tag | `action_remove_tag` | slate-400 |
+| Enrich Lead | `action_enrich` | indigo-500 |
 | Wait | `delay` | amber-500 |
+| AI Screen | `condition_ai_screen` | violet-500 |
+| Source Router | `condition_lead_source` | cyan-500 |
+| If Has Field | `condition_has_field` | amber-500 |
 | End | `end` | rose-500 |
 
-> `action_sms` and `action_webhook` are wired through the UI and backend `NodeType` but the dispatcher has no handler yet — they will silently no-op until implemented.
+This is intentionally not every backend-supported node. The builder favors common linear flows, while the [[canvas-editor]] exposes the full graph surface.
 
 ## STEP_LABELS Map
 
-Human-readable display names for each node type are maintained in the `STEP_LABELS` constant in `SequentialBuilder.tsx`. This prevents raw `node_type` strings from surfacing in the UI.
+Human-readable display names live in the `STEP_LABELS` constant. This prevents raw `node_type` strings from leaking into the list UI.
 
 ## StepIcon Component
 
-Each step card renders a `StepIcon` switch for a semantically correct icon per type (Linkedin, Mail, MessageSquare, MessageCircle, Phone, Webhook, Tag, MinusCircle, GitBranch, Bell, Clock, Shuffle, StopCircle). Unknown types fall back to `<Zap>`.
+`StepIcon` can render more than the curated add grid exposes. It includes icons for additional node types such as Instagram, Telegram, profile view, events, split nodes, and lead-source routing so pre-existing graphs still render cleanly even if those steps were not added from the linear UI.
 
 ## Key Features
 
-- **Interactive Wait Durations**: `delay` steps feature an inline numeric input allowing users to directly edit the wait duration (`delay_days`). Modifying this input updates the underlying node's `data` payload instantly.
-- **Reordering**: Built-in up/down arrows allow users to reorder steps, which automatically deletes and recreates the intervening edges linearly.
-- **Template Configuration**: Action nodes feature an "Edit Template" button, opening the `ConfigSidebar` (same sidebar used in canvas mode) to edit message bodies, email subjects, and voice agent assignments.
-- **Save Sequence button**: Sky-500 button in the header, calls `onSave(nodes, edges)` → `POST /sequences/save`.
+- **Interactive Wait Durations**: `delay` steps expose an inline numeric editor for `delay_days`.
+- **Reordering**: up/down arrows rebuild the linear edge chain automatically.
+- **Template Configuration**: action nodes expose an `Edit Template` button that opens the shared config/template surface.
+- **Save Sequence**: sky-500 button in the header calls `onSave(nodes, edges)`.
 
 ## Related Pages
+
 - [[campaigns]]
 - [[canvas-editor]]
 - [[sequence-engine]]

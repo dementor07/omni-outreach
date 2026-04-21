@@ -1,15 +1,15 @@
 # Omni Wiki — Index
 
-Last updated: 2026-04-21 (integrations security ADR indexed, production hardening and suspicious-site mitigation logged, trust-signal pages and HTTPS live)
+Last updated: 2026-04-21 (lead-gen phases 1B/1C/2/3 reconciled into canonical pages, Lead Sources page canonicalized, SMS/Webhook live, CI smoke tests stabilized)
 
 ## Architecture
 
 | Page | Summary |
 |------|---------|
-| [[system-overview]] | Stack, Docker services, directory structure |
-| [[sequence-engine]] | Graph traversal, node types, all functions, queue/parking/re-evaluation, split bandit |
-| [[dispatcher]] | Queue locking, all channel handlers, retry logic, background crons |
-| [[worker]] | arq cron schedule, stream processor, Redis consumer group |
+| [[system-overview]] | Stack, runtime services, lead-intake flow, execution loop, and CI smoke-test model |
+| [[sequence-engine]] | 27 backend-supported node types, graph traversal, queue/parking/re-evaluation, split bandit |
+| [[dispatcher]] | Queue locking, all delivery/action handlers, retry logic, dead-letter capture, helper crons |
+| [[worker]] | arq cron schedule, stream processor, authenticated Redis, scheduled lead-gen cron |
 | [[job-search-pipeline]] | Apify → Serper → upsert leads → DAG injection |
 | [[event-bus-architecture]] | Kafka/Redis Streams for high-throughput webhooks and scalability |
 | [[auto-optimization-engine]] | Thompson Sampling bandit, Beta params, reward schedule, cron |
@@ -24,16 +24,16 @@ Last updated: 2026-04-21 (integrations security ADR indexed, production hardenin
 | Page | Summary |
 |------|---------|
 | [[dashboard]] | Mission-control overview: stat cards, channel breakdown table, campaign footprint, first-run onboarding |
-| [[campaigns]] | Campaign list + detail view (leads/queue/sequence/settings tabs), CampaignSettings form (8 fields), stats mini-bar, simulation badge |
-| [[canvas-editor]] | ReactFlow canvas, all 25 node types, palette grouped by 7 categories, TelemetryEdge, SplitNode bandit UI, ConfigSidebar, Save Canvas button, serialization |
-| [[sequential-builder]] | Linear sequence builder UI, 12 add buttons (expanded Apr 2026), STEP_LABELS map, StepIcon, reordering, inline wait duration edit |
+| [[campaigns]] | Campaign list + detail view (leads/sources/queue/sequence/settings tabs), stats mini-bar, simulation badge, integrated source controls |
+| [[canvas-editor]] | ReactFlow canvas, 27 backend-supported node types, trigger source badge, live source telemetry, bandit UI, ConfigSidebar, serialization |
+| [[sequential-builder]] | Linear sequence builder UI, curated 16-button add grid, STEP_LABELS map, StepIcon, reordering, inline wait duration edit |
 | [[voice-node]] | Standard vs Nested Flow modes, Retell editor UX |
-| [[channels]] | Active: LinkedIn (4 types), WhatsApp, Email, Voice. Stubbed: SMS, Webhook/CRM, Instagram, Telegram |
+| [[channels]] | Active delivery channels: LinkedIn (4), WhatsApp, Email, SMS, Instagram, Telegram, Voice, Webhook/CRM |
 | [[leads-page]] | Global lead inspector: campaign filter, lead table, stop action, lead drawer with profile + timeline |
 | [[queue-page]] | Live task queue inspector: stat cards, 3-way filter (campaign/channel/status), task table with retry count |
 | [[settings-page]] | Account surfaces: LinkedIn accounts, email SMTP accounts, Retell voice agents, and encrypted Integrations key management UI |
 | [[job-search-ui]] | Job search control panel (legacy): config create, run trigger, run history panel; Apify/Serper pipeline entry point |
-| [[lead-sources-ui]] | Multi-source lead gen page: source cards with availability, per-source config forms, unified run history |
+| [[lead-sources-ui]] | Multi-source lead gen page: availability grid, schema-driven config forms, schedules, per-config run history |
 
 ## Integrations
 
@@ -54,8 +54,8 @@ Last updated: 2026-04-21 (integrations security ADR indexed, production hardenin
 | [[multi-source-lead-gen]] | Apr 2026 lead gen architecture: provider protocol, RawLead schema, 5 sources (Apify, Apollo, Hunter, ProxyCurl, GitHub), registry, new DB tables |
 | [[canvas-ux-decisions]] | Apr 2026 canvas overhaul: naming convention, palette grouping, icon semantics, btn-tactile, lucide-react version constraints |
 | [[integrations-security-architecture]] | Apr 2026 security ADR: encrypted integration keys, rate limiting, CORS tightening, webhook verification, Docker isolation |
-| [[lead-gen-canvas-integration]] | Apr 2026 plan: 4 new canvas nodes (AI screen, source router, enrichment, field check), scheduled runs, Settings integrations UI, visual link between LeadSources and Canvas |
-| [[stubbed-channels-policy]] | Why SMS/Webhook/Instagram/Telegram are fully typed but have no dispatcher handler; pending work |
+| [[lead-gen-canvas-integration]] | Implemented lead-gen ↔ canvas integration: screening, source routing, enrichment, schedules, trigger/source UX, settings tie-in |
+| [[stubbed-channels-policy]] | Historical ADR for the typed-before-handler staging phase; superseded now that SMS/Webhook/Instagram/Telegram are live |
 | [[system-gaps-sprint]] | Apr 2026 20-cycle sprint closing 140+ gaps: notifications, activity log, blacklist, tracking, analytics, template library, inbox, reply classifier, CSV import, bulk actions, dark mode, campaign cloning |
 
 ## Competitors

@@ -3,13 +3,13 @@ title: "ADR: Lead Gen → Canvas/Sequence Integration Plan"
 category: decisions
 tags: [lead-gen, canvas, sequence-engine, screening, enrichment, integration]
 sources: [multi-source-lead-gen, lead-generation-injection, sequence-engine, canvas-editor]
-updated: 2026-04-19
+updated: 2026-04-21
 ---
 
 # ADR: Lead Gen → Canvas/Sequence Integration Plan
 
 ## Status
-Proposed — April 2026
+Accepted — implemented across 2026-04-19 to 2026-04-21
 
 ## Context
 
@@ -23,6 +23,22 @@ Multi-source lead gen (5 providers, registry, LeadSources UI) was shipped on 202
 6. **API keys are env vars only** — no Settings UI to manage them.
 
 ## Decision
+
+## Implementation Status (2026-04-21)
+
+### Shipped
+
+- **Phase 1A**: `condition_ai_screen` and `condition_lead_source` are live in the backend `NodeType`, sequencer logic, canvas palette, and sequential builder.
+- **Phase 1B**: `condition_has_field` is live for immediate field-presence routing.
+- **Phase 1C**: `action_enrich` is live. `LeadSource.enrich()` and `supports_enrichment` now exist in the provider protocol, and Apollo, Hunter, and ProxyCurl implement enrichment.
+- **Phase 2A**: `trigger_start` shows campaign source counts and scheduled-source counts, with a direct path into [[lead-sources-ui]].
+- **Phase 2B**: canvas Live mode injects `sources_recent` telemetry into `trigger_start` so intake volume is visible in the graph itself.
+- **Phase 3**: scheduled lead gen is live via `cron_schedule`, `last_run_at`, `triggered_by`, `croniter`, and the worker's `cron_lead_gen` job.
+- **Phase 4**: integration key management landed through [[integrations-security-architecture]] and the expanded [[settings-page]] integrations tab, giving the lead-source providers DB-backed encrypted key storage with env fallback.
+
+### Outcome
+
+Lead intake is no longer visually or operationally disconnected from campaign execution. Users can configure sources, schedule them, inspect runs inside the campaign, and route/screen/enrich leads directly inside the sequence graph.
 
 ### Phase 1: New Canvas Nodes (4 nodes)
 
@@ -281,3 +297,4 @@ Rationale: AI screening gate is the most critical (stops garbage leads from poll
 - [[canvas-editor]] — UI surface for new nodes
 - [[auto-optimization-engine]] — bandit can optimize screening thresholds
 - [[dispatcher]] — new enrichment handler needed
+- [[lead-sources-ui]] — canonical intake surface now linked into the campaign and trigger UX

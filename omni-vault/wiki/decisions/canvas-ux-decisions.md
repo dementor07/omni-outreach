@@ -3,7 +3,7 @@ title: "ADR: Canvas UX Decisions — April 2026 Overhaul"
 category: decisions
 tags: [canvas, UX, naming, icons, palette, sequential-builder, lucide-react]
 sources: []
-updated: 2026-04-19
+updated: 2026-04-21
 ---
 
 # ADR: Canvas UX Decisions — April 2026 Overhaul
@@ -94,8 +94,8 @@ These node types should be greyed out or labelled "Canvas only" in a future iter
 
 ## Consequences
 
-- All 23 node types are wired through frontend `NodeType` union, `nodeTypes` map, `NODE_PALETTE`, and `SequentialBuilder` add-buttons where appropriate.
-- `action_sms` and `action_webhook` are fully typed and UI-reachable but have no dispatcher handler yet. See [[stubbed-channels-policy]].
+- The frontend now renders the full backend-supported canvas surface, while the sequential builder exposes a curated subset of common linear steps.
+- `action_sms` and `action_webhook` are no longer stubbed; both now have live dispatcher handlers. [[stubbed-channels-policy]] remains as the historical ADR describing the earlier typed-before-handler phase.
 - The `Conscious-Drawer-364.md` note that appeared in the vault root during this session is an Obsidian-generated scratch file and should be deleted.
 
 ## Related Pages

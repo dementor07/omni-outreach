@@ -3,55 +3,93 @@ title: System Overview
 category: architecture
 tags: [backend, frontend, infra, docker]
 sources: []
-updated: 2026-04-12
+updated: 2026-04-21
 ---
 
 # System Overview
 
-Omni is a multi-channel outreach automation SaaS evolving into a programmable outbound operating system. It sequences and sends messages across LinkedIn, WhatsApp, email, and voice — driven by a visual nodal canvas functioning as an Event-Driven State Machine.
+Omni is a multi-channel outreach automation SaaS evolving into a programmable outbound operating system. It now covers both sides of the loop:
+
+- **Lead intake** — provider-driven, optionally scheduled lead generation
+- **Lead execution** — graph-based outreach across multiple channels
 
 ## Core Abstractions
 
-- **Lead**: A stateful entity traversing the graph.
-- **Node**: A state transformer (Trigger, Action, Event/Listener, Condition, Control, Subflow).
-- **Edge**: A transition rule defining logic paths.
-- **Event**: A trigger for execution (e.g., webhook, timeout) that resumes parked leads.
+- **Lead**: stateful record traversing the graph and carrying source/timeline metadata
+- **Node**: trigger, action, condition, event/listener, or control module
+- **Edge**: transition rule keyed by output handle
+- **Event**: signal that resumes parked leads or enriches campaign telemetry
 
 ## Stack
 
 | Layer | Tech |
 |-------|------|
 | Frontend | React 18, TypeScript, Vite, Tailwind CSS, @xyflow/react |
-| Backend | FastAPI, asyncpg, Python 3.11+ |
-| Database | PostgreSQL 16 (Docker) |
-| Queue | Redis 7 (Docker) |
-| Infra | Docker Compose on VPS (145.223.21.222) |
-| Branch | `outreach-threading` |
+| Edge | nginx serving the SPA and proxying `/api/*` |
+| Backend | FastAPI, asyncpg, Alembic, structured JSON logging |
+| Database | PostgreSQL 16 |
+| Queue / Streams | Redis 7 + arq |
+| Infra | Docker Compose on VPS `145.223.21.222`, HTTPS via Let's Encrypt |
 
-## Services (Docker Compose)
+## Runtime Services
 
-- `omni-outreach-frontend-1` — Vite build served via nginx, port 80
-- `omni-outreach-backend-1` — FastAPI, port 8000
-- `omni-outreach-worker-1` — background task worker
-- `omni-outreach-db-1` — PostgreSQL 16, internal only
-- `omni-outreach-redis-1` — Redis 7, internal only
+- `frontend` — built SPA plus trust-signal static pages behind nginx
+- `backend` — FastAPI app, internal to the proxy network
+- `worker` — background cron/queue/event processor
+- `db` — PostgreSQL 16
+- `redis` — authenticated Redis for queueing and streams
+
+## Key Flows
+
+### Lead Intake
+
+- `routers/lead_gen.py` exposes provider registry metadata, config CRUD, trigger, and run history APIs.
+- `services/lead_gen.py` dispatches provider searches, writes `lead_gen_runs`, updates `last_run_at`, and inserts deduplicated leads.
+- `worker/tasks.py` runs `cron_lead_gen` every 5 minutes for scheduled configs.
+- New leads immediately enter the graph through `sequencer.schedule_new_lead()`.
+
+### Sequence Execution
+
+- Campaigns render either the [[canvas-editor]] or [[sequential-builder]].
+- Graphs save to `sequence_nodes` and `sequence_edges`.
+- Queue rows are executed by the [[dispatcher]].
+- Events, reply state, and telemetry resume parked leads and feed optimization.
+
+### Delivery and Integrations
+
+- Human-facing delivery channels are documented in [[channels]].
+- Unipile powers LinkedIn, WhatsApp, Instagram, and Telegram.
+- Retell powers voice calls.
+- SMTP, Twilio, and generic webhooks fill the remaining delivery surface.
 
 ## Key Directories
 
-```
+```text
 omni-outreach/
 ├── backend/app/
-│   ├── routers/       ← FastAPI route handlers
-│   ├── services/      ← business logic (sequencer, dispatcher, voice, etc.)
-│   └── db.py          ← asyncpg query helpers
+│   ├── routers/            FastAPI route handlers
+│   ├── services/           sequencer, dispatcher, lead sources, integrations
+│   ├── worker/             arq cron jobs and stream processor
+│   └── db.py               asyncpg / Redis helpers
+├── backend/tests/          pytest smoke fixtures and API checks
 ├── frontend/src/
-│   ├── pages/         ← full-page React components
-│   ├── components/    ← shared UI components
-│   └── api/client.ts  ← axios instance with Bearer token interceptors
+│   ├── pages/              full-page React views
+│   ├── components/         shared UI and builder primitives
+│   ├── hooks/              data + graph hooks
+│   └── api/client.ts       authenticated API client
+└── omni-vault/             canonical project memory
 ```
 
+## Quality Gate
+
+The backend includes a lightweight pytest smoke suite covering health, auth, and unauthorized access checks. CI initializes the DB pool/Redis client in test fixtures, and `/health` is allowed to report `degraded` when Redis is only partially wired in the test environment.
+
 ## Related Pages
-- [[sequence-engine]] — how the nodal graph drives outreach
-- [[channels]] — LinkedIn, WhatsApp, email, voice
-- [[retell-integration]] — AI voice calls
-- [[unipile-integration]] — LinkedIn + WhatsApp API
+
+- [[sequence-engine]]
+- [[dispatcher]]
+- [[worker]]
+- [[lead-sources-ui]]
+- [[channels]]
+- [[retell-integration]]
+- [[unipile-integration]]

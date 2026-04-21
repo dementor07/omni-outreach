@@ -496,3 +496,13 @@ Files touched: 3 migrations/requirements, 7 backend .py, 3 frontend .tsx/.ts.
 - IG/TG were already fully implemented — only SMS/Webhook were pending per the stubbed-channels-policy ADR.
 
 Files touched (this batch): 2 backend (dispatcher.py, config.py, sequences router) + 1 frontend (Campaigns.tsx). No migration needed.
+
+
+## [2026-04-21] sync | Vault reconciled with lead-gen rollout and CI stability work — HEAD 2266085
+
+- Created canonical `wiki/product/lead-sources-ui.md` and removed the empty root `lead-sources-ui.md` note that was hijacking the wikilink.
+- Refreshed stale canonical pages: `campaigns`, `canvas-editor`, `channels`, `sequential-builder`, `sequence-engine`, `dispatcher`, `worker`, `system-overview`.
+- Updated `lead-gen-canvas-integration.md` from a proposed plan into an implemented ADR status page covering Phases 1A, 1B, 1C, 2A, 2B, 3, and the Phase 4 key-management tie-in.
+- Recorded the current shipped state: 27 backend-supported node types, Trigger source badges + source telemetry, scheduled lead gen, `action_enrich`, `condition_has_field`, and live SMS/Webhook handlers.
+- Captured the Apr 21 CI smoke-test stabilization work in the architecture layer: per-test DB/Redis initialization in `backend/tests/conftest.py` and health smoke tests accepting `degraded` when Redis is best-effort in CI.
+- Vault sync executed through filesystem fallback in this VS Code session rather than Obsidian MCP/API.
