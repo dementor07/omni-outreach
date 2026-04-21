@@ -427,3 +427,22 @@ Closed all infrastructure gaps identified in vault audit. Everything except sing
 - Alembic `ModuleNotFoundError: psycopg2` — added `psycopg2-binary` to requirements
 
 **Final state:** All containers healthy, `/api/health` → `{"status":"ok","checks":{"api":"ok","db":"ok","redis":"ok"}}`, Alembic at `001 (head)`, security headers verified, asset caching confirmed (1y immutable).
+
+## [2026-04-21] security | Suspicious-site false-positive mitigation — HEAD 4706ffe
+
+Started from `omni-vault/index.md` and the operation log, then investigated Bitdefender/AdGuard warnings against the live deployment at `srv1575227.hstgr.cloud`.
+
+Findings:
+- No compromise indicators found in served HTML, JS prefix, or recent nginx/container logs.
+- Valid Let's Encrypt certificate in place.
+- Public URL now emits full browser security headers including HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, COOP, and CORP.
+- Reputation risk is still likely dominated by the provider hostname (`*.hstgr.cloud`) plus an admin-style login experience, not active malware.
+
+Mitigations deployed:
+- Added trust-signal public assets under `frontend/public/`: `about.html`, `privacy.html`, `terms.html`, `security.html`, `robots.txt`, `sitemap.xml`, `.well-known/security.txt`, `favicon.svg`, `trust.css`.
+- Updated `frontend/index.html` with explicit Omni Outreach branding, canonical URL, and Open Graph metadata.
+- Updated `Login.tsx` branding from generic `Omni` to `Omni Outreach`.
+- Adjusted nginx CSP and static file serving so the trust pages render correctly under the active CSP.
+
+Operational note:
+- This materially improves crawler-visible trust signals, but permanent resolution likely still requires moving from the Hostinger VPS hostname to a dedicated custom domain and then submitting vendor false-positive reviews.
