@@ -1,7 +1,6 @@
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-
-import httpx
 
 from app.auth import get_current_user
 from app.config import settings
@@ -98,7 +97,7 @@ async def delete_email_account(account_id: str, user_id: str = Depends(get_curre
 
 # ── Voice agents ──────────────────────────────────────────────────────────────
 
-from typing import Optional
+
 from pydantic import ConfigDict
 
 RETELL_API_KEY = settings.retell_api_key
@@ -119,9 +118,9 @@ class VoiceAgentPrompt(BaseModel):
 
 class FlowUpdate(BaseModel):
     model_config = ConfigDict(extra="allow")
-    global_prompt: Optional[str] = None
-    nodes: Optional[list] = None
-    start_node_id: Optional[str] = None
+    global_prompt: str | None = None
+    nodes: list | None = None
+    start_node_id: str | None = None
 
 async def _get_retell_agent(retell_agent_id: str) -> dict:
     """GET https://api.retellai.com/get-agent/{retell_agent_id}"""
@@ -175,12 +174,12 @@ async def get_voice_agent_prompt(agent_id: str, user_id: str = Depends(get_curre
     agent = await fetch_one("SELECT retell_agent_id FROM voice_agents WHERE id = $1", agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Voice agent not found")
-    
+
     agent_data = await _get_retell_agent(agent["retell_agent_id"])
     engine = agent_data.get("response_engine")
     if not engine or engine.get("type") != "retell-llm":
         raise HTTPException(status_code=400, detail="Agent is not a standard LLM agent")
-    
+
     llm_id = engine["llm_id"]
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
@@ -189,7 +188,7 @@ async def get_voice_agent_prompt(agent_id: str, user_id: str = Depends(get_curre
         )
         if not resp.is_success:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)
-        
+
         llm_data = resp.json()
         return {
             "llm_id": llm_id,
@@ -204,12 +203,12 @@ async def update_voice_agent_prompt(agent_id: str, body: UpdatePromptRequest, us
     agent = await fetch_one("SELECT retell_agent_id FROM voice_agents WHERE id = $1", agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Voice agent not found")
-    
+
     agent_data = await _get_retell_agent(agent["retell_agent_id"])
     engine = agent_data.get("response_engine")
     if not engine or engine.get("type") != "retell-llm":
         raise HTTPException(status_code=400, detail="Agent is not a standard LLM agent")
-    
+
     llm_id = engine["llm_id"]
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.patch(
@@ -219,7 +218,7 @@ async def update_voice_agent_prompt(agent_id: str, body: UpdatePromptRequest, us
         )
         if not resp.is_success:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)
-        
+
         return {"success": True}
 
 
@@ -228,12 +227,12 @@ async def get_voice_agent_flow(agent_id: str, user_id: str = Depends(get_current
     agent = await fetch_one("SELECT retell_agent_id FROM voice_agents WHERE id = $1", agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Voice agent not found")
-    
+
     agent_data = await _get_retell_agent(agent["retell_agent_id"])
     engine = agent_data.get("response_engine")
     if not engine or engine.get("type") != "conversation-flow":
         raise HTTPException(status_code=400, detail="Agent is not a conversation-flow agent")
-    
+
     flow_id = engine["conversation_flow_id"]
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
@@ -242,7 +241,7 @@ async def get_voice_agent_flow(agent_id: str, user_id: str = Depends(get_current
         )
         if not resp.is_success:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)
-        
+
         return resp.json()
 
 
@@ -251,12 +250,12 @@ async def update_voice_agent_flow(agent_id: str, body: dict, user_id: str = Depe
     agent = await fetch_one("SELECT retell_agent_id FROM voice_agents WHERE id = $1", agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Voice agent not found")
-    
+
     agent_data = await _get_retell_agent(agent["retell_agent_id"])
     engine = agent_data.get("response_engine")
     if not engine or engine.get("type") != "conversation-flow":
         raise HTTPException(status_code=400, detail="Agent is not a conversation-flow agent")
-    
+
     flow_id = engine["conversation_flow_id"]
     payload = {k: v for k, v in body.items() if k in {"global_prompt", "nodes", "start_node_id"}}
     async with httpx.AsyncClient(timeout=15) as client:
@@ -267,6 +266,6 @@ async def update_voice_agent_flow(agent_id: str, body: dict, user_id: str = Depe
         )
         if not resp.is_success:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)
-        
+
         return {"success": True}
 

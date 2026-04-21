@@ -7,8 +7,7 @@ import hashlib
 import hmac
 import json
 import logging
-import uuid
-from urllib.parse import unquote, urlparse, quote
+from urllib.parse import quote, unquote, urlparse
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
@@ -92,14 +91,14 @@ async def track_click(event_id: str, url: str, sig: str = "", request: Request =
 
 def inject_tracking(html: str, event_id: str, base_url: str) -> str:
     """Inject tracking pixel and wrap links in click-tracking redirects.
-    
+
     URLs include HMAC signature for tamper protection.
-    
+
     Args:
         html: The email HTML body.
         event_id: The event ID for the sent email event.
         base_url: The public base URL of the API (e.g. https://api.omni.com).
-    
+
     Returns:
         Modified HTML with tracking pixel and wrapped links.
     """

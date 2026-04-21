@@ -3,7 +3,6 @@
 Provides CRUD for encrypted API keys with masked read, verification per provider.
 """
 import logging
-from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -157,7 +156,7 @@ async def _get_provider_keys(user_id: str, provider: str) -> dict[str, str]:
     return result
 
 
-async def get_integration_key(user_id: str, provider: str, field_name: str) -> Optional[str]:
+async def get_integration_key(user_id: str, provider: str, field_name: str) -> str | None:
     """Get a single decrypted key. Falls back to env var via config if not in DB."""
     from app.config import settings as cfg
     row = await fetch_one(

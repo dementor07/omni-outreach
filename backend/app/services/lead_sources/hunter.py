@@ -13,6 +13,7 @@ import logging
 import httpx
 
 from app.config import settings
+
 from .base import LeadSource, RawLead
 
 log = logging.getLogger(__name__)
@@ -143,3 +144,44 @@ class HunterSource(LeadSource):
 
         log.info(f"[hunter] total: {len(all_leads)} leads")
         return all_leads
+
+    @property
+    def supports_enrichment(self) -> bool:
+        return True
+
+    async def enrich(self, lead_data: dict) -> RawLead:
+        """Hunter email-finder: requires first_name + last_name + domain (or company)."""
+        api_key = settings.hunter_api_key  # type: ignore[attr-defined]
+        first = lead_data.get("first_name") or ""
+        last = lead_data.get("last_name") or ""
+        domain = (lead_data.get("extra") or {}).get("domain") if isinstance(lead_data.get("extra"), dict) else None
+        company = lead_data.get("company")
+        if not (first and last and (domain or company)):
+            raise ValueError("Hunter enrichment needs first_name, last_name, and domain/company")
+
+        params: dict = {"api_key": api_key, "first_name": first, "last_name": last}
+        if domain:
+            params["domain"] = domain
+        else:
+            params["company"] = company
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(f"{HUNTER_BASE}/email-finder", params=params)
+            r.raise_for_status()
+            data = (r.json() or {}).get("data") or {}
+
+        if not data.get("email"):
+            raise ValueError("Hunter returned no email match")
+
+        return RawLead(
+            first_name=first,
+            last_name=last,
+            linkedin_url=data.get("linkedin_url") or lead_data.get("linkedin_url"),
+            email=data.get("email"),
+            headline=data.get("position", "") or lead_data.get("headline", ""),
+            company=company or "",
+            extra={
+                "hunter_score": data.get("score"),
+                "hunter_verification": (data.get("verification") or {}).get("status"),
+            },
+        )

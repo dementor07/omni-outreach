@@ -1,19 +1,37 @@
-from contextlib import asynccontextmanager
-import logging
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
-from app.db import init_pool, close_pool, init_redis, close_redis
-from app.logging_config import setup_logging, get_logger
-from app.routers import auth, campaigns, leads, sequences, templates, accounts, queue, job_search, lead_gen, settings as settings_router, overview, webhooks, notifications, activity, blacklist, tracking, analytics, template_library, inbox
+from app.db import close_pool, close_redis, init_pool, init_redis
+from app.logging_config import get_logger, setup_logging
+from app.routers import (
+    accounts,
+    activity,
+    analytics,
+    auth,
+    blacklist,
+    campaigns,
+    inbox,
+    job_search,
+    lead_gen,
+    leads,
+    notifications,
+    overview,
+    queue,
+    sequences,
+    template_library,
+    templates,
+    tracking,
+    webhooks,
+)
+from app.routers import settings as settings_router
 
 setup_logging()
 logger = get_logger(__name__)

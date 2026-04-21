@@ -1,6 +1,5 @@
-from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
 from app.auth import get_current_user
@@ -43,8 +42,8 @@ async def list_leads(
     campaign_id: str,
     page: int = 1,
     page_size: int = 50,
-    search: Optional[str] = None,
-    status: Optional[str] = None,
+    search: str | None = None,
+    status: str | None = None,
     user_id: str = Depends(get_current_user),
 ):
     offset = (page - 1) * page_size

@@ -1,11 +1,11 @@
 """Pytest fixtures for Omni Outreach backend tests."""
 
-import os
 import asyncio
-from typing import AsyncGenerator
+import os
+from collections.abc import AsyncGenerator
 
-import pytest
 import httpx
+import pytest
 from fastapi import FastAPI
 
 # Point at test DB before importing app

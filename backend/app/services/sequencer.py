@@ -1,7 +1,8 @@
 import json
 import logging
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+
 from app.db import execute, fetch_all, fetch_one
 
 log = logging.getLogger(__name__)
@@ -68,7 +69,7 @@ async def queue_next_nodes(
 
         if node_type.startswith("action_"):
             channel = node_type.replace("action_", "")
-            scheduled_at = datetime.now(timezone.utc) + accumulated_delay
+            scheduled_at = datetime.now(UTC) + accumulated_delay
             await execute(
                 """
                 INSERT INTO queue (campaign_id, lead_id, node_id, channel, status, scheduled_at)
@@ -109,6 +110,12 @@ async def queue_next_nodes(
                 branch = lead_source if lead_source in configured_sources else "default"
                 log.info(f"[sequencer] Source router for lead {lead_id}: source={lead_source} → handle={branch}")
                 await queue_next_nodes(lead_id, target_id, branch, accumulated_delay)
+            elif node_type == "condition_has_field":
+                field_name = (node["data"] or {}).get("field", "email")
+                has_value = bool(lead.get(field_name))
+                branch = "true" if has_value else "false"
+                log.info(f"[sequencer] Field check for lead {lead_id}: field={field_name} present={has_value}")
+                await queue_next_nodes(lead_id, target_id, branch, accumulated_delay)
 
         elif node_type == "split":
             weights = (node.get("data") or {}).get("weights", {
@@ -145,15 +152,15 @@ async def evaluate_conditions(lead_id: str) -> None:
     """Called when lead state changes (e.g. reply received, invite accepted)."""
     log.info(f"[sequencer] Re-evaluating conditions for lead {lead_id}")
     lead = await fetch_one("SELECT * FROM leads WHERE id=$1", lead_id)
-    
+
     if not lead:
         log.warning(f"[sequencer] Lead {lead_id} not found during evaluate_conditions")
         return
-        
+
     if not lead["current_node_id"]:
         log.debug(f"[sequencer] Lead {lead_id} has no current_node_id; skipping re-evaluation")
         return
-    
+
     node = await fetch_one("SELECT node_type FROM sequence_nodes WHERE id=$1", lead["current_node_id"])
     if not node:
         log.warning(f"[sequencer] current_node_id {lead['current_node_id']} not found for lead {lead_id}")
@@ -163,7 +170,7 @@ async def evaluate_conditions(lead_id: str) -> None:
     log.debug(f"[sequencer] Lead {lead_id} currently at node {node_type} ({lead['current_node_id']})")
 
     should_advance = False
-    
+
     if node_type == "condition_replied" and lead.get("replied_at"):
         should_advance = True
     elif node_type == "event_invite_accepted" and lead.get("accepted_at"):

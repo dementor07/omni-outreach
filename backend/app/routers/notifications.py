@@ -1,11 +1,9 @@
 import asyncio
 import json
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
 from app.auth import get_current_user
 from app.db import execute, fetch_all, fetch_one
@@ -47,7 +45,7 @@ async def notification_stream(user_id: str = Depends(get_current_user)):
                 try:
                     msg = await asyncio.wait_for(q.get(), timeout=30.0)
                     yield f"data: {json.dumps(msg, default=str)}\n\n"
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": keepalive\n\n"
         except asyncio.CancelledError:
             pass

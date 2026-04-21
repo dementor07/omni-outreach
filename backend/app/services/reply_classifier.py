@@ -3,10 +3,10 @@
 Uses keyword-based heuristics. Can be upgraded to LLM classification later.
 """
 import re
-from enum import Enum
+from enum import StrEnum
 
 
-class ReplyCategory(str, Enum):
+class ReplyCategory(StrEnum):
     POSITIVE = "positive"
     NEGATIVE = "negative"
     NEUTRAL = "neutral"
@@ -58,7 +58,7 @@ def _match_any(text: str, patterns: list[str]) -> bool:
 
 def classify_reply(subject: str, body: str) -> tuple[ReplyCategory, float]:
     """Classify an inbound reply message.
-    
+
     Returns:
         Tuple of (category, confidence) where confidence is 0.0-1.0.
     """

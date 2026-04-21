@@ -1,9 +1,11 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+
 from app.auth import get_current_user
 from app.db import fetch_all, fetch_one
 from app.services.job_search import run_job_search
-import asyncio
 
 router = APIRouter()
 

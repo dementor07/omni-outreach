@@ -7,7 +7,6 @@ decrypted in-memory only when needed, and masked in API responses.
 import base64
 import hashlib
 import logging
-from typing import Optional
 
 from cryptography.fernet import Fernet, InvalidToken
 

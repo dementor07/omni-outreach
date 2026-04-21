@@ -64,7 +64,7 @@ async def upsert_lead(campaign_id: str, lead: RawLead, source_type: str) -> bool
     return False
 
 
-async def run_lead_gen(campaign_id: str, config_id: str) -> None:
+async def run_lead_gen(campaign_id: str, config_id: str, triggered_by: str = "manual") -> None:
     """
     Dispatch a lead gen run for the given config.
     Updates lead_gen_runs with status, counts, and errors.
@@ -84,13 +84,18 @@ async def run_lead_gen(campaign_id: str, config_id: str) -> None:
 
     run = await fetch_one(
         """
-        INSERT INTO lead_gen_runs (campaign_id, config_id, source_type, status)
-        VALUES ($1, $2, $3, 'running')
+        INSERT INTO lead_gen_runs (campaign_id, config_id, source_type, status, triggered_by)
+        VALUES ($1, $2, $3, 'running', $4)
         RETURNING id
         """,
         campaign_id,
         config_id,
         source_type,
+        triggered_by,
+    )
+    await execute(
+        "UPDATE lead_gen_configs SET last_run_at=NOW() WHERE id=$1",
+        config_id,
     )
     run_id = str(run["id"])
     log.info(f"[lead_gen:{run_id}] Starting source={source_type}")

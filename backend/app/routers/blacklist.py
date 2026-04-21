@@ -1,7 +1,5 @@
-import json
-from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.auth import get_current_user
@@ -22,8 +20,8 @@ class BlacklistBulk(BaseModel):
 
 @router.get("")
 async def list_blacklist(
-    entry_type: Optional[str] = None,
-    search: Optional[str] = None,
+    entry_type: str | None = None,
+    search: str | None = None,
     page: int = 1,
     page_size: int = 50,
     user_id: str = Depends(get_current_user),

@@ -13,6 +13,7 @@ import logging
 import httpx
 
 from app.config import settings
+
 from .base import LeadSource, RawLead
 
 log = logging.getLogger(__name__)
@@ -148,3 +149,36 @@ class ProxyCurlSource(LeadSource):
 
         log.info(f"[proxycurl] total: {len(all_leads)} leads")
         return all_leads
+
+    @property
+    def supports_enrichment(self) -> bool:
+        return True
+
+    async def enrich(self, lead_data: dict) -> RawLead:
+        """ProxyCurl profile lookup by linkedin_url."""
+        api_key = settings.proxycurl_api_key  # type: ignore[attr-defined]
+        profile_url = lead_data.get("linkedin_url")
+        if not profile_url:
+            raise ValueError("ProxyCurl enrichment requires linkedin_url on lead")
+        headers = {"Authorization": f"Bearer {api_key}"}
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(
+                f"{PROXYCURL_BASE}/v2/linkedin",
+                headers=headers,
+                params={"url": profile_url, "extra": "include"},
+            )
+            r.raise_for_status()
+            p = r.json() or {}
+        email = (p.get("personal_emails") or [None])[0] or p.get("work_email")
+        return RawLead(
+            first_name=p.get("first_name") or lead_data.get("first_name", ""),
+            last_name=p.get("last_name") or lead_data.get("last_name", ""),
+            linkedin_url=profile_url,
+            email=email,
+            headline=p.get("headline", ""),
+            company=(p.get("experiences") or [{}])[0].get("company", "") if p.get("experiences") else "",
+            extra={
+                "proxycurl_city": p.get("city"),
+                "proxycurl_country": p.get("country_full_name"),
+            },
+        )

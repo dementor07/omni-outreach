@@ -12,10 +12,10 @@ from __future__ import annotations
 
 from .lead_sources.apify_jobs import ApifyJobsSource
 from .lead_sources.apollo import ApolloSource
+from .lead_sources.base import LeadSource
 from .lead_sources.github import GitHubSource
 from .lead_sources.hunter import HunterSource
 from .lead_sources.proxycurl import ProxyCurlSource
-from .lead_sources.base import LeadSource
 
 
 class LeadSourceRegistry:

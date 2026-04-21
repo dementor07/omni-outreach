@@ -1,5 +1,4 @@
 """Unified inbox — aggregates inbound messages/replies across all channels."""
-from typing import Optional
 
 from fastapi import APIRouter, Depends
 
@@ -11,9 +10,9 @@ router = APIRouter()
 
 @router.get("")
 async def list_inbox(
-    channel: Optional[str] = None,
-    campaign_id: Optional[str] = None,
-    category: Optional[str] = None,
+    channel: str | None = None,
+    campaign_id: str | None = None,
+    category: str | None = None,
     page: int = 1,
     page_size: int = 30,
     user_id: str = Depends(get_current_user),

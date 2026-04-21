@@ -12,6 +12,7 @@ import logging
 import httpx
 
 from app.config import settings
+
 from .base import LeadSource, RawLead
 
 log = logging.getLogger(__name__)
@@ -157,3 +158,59 @@ class ApolloSource(LeadSource):
 
         log.info(f"[apollo] total: {len(all_leads)} leads")
         return all_leads
+
+    @property
+    def supports_enrichment(self) -> bool:
+        return True
+
+    async def enrich(self, lead_data: dict) -> RawLead:
+        """Apollo People Enrichment — looks up a person by email or linkedin_url."""
+        api_key = settings.apollo_api_key  # type: ignore[attr-defined]
+        headers = {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-cache",
+            "X-Api-Key": api_key,
+        }
+        payload: dict = {}
+        if lead_data.get("email"):
+            payload["email"] = lead_data["email"]
+        if lead_data.get("linkedin_url"):
+            payload["linkedin_url"] = lead_data["linkedin_url"]
+        if not payload:
+            # Fall back to name + company
+            first = lead_data.get("first_name") or ""
+            last = lead_data.get("last_name") or ""
+            if first or last:
+                payload["name"] = f"{first} {last}".strip()
+            if lead_data.get("company"):
+                payload["organization_name"] = lead_data["company"]
+        if not payload:
+            raise ValueError("Insufficient lead data for Apollo enrichment")
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(
+                f"{APOLLO_BASE}/people/match",
+                headers=headers,
+                json=payload,
+            )
+            r.raise_for_status()
+            person = (r.json() or {}).get("person") or {}
+
+        if not person:
+            raise ValueError("Apollo returned no match")
+
+        org = person.get("organization") or {}
+        linkedin_url = person.get("linkedin_url") or ""
+        if linkedin_url and not linkedin_url.startswith("http"):
+            linkedin_url = f"https://www.linkedin.com/in/{linkedin_url}"
+
+        return RawLead(
+            first_name=person.get("first_name") or lead_data.get("first_name", ""),
+            last_name=person.get("last_name") or lead_data.get("last_name", ""),
+            linkedin_url=linkedin_url or None,
+            email=person.get("email"),
+            headline=person.get("title", ""),
+            company=org.get("name", ""),
+            company_linkedin_url=org.get("linkedin_url"),
+            extra={"apollo_id": person.get("id")},
+        )

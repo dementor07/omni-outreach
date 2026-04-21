@@ -1,7 +1,7 @@
 """Smoke tests — health and auth endpoints."""
 
-import pytest
 import httpx
+import pytest
 
 
 @pytest.mark.asyncio

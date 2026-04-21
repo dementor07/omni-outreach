@@ -1,6 +1,5 @@
 """Reusable template library — CRUD for message templates across channels."""
 import re
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -34,9 +33,9 @@ def _extract_variables(body: str) -> list[str]:
 
 @router.get("")
 async def list_library_templates(
-    channel: Optional[str] = None,
-    category: Optional[str] = None,
-    search: Optional[str] = None,
+    channel: str | None = None,
+    category: str | None = None,
+    search: str | None = None,
     user_id: str = Depends(get_current_user),
 ):
     conditions = ["(user_id=$1 OR is_public=TRUE)"]

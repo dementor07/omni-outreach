@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from app.auth import get_current_user
-from app.db import fetch_one, fetch_all
+from app.db import fetch_all, fetch_one
 
 router = APIRouter()
 

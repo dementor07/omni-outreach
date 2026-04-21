@@ -2,8 +2,10 @@ import hashlib
 import hmac
 import json
 import logging
-from fastapi import APIRouter, Request, HTTPException
+
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+
 import app.db as db
 from app.config import settings as app_settings
 from app.services.reply_classifier import classify_reply, get_suggested_action
@@ -35,7 +37,7 @@ async def unipile_webhook(request: Request):
     if not app_settings.unipile_webhook_secret:
         log.error("Webhook secret not configured — rejecting request")
         raise HTTPException(status_code=500, detail="Webhook verification not configured")
-    
+
     signature = request.headers.get("x-webhook-signature", "")
     expected = hmac.new(
         app_settings.unipile_webhook_secret.encode(),
@@ -46,7 +48,7 @@ async def unipile_webhook(request: Request):
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
     payload = json.loads(body)
-    
+
     # We only care about message.received for now, but we just stream everything
     # and let the background stream processor filter it.
     if not db.redis_client:
@@ -54,11 +56,11 @@ async def unipile_webhook(request: Request):
 
     try:
         await db.redis_client.xadd(
-            "omni_inbound_events", 
+            "omni_inbound_events",
             {"source": "unipile", "payload": json.dumps(payload)}
         )
         return {"status": "queued"}
-    except Exception as e:
+    except Exception:
         log.exception("Failed to queue webhook payload")
         raise HTTPException(status_code=500, detail="Internal server error")
 

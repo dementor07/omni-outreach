@@ -3,8 +3,8 @@ from pydantic import BaseModel, EmailStr
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from app.auth import hash_password, verify_password, create_access_token
-from app.db import execute, fetch_one
+from app.auth import create_access_token, hash_password, verify_password
+from app.db import fetch_one
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)

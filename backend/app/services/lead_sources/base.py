@@ -66,6 +66,28 @@ class LeadSource(ABC):
         """
         ...
 
+    # Optional enrichment capability. Providers that support profile/email lookup
+    # can override this to fill missing fields on an existing lead. Default raises
+    # so the dispatcher can surface "this source does not support enrichment".
+    async def enrich(self, lead_data: dict) -> RawLead:
+        """
+        Fill missing fields on an existing lead. Called by action_enrich nodes.
+
+        Args:
+            lead_data: the current lead row as a dict (first_name, last_name,
+                email, linkedin_url, company, etc.)
+
+        Returns:
+            A RawLead with enriched fields. Only non-empty attributes are
+            merged back onto the lead.
+        """
+        raise NotImplementedError(f"{self.source_type} does not support enrichment")
+
+    @property
+    def supports_enrichment(self) -> bool:
+        """Whether this source implements enrich(). Overridden by capable providers."""
+        return False
+
     def describe(self) -> dict:
         """Serialise source metadata for the /lead-gen/sources endpoint."""
         return {
@@ -74,4 +96,5 @@ class LeadSource(ABC):
             "description": self.description,
             "available": self.is_available,
             "config_schema": self.config_schema(),
+            "supports_enrichment": self.supports_enrichment,
         }

@@ -33,7 +33,7 @@ class ConfigCreate(BaseModel):
     label: str | None = None  # optional human label for the config card
 
 
-_CONFIG_COLS = "id, campaign_id, source_type, config, label, is_enabled, created_at"
+_CONFIG_COLS = "id, campaign_id, source_type, config, label, is_enabled, cron_schedule, last_run_at, created_at"
 
 
 @router.post("/configs", status_code=201)
@@ -82,9 +82,65 @@ async def delete_config(config_id: str, user_id: str = Depends(get_current_user)
     await execute("DELETE FROM lead_gen_configs WHERE id=$1", config_id)
 
 
+class ConfigUpdate(BaseModel):
+    cron_schedule: str | None = None
+    is_enabled: bool | None = None
+    config: dict | None = None
+    label: str | None = None
+
+
+@router.patch("/configs/{config_id}")
+async def update_config(
+    config_id: str,
+    body: ConfigUpdate,
+    user_id: str = Depends(get_current_user),
+):
+    existing = await fetch_one("SELECT id FROM lead_gen_configs WHERE id=$1", config_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Config not found")
+
+    # Validate cron expression if provided (non-null, non-empty)
+    if body.cron_schedule:
+        try:
+            from croniter import croniter
+            if not croniter.is_valid(body.cron_schedule):
+                raise ValueError("invalid cron expression")
+        except ImportError:
+            pass  # croniter not installed yet — skip validation in that environment
+
+    sets: list[str] = []
+    params: list = []
+    for col, val in [
+        ("cron_schedule", body.cron_schedule),
+        ("is_enabled", body.is_enabled),
+        ("config", body.config),
+        ("label", body.label),
+    ]:
+        if val is not None:
+            params.append(val)
+            sets.append(f"{col}=${len(params)}")
+
+    # Allow clearing cron_schedule explicitly by sending empty string
+    if body.cron_schedule == "":
+        sets.append("cron_schedule=NULL")
+
+    if not sets:
+        existing_full = await fetch_one(
+            f"SELECT {_CONFIG_COLS} FROM lead_gen_configs WHERE id=$1", config_id
+        )
+        return existing_full
+
+    params.append(config_id)
+    row = await fetch_one(
+        f"UPDATE lead_gen_configs SET {', '.join(sets)} WHERE id=${len(params)} RETURNING {_CONFIG_COLS}",
+        *params,
+    )
+    return row
+
+
 # ── Runs ──────────────────────────────────────────────────────────────────────
 
-_RUN_COLS = "id, campaign_id, config_id, source_type, status, leads_found, leads_added, started_at, finished_at, error"
+_RUN_COLS = "id, campaign_id, config_id, source_type, status, leads_found, leads_added, started_at, finished_at, error, triggered_by"
 
 
 class TriggerRequest(BaseModel):

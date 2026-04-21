@@ -1,11 +1,11 @@
 import json
 import logging
+
 from redis import asyncio as aioredis
 from redis.exceptions import ResponseError
 
 from app.db import execute, fetch_one
 from app.services import sequencer
-from app.config import settings
 
 log = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ async def _process_unipile_payload(payload: dict) -> None:
 
     body = payload.get("body", {})
     sender = body.get("sender", {})
-    
+
     if sender.get("is_me"):
         log.info("[stream_processor] Skipping message sent by self.")
         return
@@ -36,23 +36,23 @@ async def _process_unipile_payload(payload: dict) -> None:
         return
 
     log.info(f"[stream_processor] Received reply for lead {lead['id']} on channel {body.get('channel')}")
-    
+
     # Update lead state
     await execute(
         "UPDATE leads SET replied_at = NOW(), status = 'replied' WHERE id = $1",
         lead["id"]
     )
-    
+
     # Log inbound message
     await execute(
         """
         INSERT INTO inbound_messages (lead_id, campaign_id, channel, body, raw)
         VALUES ($1, $2, $3, $4, $5)
         """,
-        lead["id"], lead["campaign_id"], body.get("channel"), 
+        lead["id"], lead["campaign_id"], body.get("channel"),
         body.get("text") or body.get("body"), payload
     )
-    
+
     # Evaluate sequence logic
     await sequencer.evaluate_conditions(str(lead["id"]))
 
@@ -60,7 +60,7 @@ async def _process_unipile_payload(payload: dict) -> None:
 async def process_stream_events(ctx: dict) -> None:
     """Cron job to consume events from the Redis stream."""
     redis = aioredis.from_url("redis://redis:6379", decode_responses=True)
-    
+
     # Ensure consumer group exists
     try:
         await redis.xgroup_create(STREAM_NAME, GROUP_NAME, id="0", mkstream=True)
@@ -75,15 +75,15 @@ async def process_stream_events(ctx: dict) -> None:
         streams = await redis.xreadgroup(
             GROUP_NAME, CONSUMER_NAME, {STREAM_NAME: ">"}, count=50, block=0
         )
-        
+
         if not streams:
             return
-            
+
         for stream, messages in streams:
             for message_id, message_data in messages:
                 source = message_data.get("source")
                 payload_str = message_data.get("payload")
-                
+
                 if source == "unipile" and payload_str:
                     try:
                         payload = json.loads(payload_str)
@@ -92,7 +92,7 @@ async def process_stream_events(ctx: dict) -> None:
                         await redis.xack(STREAM_NAME, GROUP_NAME, message_id)
                     except Exception as ex:
                         log.exception(f"[stream_processor] Error processing message {message_id}: {ex}")
-                        
+
     except Exception as e:
         log.exception(f"[stream_processor] Error reading from stream: {e}")
     finally:

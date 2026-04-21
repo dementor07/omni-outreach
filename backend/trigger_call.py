@@ -3,7 +3,7 @@ import logging
 import sys
 
 from app.config import settings
-from app.db import init_pool, close_pool, fetch_one
+from app.db import close_pool, fetch_one, init_pool
 from app.services import voice
 
 # Configure logging
@@ -18,16 +18,16 @@ TARGET_NUMBER = "+919895537266"
 
 async def main():
     log.info("Starting manual call trigger script...")
-    
+
     # 1. Initialize DB Connection
     await init_pool(settings.get_asyncpg_dsn())
-    
+
     try:
         # 2. Fetch an active voice agent
         agent = await fetch_one(
             "SELECT retell_agent_id, name FROM voice_agents WHERE is_active = TRUE LIMIT 1"
         )
-        
+
         if not agent:
             log.error("No active voice agents found in database. Please provision one in Settings first.")
             return
@@ -44,7 +44,7 @@ async def main():
                 "triggered_at": asyncio.get_event_loop().time()
             }
         )
-        
+
         log.info("Call dispatched successfully!")
         log.info(f"Retell Response: {result}")
 

@@ -1,4 +1,3 @@
-import asyncio
 from arq import create_pool
 from arq.connections import RedisSettings
 
@@ -6,7 +5,7 @@ from app.worker.tasks import WorkerSettings
 
 
 async def main():
-    redis = await create_pool(RedisSettings())
+    await create_pool(RedisSettings())
     print("Worker started")
 
 

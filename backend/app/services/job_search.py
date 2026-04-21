@@ -12,7 +12,7 @@ import re
 import httpx
 
 from app.config import settings
-from app.db import execute, fetch_all, fetch_one
+from app.db import execute, fetch_one
 from app.services import sequencer
 
 log = logging.getLogger(__name__)
@@ -164,7 +164,7 @@ async def upsert_leads(campaign_id: str, company: dict, profiles: list[dict]) ->
         )
         if existing:
             continue
-        
+
         lead = await fetch_one(
             """
             INSERT INTO leads
@@ -182,11 +182,11 @@ async def upsert_leads(campaign_id: str, company: dict, profiles: list[dict]) ->
             company.get("companyLinkedInUrl") or company.get("companyUrl", ""),
             company.get("jobUrl") or company.get("url", ""),
         )
-        
+
         if lead:
             await sequencer.schedule_new_lead(str(lead["id"]))
             added += 1
-            
+
     return added
 
 

@@ -1,10 +1,10 @@
 import json
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
+
 from app.auth import get_current_user
-from app.db import execute, fetch_all, fetch_one
+from app.db import execute, fetch_all
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ async def log_activity(action: str, detail: str = None, user_id: str = None,
 
 @router.get("")
 async def list_activity(
-    campaign_id: Optional[str] = None,
+    campaign_id: str | None = None,
     limit: int = Query(default=50, le=200),
     user: dict = Depends(get_current_user),
 ):

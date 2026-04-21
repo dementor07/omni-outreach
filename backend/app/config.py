@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     proxycurl_api_key: str = ""
     github_token: str = ""  # optional, raises rate limit from 60→5000 req/hr
 
+    # SMS (Twilio) — optional
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_from_number: str = ""
+
     redis_password: str = "changeme"
 
     jwt_algorithm: str = "HS256"
