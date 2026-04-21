@@ -31,20 +31,21 @@ def app() -> FastAPI:
     return _app
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(autouse=True)
 async def _init_db_pool() -> AsyncGenerator[None, None]:
-    """CI runs without the FastAPI lifespan, so initialise the DB pool here.
-    Redis is stubbed because CI Redis is available but the app doesn't
-    require it during these smoke tests."""
+    """CI runs the tests without invoking the FastAPI lifespan, so the
+    global asyncpg pool and Redis client never get initialised. Do it here.
+
+    Must be function-scoped because pytest-asyncio gives each test a fresh
+    event loop; an asyncpg pool bound to a prior loop raises
+    "attached to a different loop"."""
     from app import db
 
-    dsn = os.environ["DATABASE_URL"]
-    await db.init_pool(dsn)
-    redis_url = "redis://localhost:6379"
+    await db.init_pool(os.environ["DATABASE_URL"])
     try:
-        await db.init_redis(redis_url)
+        await db.init_redis("redis://localhost:6379")
     except Exception:
-        pass
+        db.redis_client = None
     yield
     try:
         await db.close_pool()
@@ -54,6 +55,8 @@ async def _init_db_pool() -> AsyncGenerator[None, None]:
         await db.close_redis()
     except Exception:
         pass
+    db._pool = None
+    db.redis_client = None
 
 
 @pytest.fixture()
