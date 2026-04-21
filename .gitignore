@@ -9,3 +9,7 @@ dist/
 
 # Obsidian local app/runtime state (contains machine-local settings and secrets)
 omni-vault/.obsidian/
+
+# Claude Code — local MCP config (contains API keys)
+.mcp.json
+.claude/settings.local.json
