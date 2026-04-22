@@ -44,7 +44,7 @@ All 27 backend-supported `node_type` values accepted by `backend/app/routers/seq
 | `split`                        | `SplitNode`     | Flow                      | Thompson Sampling bandit. Shows learning vs live arm win rate.                                                                                           |
 | `end`                          | `EndNode`       | Flow                      | Terminal node. Stops sequence execution for the lead.                                                                                                    |
 
-`ActionNode` uses the `ConfigSidebar` for configuration. `ConditionNode` renders GitBranch styling with branch handles. `EventNode` uses the palette icon with a single source handle.
+`ActionNode` uses the `ConfigSidebar` for configuration. `ConditionNode` keeps the shared true/false branch layout but now inherits its label, icon, and accent colors from `NODE_PALETTE`, so nodes like `condition_ai_screen` and `condition_lead_source` no longer collapse into the same generic amber card. `EventNode` uses the palette icon with a single source handle.
 
 ## TriggerNode Enhancements
 

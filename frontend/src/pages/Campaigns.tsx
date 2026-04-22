@@ -325,30 +325,35 @@ const TriggerNode = ({ selected, data }: NodeProps) => {
   )
 }
 
-const ConditionNode = ({ selected }: NodeProps) => (
-  <div className={`relative min-w-[200px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-amber-200'}`}>
-    <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
-    <div className="flex items-center gap-3">
-      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 text-amber-500">
-        <GitBranch size={14} />
+const ConditionNode = ({ data, selected }: NodeProps) => {
+  const nodeType = data.node_type as NodeType
+  const cfg = NODE_PALETTE.find(p => p.type === nodeType)
+
+  return (
+    <div className={`relative min-w-[200px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : cfg?.border ?? 'border-amber-200'}`}>
+      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
+      <div className="flex items-center gap-3">
+        <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${cfg?.bg ?? 'bg-amber-50'} ${cfg?.color ?? 'text-amber-500'}`}>
+          {cfg?.icon ?? <GitBranch size={14} />}
+        </div>
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Condition</p>
+          <p className="text-xs font-bold text-slate-900">{cfg?.label ?? 'Condition'}</p>
+        </div>
       </div>
-      <div>
-        <p className="text-[10px] font-bold uppercase tracking-widest text-amber-500/60">Condition</p>
-        <p className="text-xs font-bold text-slate-900">Wait for Reply</p>
+      <div className="mt-4 grid grid-cols-2 divide-x divide-slate-50 border-t border-slate-50 pt-3">
+        <div className="flex flex-col items-center">
+          <span className="text-[9px] font-black uppercase text-emerald-500">True</span>
+          <Handle type="source" id="true" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-emerald-400" />
+        </div>
+        <div className="flex flex-col items-center">
+          <span className="text-[9px] font-black uppercase text-rose-400">False</span>
+          <Handle type="source" id="false" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-rose-400" />
+        </div>
       </div>
     </div>
-    <div className="mt-4 grid grid-cols-2 divide-x divide-slate-50 border-t border-slate-50 pt-3">
-      <div className="flex flex-col items-center">
-        <span className="text-[9px] font-black uppercase text-emerald-500">True</span>
-        <Handle type="source" id="true" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-emerald-400" />
-      </div>
-      <div className="flex flex-col items-center">
-        <span className="text-[9px] font-black uppercase text-rose-400">False</span>
-        <Handle type="source" id="false" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-rose-400" />
-      </div>
-    </div>
-  </div>
-)
+  )
+}
 
 const DelayNode = ({ data, id, selected }: NodeProps<Node<{ delay_days?: number; onChange?: (id: string, val: number) => void }>>) => (
   <div className={`relative min-w-[160px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-slate-200'}`}>

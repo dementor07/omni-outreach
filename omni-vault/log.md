@@ -506,3 +506,9 @@ Files touched (this batch): 2 backend (dispatcher.py, config.py, sequences route
 - Recorded the current shipped state: 27 backend-supported node types, Trigger source badges + source telemetry, scheduled lead gen, `action_enrich`, `condition_has_field`, and live SMS/Webhook handlers.
 - Captured the Apr 21 CI smoke-test stabilization work in the architecture layer: per-test DB/Redis initialization in `backend/tests/conftest.py` and health smoke tests accepting `degraded` when Redis is best-effort in CI.
 - Vault sync executed through filesystem fallback in this VS Code session rather than Obsidian MCP/API.
+
+## [2026-04-21] fix | Distinct visuals restored for condition nodes
+
+- Fixed the shared `ConditionNode` renderer in `frontend/src/pages/Campaigns.tsx` so it now reads `data.node_type` and applies the correct `NODE_PALETTE` label, icon, and color treatment instead of rendering every condition as the same hardcoded amber "Wait for Reply" card.
+- Verified the canvas metadata already contained the correct per-type visuals (`AI Screen`, `Source Router`, etc.); the bug was in the renderer, not the palette.
+- Frontend build completes successfully after the fix.
