@@ -270,3 +270,85 @@ async def _verify_provider(provider: str, keys: dict[str, str]) -> tuple[bool, s
             return r.status_code == 200, f"HTTP {r.status_code}"
 
     return False, "Unknown provider"
+
+
+# ── Notification channels ───────────────────────────────────────────────────
+
+_CHANNEL_COLS = "id, channel_type, name, config, is_active, created_at"
+
+
+class NotificationChannelCreate(BaseModel):
+    channel_type: str  # 'slack' | 'email'
+    name: str
+    config: dict
+
+
+class NotificationChannelUpdate(BaseModel):
+    name: str | None = None
+    config: dict | None = None
+    is_active: bool | None = None
+
+
+@router.get("/notification-channels")
+async def list_notification_channels(user_id: str = Depends(get_current_user)):
+    rows = await fetch_all(
+        f"SELECT {_CHANNEL_COLS} FROM notification_channels ORDER BY created_at DESC"
+    )
+    return rows
+
+
+@router.post("/notification-channels", status_code=201)
+async def create_notification_channel(
+    body: NotificationChannelCreate,
+    user_id: str = Depends(get_current_user),
+):
+    if body.channel_type not in ("slack", "email"):
+        raise HTTPException(status_code=400, detail=f"Unsupported channel_type: {body.channel_type}")
+    if body.channel_type == "slack" and not body.config.get("webhook_url"):
+        raise HTTPException(status_code=400, detail="Slack channel requires config.webhook_url")
+    if body.channel_type == "email" and not body.config.get("to"):
+        raise HTTPException(status_code=400, detail="Email channel requires config.to")
+
+    row = await fetch_one(
+        f"""
+        INSERT INTO notification_channels (channel_type, name, config)
+        VALUES ($1, $2, $3)
+        RETURNING {_CHANNEL_COLS}
+        """,
+        body.channel_type, body.name, body.config,
+    )
+    return row
+
+
+@router.patch("/notification-channels/{channel_id}")
+async def update_notification_channel(
+    channel_id: str,
+    body: NotificationChannelUpdate,
+    user_id: str = Depends(get_current_user),
+):
+    existing = await fetch_one("SELECT id FROM notification_channels WHERE id=$1", channel_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    sets: list[str] = []
+    params: list = []
+    for col, val in [("name", body.name), ("config", body.config), ("is_active", body.is_active)]:
+        if val is not None:
+            params.append(val)
+            sets.append(f"{col}=${len(params)}")
+    if not sets:
+        row = await fetch_one(f"SELECT {_CHANNEL_COLS} FROM notification_channels WHERE id=$1", channel_id)
+        return row
+    params.append(channel_id)
+    row = await fetch_one(
+        f"UPDATE notification_channels SET {', '.join(sets)} WHERE id=${len(params)} RETURNING {_CHANNEL_COLS}",
+        *params,
+    )
+    return row
+
+
+@router.delete("/notification-channels/{channel_id}", status_code=204)
+async def delete_notification_channel(
+    channel_id: str, user_id: str = Depends(get_current_user)
+):
+    await execute("DELETE FROM notification_channels WHERE id=$1", channel_id)

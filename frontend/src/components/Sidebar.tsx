@@ -1,5 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Megaphone, Users, ListTodo, Settings, LogOut, Zap, Search, Database, Activity, ShieldOff, BarChart3, FileText, Inbox } from 'lucide-react'
+import { LayoutDashboard, Megaphone, Users, ListTodo, Settings, LogOut, Zap, Search, Database, Activity, ShieldOff, BarChart3, FileText, Inbox, UserCheck } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '../api/client'
 import { clsx } from 'clsx'
 
 const navItems = [
@@ -13,12 +15,19 @@ const navItems = [
   { to: '/analytics',    label: 'Analytics',     icon: BarChart3 },
   { to: '/templates',    label: 'Templates',     icon: FileText },
   { to: '/inbox',        label: 'Inbox',         icon: Inbox },
+  { to: '/approvals',    label: 'Approvals',     icon: UserCheck },
   { to: '/job-search',   label: 'Job Search',    icon: Search },
   { to: '/settings',     label: 'Settings',      icon: Settings },
 ]
 
 export default function Sidebar() {
   const navigate = useNavigate()
+  const approvalsCountQuery = useQuery<{ pending: number }>({
+    queryKey: ['approvals-count'],
+    queryFn: async () => (await api.get<{ pending: number }>('/approvals/count')).data,
+    refetchInterval: 30_000,
+  })
+  const pending = approvalsCountQuery.data?.pending ?? 0
 
   function logout() {
     localStorage.removeItem('token')
@@ -55,7 +64,10 @@ export default function Sidebar() {
             }
           >
             <Icon size={16} />
-            {label}
+            <span className="flex-1">{label}</span>
+            {to === '/approvals' && pending > 0 && (
+              <span className="rounded-full bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 min-w-[20px] text-center">{pending}</span>
+            )}
           </NavLink>
         ))}
       </nav>

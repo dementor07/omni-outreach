@@ -457,6 +457,38 @@ async def _handle_remove_tag(task: dict, lead: dict, campaign: dict) -> None:
     await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
 
 
+async def _handle_hot_lead_alert(task: dict, lead: dict, campaign: dict) -> None:
+    """Fan-out a hot-lead alert via the notifier service."""
+    from app.services.notifier import dispatch_alert
+
+    node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
+    node_data = node.get("data") or {}
+    title_template = node_data.get("title") or "🔥 Hot lead: {{first_name}} {{last_name}}"
+    body_template = node_data.get("body") or (
+        "{{first_name}} {{last_name}} at {{company}} is showing buying intent in campaign {{campaign_name}}.\n"
+        "Last reply: {{last_reply_text}}"
+    )
+    channel_ids: list[str] = node_data.get("channel_ids") or []
+
+    title = renderer.render(title_template, {**lead, "campaign_name": campaign.get("name", "")})
+    body = renderer.render(body_template, {**lead, "campaign_name": campaign.get("name", "")})
+    context = {
+        "campaign": campaign.get("name", ""),
+        "lead": f"{lead.get('first_name', '')} {lead.get('last_name', '')}".strip(),
+        "email": lead.get("email") or "",
+        "linkedin_url": lead.get("linkedin_url") or "",
+        "last_reply": (lead.get("last_reply_text") or "")[:200],
+    }
+
+    delivered = await dispatch_alert(title, body, context, channel_ids or None)
+    await _log_event(
+        lead["id"], lead["campaign_id"], "hot_lead_alert", "alert",
+        {"delivered": delivered, "channel_ids": channel_ids},
+    )
+    await _mark_sent(task["id"])
+    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
+
+
 async def _handle_enrich(task: dict, lead: dict, campaign: dict) -> None:
     from app.services.lead_source_registry import registry
 
@@ -544,6 +576,7 @@ async def _process_task(task: dict, worker_id: str) -> None:
         elif ch == "add_tag": await _handle_add_tag(task, lead, campaign)
         elif ch == "remove_tag": await _handle_remove_tag(task, lead, campaign)
         elif ch == "enrich": await _handle_enrich(task, lead, campaign)
+        elif ch == "hot_lead_alert": await _handle_hot_lead_alert(task, lead, campaign)
         else: raise RuntimeError(f"Unknown channel: {ch}")
     except Exception as e:
         log.exception(f"[dispatcher] task={task['id']} failed: {e}")

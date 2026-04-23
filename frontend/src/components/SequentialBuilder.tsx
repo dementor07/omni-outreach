@@ -1,5 +1,5 @@
 import React from 'react'
-import { Plus, Trash2, ChevronUp, ChevronDown, Linkedin, Mail, MessageSquare, Instagram, Send, Phone, Clock, Zap, Save, Tag, MinusCircle, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle, Brain, Route, Database } from 'lucide-react'
+import { Plus, Trash2, ChevronUp, ChevronDown, Linkedin, Mail, MessageSquare, Instagram, Send, Phone, Clock, Zap, Save, Tag, MinusCircle, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle, Brain, Route, Database, Flame, UserCheck } from 'lucide-react'
 import { Node, Edge } from '@xyflow/react'
 import { NodeType } from '../hooks/useSequenceSteps'
 import Badge from './Badge'
@@ -34,6 +34,9 @@ const STEP_LABELS: Partial<Record<NodeType, string>> = {
   action_add_tag: 'Add Tag',
   action_remove_tag: 'Remove Tag',
   action_enrich: 'Enrich Lead',
+  action_hot_lead_alert: 'Hot Lead Alert',
+  human_approval: 'Human Approval',
+  condition_reply_intent: 'Reply Intent',
   condition_replied: 'If Replied',
   condition_linkedin_distance: 'If 1st Degree',
   condition_tag_exists: 'If Has Tag',
@@ -263,6 +266,9 @@ export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate
         <AddButton icon={<Brain className="text-violet-500" />}   label="AI Screen"    onClick={() => addStep('condition_ai_screen')} />
         <AddButton icon={<Route className="text-cyan-500" />}     label="Source Router" onClick={() => addStep('condition_lead_source')} />
         <AddButton icon={<GitBranch className="text-amber-500" />} label="If Has Field" onClick={() => addStep('condition_has_field')} />
+        <AddButton icon={<Brain className="text-violet-500" />} label="Reply Intent" onClick={() => addStep('condition_reply_intent')} />
+        <AddButton icon={<UserCheck className="text-teal-500" />} label="Human Approval" onClick={() => addStep('human_approval')} />
+        <AddButton icon={<Flame className="text-rose-500" />} label="Hot Lead Alert" onClick={() => addStep('action_hot_lead_alert')} />
         <AddButton icon={<StopCircle className="text-rose-500" />} label="End"        onClick={() => addStep('end')} />
       </div>
     </div>
@@ -291,6 +297,9 @@ function StepIcon({ type }: { type: NodeType }) {
     case 'condition_ai_screen':          return <Brain size={20} className="text-violet-500" />
     case 'condition_lead_source':        return <Route size={20} className="text-cyan-500" />
     case 'condition_has_field':          return <GitBranch size={20} className="text-amber-500" />
+    case 'condition_reply_intent':       return <Brain size={20} className="text-violet-500" />
+    case 'human_approval':               return <UserCheck size={20} className="text-teal-500" />
+    case 'action_hot_lead_alert':        return <Flame size={20} className="text-rose-500" />
     case 'event_invite_accepted':
     case 'event_email_opened':
     case 'event_link_clicked':           return <Bell size={20} className="text-violet-500" />

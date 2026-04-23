@@ -116,6 +116,20 @@ async def queue_next_nodes(
                 branch = "true" if has_value else "false"
                 log.info(f"[sequencer] Field check for lead {lead_id}: field={field_name} present={has_value}")
                 await queue_next_nodes(lead_id, target_id, branch, accumulated_delay)
+            elif node_type == "condition_reply_intent":
+                category = (lead.get("last_reply_category") or "").strip()
+                if not category:
+                    # No classified reply yet — park here; webhook handler will
+                    # re-enter via evaluate_conditions() once a reply arrives.
+                    await execute(
+                        "UPDATE leads SET current_node_id=$1 WHERE id=$2",
+                        target_id, lead_id,
+                    )
+                    log.info(f"[sequencer] Reply-intent parking lead {lead_id} at {target_id}")
+                else:
+                    branch = category  # positive|negative|neutral|out_of_office|unsubscribe|bounce
+                    log.info(f"[sequencer] Reply intent for lead {lead_id}: {branch}")
+                    await queue_next_nodes(lead_id, target_id, branch, accumulated_delay)
 
         elif node_type == "split":
             weights = (node.get("data") or {}).get("weights", {
@@ -136,6 +150,28 @@ async def queue_next_nodes(
             )
             log.info(f"[sequencer] Split node {target_id}: chose arm '{chosen_arm}' for lead {lead_id}")
             await queue_next_nodes(lead_id, target_id, chosen_arm, accumulated_delay)
+
+        elif node_type == "human_approval":
+            # Open a new approvals row and park. Resume on POST /approvals/{id}/resolve.
+            existing = await fetch_one(
+                "SELECT id FROM approvals WHERE lead_id=$1 AND node_id=$2 AND status='pending'",
+                lead_id, target_id,
+            )
+            if not existing:
+                title = (node["data"] or {}).get("title") or "Approval required"
+                payload = (node["data"] or {}).get("payload") or {}
+                await execute(
+                    """
+                    INSERT INTO approvals (campaign_id, lead_id, node_id, title, payload)
+                    VALUES ($1, $2, $3, $4, $5)
+                    """,
+                    lead["campaign_id"], lead_id, target_id, title, json.dumps(payload),
+                )
+                log.info(f"[sequencer] Opened approval for lead {lead_id} at node {target_id}")
+            await execute(
+                "UPDATE leads SET current_node_id=$1 WHERE id=$2",
+                target_id, lead_id,
+            )
 
         elif node_type.startswith("event_"):
             # All events park the lead until the webhook triggers evaluation
@@ -169,20 +205,39 @@ async def evaluate_conditions(lead_id: str) -> None:
     node_type = node["node_type"]
     log.debug(f"[sequencer] Lead {lead_id} currently at node {node_type} ({lead['current_node_id']})")
 
-    should_advance = False
+    advance_handle: str | None = None
 
     if node_type == "condition_replied" and lead.get("replied_at"):
-        should_advance = True
+        advance_handle = "true"
     elif node_type == "event_invite_accepted" and lead.get("accepted_at"):
-        should_advance = True
+        advance_handle = "true"
     elif node_type == "event_email_opened" and lead.get("email_opened_at"):
-        should_advance = True
+        advance_handle = "true"
     elif node_type == "event_link_clicked" and lead.get("link_clicked_at"):
-        should_advance = True
+        advance_handle = "true"
+    elif node_type == "condition_reply_intent" and lead.get("last_reply_category"):
+        advance_handle = lead["last_reply_category"]
+    # human_approval is unparked by the approvals router calling
+    # resume_from_approval(); it does not self-advance here.
 
-    if should_advance:
-        log.info(f"[sequencer] Lead {lead_id} satisfied {node_type}. Advancing True branch.")
-        await queue_next_nodes(lead_id, lead["current_node_id"], "true")
+    if advance_handle:
+        log.info(f"[sequencer] Lead {lead_id} satisfied {node_type}. Advancing handle '{advance_handle}'.")
+        await queue_next_nodes(lead_id, lead["current_node_id"], advance_handle)
         await execute("UPDATE leads SET current_node_id=NULL WHERE id=$1", lead_id)
     else:
         log.debug(f"[sequencer] Lead {lead_id} is at {node_type} but condition not met yet; no-op.")
+
+
+async def resume_from_approval(lead_id: str, approval_id: str, resolution: str) -> None:
+    """Unpark a lead that was parked at a human_approval node.
+
+    resolution is one of 'approve' | 'reject'. Advances the matching handle.
+    """
+    lead = await fetch_one("SELECT * FROM leads WHERE id=$1", lead_id)
+    if not lead or not lead.get("current_node_id"):
+        log.warning(f"[sequencer] resume_from_approval: lead {lead_id} has no current_node_id")
+        return
+    handle = "approve" if resolution == "approve" else "reject"
+    log.info(f"[sequencer] Resuming lead {lead_id} from approval {approval_id} via handle '{handle}'")
+    await queue_next_nodes(lead_id, lead["current_node_id"], handle)
+    await execute("UPDATE leads SET current_node_id=NULL WHERE id=$1", lead_id)

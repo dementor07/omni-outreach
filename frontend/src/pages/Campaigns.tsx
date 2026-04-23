@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { Link, useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom'
-import { Plus, Save, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap, X, ChevronRight, Settings2, Trash2, Radio, Tag, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle, MinusCircle, Brain, Route, Upload, Undo2, Redo2, Copy, Database } from 'lucide-react'
+import { Plus, Save, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap, X, ChevronRight, Settings2, Trash2, Radio, Tag, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle, MinusCircle, Brain, Route, Upload, Undo2, Redo2, Copy, Database, Flame, UserCheck } from 'lucide-react'
 import CsvImport from '../components/CsvImport'
 import { useCanvasHistory } from '../hooks/useCanvasHistory'
 import {
@@ -175,6 +175,7 @@ const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNode; colo
   { type: 'action_voice',                  label: 'AI Voice Call',     icon: <Phone size={15} />,          color: 'text-indigo-600',  bg: 'bg-indigo-50',  border: 'border-indigo-200' },
   { type: 'action_webhook',                label: 'Webhook / CRM',     icon: <Webhook size={15} />,        color: 'text-orange-600',  bg: 'bg-orange-50',  border: 'border-orange-200' },
   { type: 'action_enrich',                 label: 'Enrich Lead',       icon: <Database size={15} />,       color: 'text-indigo-600',  bg: 'bg-indigo-50',  border: 'border-indigo-200' },
+  { type: 'action_hot_lead_alert',         label: 'Hot Lead Alert',    icon: <Flame size={15} />,          color: 'text-rose-600',    bg: 'bg-rose-50',    border: 'border-rose-200' },
   { type: 'action_add_tag',                label: 'Add Tag',           icon: <Tag size={15} />,            color: 'text-slate-600',   bg: 'bg-slate-50',   border: 'border-slate-200' },
   { type: 'action_remove_tag',             label: 'Remove Tag',        icon: <MinusCircle size={15} />,     color: 'text-slate-500',   bg: 'bg-slate-50',   border: 'border-slate-200' },
   { type: 'condition_replied',             label: 'If Replied',        icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
@@ -183,6 +184,8 @@ const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNode; colo
   { type: 'condition_ai_screen',           label: 'AI Screen',         icon: <Brain size={15} />,          color: 'text-violet-600',  bg: 'bg-violet-50',  border: 'border-violet-200' },
   { type: 'condition_lead_source',         label: 'Source Router',     icon: <Route size={15} />,          color: 'text-cyan-600',    bg: 'bg-cyan-50',    border: 'border-cyan-200' },
   { type: 'condition_has_field',           label: 'If Has Field',      icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
+  { type: 'condition_reply_intent',        label: 'Reply Intent',      icon: <Brain size={15} />,          color: 'text-violet-600',  bg: 'bg-violet-50',  border: 'border-violet-200' },
+  { type: 'human_approval',                label: 'Human Approval',    icon: <UserCheck size={15} />,      color: 'text-teal-600',    bg: 'bg-teal-50',    border: 'border-teal-200' },
   { type: 'event_invite_accepted',         label: 'Invite Accepted',   icon: <Bell size={15} />,           color: 'text-violet-500',  bg: 'bg-violet-50',  border: 'border-violet-200' },
   { type: 'event_email_opened',            label: 'Email Opened',      icon: <Bell size={15} />,           color: 'text-violet-500',  bg: 'bg-violet-50',  border: 'border-violet-200' },
   { type: 'event_link_clicked',            label: 'Link Clicked',      icon: <Bell size={15} />,           color: 'text-violet-500',  bg: 'bg-violet-50',  border: 'border-violet-200' },
@@ -355,6 +358,72 @@ const ConditionNode = ({ data, selected }: NodeProps) => {
   )
 }
 
+const REPLY_INTENT_HANDLES: { id: string; label: string; color: string; dot: string }[] = [
+  { id: 'positive',      label: 'Positive',     color: 'text-emerald-500', dot: '!bg-emerald-400' },
+  { id: 'negative',      label: 'Negative',     color: 'text-rose-500',    dot: '!bg-rose-400' },
+  { id: 'neutral',       label: 'Neutral',      color: 'text-slate-500',   dot: '!bg-slate-400' },
+  { id: 'out_of_office', label: 'OOO',          color: 'text-amber-500',   dot: '!bg-amber-400' },
+  { id: 'unsubscribe',   label: 'Unsubscribe',  color: 'text-fuchsia-500', dot: '!bg-fuchsia-400' },
+  { id: 'bounce',        label: 'Bounce',       color: 'text-orange-500',  dot: '!bg-orange-400' },
+]
+
+const ReplyIntentNode = ({ selected }: NodeProps) => (
+  <div className={`relative min-w-[260px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-violet-200'}`}>
+    <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
+    <div className="flex items-center gap-3">
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-50 text-violet-600">
+        <Brain size={14} />
+      </div>
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Condition</p>
+        <p className="text-xs font-bold text-slate-900">Reply Intent</p>
+      </div>
+    </div>
+    <div className="mt-4 grid grid-cols-3 gap-x-3 gap-y-2 border-t border-slate-50 pt-3">
+      {REPLY_INTENT_HANDLES.map(h => (
+        <div key={h.id} className="flex flex-col items-center">
+          <span className={`text-[9px] font-black uppercase ${h.color}`}>{h.label}</span>
+          <Handle
+            type="source"
+            id={h.id}
+            position={Position.Bottom}
+            style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }}
+            className={`!mt-1 !h-2 !w-2 !border-none ${h.dot}`}
+          />
+        </div>
+      ))}
+    </div>
+  </div>
+)
+
+const HumanApprovalNode = ({ data, selected }: NodeProps) => {
+  const title = (data as any)?.title || 'Awaiting human approval'
+  return (
+    <div className={`relative min-w-[220px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-teal-200'}`}>
+      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
+      <div className="flex items-center gap-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-50 text-teal-600">
+          <UserCheck size={14} />
+        </div>
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Approval</p>
+          <p className="text-xs font-bold text-slate-900 truncate max-w-[160px]">{title}</p>
+        </div>
+      </div>
+      <div className="mt-4 grid grid-cols-2 divide-x divide-slate-50 border-t border-slate-50 pt-3">
+        <div className="flex flex-col items-center">
+          <span className="text-[9px] font-black uppercase text-emerald-500">Approve</span>
+          <Handle type="source" id="approve" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-emerald-400" />
+        </div>
+        <div className="flex flex-col items-center">
+          <span className="text-[9px] font-black uppercase text-rose-400">Reject</span>
+          <Handle type="source" id="reject" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-rose-400" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const DelayNode = ({ data, id, selected }: NodeProps<Node<{ delay_days?: number; onChange?: (id: string, val: number) => void }>>) => (
   <div className={`relative min-w-[160px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-slate-200'}`}>
     <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
@@ -477,6 +546,9 @@ const nodeTypes = {
   action_sms: ActionNode,
   action_webhook: ActionNode,
   action_enrich: ActionNode,
+  action_hot_lead_alert: ActionNode,
+  human_approval: HumanApprovalNode,
+  condition_reply_intent: ReplyIntentNode,
   condition_replied: ConditionNode,
   condition_linkedin_distance: ConditionNode,
   condition_tag_exists: ConditionNode,
@@ -990,8 +1062,9 @@ function NodePalette({ onAdd }: { onAdd: (type: NodeType) => void }) {
     { heading: 'LinkedIn',   types: ['action_linkedin_invite', 'action_linkedin_dm', 'action_linkedin_inmail', 'action_linkedin_profile_view'] },
     { heading: 'Messaging',  types: ['action_email', 'action_whatsapp', 'action_sms', 'action_instagram', 'action_telegram'] },
     { heading: 'Voice',      types: ['action_voice'] },
-    { heading: 'Actions',    types: ['action_add_tag', 'action_remove_tag', 'action_webhook', 'action_enrich'] },
-    { heading: 'Conditions', types: ['condition_replied', 'condition_linkedin_distance', 'condition_tag_exists', 'condition_ai_screen', 'condition_lead_source', 'condition_has_field'] },
+    { heading: 'Actions',    types: ['action_add_tag', 'action_remove_tag', 'action_webhook', 'action_enrich', 'action_hot_lead_alert'] },
+    { heading: 'Conditions', types: ['condition_replied', 'condition_linkedin_distance', 'condition_tag_exists', 'condition_ai_screen', 'condition_lead_source', 'condition_has_field', 'condition_reply_intent'] },
+    { heading: 'Human',      types: ['human_approval'] },
     { heading: 'Events',     types: ['event_invite_accepted', 'event_email_opened', 'event_link_clicked'] },
     { heading: 'Flow',       types: ['delay', 'split', 'end'] },
   ]
@@ -1297,6 +1370,58 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
           </div>
         )}
 
+        {nodeType === 'action_hot_lead_alert' && <HotLeadAlertConfigPanel node={node} onUpdate={onUpdate} />}
+
+        {nodeType === 'human_approval' && (
+          <div className="space-y-3">
+            <div>
+              <label className={labelCls}>Title</label>
+              <input
+                type="text"
+                value={(node.data as any).title || ''}
+                onChange={(e) => onUpdate({ title: e.target.value })}
+                className={inputClassName}
+                placeholder="Approve outreach for this lead"
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Payload / Preview (JSON)</label>
+              <textarea
+                value={(() => {
+                  const p = (node.data as any).payload
+                  if (!p) return ''
+                  return typeof p === 'string' ? p : JSON.stringify(p, null, 2)
+                })()}
+                onChange={(e) => {
+                  try {
+                    onUpdate({ payload: JSON.parse(e.target.value || '{}') })
+                  } catch {
+                    onUpdate({ payload: e.target.value })
+                  }
+                }}
+                className={inputClassName + ' min-h-[120px] font-mono text-xs'}
+                placeholder='{"draft_message": "Hi {{first_name}}…", "channel": "email"}'
+                rows={5}
+              />
+              <p className="mt-2 text-[10px] text-slate-400">This JSON is shown in the Approvals inbox so a reviewer can see what's about to go out. Use {`{{lead_field}}`} placeholders — they're rendered at review time.</p>
+            </div>
+          </div>
+        )}
+
+        {nodeType === 'condition_reply_intent' && (
+          <div>
+            <label className={labelCls}>Reply Intent Router</label>
+            <p className="text-[11px] text-slate-500 mb-3">
+              After a reply arrives (from <code>event_replied</code> or inline), the classifier labels it.
+              Branches: positive / negative / neutral / out_of_office / unsubscribe / bounce.
+            </p>
+            <div className="rounded-lg bg-violet-50 p-3 text-[11px] text-violet-900 space-y-1">
+              <p><strong>Tip:</strong> unhook branches you don't need. Unconnected outcomes fall through to sequence end.</p>
+              <p>Pair with a preceding <code>condition_replied</code> or <code>event_email_opened</code> so this only evaluates once a reply exists.</p>
+            </div>
+          </div>
+        )}
+
         {nodeType === 'action_enrich' && (
           <div className="space-y-3">
             <div>
@@ -1546,6 +1671,81 @@ function StepIcon({ type }: { type: NodeType }) {
 }
 
 // ── Shared UI Parts ────────────────────────────────────────────────────────
+
+interface NotificationChannel {
+  id: string
+  channel_type: 'slack' | 'email'
+  name: string
+  is_active: boolean
+}
+
+function HotLeadAlertConfigPanel({ node, onUpdate }: { node: Node; onUpdate: (data: any) => void }) {
+  const channelsQuery = useQuery<NotificationChannel[]>({
+    queryKey: ['notification-channels'],
+    queryFn: async () => (await api.get<NotificationChannel[]>('/settings/notification-channels')).data,
+  })
+  const data = (node.data as any) || {}
+  const selectedIds: string[] = data.channel_ids || []
+  const channels = (channelsQuery.data || []).filter(c => c.is_active)
+
+  const toggle = (id: string) => {
+    const next = selectedIds.includes(id) ? selectedIds.filter(x => x !== id) : [...selectedIds, id]
+    onUpdate({ channel_ids: next })
+  }
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className={labelCls}>Title</label>
+        <input
+          type="text"
+          value={data.title || ''}
+          onChange={(e) => onUpdate({ title: e.target.value })}
+          className={inputClassName}
+          placeholder="🔥 Hot lead: {{first_name}} {{last_name}}"
+        />
+      </div>
+      <div>
+        <label className={labelCls}>Message</label>
+        <textarea
+          value={data.body || ''}
+          onChange={(e) => onUpdate({ body: e.target.value })}
+          className={inputClassName + ' min-h-[90px]'}
+          rows={4}
+          placeholder="{{first_name}} at {{company}} replied positively. Reach out now."
+        />
+      </div>
+      <div>
+        <label className={labelCls}>Channels</label>
+        {channels.length === 0 ? (
+          <p className="text-[11px] text-slate-500">No active channels. Add one in <Link to="/settings?tab=integrations" className="text-sky-600 hover:underline">Settings → Integrations</Link>.</p>
+        ) : (
+          <div className="space-y-1">
+            {channels.map(ch => {
+              const checked = selectedIds.includes(ch.id) || selectedIds.length === 0
+              return (
+                <label key={ch.id} className="flex items-center gap-3 rounded-xl px-3 py-2 hover:bg-slate-50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.includes(ch.id)}
+                    onChange={() => toggle(ch.id)}
+                    className="h-4 w-4 rounded border-slate-300 text-sky-500 focus:ring-sky-500"
+                  />
+                  <span className="text-sm font-medium text-slate-700">{ch.name}</span>
+                  <span className="text-[10px] uppercase text-slate-400">{ch.channel_type}</span>
+                  {!checked && selectedIds.length === 0 && (
+                    <span className="ml-auto text-[10px] text-slate-400">(all by default)</span>
+                  )}
+                </label>
+              )
+            })}
+            <p className="text-[10px] text-slate-400 pt-1">Leave all unchecked to broadcast to every active channel.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 function CampaignSettings({ campaignId }: { campaignId: string }) {
   const toast = useToast()

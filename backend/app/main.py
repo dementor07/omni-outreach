@@ -15,6 +15,7 @@ from app.routers import (
     accounts,
     activity,
     analytics,
+    approvals,
     auth,
     blacklist,
     campaigns,
@@ -96,6 +97,7 @@ app.include_router(tracking.router, prefix="/track", tags=["tracking"])
 app.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
 app.include_router(template_library.router, prefix="/template-library", tags=["template-library"])
 app.include_router(inbox.router, prefix="/inbox", tags=["inbox"])
+app.include_router(approvals.router, prefix="/approvals", tags=["approvals"])
 
 
 @app.get("/health")

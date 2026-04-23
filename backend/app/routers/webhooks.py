@@ -124,9 +124,20 @@ async def generic_inbound_event(request: Request):
             lead_id,
         )
     elif event_type == "reply":
+        reply_text = meta.get("body") or meta.get("text") or ""
+        reply_subject = meta.get("subject") or ""
+        category, confidence = classify_reply(reply_subject, reply_text)
         await db.execute(
-            "UPDATE leads SET replied_at=NOW() WHERE id=$1 AND replied_at IS NULL",
-            lead_id,
+            """
+            UPDATE leads
+            SET replied_at = COALESCE(replied_at, NOW()),
+                last_reply_text = $2,
+                last_reply_category = $3,
+                last_reply_confidence = $4,
+                last_reply_at = NOW()
+            WHERE id = $1
+            """,
+            lead_id, reply_text[:4000], category.value, round(confidence, 2),
         )
     elif event_type == "bounce":
         await db.execute(

@@ -189,6 +189,10 @@ CREATE TABLE IF NOT EXISTS leads (
     link_clicked_at         TIMESTAMPTZ,
     replied_at              TIMESTAMPTZ,
     stopped_at              TIMESTAMPTZ,
+    last_reply_text         TEXT,
+    last_reply_category     TEXT,
+    last_reply_confidence   REAL,
+    last_reply_at           TIMESTAMPTZ,
     created_at              TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (campaign_id, linkedin_url)
 );
@@ -244,3 +248,30 @@ CREATE TABLE IF NOT EXISTS inbound_messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_inbound_lead ON inbound_messages(lead_id);
+
+-- ── Approvals (human_approval nodes) ─────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS approvals (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    campaign_id     UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    lead_id         UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+    node_id         UUID NOT NULL REFERENCES sequence_nodes(id) ON DELETE CASCADE,
+    title           TEXT NOT NULL,
+    payload         JSONB DEFAULT '{}'::jsonb,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    resolution      TEXT,
+    resolved_by     TEXT,
+    resolved_at     TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_approvals_status_campaign ON approvals(status, campaign_id, created_at);
+
+-- ── Notification channels (hot_lead_alert + approval pings) ──────────────────
+CREATE TABLE IF NOT EXISTS notification_channels (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    channel_type    TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    config          JSONB NOT NULL DEFAULT '{}'::jsonb,
+    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);

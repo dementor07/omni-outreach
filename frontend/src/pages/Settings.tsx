@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2, Shield, ShieldCheck, ShieldX, Eye, EyeOff, Trash2 } from 'lucide-react'
+import { Loader2, Shield, ShieldCheck, ShieldX, Eye, EyeOff, Trash2, Plus, Slack, Mail, PowerOff, Power } from 'lucide-react'
 
 import { api } from '../api/client'
 import Badge from '../components/Badge'
@@ -9,7 +9,7 @@ import Modal from '../components/Modal'
 import { useToast } from '../components/Toast'
 import { formatDate } from '../lib/time'
 
-type SettingsTab = 'linkedin' | 'email' | 'voice' | 'integrations'
+type SettingsTab = 'linkedin' | 'email' | 'voice' | 'integrations' | 'notifications'
 
 type LinkedInAccount = {
   id: string
@@ -134,7 +134,7 @@ export default function Settings() {
       </section>
 
       <div className="flex flex-wrap gap-2">
-        {(['linkedin', 'email', 'voice', 'integrations'] as SettingsTab[]).map((tab) => (
+        {(['linkedin', 'email', 'voice', 'integrations', 'notifications'] as SettingsTab[]).map((tab) => (
           <button
             key={tab}
             type="button"
@@ -143,7 +143,7 @@ export default function Settings() {
               activeTab === tab ? 'bg-sky-500 text-white' : 'bg-white text-slate-500 hover:bg-slate-100'
             }`}
           >
-            {tab === 'linkedin' ? 'LinkedIn Accounts' : tab === 'email' ? 'Email Accounts' : tab === 'voice' ? 'Voice Agents' : 'Integrations'}
+            {tab === 'linkedin' ? 'LinkedIn Accounts' : tab === 'email' ? 'Email Accounts' : tab === 'voice' ? 'Voice Agents' : tab === 'integrations' ? 'Integrations' : 'Notifications'}
           </button>
         ))}
       </div>
@@ -152,17 +152,29 @@ export default function Settings() {
         <div className="mb-5 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">
-              {activeTab === 'linkedin' ? 'LinkedIn accounts' : activeTab === 'email' ? 'Email accounts' : 'Voice agents'}
+              {activeTab === 'linkedin' ? 'LinkedIn accounts'
+                : activeTab === 'email' ? 'Email accounts'
+                : activeTab === 'voice' ? 'Voice agents'
+                : activeTab === 'integrations' ? 'Integrations'
+                : 'Notification channels'}
             </h2>
-            <p className="text-sm text-slate-500">Provisioned sending identities and test hooks.</p>
+            <p className="text-sm text-slate-500">
+              {activeTab === 'notifications'
+                ? 'Where Omni fans out alerts — hot leads, approvals, failures.'
+                : activeTab === 'integrations'
+                ? 'Encrypted API keys per provider.'
+                : 'Provisioned sending identities and test hooks.'}
+            </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setModalOpen(true)}
-            className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-600 transition-colors"
-          >
-            Add {activeTab === 'voice' ? 'agent' : 'account'}
-          </button>
+          {(activeTab === 'linkedin' || activeTab === 'email' || activeTab === 'voice') && (
+            <button
+              type="button"
+              onClick={() => setModalOpen(true)}
+              className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-600 transition-colors"
+            >
+              Add {activeTab === 'voice' ? 'agent' : 'account'}
+            </button>
+          )}
         </div>
 
         {activeTab === 'linkedin' && (
@@ -266,6 +278,8 @@ export default function Settings() {
         )}
 
         {activeTab === 'integrations' && <IntegrationsPanel />}
+
+        {activeTab === 'notifications' && <NotificationChannelsPanel />}
       </section>
 
       <AccountModal
@@ -571,6 +585,200 @@ function IntegrationsPanel() {
           )
         })}
       </div>
+    </div>
+  )
+}
+
+// ── Notification channels ───────────────────────────────────────────────────
+
+type NotificationChannel = {
+  id: string
+  channel_type: 'slack' | 'email'
+  name: string
+  config: Record<string, unknown>
+  is_active: boolean
+  created_at: string
+}
+
+function NotificationChannelsPanel() {
+  const queryClient = useQueryClient()
+  const toast = useToast()
+  const [draft, setDraft] = useState<{ channel_type: 'slack' | 'email'; name: string; target: string } | null>(null)
+
+  const channelsQuery = useQuery<NotificationChannel[]>({
+    queryKey: ['settings', 'notification-channels'],
+    queryFn: async () => (await api.get('/settings/notification-channels')).data,
+  })
+
+  const createChannel = useMutation({
+    mutationFn: async (payload: { channel_type: 'slack' | 'email'; name: string; config: Record<string, unknown> }) =>
+      (await api.post('/settings/notification-channels', payload)).data,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['settings', 'notification-channels'] })
+      toast.success('Channel added.')
+      setDraft(null)
+    },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Failed to add channel.'
+      toast.error(msg)
+    },
+  })
+
+  const toggleChannel = useMutation({
+    mutationFn: async (payload: { id: string; is_active: boolean }) =>
+      (await api.patch(`/settings/notification-channels/${payload.id}`, { is_active: payload.is_active })).data,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['settings', 'notification-channels'] })
+    },
+    onError: () => toast.error('Failed to toggle channel.'),
+  })
+
+  const deleteChannel = useMutation({
+    mutationFn: async (id: string) => (await api.delete(`/settings/notification-channels/${id}`)).data,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['settings', 'notification-channels'] })
+      toast.success('Channel removed.')
+    },
+    onError: () => toast.error('Failed to remove channel.'),
+  })
+
+  function handleCreate() {
+    if (!draft) return
+    const target = draft.target.trim()
+    if (!draft.name.trim() || !target) {
+      toast.error(draft.channel_type === 'slack' ? 'Name and webhook URL are required.' : 'Name and destination email are required.')
+      return
+    }
+    const config = draft.channel_type === 'slack' ? { webhook_url: target } : { to: target }
+    void createChannel.mutateAsync({ channel_type: draft.channel_type, name: draft.name.trim(), config })
+  }
+
+  if (channelsQuery.isLoading) {
+    return <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-sky-500" /></div>
+  }
+
+  const channels = channelsQuery.data ?? []
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-start justify-between gap-4">
+        <p className="text-sm text-slate-500">
+          Slack webhooks and email destinations are fanned out for hot-lead alerts, approvals, and delivery failures.
+        </p>
+        {!draft && (
+          <button
+            type="button"
+            onClick={() => setDraft({ channel_type: 'slack', name: '', target: '' })}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-sky-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-600 transition-colors"
+          >
+            <Plus size={14} /> Add channel
+          </button>
+        )}
+      </div>
+
+      {draft && (
+        <div className="rounded-2xl border border-sky-200 bg-sky-50/50 p-4 space-y-3">
+          <div className="flex flex-wrap gap-2">
+            {(['slack', 'email'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setDraft((d) => (d ? { ...d, channel_type: t, target: '' } : d))}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition ${
+                  draft.channel_type === t ? 'bg-sky-500 text-white' : 'bg-white text-slate-500 ring-1 ring-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                {t === 'slack' ? <Slack size={12} /> : <Mail size={12} />}
+                {t === 'slack' ? 'Slack webhook' : 'Email'}
+              </button>
+            ))}
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input
+              type="text"
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+              placeholder="Channel name (e.g. Hot leads #growth)"
+              value={draft.name}
+              onChange={(e) => setDraft((d) => (d ? { ...d, name: e.target.value } : d))}
+            />
+            <input
+              type={draft.channel_type === 'email' ? 'email' : 'url'}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-mono text-slate-900 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+              placeholder={draft.channel_type === 'slack' ? 'https://hooks.slack.com/services/…' : 'alerts@example.com'}
+              value={draft.target}
+              onChange={(e) => setDraft((d) => (d ? { ...d, target: e.target.value } : d))}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleCreate() }}
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setDraft(null)}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleCreate}
+              disabled={createChannel.isPending}
+              className="rounded-lg bg-sky-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-600 disabled:opacity-50"
+            >
+              {createChannel.isPending ? 'Saving…' : 'Add channel'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {channels.length === 0 && !draft ? (
+        <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 p-8 text-center">
+          <p className="text-sm text-slate-500">No notification channels configured yet. Alerts will be dropped silently.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {channels.map((ch) => {
+            const config = (ch.config ?? {}) as { webhook_url?: string; to?: string }
+            const target = ch.channel_type === 'slack' ? config.webhook_url : config.to
+            return (
+              <div key={ch.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${
+                  ch.channel_type === 'slack' ? 'bg-violet-50 text-violet-600' : 'bg-amber-50 text-amber-600'
+                }`}>
+                  {ch.channel_type === 'slack' ? <Slack size={14} /> : <Mail size={14} />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-slate-900 truncate">{ch.name}</span>
+                    <Badge label={ch.is_active ? 'active' : 'paused'} asStatus />
+                  </div>
+                  <p className="mt-0.5 truncate font-mono text-[11px] text-slate-400">{target || '—'}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => toggleChannel.mutate({ id: ch.id, is_active: !ch.is_active })}
+                  className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                    ch.is_active
+                      ? 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                      : 'border-emerald-200 text-emerald-600 hover:bg-emerald-50'
+                  }`}
+                >
+                  {ch.is_active ? <PowerOff size={12} /> : <Power size={12} />}
+                  {ch.is_active ? 'Pause' : 'Resume'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { if (confirm(`Remove "${ch.name}"?`)) deleteChannel.mutate(ch.id) }}
+                  title={`Remove ${ch.name}`}
+                  aria-label={`Remove ${ch.name}`}
+                  className="rounded-lg border border-rose-200 px-2.5 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

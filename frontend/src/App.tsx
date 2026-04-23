@@ -13,6 +13,7 @@ import Blacklist from './pages/Blacklist'
 import Analytics from './pages/Analytics'
 import Templates from './pages/Templates'
 import Inbox from './pages/Inbox'
+import Approvals from './pages/Approvals'
 import RetellFlowEditor from './pages/RetellFlowEditor'
 
 function RequireAuth() {
@@ -49,6 +50,7 @@ export default function App() {
         <Route path="/analytics" element={<Analytics />} />
         <Route path="/templates" element={<Templates />} />
         <Route path="/inbox" element={<Inbox />} />
+        <Route path="/approvals" element={<Approvals />} />
       </Route>
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
