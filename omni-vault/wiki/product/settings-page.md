@@ -13,10 +13,11 @@ updated: 2026-04-13
 
 Account surface for provisioning sending identities: LinkedIn accounts via Unipile, email accounts via SMTP, and Retell voice agents.
 
-## Tab Structure
-
-Three round-pill tab buttons: **LinkedIn Accounts** | **Email Accounts** | **Voice Agents**.  
+## Tab StructureFive round-pill tab buttons: **LinkedIn Accounts** | **Email Accounts** | **Voice Agents** | **Integrations** | **Notifications**.
 Default active tab: `linkedin`.
+
+The first three tabs show provisioned sending identities (the shared `AccountModal` handles all three creation flows). The last two tabs manage configuration rather than identities, so they hide the "Add account" button and render their own creation UI.
+
 
 ## LinkedIn Accounts Tab
 
@@ -99,9 +100,44 @@ Linked agents are selectable in the `action_voice` [[canvas-editor]] node via th
 
 All three tabs share one `AccountModal` component. The modal renders a different form section depending on `tab` prop. A "busy" spinner disables the submit button while any mutation is pending. The modal closes and toasts on success.
 
-## Related Pages
-
-- [[unipile-integration]]
+## Related Pages- [[unipile-integration]]
 - [[retell-integration]]
 - [[canvas-editor]]
 - [[campaigns]]
+- [[notifier]]
+- [[approvals-page]]
+- [[integrations-security-architecture]]
+
+## Integrations Tab
+
+`IntegrationsPanel` component. Backed by:
+
+- `GET /settings/integrations/providers` — the provider catalog (required fields per provider)
+- `GET /settings/integrations` — the stored keys (masked preview only)
+- `PUT /settings/integrations` — upsert a key (encrypted at rest with AES-256)
+- `DELETE /settings/integrations` — remove a key
+- `POST /settings/integrations/{provider}/verify` — optional live check against the provider's API
+
+Each provider is a card showing Shield (no keys) / ShieldCheck (all keys verified) / ShieldX (present but verification failed). Fields support show/hide for the masked preview and can be swapped in place via an "Update" flow.
+
+The encryption model and rationale live in [[integrations-security-architecture]].
+
+## Notifications Tab
+
+`NotificationChannelsPanel` component. This is the operator-facing surface for the global [[notifier]] fan-out table.
+
+Backed by `GET/POST/PATCH/DELETE /settings/notification-channels`:
+
+| Channel type | Required config | Delivery |
+|--------------|-----------------|----------|
+| `slack` | `webhook_url` | POST to Slack incoming webhook |
+| `email` | `to` | POST to Resend using the existing `resend_api_key` env |
+
+The panel lists all channels with name, status badge, and target preview. Each row supports:
+
+- **Pause/Resume** — flips `is_active` via `PATCH`
+- **Remove** — deletes via `DELETE`
+
+Creation is an inline draft card (not the shared `AccountModal`), because the field shape differs per channel type. Slack and email toggle pills swap the placeholder and the second input's type between URL and email.
+
+This tab is consumed by `action_hot_lead_alert` nodes in the [[canvas-editor]] — each node either broadcasts to every active channel or restricts delivery to a subset via `channel_ids`.

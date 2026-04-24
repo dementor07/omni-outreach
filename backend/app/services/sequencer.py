@@ -4,6 +4,7 @@ import random
 from datetime import UTC, datetime, timedelta
 
 from app.db import execute, fetch_all, fetch_one
+from app.services import notifier
 
 log = logging.getLogger(__name__)
 
@@ -168,6 +169,12 @@ async def queue_next_nodes(
                     lead["campaign_id"], lead_id, target_id, title, json.dumps(payload),
                 )
                 log.info(f"[sequencer] Opened approval for lead {lead_id} at node {target_id}")
+                # Notify operators so the approval is not silent
+                await notifier.dispatch_alert(
+                    title=f"Approval required: {title}",
+                    body=f"Lead {lead_id} is parked at approval node and requires manual review.",
+                    context={"lead_id": str(lead_id), "node_id": str(target_id), "campaign_id": str(lead['campaign_id'])},
+                )
             await execute(
                 "UPDATE leads SET current_node_id=$1 WHERE id=$2",
                 target_id, lead_id,

@@ -44,7 +44,6 @@ Every task passes through `_in_active_hours(campaign)`. If the campaign is outsi
 If `campaign.simulation_mode = TRUE`, the dispatcher logs `simulated_{channel}`, marks the task sent, and advances the DAG without making external calls.
 
 ## Queue Handlers
-
 | `queue.channel` | Handler | Key Behavior |
 |-----------------|---------|-------------|
 | `linkedin_invite` | `_handle_linkedin_invite` | Enforces per-account caps, resolves provider IDs, sends invite, sets `invited_at` |
@@ -61,6 +60,7 @@ If `campaign.simulation_mode = TRUE`, the dispatcher logs `simulated_{channel}`,
 | `add_tag` | `_handle_add_tag` | Appends tag idempotently |
 | `remove_tag` | `_handle_remove_tag` | Removes tag from `leads.tags[]` |
 | `enrich` | `_handle_enrich` | Calls lead-source provider `enrich()`, merges only missing fields, logs `lead_enriched` |
+| `hot_lead_alert` | `_handle_hot_lead_alert` | Renders title/body against lead + campaign, calls `notifier.dispatch_alert` (optionally restricted to `node.data.channel_ids`), logs `hot_lead_alert` with delivered count |
 
 ## Post-Execution Contract
 
@@ -90,9 +90,9 @@ Every 5 minutes, assigns LinkedIn accounts to eligible leads and inserts `linked
 Every 5 minutes, polls Unipile for accepted connections, sets `accepted_at`, logs `invite_accepted`, and calls `sequencer.schedule_sequence(lead_id)`.
 
 ## Related Pages
-
 - [[sequence-engine]]
 - [[channels]]
+- [[notifier]]
 - [[lead-sources-ui]]
 - [[unipile-integration]]
 - [[event-bus-architecture]]

@@ -101,12 +101,18 @@ The primary lead-acquisition path now uses `lead_gen_configs` and the [[lead-sou
 
 The older [[job-search-ui]] / [[job-search-pipeline]] path is still present for backward compatibility, but the main product surface has shifted to multi-source lead gen.
 
-## Related Pages
-
-- [[lead-sources-ui]]
+## Related Pages- [[lead-sources-ui]]
 - [[canvas-editor]]
 - [[sequential-builder]]
 - [[leads-page]]
 - [[queue-page]]
+- [[approvals-page]]
 - [[job-search-ui]]
 - [[dispatcher]]
+
+## Operator Surfaces Beyond the Campaign
+
+Two surfaces now live outside any single campaign but are triggered by nodes inside one:
+
+- **Approvals** — any lead sitting at a `human_approval` node shows up in the global [[approvals-page]] inbox until it's resolved. The lead's `current_node_id` is the pointer back into the campaign's DAG.
+- **Notification channels** — Slack/email destinations configured in the Notifications tab of [[settings-page]] are the fan-out target for `action_hot_lead_alert` nodes. Scoping is global; a campaign wanting a different destination overrides it on the node via `channel_ids`.

@@ -29,14 +29,15 @@ As of 2026-04-21 there are no remaining palette channels that are wired in UI/ba
 | **Webhook / CRM** | `_handle_webhook` | Generic HTTP endpoint | Sends POST/PUT/PATCH with rendered payload or raw lead JSON to external CRM/automation systems. |
 
 ## Sequence Actions That Are Not Delivery Channels
-
-These still run through queue + dispatcher, but they mutate state rather than contacting a human channel.
+These still run through queue + dispatcher, but they mutate state or emit notifications rather than contacting the lead directly.
 
 | Action | Handler | Behaviour |
 |--------|---------|-----------|
 | **Add Tag** | `_handle_add_tag` | Appends a tag idempotently |
 | **Remove Tag** | `_handle_remove_tag` | Removes a tag from `leads.tags[]` |
 | **Enrich Lead** | `_handle_enrich` | Calls a lead-source provider enrichment path and fills only missing fields |
+| **Hot Lead Alert** | `_handle_hot_lead_alert` | Renders title/body against the lead + campaign and fans out to Slack/email via [[notifier]]. Optional `channel_ids` on the node restrict delivery to a subset of active destinations |
+| **Human Approval** | *(not dispatched — sequencer parks the lead)* | Opens an `approvals` row and holds the lead in place; the [[approvals-page]] resolves it and the sequencer advances `approve`/`reject` |
 
 ## Shared Characteristics
 
@@ -46,9 +47,9 @@ These still run through queue + dispatcher, but they mutate state rather than co
 - Final failures dead-letter into the queue record rather than disappearing silently.
 
 ## Related Pages
-
 - [[dispatcher]]
 - [[sequence-engine]]
 - [[canvas-editor]]
+- [[notifier]]
 - [[retell-integration]]
 - [[unipile-integration]]

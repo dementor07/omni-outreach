@@ -512,3 +512,32 @@ Files touched (this batch): 2 backend (dispatcher.py, config.py, sequences route
 - Fixed the shared `ConditionNode` renderer in `frontend/src/pages/Campaigns.tsx` so it now reads `data.node_type` and applies the correct `NODE_PALETTE` label, icon, and color treatment instead of rendering every condition as the same hardcoded amber "Wait for Reply" card.
 - Verified the canvas metadata already contained the correct per-type visuals (`AI Screen`, `Source Router`, etc.); the bug was in the renderer, not the palette.
 - Frontend build completes successfully after the fix.
+
+
+## [2026-04-23] deploy | First fully-automated CI deploy — features at rev 004
+
+**Shipped in commits `ef7440c` + `f04a98c` (via CI run 24818665163):**
+
+- `fix(canvas)` (0467946) — `ConditionNode` now reads `data.node_type` and pulls label/icon/color from `NODE_PALETTE` instead of rendering every condition as a hardcoded "Wait for Reply" amber card.
+- `feat(sequence+notify)` — three new node types (`human_approval`, `condition_reply_intent`, `action_hot_lead_alert`), approvals page + router, notifier service (slack webhook + email via Resend), `NotificationChannelsPanel` in Settings (had a missing-symbol TS error that blocked the build — implemented against the existing `/settings/notification-channels` CRUD).
+- `chore(docs)` — removed `CLAUDE_HANDOVER.md`, `CODEX_CONTEXT.md`, `MASTER_GUIDE.md`, `OMNI_TUTORIAL.md`, `update_retell_flow.py` (superseded by the vault).
+
+**Migration 004 applied in prod:**
+- `leads.last_reply_{text,category,confidence,at}` — cached inbound reply for `condition_reply_intent` branching
+- `approvals` table with `idx_approvals_status_campaign`
+- `notification_channels` table (global, not per-campaign)
+
+**Deploy mechanics (first end-to-end autodeploy):**
+- `~/.ssh/omni_deploy` ed25519 keypair generated on the workstation; public key appended to `root@145.223.21.222:~/.ssh/authorized_keys` via grep-idempotent one-liner.
+- GitHub repo secrets set: `VPS_HOST=145.223.21.222`, `VPS_DEPLOY_USER=root`, `VPS_SSH_KEY=<private key>`.
+- CI ran lint → test → build → deploy. Deploy pulled, rebuilt the Compose stack, ran `alembic upgrade head` (003→004).
+
+**Post-deploy verification:**
+- All 5 containers up and healthy (backend/worker/frontend recycled ~30s)
+- `alembic current` = `004 (head)`
+- `/health` = `{status: ok, checks: {api: ok, db: ok, redis: ok}}`
+
+**Follow-ups worth tracking (not blocking):**
+- CI annotations flag deprecated Node 20 actions; `actions/checkout@v4` + `actions/setup-python@v5` will be forced to Node 24 by 2026-06-02. Harmless today, but the bump should happen before then.
+- Rotate `omni_deploy` key after prod access is verified stable (private key was handed to the SSH agent + GitHub secret; workstation copy still exists).
+- The "Remove" icon-only button in `NotificationChannelsPanel` is gated by a native `confirm()` — replace with the existing `Modal` pattern if we want consistency with other destructive actions in Settings.

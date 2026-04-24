@@ -11,8 +11,7 @@ updated: 2026-04-21
 `frontend/src/pages/Campaigns.tsx` — the Sequence tab when `campaign.sequence_mode === 'canvas'`.
 
 ## Node Types & Components
-
-All 27 backend-supported `node_type` values accepted by `backend/app/routers/sequences.py` and rendered by the frontend:
+All 30 backend-supported `node_type` values accepted by `backend/app/routers/sequences.py` and rendered by the frontend:
 
 | node_type                      | Component       | Palette Group             | Notes                                                                                                                                                    |
 | ------------------------------ | --------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -31,12 +30,15 @@ All 27 backend-supported `node_type` values accepted by `backend/app/routers/seq
 | `action_add_tag`               | `ActionNode`    | Actions                   | Adds a tag to the lead record.                                                                                                                           |
 | `action_remove_tag`            | `ActionNode`    | Actions                   | Removes a tag from the lead record.                                                                                                                      |
 | `action_enrich`                | `ActionNode`    | Actions                   | Calls a lead-source enrichment path and fills only missing lead fields.                                                                                  |
+| `action_hot_lead_alert`        | `ActionNode`    | Actions                   | Fans out a Slack/email alert via [[notifier]]. Optional `node.data.channel_ids` restricts delivery; blank means every active channel. |
+| `human_approval`               | `ActionNode`    | Actions                   | Opens a row in the [[approvals-page]] inbox and parks the lead until operator resolution. Handles: `approve`, `reject`. |
 | `condition_replied`            | `ConditionNode` | Conditions                | True/False fork: has the lead replied on any channel?                                                                                                    |
 | `condition_linkedin_distance`  | `ConditionNode` | Conditions                | True/False fork: is the lead 1st-degree? Usually follows profile view.                                                                                   |
 | `condition_tag_exists`         | `ConditionNode` | Conditions                | True/False fork: does a specific tag exist?                                                                                                              |
 | `condition_ai_screen`          | `ConditionNode` | Conditions                | Immediate AI screening gate using `screener.screen_lead()` and `screening_prompt`.                                                                       |
 | `condition_lead_source`        | `ConditionNode` | Conditions                | Routes by `lead.source`; output handles map to configured providers plus `default`.                                                                      |
 | `condition_has_field`          | `ConditionNode` | Conditions                | Immediate True/False branch based on presence of one lead field.                                                                                         |
+| `condition_reply_intent`       | `ConditionNode` | Conditions                | Routes on classified `lead.last_reply_category`: `positive`, `negative`, `neutral`, `out_of_office`, `unsubscribe`, `bounce`. Parks if no reply has been classified yet. |
 | `event_invite_accepted`        | `EventNode`     | Events                    | Parks until the invite is accepted.                                                                                                                      |
 | `event_email_opened`           | `EventNode`     | Events                    | Fires from the email open tracking pixel.                                                                                                                |
 | `event_link_clicked`           | `EventNode`     | Events                    | Fires from tracked email link clicks.                                                                                                                    |
@@ -56,7 +58,6 @@ All 27 backend-supported `node_type` values accepted by `backend/app/routers/seq
 - The source badge is clickable (`nodrag`) and navigates to [[lead-sources-ui]].
 
 ## NodePalette Groups
-
 The left-side palette (`w-52`, scrollable, `maxHeight: calc(100vh - 160px)`) groups nodes into 7 sections:
 
 | Heading | Types |
@@ -64,8 +65,8 @@ The left-side palette (`w-52`, scrollable, `maxHeight: calc(100vh - 160px)`) gro
 | LinkedIn | invite, dm, inmail, profile_view |
 | Messaging | email, whatsapp, sms, instagram, telegram |
 | Voice | voice |
-| Actions | add_tag, remove_tag, webhook, enrich |
-| Conditions | replied, linkedin_distance, tag_exists, ai_screen, lead_source, has_field |
+| Actions | add_tag, remove_tag, webhook, enrich, hot_lead_alert, human_approval |
+| Conditions | replied, linkedin_distance, tag_exists, ai_screen, lead_source, has_field, reply_intent |
 | Events | invite_accepted, email_opened, link_clicked |
 | Flow | delay, split, end |
 
@@ -95,7 +96,6 @@ Reads `node.data.weights` (`{true: {alpha, beta}, false: {alpha, beta}}`).
 - Learned state: shows `Bandit Active` plus per-arm win rate derived from `alpha / (alpha + beta)`.
 
 ## ConfigSidebar
-
 The right-side panel opens on node click (`selectedNodeId`). Important custom panels:
 
 - `action_email`: email account selector, subject, body
@@ -103,9 +103,12 @@ The right-side panel opens on node click (`selectedNodeId`). Important custom pa
 - `action_sms`: message body plus inline env-key requirement text
 - `action_webhook`: URL, HTTP method, headers, optional `body_template`
 - `action_enrich`: provider dropdown plus field selection for which missing fields to fill
+- `action_hot_lead_alert`: optional `title` and `body` templates (variables rendered against the lead + campaign), multi-select `channel_ids` from the configured notification channels — blank means broadcast to all
+- `human_approval`: `title` string shown in the [[approvals-page]] inbox plus a `payload` JSON stub stored on the approval row
 - `condition_ai_screen`: `screening_prompt` textarea
 - `condition_lead_source`: source checkboxes used to mint output handles
 - `condition_has_field`: field selector (`email`, `linkedin_url`, `headline`, `company`, `phone`, `first_name`, `last_name`)
+- `condition_reply_intent`: read-only — the handles are the fixed classifier categories (`positive`, `negative`, `neutral`, `out_of_office`, `unsubscribe`, `bounce`)
 - `delay`: `delay_days`
 
 ## Serialization (Critical)
@@ -128,10 +131,12 @@ This prevents non-serializable functions from leaking into `sequence_nodes.data 
 The TypeScript layer still contains experimental `wait_until` and `goal` union members, and `Campaigns.tsx` includes a `WaitUntilNode` component. The backend `NodeType` contract in `sequences.py` does not accept those values, so they are not part of the shipped persisted graph model.
 
 ## Related Pages
-
 - [[campaigns]]
 - [[lead-sources-ui]]
 - [[sequence-engine]]
 - [[telemetry-overlay]]
 - [[auto-optimization-engine]]
 - [[voice-node]]
+- [[approvals-page]]
+- [[notifier]]
+- [[human-approval-and-reply-intent]]
