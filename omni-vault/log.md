@@ -541,3 +541,13 @@ Files touched (this batch): 2 backend (dispatcher.py, config.py, sequences route
 - CI annotations flag deprecated Node 20 actions; `actions/checkout@v4` + `actions/setup-python@v5` will be forced to Node 24 by 2026-06-02. Harmless today, but the bump should happen before then.
 - Rotate `omni_deploy` key after prod access is verified stable (private key was handed to the SSH agent + GitHub secret; workstation copy still exists).
 - The "Remove" icon-only button in `NotificationChannelsPanel` is gated by a native `confirm()` — replace with the existing `Modal` pattern if we want consistency with other destructive actions in Settings.
+
+## [2026-04-24] feat & deploy | Reply Intent Timeout Fix
+
+- Addressed the durability bug where `condition_reply_intent` parked leads forever if no reply arrived.
+- Filed ADR `wiki/decisions/reply-intent-timeout.md`.
+- Added `timeout_days` field to `condition_reply_intent` config sidebar in `frontend/src/pages/Campaigns.tsx`.
+- Added `timeout` handle to `ReplyIntentNode`.
+- Added `check_reply_intent_timeouts` inside `backend/app/services/sequencer.py` to route timed-out leads down the new `timeout` handle based on their last `queue` interaction.
+- Scheduled `cron_reply_intent_timeout` every 30 minutes in `backend/app/worker/tasks.py`.
+- Deployed changes to VPS.

@@ -248,3 +248,31 @@ async def resume_from_approval(lead_id: str, approval_id: str, resolution: str) 
     log.info(f"[sequencer] Resuming lead {lead_id} from approval {approval_id} via handle '{handle}'")
     await queue_next_nodes(lead_id, lead["current_node_id"], handle)
     await execute("UPDATE leads SET current_node_id=NULL WHERE id=$1", lead_id)
+
+async def check_reply_intent_timeouts() -> None:
+    """Finds leads parked at condition_reply_intent longer than timeout_days and routes them."""
+    log.info("[sequencer] Checking for condition_reply_intent timeouts...")
+    query = """
+        SELECT l.id, l.current_node_id, sn.data,
+               (SELECT MAX(sent_at) FROM queue WHERE lead_id = l.id AND status = 'sent') as last_contact_at
+        FROM leads l
+        JOIN sequence_nodes sn ON l.current_node_id = sn.id
+        WHERE sn.node_type = 'condition_reply_intent'
+          AND l.current_node_id IS NOT NULL
+    """
+    rows = await fetch_all(query)
+    now = datetime.now(UTC)
+    for row in rows:
+        timeout_days = (row["data"] or {}).get("timeout_days", 7)
+        last_contact = row["last_contact_at"]
+        if not last_contact:
+            continue
+
+        if last_contact.tzinfo is None:
+            last_contact = last_contact.replace(tzinfo=UTC)
+
+        elapsed = (now - last_contact).days
+        if elapsed >= int(timeout_days):
+            log.info(f"[sequencer] Lead {row['id']} timed out at reply intent node (elapsed: {elapsed}d, timeout: {timeout_days}d). Routing to 'timeout' handle.")
+            await queue_next_nodes(str(row["id"]), str(row["current_node_id"]), "timeout")
+            await execute("UPDATE leads SET current_node_id=NULL WHERE id=$1", row["id"])

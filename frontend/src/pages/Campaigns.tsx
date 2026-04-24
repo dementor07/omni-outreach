@@ -1409,15 +1409,28 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
         )}
 
         {nodeType === 'condition_reply_intent' && (
-          <div>
-            <label className={labelCls}>Reply Intent Router</label>
-            <p className="text-[11px] text-slate-500 mb-3">
-              After a reply arrives (from <code>event_replied</code> or inline), the classifier labels it.
-              Branches: positive / negative / neutral / out_of_office / unsubscribe / bounce.
-            </p>
-            <div className="rounded-lg bg-violet-50 p-3 text-[11px] text-violet-900 space-y-1">
-              <p><strong>Tip:</strong> unhook branches you don't need. Unconnected outcomes fall through to sequence end.</p>
-              <p>Pair with a preceding <code>condition_replied</code> or <code>event_email_opened</code> so this only evaluates once a reply exists.</p>
+          <div className="space-y-3">
+            <div>
+              <label className={labelCls}>Reply Intent Router</label>
+              <p className="text-[11px] text-slate-500 mb-3">
+                After a reply arrives (from <code>event_replied</code> or inline), the classifier labels it.
+                Branches: positive / negative / neutral / out_of_office / unsubscribe / bounce / timeout.
+              </p>
+              <div className="rounded-lg bg-violet-50 p-3 text-[11px] text-violet-900 space-y-1">
+                <p><strong>Tip:</strong> unhook branches you don't need. Unconnected outcomes fall through to sequence end.</p>
+                <p>Pair with a preceding <code>condition_replied</code> or <code>event_email_opened</code> so this only evaluates once a reply exists.</p>
+              </div>
+            </div>
+            <div>
+              <label className={labelCls}>Timeout (Days)</label>
+              <input
+                type="number"
+                min="1"
+                value={(node.data as any).timeout_days || 7}
+                onChange={(e) => onUpdate({ timeout_days: parseInt(e.target.value) || 7 })}
+                className={inputClassName}
+              />
+              <p className="mt-2 text-[10px] text-slate-400">If no reply arrives within this many days after the last message, route to timeout.</p>
             </div>
           </div>
         )}

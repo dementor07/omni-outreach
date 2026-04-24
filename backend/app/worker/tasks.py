@@ -28,6 +28,11 @@ async def optimize_splits(ctx: dict) -> None:
     await run_optimization()
 
 
+async def cron_reply_intent_timeout(ctx: dict) -> None:
+    from app.services.sequencer import check_reply_intent_timeouts
+    await check_reply_intent_timeouts()
+
+
 async def cron_lead_gen(ctx: dict) -> None:
     """Fires any enabled lead_gen_configs whose cron_schedule is due."""
     try:
