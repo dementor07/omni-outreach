@@ -93,6 +93,7 @@ class WorkerSettings:
         cron(process_stream_events, second=set(range(0, 60, 5))),
         cron(optimize_splits, minute=set(range(0, 60, 10))),
         cron(cron_lead_gen, minute=set(range(0, 60, 5))),
+        cron(cron_reply_intent_timeout, minute={0, 30}),
     ]
     max_jobs = 1
     job_timeout = 300
