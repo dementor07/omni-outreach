@@ -23,6 +23,12 @@ def _dedupe_scope() -> str:
 
 async def upsert_lead(campaign_id: str, lead: RawLead, source_type: str) -> bool:
     """Upsert a single RawLead into the DB. Returns True if newly inserted."""
+    # linkedin_url is the primary identifier — the DB has a NOT NULL constraint
+    # and all outreach is LinkedIn-routed. Leads without it cannot be inserted.
+    if not lead.linkedin_url:
+        log.warning(f"[lead_gen] Skipping lead with no linkedin_url (email={lead.email})")
+        return False
+
     # Blacklist gate — refuse to insert leads matching any blocked identifier.
     # Checked here (intake) so the lead never enters the campaign DAG; the
     # dispatcher does its own check at delivery time as defense-in-depth.
@@ -31,12 +37,55 @@ async def upsert_lead(campaign_id: str, lead: RawLead, source_type: str) -> bool
     if lead.email and await is_blacklisted(lead.email, "email"):
         log.info(f"[lead_gen] Skipping blacklisted email {lead.email}")
         return False
-    if lead.linkedin_url and await is_blacklisted(lead.linkedin_url, "linkedin_url"):
+    if await is_blacklisted(lead.linkedin_url, "linkedin_url"):
         log.info(f"[lead_gen] Skipping blacklisted linkedin_url {lead.linkedin_url}")
         return False
     if lead.company and await is_blacklisted(lead.company, "company"):
         log.info(f"[lead_gen] Skipping blacklisted company {lead.company}")
         return False
+
+    # Email verification gate (sprint #4) — reject provably undeliverable
+    # addresses early so they never consume sequence credits. Only fires when
+    # Hunter is configured; unknown/risky emails are allowed through with a warning.
+    if lead.email:
+        from app.config import settings as _settings
+        if getattr(_settings, "hunter_api_key", None):
+            try:
+                import httpx as _httpx
+                async with _httpx.AsyncClient(timeout=8) as _c:
+                    _r = await _c.get(
+                        "https://api.hunter.io/v2/email-verifier",
+                        params={"email": lead.email, "api_key": _settings.hunter_api_key},
+                    )
+                if _r.status_code == 200:
+                    _status = (_r.json().get("data") or {}).get("result", "unknown")
+                    if _status == "undeliverable":
+                        log.info(f"[lead_gen] Rejecting undeliverable email {lead.email}")
+                        return False
+                    if _status == "risky":
+                        log.warning(f"[lead_gen] Risky email {lead.email} — allowing through")
+            except Exception as _exc:
+                log.warning(f"[lead_gen] Hunter verify failed for {lead.email}: {_exc}")
+
+    # Cool-off window (sprint #13) — skip leads that had recent outreach in any
+    # campaign within LEAD_COOLOFF_DAYS. Set env var to 0 (default) to disable.
+    _cooloff_days = int(os.environ.get("LEAD_COOLOFF_DAYS", "0"))
+    if _cooloff_days > 0:
+        _recent = await fetch_one(
+            """
+            SELECT 1 FROM events e
+            JOIN leads l ON l.id = e.lead_id
+            WHERE l.linkedin_url = $1
+              AND e.occurred_at >= NOW() - make_interval(days => $2)
+            LIMIT 1
+            """,
+            lead.linkedin_url, _cooloff_days,
+        )
+        if _recent:
+            log.info(
+                f"[lead_gen] Skipping {lead.linkedin_url} — in cool-off window ({_cooloff_days}d)"
+            )
+            return False
 
     # Daily lead cap — campaigns.daily_lead_cap was previously dead config.
     # Enforce it here at intake so a noisy provider run can't drown the campaign.
@@ -63,43 +112,23 @@ async def upsert_lead(campaign_id: str, lead: RawLead, source_type: str) -> bool
     # cross-campaign re-contact gap from the lead-gen workflow audit).
     scope = _dedupe_scope()
     if scope == "global":
-        if lead.linkedin_url:
-            existing = await fetch_one(
-                "SELECT id FROM leads WHERE linkedin_url=$1 LIMIT 1",
-                lead.linkedin_url,
+        existing = await fetch_one(
+            "SELECT id FROM leads WHERE linkedin_url=$1 LIMIT 1",
+            lead.linkedin_url,
+        )
+        if existing:
+            log.info(
+                f"[lead_gen] Skipping {lead.linkedin_url} — already present in another campaign (global dedupe)"
             )
-            if existing:
-                log.info(f"[lead_gen] Skipping {lead.linkedin_url} — already present in another campaign (global dedupe)")
-                return False
-        elif lead.email:
-            existing = await fetch_one(
-                "SELECT id FROM leads WHERE email=$1 LIMIT 1",
-                lead.email,
-            )
-            if existing:
-                log.info(f"[lead_gen] Skipping {lead.email} — already present in another campaign (global dedupe)")
-                return False
-        else:
             return False
     else:
         # Default: within-campaign dedupe
-        if lead.linkedin_url:
-            existing = await fetch_one(
-                "SELECT id FROM leads WHERE campaign_id=$1 AND linkedin_url=$2",
-                campaign_id,
-                lead.linkedin_url,
-            )
-            if existing:
-                return False
-        elif lead.email:
-            existing = await fetch_one(
-                "SELECT id FROM leads WHERE campaign_id=$1 AND email=$2",
-                campaign_id,
-                lead.email,
-            )
-            if existing:
-                return False
-        else:
+        existing = await fetch_one(
+            "SELECT id FROM leads WHERE campaign_id=$1 AND linkedin_url=$2",
+            campaign_id,
+            lead.linkedin_url,
+        )
+        if existing:
             return False
 
     row = await fetch_one(
@@ -146,6 +175,20 @@ async def run_lead_gen(campaign_id: str, config_id: str, triggered_by: str = "ma
     if not source.is_available:
         raise RuntimeError(f"Lead source '{source_type}' is not available (missing API key)")
 
+    # Credit budget gate (sprint #7b) — block run if the config has a budget
+    # and previous runs have consumed it all.
+    credit_budget = config_row.get("credit_budget")
+    if credit_budget:
+        used_row = await fetch_one(
+            "SELECT COALESCE(SUM(credits_consumed), 0) AS total FROM lead_gen_runs WHERE config_id=$1 AND status='done'",
+            config_id,
+        )
+        used = int(used_row["total"] if used_row else 0)
+        if used >= credit_budget:
+            raise RuntimeError(
+                f"Credit budget of {credit_budget} exhausted ({used} consumed); run cancelled."
+            )
+
     run = await fetch_one(
         """
         INSERT INTO lead_gen_runs (campaign_id, config_id, source_type, status, triggered_by)
@@ -178,14 +221,19 @@ async def run_lead_gen(campaign_id: str, config_id: str, triggered_by: str = "ma
         await execute(
             """
             UPDATE lead_gen_runs
-            SET status='done', leads_found=$1, leads_added=$2, finished_at=NOW()
-            WHERE id=$3
+            SET status='done', leads_found=$1, leads_added=$2,
+                credits_consumed=$3, finished_at=NOW()
+            WHERE id=$4
             """,
             leads_found,
             leads_added,
+            leads_found,  # 1 credit per lead fetched from the source
             run_id,
         )
-        log.info(f"[lead_gen:{run_id}] Done — {leads_added}/{leads_found} new leads")
+        log.info(
+            f"[lead_gen:{run_id}] Done — {leads_added}/{leads_found} new leads "
+            f"({leads_found} credits consumed)"
+        )
 
     except Exception as e:
         log.error(f"[lead_gen:{run_id}] Error: {e}", exc_info=True)

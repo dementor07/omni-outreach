@@ -44,6 +44,37 @@ class LeadImport(BaseModel):
         return v
 
 
+@router.post("", status_code=201)
+async def create_lead(
+    campaign_id: str,
+    body: LeadImport,
+    user_id: str = Depends(get_current_user),
+):
+    """Add a single lead manually. Routes through upsert_lead so blacklist +
+    daily cap + dedupe + email verification + cool-off all apply."""
+    from app.services.lead_gen import upsert_lead
+
+    raw = RawLead(
+        first_name=body.first_name or "",
+        last_name=body.last_name or "",
+        linkedin_url=body.linkedin_url,
+        email=body.email,
+        headline=body.headline or "",
+        company=body.company or "",
+    )
+    inserted = await upsert_lead(campaign_id, raw, body.source or "manual")
+    if not inserted:
+        raise HTTPException(
+            status_code=409,
+            detail="Lead already exists or was rejected by intake gate (blacklist / dedupe / cap)",
+        )
+    lead = await fetch_one(
+        "SELECT id FROM leads WHERE campaign_id=$1 AND linkedin_url=$2",
+        campaign_id, raw.linkedin_url,
+    )
+    return {"id": str(lead["id"]) if lead else None, "status": "created"}
+
+
 @router.get("")
 async def list_leads(
     campaign_id: str,
@@ -206,14 +237,14 @@ async def csv_upload(
         linkedin_url = mapped.get("linkedin_url")
         email = mapped.get("email")
 
-        if not linkedin_url and not email:
+        if not linkedin_url:
             invalid += 1
             if len(errors) < 20:
-                errors.append(f"Row {row_num}: must have linkedin_url or email")
+                errors.append(f"Row {row_num}: linkedin_url is required")
             continue
 
         # Basic LinkedIn URL normalisation
-        if linkedin_url and "linkedin.com/" not in linkedin_url:
+        if "linkedin.com/" not in linkedin_url:
             invalid += 1
             if len(errors) < 20:
                 errors.append(f"Row {row_num}: invalid linkedin_url '{linkedin_url}'")
@@ -296,6 +327,16 @@ async def bulk_lead_action(body: BulkAction, user_id: str = Depends(get_current_
             raise HTTPException(400, "target_campaign_id required for move_campaign")
         for lid in body.lead_ids:
             await execute("UPDATE leads SET campaign_id=$1 WHERE id=$2", body.target_campaign_id, lid)
+            affected += 1
+
+    elif body.action == "add_tag":
+        if not body.tag:
+            raise HTTPException(400, "tag is required for add_tag action")
+        for lid in body.lead_ids:
+            await execute(
+                "UPDATE leads SET tags = array_append(tags, $1) WHERE id=$2 AND NOT ($1 = ANY(tags))",
+                body.tag, lid,
+            )
             affected += 1
 
     else:

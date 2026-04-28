@@ -140,7 +140,7 @@ async def update_config(
 
 # ── Runs ──────────────────────────────────────────────────────────────────────
 
-_RUN_COLS = "id, campaign_id, config_id, source_type, status, leads_found, leads_added, started_at, finished_at, error, triggered_by"
+_RUN_COLS = "id, campaign_id, config_id, source_type, status, leads_found, leads_added, credits_consumed, started_at, finished_at, error, triggered_by"
 
 
 class TriggerRequest(BaseModel):
