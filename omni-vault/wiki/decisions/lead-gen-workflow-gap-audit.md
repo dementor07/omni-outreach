@@ -2,15 +2,15 @@
 title: "Lead-Gen Workflow Gap Audit (vs Typical Outreach Automation)"
 category: decisions
 tags: [audit, lead-gen, workflow, gaps, roadmap]
-sources: [wiki/decisions/system-gaps-sprint.md, wiki/competitors/landscape.md, code-inventory-2026-04-28]
-updated: 2026-04-28
+sources: [wiki/decisions/system-gaps-sprint.md, wiki/competitors/landscape.md, code-inventory-2026-04-29]
+updated: 2026-04-29
 ---
 
 # Lead-Gen Workflow Gap Audit
 
 ## Status
 
-Snapshot — 2026-04-28. Compared the live lead-gen pipeline against the typical capability set of automation stacks (Apollo, Instantly, Lemlist, Smartlead, Clay, Woodpecker).
+Snapshot — 2026-04-29. Compared the live lead-gen pipeline against the typical capability set of automation stacks (Apollo, Instantly, Lemlist, Smartlead, Clay, Woodpecker) **and** the predecessor `outreach_automation` project (now clipped verbatim into `raw/external-projects/outreach-automation/`).
 
 ## Reference workflow
 
@@ -32,12 +32,15 @@ Snapshot — 2026-04-28. Compared the live lead-gen pipeline against the typical
 | 4c | Phone verification | ❌ | No Twilio Lookup / Numverify before SMS. |
 | 5 | ICP score / qualify | ⚠️ | `condition_ai_screen` runs Haiku on `headline` + `screening_prompt`. No structured firmographic gate (employee_count, industry, region) before insertion. |
 | 5b | Intent signals | ❌ | No web-traffic / job-change / fundraising signal ingestion. |
+| 5c | Company size filter | ✅ (2026-04-29) | `job_search.filter_by_size()` gates companies by `min_employees` / `max_employees` (nullable; skipped when NULL). Reads size from Apify payload. Fails-closed (excludes unknown-size companies) when either bound is set. Columns added to `job_search_configs` via migration 005. Ported from `outreach_automation/job_search_scraper.py`. |
 | 6 | Suppression / blacklist | ✅ (2026-04-28) | Enforced in `lead_gen.upsert_lead` and `dispatcher._process_task` for delivery channels. |
 | 6b | Unsubscribe / STOP capture | ✅ (2026-04-28) | `/webhooks/events/inbound` now handles `event_type='unsubscribe'`: marks lead status and inserts the lead's lowercased email into `blacklists` with `reason='unsubscribed via webhook'`. Idempotent via `UNIQUE(entry_type, value)`. Closes the loop with the suppression infrastructure. |
 | 6c | GDPR / CAN-SPAM artifacts | ❌ | No consent ledger, no PII-purge endpoint. |
+| 6d | job_search bypass | ✅ (2026-04-29) | `job_search.upsert_leads()` was inserting directly into DB, bypassing all intake gates. Fixed: now builds `RawLead` and calls `lead_gen.upsert_lead()` so blacklist + daily cap + global dedupe apply uniformly regardless of lead source. |
 | 7 | Daily lead cap | ✅ (2026-04-28) | `campaigns.daily_lead_cap` now enforced at intake. Per-LinkedIn-account daily invite cap already enforced. |
 | 7b | Provider credit budget | ❌ | `lead_gen_runs` does not record credits consumed. A runaway scheduled run can blow Apollo / ProxyCurl quotas silently. |
 | 8 | Inject to DAG | ✅ | `sequencer.schedule_new_lead` plus `trigger_start`, `condition_ai_screen`, `condition_lead_source` are wired end-to-end. |
+| 8b | Unipile people search fallback | ✅ (2026-04-29) | `job_search.find_decision_makers()` dispatcher: Serper-first; falls back to `search_unipile_people()` (Unipile `/api/v1/linkedin/search`, `network_distance=[2,3]`) when `SERPER_KEY` is absent. Prevents zero-profile runs when Serper credits are exhausted. Ported from `outreach_automation/job_search_scraper.py`. |
 | 9 | Reply intent capture | ✅ (2026-04-28) | Unipile stream path now also classifies and writes `last_reply_*`, matching the HTTP webhook. |
 | 10 | Closed-loop feedback | ⚠️ | [[autonomous-feedback-loops]] ADR exists but is unimplemented — `lead_gen_runs` doesn't track conversion per source. Bandit only optimizes split nodes, not provider configs. |
 | 11 | CSV / list import | ❌ | [[system-gaps-sprint]] Cycle 5 — not landed. Registry pattern would support a `csv_upload` source but there's no implementation. |
@@ -46,7 +49,7 @@ Snapshot — 2026-04-28. Compared the live lead-gen pipeline against the typical
 | 14 | Per-source A/B test | ❌ | Bandit-style optimization at the lead-gen layer (which provider yields the highest reply rate per dollar) is not implemented. |
 
 ## Recommended next sprint (priority order, vault-derived)
-Top of the queue (2b and 6b shipped 2026-04-28, removed from this list):
+Shipped 2026-04-29 (removed from list): job_search bypass fix (6d), company size filter (5c), Unipile fallback (8b).
 
 1. **11 — CSV / list import.** Operator-blocking gap. Implement as a `csv_upload` provider following the registry pattern: file storage on the campaign settings page, schema-driven column mapping, idempotent reruns.
 2. **4 — email verification gate.** Wrap Hunter's `verification.status` into a hard reject for `undeliverable` and a soft warning for `risky`/`accept_all`. Optional later: bring in a dedicated verify provider.

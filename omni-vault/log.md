@@ -646,3 +646,13 @@ Vault-driven follow-on to the workflow audit ADR. Both gaps shipped in `e434a64`
 ### Audit ADR refreshed
 
 `wiki/decisions/lead-gen-workflow-gap-audit.md` rows 2b and 6b flipped to ✅. Top-of-queue updated; new ranked next-sprint list now leads with CSV import, email verification gate, credit budget tracking, manual ad-hoc lead add, and cool-off window.
+
+## [2026-04-29] fix+audit | job_search lead-gen bypass fixed + predecessor comparison
+
+Compared live codebase against outreach_automation/job_search_scraper.py (now in raw/external-projects/). Found and fixed three workflow gaps:
+
+1. **Bypass bug** — job_search.upsert_leads() was inserting leads directly, bypassing blacklist + daily_lead_cap + global dedupe from lead_gen.upsert_lead(). Fixed: builds RawLead and routes through upsert_lead().
+2. **No company size filter** — added filter_by_size() + _parse_employee_range(). New min_employees / max_employees nullable columns on job_search_configs (migration 005). Fails closed.
+3. **No Unipile fallback** — added search_unipile_people() (network_distance=[2,3]) and find_decision_makers() Serper-first dispatcher.
+
+Vault: 621-file clip of both predecessors committed to raw/external-projects/. Gap audit updated (rows 5c, 6d, 8b now ✅). All in commit 583efef.
