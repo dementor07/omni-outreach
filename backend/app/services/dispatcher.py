@@ -19,6 +19,14 @@ BATCH_SIZE = 20
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 300  # 5 minutes
 
+# Channels that contact the lead directly. Used by the blacklist gate so that
+# internal actions (tag mutation, enrichment, alerts) keep flowing for blocked
+# leads while only outbound delivery is suppressed.
+_DELIVERY_CHANNELS = frozenset({
+    "linkedin_invite", "linkedin_dm", "linkedin_inmail", "linkedin_profile_view",
+    "email", "whatsapp", "sms", "instagram", "telegram", "voice", "webhook",
+})
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -562,6 +570,33 @@ async def _process_task(task: dict, worker_id: str) -> None:
 
     try:
         ch = task["channel"]
+
+        # Blacklist gate (defense-in-depth — intake also filters, but operators
+        # can blacklist a lead after they're already in the campaign).
+        if ch in _DELIVERY_CHANNELS:
+            from app.routers.blacklist import is_blacklisted
+            blocked = False
+            if lead.get("email") and await is_blacklisted(lead["email"], "email"):
+                blocked = True
+            elif lead.get("linkedin_url") and await is_blacklisted(lead["linkedin_url"], "linkedin_url"):
+                blocked = True
+            elif lead.get("company") and await is_blacklisted(lead["company"], "company"):
+                blocked = True
+            if blocked:
+                log.info(f"[dispatcher] task={task['id']} skipped: lead {lead['id']} on blacklist")
+                await _log_event(
+                    lead["id"], campaign["id"], "blacklisted_skip", ch,
+                    {"reason": "lead matched blacklist"},
+                )
+                await execute(
+                    "UPDATE queue SET status='skipped', failure_reason=$1 WHERE id=$2",
+                    "blacklisted", task["id"],
+                )
+                # Advance the DAG so the lead isn't stuck — this matches how
+                # other "soft skip" paths (e.g. invalid IG recipient) behave.
+                await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
+                return
+
         if ch == "linkedin_invite": await _handle_linkedin_invite(task, lead, campaign)
         elif ch == "linkedin_dm": await _handle_linkedin_dm(task, lead, campaign)
         elif ch == "linkedin_inmail": await _handle_linkedin_inmail(task, lead, campaign)

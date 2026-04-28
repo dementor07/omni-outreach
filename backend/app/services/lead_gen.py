@@ -16,6 +16,41 @@ log = logging.getLogger(__name__)
 
 async def upsert_lead(campaign_id: str, lead: RawLead, source_type: str) -> bool:
     """Upsert a single RawLead into the DB. Returns True if newly inserted."""
+    # Blacklist gate — refuse to insert leads matching any blocked identifier.
+    # Checked here (intake) so the lead never enters the campaign DAG; the
+    # dispatcher does its own check at delivery time as defense-in-depth.
+    from app.routers.blacklist import is_blacklisted
+
+    if lead.email and await is_blacklisted(lead.email, "email"):
+        log.info(f"[lead_gen] Skipping blacklisted email {lead.email}")
+        return False
+    if lead.linkedin_url and await is_blacklisted(lead.linkedin_url, "linkedin_url"):
+        log.info(f"[lead_gen] Skipping blacklisted linkedin_url {lead.linkedin_url}")
+        return False
+    if lead.company and await is_blacklisted(lead.company, "company"):
+        log.info(f"[lead_gen] Skipping blacklisted company {lead.company}")
+        return False
+
+    # Daily lead cap — campaigns.daily_lead_cap was previously dead config.
+    # Enforce it here at intake so a noisy provider run can't drown the campaign.
+    cap_row = await fetch_one(
+        "SELECT daily_lead_cap FROM campaigns WHERE id=$1", campaign_id
+    )
+    if cap_row and cap_row["daily_lead_cap"]:
+        cap = cap_row["daily_lead_cap"]
+        count_row = await fetch_one(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM leads
+            WHERE campaign_id = $1
+              AND created_at >= DATE_TRUNC('day', NOW())
+            """,
+            campaign_id,
+        )
+        if count_row and count_row["cnt"] >= cap:
+            log.info(f"[lead_gen] Campaign {campaign_id} hit daily_lead_cap={cap}; skipping")
+            return False
+
     # Deduplicate by linkedin_url within campaign if available
     if lead.linkedin_url:
         existing = await fetch_one(

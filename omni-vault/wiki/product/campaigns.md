@@ -10,21 +10,22 @@ updated: 2026-04-21
 
 A campaign is the master container for a target audience, its lead-intake configuration, and the sequence that decides what happens next.
 
-## Configuration Fields
-
-Stored in the `campaigns` table. Editable in the **Settings** tab of the campaign detail view.
+## Configuration FieldsStored in the `campaigns` table. Editable in the **Settings** tab of the campaign detail view.
 
 | Field | Type | Purpose |
 |-------|------|---------|
 | `name` | text | Campaign display name |
 | `timezone` | text | Timezone string for scheduling (for example `Asia/Kolkata`) |
-| `daily_lead_cap` | integer | Max new leads processed per day |
-| `invite_daily_cap` | integer | Max LinkedIn invites sent per day |
-| `active_hours_start` | 0–23 | Beginning of the daily outreach window |
-| `active_hours_end` | 0–23 | End of the daily outreach window |
+| `daily_lead_cap` | integer | **Configured but not enforced as of 2026-04-28.** The column is persisted; nothing in `lead_gen.upsert_lead`, `dispatcher`, or the worker reads it. Treated as advisory until a real cap-enforcement path is wired in. |
+| `invite_daily_cap` | integer | Per-LinkedIn-account daily invite ceiling enforced by `dispatcher._handle_linkedin_invite`. Note: the *campaign* field is unused; the dispatcher reads `linkedin_accounts.daily_invite_cap` per account, not this column. |
+| `active_hours_start` | 0–23 | Beginning of the daily outreach window. Enforced in `dispatcher._in_active_hours`. |
+| `active_hours_end` | 0–23 | End of the daily outreach window. Enforced in `dispatcher._in_active_hours`. |
 | `screening_prompt` | text | Default AI screening criteria used by the screener service |
 | `simulation_mode` | boolean | If true, the [[dispatcher]] marks tasks as sent without calling external APIs |
 | `sequence_mode` | `canvas` \| `sequential` | Controls whether the campaign uses the nodal canvas or the linear builder |
+
+> **Audit note (2026-04-28):** `daily_lead_cap` and the campaign-level `invite_daily_cap` are configured by operators in the UI but the only cap actually enforced at runtime is `linkedin_accounts.daily_invite_cap` (per-account). Both campaign-scoped caps are dead fields.
+
 
 ## Campaign List View (`/campaigns`)
 

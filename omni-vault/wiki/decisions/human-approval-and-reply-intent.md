@@ -36,13 +36,14 @@ Three new node types plus one new backing table pattern. All three live inside t
 - `evaluate_conditions` does not pick up this node type. It is only unparked through the approvals router, because the signal originates from human input, not from lead state change.
 
 ### `condition_reply_intent` — intent-aware routing
-
 - Palette category: Conditions.
-- Handles: `positive`, `negative`, `neutral`, `out_of_office`, `unsubscribe`, `bounce` (one per category produced by `services/reply_classifier.py`).
+- Handles: `positive`, `negative`, `neutral`, `out_of_office`, `unsubscribe`, `bounce` (one per category produced by `services/reply_classifier.py`), plus `timeout` (see [[reply-intent-timeout]]).
 - Entry behavior:
   - If `lead.last_reply_category` is already set, branch on it immediately.
   - Otherwise park: `UPDATE leads SET current_node_id = <this node>`.
-- Resume path: the Unipile/Resend webhook handlers already classify inbound replies via `classify_reply(...)`. They now also write `last_reply_{text,category,confidence,at}` onto the lead, then call `evaluate_conditions(lead_id)`. That function picks up the parked node and advances the matching handle.
+- Resume path — there are **two**, and only one of them currently classifies:
+  - **Generic HTTP webhook** (`POST /webhooks/events/inbound`, `routers/webhooks.py`): on `event_type=='reply'` it calls `classify_reply(...)` and writes `last_reply_text/category/confidence/at` onto the lead, then queues a `omni_sequence_events` Redis stream entry. This path picks up the parked node correctly.
+  - **Unipile stream** (`worker/stream_processor.py::_process_unipile_payload`): handles inbound LinkedIn / WhatsApp / IG / TG replies. As of 2026-04-28 it sets `replied_at` and `status='replied'` and calls `evaluate_conditions`, but it does **not** call `classify_reply` and does **not** write `last_reply_*`. Result: leads receiving Unipile-routed replies park indefinitely at `condition_reply_intent` until either the timeout cron fires or the lead is unparked manually. **Fix tracked separately.**
 
 ### `action_hot_lead_alert` — fan-out notification
 

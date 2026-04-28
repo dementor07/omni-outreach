@@ -6,6 +6,7 @@ from redis.exceptions import ResponseError
 
 from app.db import execute, fetch_one
 from app.services import sequencer
+from app.services.reply_classifier import classify_reply
 
 log = logging.getLogger(__name__)
 
@@ -37,10 +38,26 @@ async def _process_unipile_payload(payload: dict) -> None:
 
     log.info(f"[stream_processor] Received reply for lead {lead['id']} on channel {body.get('channel')}")
 
-    # Update lead state
+    # Classify the reply text so condition_reply_intent has something to branch on
+    reply_text = (body.get("text") or body.get("body") or "")
+    reply_subject = body.get("subject") or ""
+    category, confidence = classify_reply(reply_subject, reply_text)
+
+    # Update lead state — mirror the generic /webhooks/events/inbound path so both
+    # routes populate last_reply_* and condition_reply_intent works regardless of
+    # whether the reply arrived via Unipile stream or the HTTP webhook.
     await execute(
-        "UPDATE leads SET replied_at = NOW(), status = 'replied' WHERE id = $1",
-        lead["id"]
+        """
+        UPDATE leads
+        SET replied_at = COALESCE(replied_at, NOW()),
+            status = 'replied',
+            last_reply_text = $2,
+            last_reply_category = $3,
+            last_reply_confidence = $4,
+            last_reply_at = NOW()
+        WHERE id = $1
+        """,
+        lead["id"], reply_text[:4000], category.value, round(confidence, 2),
     )
 
     # Log inbound message
@@ -50,10 +67,10 @@ async def _process_unipile_payload(payload: dict) -> None:
         VALUES ($1, $2, $3, $4, $5)
         """,
         lead["id"], lead["campaign_id"], body.get("channel"),
-        body.get("text") or body.get("body"), payload
+        reply_text, payload
     )
 
-    # Evaluate sequence logic
+    # Evaluate sequence logic — picks up condition_reply_intent / condition_replied parks
     await sequencer.evaluate_conditions(str(lead["id"]))
 
 

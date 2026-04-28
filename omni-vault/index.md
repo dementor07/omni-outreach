@@ -54,9 +54,10 @@ Last updated: 2026-04-23 (human_approval + condition_reply_intent + action_hot_l
 | [[integrations-security-architecture]] | Apr 2026 security ADR: encrypted integration keys, rate limiting, CORS tightening, webhook verification, Docker isolation |
 | [[lead-gen-canvas-integration]] | Implemented lead-gen ↔ canvas integration: screening, source routing, enrichment, schedules, trigger/source UX, settings tie-in |
 | [[human-approval-and-reply-intent]] | Apr 2026 ADR: `human_approval`, `condition_reply_intent`, `action_hot_lead_alert`; approvals table, reply cache, global notifier |
+| [[reply-intent-timeout]] | Apr 2026 ADR: timeout_days fallback handle on condition_reply_intent (cron registration fix 2026-04-25, semantics clarified 2026-04-28) |
+| [[lead-gen-workflow-gap-audit]] | 2026-04-28 audit: lead-gen pipeline gaps vs typical automation stacks; ranked next-sprint list |
 | [[stubbed-channels-policy]] | Historical ADR for the typed-before-handler staging phase; superseded now that SMS/Webhook/Instagram/Telegram are live |
 | [[system-gaps-sprint]] | Apr 2026 20-cycle sprint closing 140+ gaps: notifications, activity log, blacklist, tracking, analytics, template library, inbox, reply classifier, CSV import, bulk actions, dark mode, campaign cloning |
-| [[reply-intent-timeout]] | Apr 2026 ADR: Added timeout_days to condition_reply_intent to fix indefinite parking of leads. |
 
 ## Competitors
 

@@ -40,11 +40,12 @@ These still run through queue + dispatcher, but they mutate state or emit notifi
 | **Human Approval** | *(not dispatched — sequencer parks the lead)* | Opens an `approvals` row and holds the lead in place; the [[approvals-page]] resolves it and the sequencer advances `approve`/`reject` |
 
 ## Shared Characteristics
-
 - Templates render through `renderer.py`, so variables like `{{first_name}}` work across email, DMs, SMS, and webhook bodies.
 - Every successful handler logs an immutable event, marks the queue row sent, and calls `sequencer.queue_next_nodes()`.
 - All channels obey campaign active hours and simulation mode.
 - Final failures dead-letter into the queue record rather than disappearing silently.
+
+> **Audit gap (2026-04-28):** the `blacklists` table and `/blacklist` router exist with a working `is_blacklisted(value, entry_type)` function, but **no caller**. Neither `lead_gen.upsert_lead` (intake) nor any dispatcher handler (delivery) consults it. Blacklisted emails / domains / linkedin URLs still get scraped, queued, and contacted. Tracked as a pending fix.
 
 ## Related Pages
 - [[dispatcher]]
