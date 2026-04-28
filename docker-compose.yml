@@ -72,6 +72,8 @@ services:
     volumes:
       - ./certs:/etc/nginx/certs:ro
       - ./certbot/www:/var/www/certbot:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       backend:
         condition: service_healthy
