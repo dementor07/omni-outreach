@@ -45,10 +45,16 @@ Transfer destination: `+918129244426` (cold transfer)
 Stored in server `.env` as `RETELL_API_KEY`. Base URL: `https://api.retellai.com`
 
 ## Voice Node in Canvas
+The voice node in the [[canvas-editor]] has two modes (toggle in the ConfigSidebar):
 
-See [[voice-node]] for the UX. Two modes:
-- **Standard** — ConfigSidebar shows begin_message + prompt editor, saves via PATCH retell-llm
-- **Nested Flow** — opens `RetellFlowEditor` sub-canvas at `/campaigns/:id/voice-flow/:agentId`
+- **Standard** — ConfigSidebar shows the `begin_message` + global-prompt editor for the `retell-llm`. Saves via `PATCH /update-retell-llm/{llm_id}`.
+- **Nested Flow** — clicking the node navigates to a sub-canvas at `/campaigns/:id/voice-flow/:agentId` rendered by `RetellFlowEditor.tsx`. The sub-canvas reads and writes the live Retell conversation-flow graph directly.
+
+Inside `RetellFlowEditor`:
+
+- Each Retell node (`conversation`, `transfer_call`, `end`) has its own right-side config panel. `conversation` exposes the instruction script and the outgoing edges with their transition conditions; `transfer_call` exposes the destination phone number; `end` exposes a final instruction.
+- Edges show their transition condition labels (truncated for display).
+- The top bar has a **Global Prompt** textarea and a **Publish to Retell** button. The button maps to `PATCH /accounts/voice/{agentId}/flow`, which forwards to Retell's `update-conversation-flow` endpoint. Until Publish is clicked, edits are local-only.
 
 ## Calling
 
@@ -59,6 +65,7 @@ See [[voice-node]] for the UX. Two modes:
 - `metadata`: `{ lead_id, campaign_id }`
 
 ## Related Pages
-- [[voice-node]]
+- [[canvas-editor]]
+- [[voice-node-architecture]]
 - [[system-overview]]
 - [[channels]]
