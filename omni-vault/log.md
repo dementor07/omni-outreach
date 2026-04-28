@@ -692,3 +692,44 @@ Compared live codebase against outreach_automation/job_search_scraper.py (now in
 3. **No Unipile fallback** — added search_unipile_people() (network_distance=[2,3]) and find_decision_makers() Serper-first dispatcher.
 
 Vault: 621-file clip of both predecessors committed to raw/external-projects/. Gap audit updated (rows 5c, 6d, 8b now ✅). All in commit 583efef.
+
+## [2026-04-28] fix+infra | Webhook-based CI/CD deploy + CI build fixes — HEAD d902010
+
+**Context:** CI builds were constantly failing. The previous SSH-based deploy (`appleboy/ssh-action`) timed out on every run because Hostinger's upstream network silently blocks GitHub Actions IP ranges (`dial tcp ***:22: i/o timeout`).
+
+### Problem chain and fixes (four commits)
+
+**`c96934a` — fix(build): React import missing in `Campaigns.tsx`**
+
+TypeScript TS2686 error ("'React' refers to a UMD global") was blocking the `build` CI job. Added `import React from 'react'` to the top of `Campaigns.tsx`. Unrelated to deploy, but was the first blocker in the CI failure chain.
+
+**`d10a729` — feat(deploy): replace SSH deploy with webhook-based pull deploy**
+
+Replaced the SSH deploy step entirely with a webhook pull model:
+
+- New `webhook/deploy-webhook.py` — minimal Python HTTP server running as a **systemd service** on the VPS at port 9000. Validates `Authorization: Bearer <token>`, runs `git pull` + `docker compose up -d --build --remove-orphans` + `alembic upgrade head`.
+- `frontend/nginx.conf` — new `location = /deploy { proxy_pass http://host.docker.internal:9000/deploy; }` block (HTTPS on 443, POST-only, 300s timeouts).
+- `docker-compose.yml` — added `extra_hosts: ["host.docker.internal:host-gateway"]` on the frontend service so nginx can reach the host daemon.
+- `.github/workflows/ci.yml` — deploy step replaced with a `curl -sf -X POST -H "Authorization: Bearer $DEPLOY_WEBHOOK_SECRET"` call.
+- GitHub secret: `DEPLOY_WEBHOOK_SECRET = c43d9f495529a3d8c6e3b6bcad529a5d9cba113fdb4c4511ccd76f0c17610285`
+- VPS: `scp`'d `deploy-webhook.py` to `/usr/local/bin/`, created systemd unit, `systemctl start deploy-webhook`.
+- UFW: added rules to allow port 9000 from all Docker Compose bridge subnets (`172.18–20.0.0/16` in addition to the legacy `172.17.0.0/16`). The 504 gateway error on `/deploy` was caused by nginx in the compose network being unable to reach host port 9000.
+
+**`e6d8c6c` — fix(deploy): use `srv1575227.hstgr.cloud` — `omnioutreach.space` has no DNS**
+
+The initial webhook URL used `omnioutreach.space`, which has no DNS A record (curl exit code 6 — "Couldn't resolve host"). Switched to `srv1575227.hstgr.cloud` (the Hostinger hostname the Let's Encrypt cert is issued for). Added `omnioutreach.space www.omnioutreach.space` as nginx `server_name` aliases for when the domain is pointed.
+
+**`d902010` — fix(deploy): respond 202 immediately, deploy in background thread**
+
+`docker compose up --build` restarts the nginx container mid-request, which kills the active proxy connection and returns curl exit code 56 (broken pipe), even though the deploy completed successfully on the VPS. Fix: `do_POST` now sends `202 Accepted` before starting `threading.Thread(target=_run_deploy, daemon=True).start()`. The connection closes cleanly before nginx restarts.
+
+### Final state
+
+- CI run `25054242559`: lint ✅ test ✅ build ✅ deploy ✅ — **all four jobs green**
+- VPS HEAD: `d902010`, all containers healthy, `/health = ok`
+- `deploy-webhook.py` service healthy on the VPS
+- UFW rules in place for compose bridge subnets
+
+### Updated vault
+
+- `wiki/architecture/system-overview.md` — new "CI/CD & Deploy" section documenting the webhook pipeline, UFW rules, `host.docker.internal`, and domain status.

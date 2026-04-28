@@ -1,12 +1,12 @@
 # Omni Wiki — Index
 
-Last updated: 2026-04-23 (human_approval + condition_reply_intent + action_hot_lead_alert live; approvals inbox, notifier service, global notification_channels; 30 backend node types)
+Last updated: 2026-04-28 (webhook-based CI/CD deploy; 30 backend node types; reply-intent timeout; lead-gen gaps; cross-campaign dedupe; unsubscribe blacklist)
 
 ## Architecture
 
 | Page | Summary |
 | --- | --- |
-| [[system-overview]] | Stack, runtime services, lead-intake flow, execution loop, and CI smoke-test model |
+| [[system-overview]] | Stack, runtime services, lead-intake flow, execution loop, CI/CD webhook deploy, and smoke-test model |
 | [[sequence-engine]] | 30 backend-supported node types, graph traversal, queue/parking/re-evaluation, split bandit, reply-intent + approvals |
 | [[dispatcher]] | Queue locking, all delivery/action/alert handlers, retry logic, dead-letter capture, helper crons |
 | [[worker]] | arq cron schedule, stream processor, authenticated Redis, scheduled lead-gen cron |

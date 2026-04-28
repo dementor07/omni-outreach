@@ -3,7 +3,7 @@ title: System Overview
 category: architecture
 tags: [backend, frontend, infra, docker]
 sources: []
-updated: 2026-04-21
+updated: 2026-04-28
 ---
 
 # System Overview
@@ -80,7 +80,41 @@ omni-outreach/
 └── omni-vault/             canonical project memory
 ```
 
-## Quality Gate
+## CI/CD & Deploy
+
+### Pipeline (`.github/workflows/ci.yml`)
+
+Four jobs run sequentially on every master push:
+
+1. **lint** — `ruff check backend/`
+2. **test** — pytest against ephemeral Postgres 16 + Redis 7 services; DB seeded from `schema.sql`
+3. **build** — `docker build` for backend and frontend images
+4. **deploy** — `curl -sf -X POST -H "Authorization: Bearer $DEPLOY_WEBHOOK_SECRET" https://srv1575227.hstgr.cloud/deploy`
+
+Deploy only fires on master push when `DEPLOY_WEBHOOK_SECRET` is set in GitHub repo secrets.
+
+### Webhook Deploy (`webhook/deploy-webhook.py`)
+
+Replaced `appleboy/ssh-action` SSH deploy (which timed out because Hostinger's upstream blocks GitHub Actions IP ranges). New approach:
+
+- `deploy-webhook.py` runs as a **systemd service** on the VPS at port 9000
+- nginx in the frontend container proxies `POST /deploy` → `http://host.docker.internal:9000/deploy` (the `/deploy` location is restricted to POST and requires the Bearer token)
+- CI `curl`s `https://srv1575227.hstgr.cloud/deploy` — HTTPS on 443, always open
+- Webhook validates the token with `hmac.compare_digest`, responds **202 Accepted immediately**, then runs the deploy in a background thread:
+  1. `git pull origin master`
+  2. `docker compose up -d --build --remove-orphans`
+  3. `docker compose exec -T backend alembic upgrade head`
+
+The 202-before-deploy pattern is required because step 2 restarts the nginx container, which would kill the active proxy connection and return `curl` exit code 56 if the response hadn't already been sent.
+
+### VPS Networking
+
+- **UFW rules** — port 9000 explicitly allowed for all Docker Compose bridge subnets:
+  - `172.17.0.0/16` (legacy docker0), `172.18.0.0/16`, `172.19.0.0/16`, `172.20.0.0/16`
+- **`host.docker.internal`** — `extra_hosts: ["host.docker.internal:host-gateway"]` on the `frontend` service enables the nginx container to reach the host-level webhook daemon
+- **Domain** — `srv1575227.hstgr.cloud` is the active HTTPS endpoint (Let's Encrypt cert). `omnioutreach.space` is configured as an nginx `server_name` alias but has no DNS A record yet.
+
+### Quality Gate
 
 The backend includes a lightweight pytest smoke suite covering health, auth, and unauthorized access checks. CI initializes the DB pool/Redis client in test fixtures, and `/health` is allowed to report `degraded` when Redis is only partially wired in the test environment.
 
