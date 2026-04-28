@@ -625,3 +625,24 @@ CI ran lint+test+build+deploy and the SSH deploy step succeeded this time — `D
 - Node 20 GitHub Actions deprecation — bump `actions/checkout@v4` and `actions/setup-python@v5` before 2026-06-02.
 - The dangling `[[voice-node]]` page references in `index.md` and `canvas-editor.md` left over from `1c480e2` (which deleted `wiki/product/voice-node.md`) — fixed inline by redirecting to `[[retell-integration]]`.
 - The 5 ranked items in the new gap-audit ADR.
+
+
+## [2026-04-28] feat | Cross-campaign dedupe + unsubscribe auto-blacklist (audit gaps #2b + #6b)
+
+Vault-driven follow-on to the workflow audit ADR. Both gaps shipped in `e434a64` and verified live on the VPS (now at `e434a64`).
+
+### #2b — Cross-campaign dedupe
+
+- New `_dedupe_scope()` helper in `services/lead_gen.py` reading `LEAD_DEDUPE_SCOPE` env var. `campaign` (default) preserves the prior within-campaign behavior; `global` drops the campaign filter on the dedupe query so a lead present in any campaign blocks reinsertion.
+- No migration. Activate by setting `LEAD_DEDUPE_SCOPE=global` in the backend env.
+- Verified live: `_dedupe_scope() == 'campaign'` in prod (default preserved).
+
+### #6b — Unsubscribe auto-blacklist
+
+- `/webhooks/events/inbound` now handles `event_type='unsubscribe'` in addition to `bounce`. Sets `leads.status='unsubscribed'` and inserts the lead's lowercased email into `blacklists` with `reason='unsubscribed via webhook'`. Idempotent via the existing `UNIQUE(entry_type, value)` constraint (`ON CONFLICT DO NOTHING`).
+- Future provider runs and outbound delivery skip the address via the existing intake + delivery blacklist gates we shipped earlier today.
+- Verified live: `event_type == "unsubscribe"` block present in the running webhook module.
+
+### Audit ADR refreshed
+
+`wiki/decisions/lead-gen-workflow-gap-audit.md` rows 2b and 6b flipped to ✅. Top-of-queue updated; new ranked next-sprint list now leads with CSV import, email verification gate, credit budget tracking, manual ad-hoc lead add, and cool-off window.
