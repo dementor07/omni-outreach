@@ -25,7 +25,6 @@ Last updated: 2026-04-23 (human_approval + condition_reply_intent + action_hot_l
 | [[campaigns]] | Campaign list + detail view (leads/sources/queue/sequence/settings tabs), stats mini-bar, simulation badge, integrated source controls |
 | [[canvas-editor]] | ReactFlow canvas, 30 backend-supported node types, trigger source badge, live source telemetry, bandit UI, ConfigSidebar, serialization |
 | [[sequential-builder]] | Linear sequence builder UI, curated 16-button add grid, STEP_LABELS map, StepIcon, reordering, inline wait duration edit |
-| [[voice-node]] | Standard vs Nested Flow modes, Retell editor UX |
 | [[channels]] | Delivery channels (LinkedIn ×4, WhatsApp, Email, SMS, Instagram, Telegram, Voice, Webhook/CRM) plus non-delivery actions (tags, enrichment, alerts, approvals) |
 | [[leads-page]] | Global lead inspector: campaign filter, lead table, stop action, lead drawer with profile + timeline |
 | [[queue-page]] | Live task queue inspector: stat cards, 3-way filter (campaign/channel/status), task table with retry count |

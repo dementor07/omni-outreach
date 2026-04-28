@@ -136,7 +136,7 @@ The TypeScript layer still contains experimental `wait_until` and `goal` union m
 - [[sequence-engine]]
 - [[telemetry-overlay]]
 - [[auto-optimization-engine]]
-- [[voice-node]]
+- [[retell-integration]]
 - [[approvals-page]]
 - [[notifier]]
 - [[human-approval-and-reply-intent]]

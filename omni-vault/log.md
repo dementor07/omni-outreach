@@ -583,3 +583,45 @@ CI lint+test+build passed but the `appleboy/ssh-action` deploy step timed out wi
 **Follow-ups added to the queue:**
 1. **VPS firewall vs GitHub Actions** — figure out which IP ranges to allow for `actions/runner` so autodeploy works again. Or switch to a pull-based deploy (a cron on the VPS that polls master), which sidesteps the firewall entirely.
 2. **Stream processor Redis auth** — investigate why arq's process_stream_events can't authenticate while the rest of the worker can.
+
+
+## [2026-04-28] audit | Vault drift fixes + lead-gen pipeline gap audit + 4 code fixes shipped
+
+**Trigger:** vault-vs-code re-check requested. Found four real bugs disguised as documentation, plus stale claims; fixed everything in one commit (`c38e8c7`).
+
+### Vault drift corrected
+
+- `wiki/product/canvas-editor.md` — stripped trailing `t]]` corruption from EOF.
+- `wiki/product/campaigns.md` — flagged `daily_lead_cap` and the campaign-level `invite_daily_cap` as configured-but-unread before today's fix; now `daily_lead_cap` is enforced.
+- `wiki/decisions/human-approval-and-reply-intent.md` — clarified the Unipile-stream-vs-HTTP-webhook divergence: only the HTTP webhook was running `classify_reply` and writing `last_reply_*`. The Unipile path silently parked every Unipile-routed reply at `condition_reply_intent`. Fixed in this commit.
+- `wiki/decisions/reply-intent-timeout.md` — corrected what the cron measures (elapsed since last outbound `queue.sent_at`, not "time at the node"). Documents the implication: leads that reach the node via a pure-condition branch with no preceding outbound never time out.
+- `wiki/product/channels.md` — flagged the blacklist gap (closed by this commit).
+
+### Code fixes shipped (all in `c38e8c7`)
+
+1. **Blacklist now consulted at intake** — `lead_gen.upsert_lead` rejects matches on email / linkedin_url / company.
+2. **Blacklist now consulted at delivery** — `dispatcher._process_task` gates the 11 delivery channels (linkedin_*, email, whatsapp, sms, instagram, telegram, voice, webhook). Internal actions (tags / enrich / hot_lead_alert / human_approval) keep flowing for blacklisted leads. The frozen `_DELIVERY_CHANNELS` set is module-scoped.
+3. **`daily_lead_cap` enforced** — same place, after blacklist. Counts today's inserted leads vs the cap.
+4. **Stream processor now classifies** — `worker/stream_processor.py::_process_unipile_payload` calls `classify_reply` and writes the same `last_reply_*` columns the HTTP webhook writes. `condition_reply_intent` now branches correctly regardless of which path delivered the reply.
+
+The Redis-URL hardcoding fix that I had locally was already shipped by Gemini in commit `7eb3c79` earlier today — confirmed live in prod via worker logs (no more `AuthenticationError` spam).
+
+### Lead-gen workflow gap audit
+
+New page: `wiki/decisions/lead-gen-workflow-gap-audit.md`. Compares the live pipeline against the typical capability matrix of Apollo / Instantly / Lemlist / Smartlead / Clay / Woodpecker. 14-row matrix. Highest-leverage open gaps in priority order:
+
+1. Cross-campaign dedupe (one-line change in `upsert_lead`).
+2. Auto-blacklist on `unsubscribe` event (two-line change in `webhooks.py`).
+3. CSV / list import (operator-blocking gap — would follow the registry pattern as a `csv_upload` source).
+4. Email verification gate (use Hunter's existing `verification.status`; reject `undeliverable`).
+5. Provider credit-budget tracking (`credits_consumed`/`credit_budget` on `lead_gen_runs`/`lead_gen_configs`).
+
+### Deployment
+
+CI ran lint+test+build+deploy and the SSH deploy step succeeded this time — `Deploy complete at 2026-04-28 08:55:48 UTC`. The firewall block from 04-25 has resolved itself (or someone opened the port). Backend / worker / frontend containers all recycled and healthy. `/health = ok`.
+
+### Followups still open
+
+- Node 20 GitHub Actions deprecation — bump `actions/checkout@v4` and `actions/setup-python@v5` before 2026-06-02.
+- The dangling `[[voice-node]]` page references in `index.md` and `canvas-editor.md` left over from `1c480e2` (which deleted `wiki/product/voice-node.md`) — fixed inline by redirecting to `[[retell-integration]]`.
+- The 5 ranked items in the new gap-audit ADR.
