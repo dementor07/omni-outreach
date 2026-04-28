@@ -6,23 +6,22 @@ sources: [wiki/decisions/system-gaps-sprint.md, wiki/competitors/landscape.md, c
 updated: 2026-04-29
 ---
 
-# Lead-Gen Workflow Gap Audit
-
 ## Status
 
 Snapshot — 2026-04-29. Compared the live lead-gen pipeline against the typical capability set of automation stacks (Apollo, Instantly, Lemlist, Smartlead, Clay, Woodpecker) **and** the predecessor `outreach_automation` project (now clipped verbatim into `raw/external-projects/outreach-automation/`).
 
 ## Reference workflow
 
-```
+```text
 1. Source → 2. Dedupe → 3. Enrich → 4. Verify → 5. Score / qualify
 → 6. Suppression → 7. Cap / budget → 8. Inject to DAG
 → 9. Capture intent / reply → 10. Closed-loop feedback
 ```
 
 ## Gap matrix
+
 | # | Step | Status | Notes |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | Source | ✅ | 5 providers in `lead_source_registry`: apify_jobs, apollo, hunter, proxycurl, github |
 | 2 | Dedupe within campaign | ✅ | `lead_gen.upsert_lead` checks `linkedin_url` then `email` |
 | 2b | Dedupe cross-campaign | ✅ (2026-04-28) | `LEAD_DEDUPE_SCOPE` env flag: `campaign` (default) or `global`. `global` mode drops the campaign filter from the dedupe query so a lead present in any campaign blocks reinsertion. |
@@ -49,6 +48,7 @@ Snapshot — 2026-04-29. Compared the live lead-gen pipeline against the typical
 | 14 | Per-source A/B test | ❌ | Bandit-style optimization at the lead-gen layer (which provider yields the highest reply rate per dollar) is not implemented. |
 
 ## Recommended next sprint (priority order, vault-derived)
+
 Shipped 2026-04-29 (removed from list): job_search bypass fix (6d), company size filter (5c), Unipile fallback (8b).
 
 1. **11 — CSV / list import.** Operator-blocking gap. Implement as a `csv_upload` provider following the registry pattern: file storage on the campaign settings page, schema-driven column mapping, idempotent reruns.

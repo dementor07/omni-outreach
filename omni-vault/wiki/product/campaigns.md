@@ -6,14 +6,14 @@ sources: []
 updated: 2026-04-21
 ---
 
-# Campaigns
-
 A campaign is the master container for a target audience, its lead-intake configuration, and the sequence that decides what happens next.
 
-## Configuration FieldsStored in the `campaigns` table. Editable in the **Settings** tab of the campaign detail view.
+## Configuration Fields
+
+Stored in the `campaigns` table. Editable in the **Settings** tab of the campaign detail view.
 
 | Field | Type | Purpose |
-|-------|------|---------|
+| --- | --- | --- |
 | `name` | text | Campaign display name |
 | `timezone` | text | Timezone string for scheduling (for example `Asia/Kolkata`) |
 | `daily_lead_cap` | integer | **Configured but not enforced as of 2026-04-28.** The column is persisted; nothing in `lead_gen.upsert_lead`, `dispatcher`, or the worker reads it. Treated as advisory until a real cap-enforcement path is wired in. |
@@ -25,7 +25,6 @@ A campaign is the master container for a target audience, its lead-intake config
 | `sequence_mode` | `canvas` \| `sequential` | Controls whether the campaign uses the nodal canvas or the linear builder |
 
 > **Audit note (2026-04-28):** `daily_lead_cap` and the campaign-level `invite_daily_cap` are configured by operators in the UI but the only cap actually enforced at runtime is `linkedin_accounts.daily_invite_cap` (per-account). Both campaign-scoped caps are dead fields.
-
 
 ## Campaign List View (`/campaigns`)
 
@@ -74,7 +73,7 @@ Recent lead-gen/canvas integration points now surface here too:
 
 **CampaignSettings form** — all campaign-level controls in a compact grid:
 
-```
+```text
 [Name]              [Timezone]
 [Daily Lead Cap]    [Daily Invite Cap]
 [Active Hours Start][Active Hours End]
@@ -102,7 +101,9 @@ The primary lead-acquisition path now uses `lead_gen_configs` and the [[lead-sou
 
 The older [[job-search-ui]] / [[job-search-pipeline]] path is still present for backward compatibility, but the main product surface has shifted to multi-source lead gen.
 
-## Related Pages- [[lead-sources-ui]]
+## Related Pages
+
+- [[lead-sources-ui]]
 - [[canvas-editor]]
 - [[sequential-builder]]
 - [[leads-page]]

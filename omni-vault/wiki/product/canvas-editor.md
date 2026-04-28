@@ -6,45 +6,44 @@ sources: []
 updated: 2026-04-21
 ---
 
-# Canvas Editor
-
 `frontend/src/pages/Campaigns.tsx` — the Sequence tab when `campaign.sequence_mode === 'canvas'`.
 
 ## Node Types & Components
+
 All 30 backend-supported `node_type` values accepted by `backend/app/routers/sequences.py` and rendered by the frontend:
 
-| node_type                      | Component       | Palette Group             | Notes                                                                                                                                                    |
-| ------------------------------ | --------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `trigger_start`                | `TriggerNode`   | *(palette header button)* | Dark slate card with Zap icon. Shows lead-source count, scheduled-source count, and in Live mode a `+N in 60s` source banner. Opens [[lead-sources-ui]]. |
-| `action_linkedin_invite`       | `ActionNode`    | LinkedIn                  | Sends a connection request. Sequencer parks later on acceptance events.                                                                                  |
-| `action_linkedin_dm`           | `ActionNode`    | LinkedIn                  | Sends a direct message to an accepted connection.                                                                                                        |
-| `action_linkedin_inmail`       | `ActionNode`    | LinkedIn                  | Sends Premium InMail.                                                                                                                                    |
-| `action_linkedin_profile_view` | `ActionNode`    | LinkedIn                  | Triggers a profile view and populates `linkedin_distance`.                                                                                               |
-| `action_email`                 | `ActionNode`    | Messaging                 | Native SMTP send. ConfigSidebar selects the email account plus subject/body.                                                                             |
-| `action_whatsapp`              | `ActionNode`    | Messaging                 | WhatsApp message via Unipile.                                                                                                                            |
-| `action_sms`                   | `ActionNode`    | Messaging                 | Sends SMS through Twilio. Requires `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM_NUMBER`.                                                  |
-| `action_instagram`             | `ActionNode`    | Messaging                 | Instagram DM via Unipile account routing.                                                                                                                |
-| `action_telegram`              | `ActionNode`    | Messaging                 | Telegram DM via configured account plus username/phone resolution.                                                                                       |
-| `action_voice`                 | `ActionNode`    | Voice                     | Retell AI call. Standard vs Nested Flow mode in ConfigSidebar.                                                                                           |
-| `action_webhook`               | `ActionNode`    | Actions                   | Sends POST/PUT/PATCH to a configured URL with rendered payload or lead JSON.                                                                             |
-| `action_add_tag`               | `ActionNode`    | Actions                   | Adds a tag to the lead record.                                                                                                                           |
-| `action_remove_tag`            | `ActionNode`    | Actions                   | Removes a tag from the lead record.                                                                                                                      |
-| `action_enrich`                | `ActionNode`    | Actions                   | Calls a lead-source enrichment path and fills only missing lead fields.                                                                                  |
-| `action_hot_lead_alert`        | `ActionNode`    | Actions                   | Fans out a Slack/email alert via [[notifier]]. Optional `node.data.channel_ids` restricts delivery; blank means every active channel. |
-| `human_approval`               | `ActionNode`    | Actions                   | Opens a row in the [[approvals-page]] inbox and parks the lead until operator resolution. Handles: `approve`, `reject`. |
-| `condition_replied`            | `ConditionNode` | Conditions                | True/False fork: has the lead replied on any channel?                                                                                                    |
-| `condition_linkedin_distance`  | `ConditionNode` | Conditions                | True/False fork: is the lead 1st-degree? Usually follows profile view.                                                                                   |
-| `condition_tag_exists`         | `ConditionNode` | Conditions                | True/False fork: does a specific tag exist?                                                                                                              |
-| `condition_ai_screen`          | `ConditionNode` | Conditions                | Immediate AI screening gate using `screener.screen_lead()` and `screening_prompt`.                                                                       |
-| `condition_lead_source`        | `ConditionNode` | Conditions                | Routes by `lead.source`; output handles map to configured providers plus `default`.                                                                      |
-| `condition_has_field`          | `ConditionNode` | Conditions                | Immediate True/False branch based on presence of one lead field.                                                                                         |
-| `condition_reply_intent`       | `ConditionNode` | Conditions                | Routes on classified `lead.last_reply_category`: `positive`, `negative`, `neutral`, `out_of_office`, `unsubscribe`, `bounce`. Parks if no reply has been classified yet. |
-| `event_invite_accepted`        | `EventNode`     | Events                    | Parks until the invite is accepted.                                                                                                                      |
-| `event_email_opened`           | `EventNode`     | Events                    | Fires from the email open tracking pixel.                                                                                                                |
-| `event_link_clicked`           | `EventNode`     | Events                    | Fires from tracked email link clicks.                                                                                                                    |
-| `delay`                        | `DelayNode`     | Flow                      | Inline numeric input for `delay_days`.                                                                                                                   |
-| `split`                        | `SplitNode`     | Flow                      | Thompson Sampling bandit. Shows learning vs live arm win rate.                                                                                           |
-| `end`                          | `EndNode`       | Flow                      | Terminal node. Stops sequence execution for the lead.                                                                                                    |
+| node_type | Component | Palette Group | Notes |
+| --- | --- | --- | --- |
+| `trigger_start` | `TriggerNode` | *(palette header button)* | Dark slate card with Zap icon. Shows lead-source count, scheduled-source count, and in Live mode a `+N in 60s` source banner. Opens [[lead-sources-ui]]. |
+| `action_linkedin_invite` | `ActionNode` | LinkedIn | Sends a connection request. Sequencer parks later on acceptance events. |
+| `action_linkedin_dm` | `ActionNode` | LinkedIn | Sends a direct message to an accepted connection. |
+| `action_linkedin_inmail` | `ActionNode` | LinkedIn | Sends Premium InMail. |
+| `action_linkedin_profile_view` | `ActionNode` | LinkedIn | Triggers a profile view and populates `linkedin_distance`. |
+| `action_email` | `ActionNode` | Messaging | Native SMTP send. ConfigSidebar selects the email account plus subject/body. |
+| `action_whatsapp` | `ActionNode` | Messaging | WhatsApp message via Unipile. |
+| `action_sms` | `ActionNode` | Messaging | Sends SMS through Twilio. Requires `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM_NUMBER`. |
+| `action_instagram` | `ActionNode` | Messaging | Instagram DM via Unipile account routing. |
+| `action_telegram` | `ActionNode` | Messaging | Telegram DM via configured account plus username/phone resolution. |
+| `action_voice` | `ActionNode` | Voice | Retell AI call. Standard vs Nested Flow mode in ConfigSidebar. |
+| `action_webhook` | `ActionNode` | Actions | Sends POST/PUT/PATCH to a configured URL with rendered payload or lead JSON. |
+| `action_add_tag` | `ActionNode` | Actions | Adds a tag to the lead record. |
+| `action_remove_tag` | `ActionNode` | Actions | Removes a tag from the lead record. |
+| `action_enrich` | `ActionNode` | Actions | Calls a lead-source enrichment path and fills only missing lead fields. |
+| `action_hot_lead_alert` | `ActionNode` | Actions | Fans out a Slack/email alert via [[notifier]]. Optional `node.data.channel_ids` restricts delivery; blank means every active channel. |
+| `human_approval` | `ActionNode` | Actions | Opens a row in the [[approvals-page]] inbox and parks the lead until operator resolution. Handles: `approve`, `reject`. |
+| `condition_replied` | `ConditionNode` | Conditions | True/False fork: has the lead replied on any channel? |
+| `condition_linkedin_distance` | `ConditionNode` | Conditions | True/False fork: is the lead 1st-degree? Usually follows profile view. |
+| `condition_tag_exists` | `ConditionNode` | Conditions | True/False fork: does a specific tag exist? |
+| `condition_ai_screen` | `ConditionNode` | Conditions | Immediate AI screening gate using `screener.screen_lead()` and `screening_prompt`. |
+| `condition_lead_source` | `ConditionNode` | Conditions | Routes by `lead.source`; output handles map to configured providers plus `default`. |
+| `condition_has_field` | `ConditionNode` | Conditions | Immediate True/False branch based on presence of one lead field. |
+| `condition_reply_intent` | `ConditionNode` | Conditions | Routes on classified `lead.last_reply_category`: `positive`, `negative`, `neutral`, `out_of_office`, `unsubscribe`, `bounce`. Parks if no reply has been classified yet. |
+| `event_invite_accepted` | `EventNode` | Events | Parks until the invite is accepted. |
+| `event_email_opened` | `EventNode` | Events | Fires from the email open tracking pixel. |
+| `event_link_clicked` | `EventNode` | Events | Fires from tracked email link clicks. |
+| `delay` | `DelayNode` | Flow | Inline numeric input for `delay_days`. |
+| `split` | `SplitNode` | Flow | Thompson Sampling bandit. Shows learning vs live arm win rate. |
+| `end` | `EndNode` | Flow | Terminal node. Stops sequence execution for the lead. |
 
 `ActionNode` uses the `ConfigSidebar` for configuration. `ConditionNode` keeps the shared true/false branch layout but now inherits its label, icon, and accent colors from `NODE_PALETTE`, so nodes like `condition_ai_screen` and `condition_lead_source` no longer collapse into the same generic amber card. `EventNode` uses the palette icon with a single source handle.
 
@@ -58,10 +57,11 @@ All 30 backend-supported `node_type` values accepted by `backend/app/routers/seq
 - The source badge is clickable (`nodrag`) and navigates to [[lead-sources-ui]].
 
 ## NodePalette Groups
-The left-side palette (`w-52`, scrollable, `maxHeight: calc(100vh - 160px)`) groups nodes into 7 sections:
+
+The left-side palette (`w-52`, scrollable, `max-h-[calc(100vh-160px)]`) groups nodes into 7 sections:
 
 | Heading | Types |
-|---------|-------|
+| --- | --- |
 | LinkedIn | invite, dm, inmail, profile_view |
 | Messaging | email, whatsapp, sms, instagram, telegram |
 | Voice | voice |
@@ -73,7 +73,7 @@ The left-side palette (`w-52`, scrollable, `maxHeight: calc(100vh - 160px)`) gro
 ## Edge Types
 
 | type | Component | When used |
-|------|-----------|-----------|
+| --- | --- | --- |
 | `custom` | `CustomEdge` | Default Bezier edge with delete affordance on select |
 | `telemetry` | `TelemetryEdge` | Active when Live mode is on; heat-colored with floating count pill and dashed backpressure state |
 
@@ -82,7 +82,7 @@ The left-side palette (`w-52`, scrollable, `maxHeight: calc(100vh - 160px)`) gro
 Top-right panel contains two primary controls:
 
 | Button | Style | Behaviour |
-|--------|-------|-----------|
+| --- | --- | --- |
 | **Live** | Emerald when active, white/slate when inactive | Polls telemetry every 5 seconds and swaps edge rendering to `telemetry` |
 | **Save Canvas** | Sky-500 with `btn-tactile` styling | Calls `saveGraph.mutate()` → `POST /sequences/save` |
 
@@ -96,6 +96,7 @@ Reads `node.data.weights` (`{true: {alpha, beta}, false: {alpha, beta}}`).
 - Learned state: shows `Bandit Active` plus per-arm win rate derived from `alpha / (alpha + beta)`.
 
 ## ConfigSidebar
+
 The right-side panel opens on node click (`selectedNodeId`). Important custom panels:
 
 - `action_email`: email account selector, subject, body
@@ -131,6 +132,7 @@ This prevents non-serializable functions from leaking into `sequence_nodes.data 
 The TypeScript layer still contains experimental `wait_until` and `goal` union members, and `Campaigns.tsx` includes a `WaitUntilNode` component. The backend `NodeType` contract in `sequences.py` does not accept those values, so they are not part of the shipped persisted graph model.
 
 ## Related Pages
+
 - [[campaigns]]
 - [[lead-sources-ui]]
 - [[sequence-engine]]

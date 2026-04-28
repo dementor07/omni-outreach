@@ -1,0 +1,10 @@
+{
+  "mssql.enableSqlAuthentication": false,
+  "sql.linting.enabled": false,
+  "[sql]": {
+    "editor.defaultFormatter": "ms-mssql.mssql"
+  },
+  "files.associations": {
+    "schema.sql": "postgres"
+  }
+}

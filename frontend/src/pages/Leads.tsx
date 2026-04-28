@@ -140,6 +140,7 @@ export default function Leads() {
           <div className="flex min-w-[320px] items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
             <Search size={16} className="text-slate-400" />
             <select
+              aria-label="Select campaign"
               value={campaignId}
               onChange={(event) => {
                 setCampaignId(event.target.value)
@@ -193,12 +194,13 @@ export default function Leads() {
                 className="w-full text-sm text-slate-700 outline-none placeholder:text-slate-400"
               />
               {search && (
-                <button onClick={() => setSearch('')} className="text-slate-400 hover:text-slate-600">
+                <button aria-label="Clear search" onClick={() => setSearch('')} className="text-slate-400 hover:text-slate-600">
                   <X size={14} />
                 </button>
               )}
             </div>
             <select
+              aria-label="Filter by status"
               value={statusFilter}
               onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
               className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none"
@@ -229,6 +231,7 @@ export default function Leads() {
             </div>
             <button
               type="button"
+              aria-label="Dismiss import result"
               onClick={() => setCsvResult(null)}
               className="mt-0.5 shrink-0 text-slate-400 hover:text-slate-600"
             >
@@ -269,6 +272,7 @@ export default function Leads() {
                     <RotateCcw size={13} /> Re-activate
                   </button>
                   <select
+                    aria-label="Move selected leads to campaign"
                     value={bulkTarget}
                     onChange={(e) => {
                       if (e.target.value) {
@@ -376,7 +380,7 @@ function LeadDrawer({
               </a>
             )}
           </div>
-          <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50">
+          <button type="button" aria-label="Close lead profile" onClick={onClose} className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50">
             <X size={16} />
           </button>
         </div>

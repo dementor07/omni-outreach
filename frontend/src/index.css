@@ -18,6 +18,14 @@
   .btn-tactile {
     @apply inline-flex items-center justify-center rounded-xl font-semibold transition-all active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none;
   }
+
+  /* React Flow EdgeLabelRenderer — position + transform driven by --elx/--ely CSS vars
+     so we avoid inline style for the static properties */
+  .rflow-edge-label {
+    position: absolute;
+    pointer-events: all;
+    transform: translate(-50%, -50%) translate(var(--elx, 0px), var(--ely, 0px));
+  }
 }
 
 @layer utilities {

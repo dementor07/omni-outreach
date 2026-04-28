@@ -1,9 +1,11 @@
 # Omni Wiki — Index
+
 Last updated: 2026-04-23 (human_approval + condition_reply_intent + action_hot_lead_alert live; approvals inbox, notifier service, global notification_channels; 30 backend node types)
 
 ## Architecture
+
 | Page | Summary |
-|------|---------|
+| --- | --- |
 | [[system-overview]] | Stack, runtime services, lead-intake flow, execution loop, and CI smoke-test model |
 | [[sequence-engine]] | 30 backend-supported node types, graph traversal, queue/parking/re-evaluation, split bandit, reply-intent + approvals |
 | [[dispatcher]] | Queue locking, all delivery/action/alert handlers, retry logic, dead-letter capture, helper crons |
@@ -19,8 +21,9 @@ Last updated: 2026-04-23 (human_approval + condition_reply_intent + action_hot_l
 | [[knowledge-graphs]] | Enhancing the LLM Wiki with structural self-awareness and gap detection |
 
 ## Product
+
 | Page | Summary |
-|------|---------|
+| --- | --- |
 | [[dashboard]] | Mission-control overview: stat cards, channel breakdown table, campaign footprint, first-run onboarding |
 | [[campaigns]] | Campaign list + detail view (leads/sources/queue/sequence/settings tabs), stats mini-bar, simulation badge, integrated source controls |
 | [[canvas-editor]] | ReactFlow canvas, 30 backend-supported node types, trigger source badge, live source telemetry, bandit UI, ConfigSidebar, serialization |
@@ -36,14 +39,15 @@ Last updated: 2026-04-23 (human_approval + condition_reply_intent + action_hot_l
 ## Integrations
 
 | Page | Summary |
-|------|---------|
+| --- | --- |
 | [[retell-integration]] | Retell AI — Standard (retell-llm) + Nested Flow (conversation-flow) agents, API |
 | [[unipile-integration]] | LinkedIn + WhatsApp messaging via Unipile API |
 | [[instagram-telegram-integration]] | Mapping Unipile /chats endpoints to IG and TG handlers |
 
 ## Decisions (ADRs)
+
 | Page | Summary |
-|------|---------|
+| --- | --- |
 | [[omnichannel-logic-loops]] | How tag-based routing and events power cross-channel loops |
 | [[voice-node-architecture]] | Why Standard/Nested Flow toggle maps to Retell agent types |
 | [[lead-generation-injection]] | Apify + Serper autonomous scraping and DAG injection |
@@ -61,5 +65,4 @@ Last updated: 2026-04-23 (human_approval + condition_reply_intent + action_hot_l
 ## Competitors
 
 | Page | Summary |
-|------|---------|
-| [[landscape]] | Analysis of Apollo, Instantly, Lemlist, Clay |
+| --- | --- |
