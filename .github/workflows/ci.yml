@@ -100,7 +100,7 @@ jobs:
             --max-time 300 \
             -X POST \
             -H "Authorization: Bearer $DEPLOY_WEBHOOK_SECRET" \
-            https://omnioutreach.space/deploy
+            https://srv1575227.hstgr.cloud/deploy
 
       - name: Report skipped deploy
         if: steps.deploy_config.outputs.ready != 'true'
