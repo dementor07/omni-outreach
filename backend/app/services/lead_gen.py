@@ -5,6 +5,7 @@ Replaces the single-pipeline job_search.py with a provider-dispatch model.
 from __future__ import annotations
 
 import logging
+import os
 
 from app.db import execute, fetch_one
 from app.services import sequencer
@@ -12,6 +13,12 @@ from app.services.lead_source_registry import registry
 from app.services.lead_sources.base import RawLead
 
 log = logging.getLogger(__name__)
+
+
+def _dedupe_scope() -> str:
+    """`campaign` (default) or `global`. Controls whether a lead present in any
+    campaign blocks reinsertion in another, or only within the same campaign."""
+    return os.environ.get("LEAD_DEDUPE_SCOPE", "campaign").strip().lower()
 
 
 async def upsert_lead(campaign_id: str, lead: RawLead, source_type: str) -> bool:
@@ -51,27 +58,49 @@ async def upsert_lead(campaign_id: str, lead: RawLead, source_type: str) -> bool
             log.info(f"[lead_gen] Campaign {campaign_id} hit daily_lead_cap={cap}; skipping")
             return False
 
-    # Deduplicate by linkedin_url within campaign if available
-    if lead.linkedin_url:
-        existing = await fetch_one(
-            "SELECT id FROM leads WHERE campaign_id=$1 AND linkedin_url=$2",
-            campaign_id,
-            lead.linkedin_url,
-        )
-        if existing:
-            return False
-    elif lead.email:
-        # Fallback dedup by email
-        existing = await fetch_one(
-            "SELECT id FROM leads WHERE campaign_id=$1 AND email=$2",
-            campaign_id,
-            lead.email,
-        )
-        if existing:
+    # Dedupe — defaults to within-campaign. Set LEAD_DEDUPE_SCOPE=global to
+    # treat the lead as a duplicate when it exists in any campaign (closes the
+    # cross-campaign re-contact gap from the lead-gen workflow audit).
+    scope = _dedupe_scope()
+    if scope == "global":
+        if lead.linkedin_url:
+            existing = await fetch_one(
+                "SELECT id FROM leads WHERE linkedin_url=$1 LIMIT 1",
+                lead.linkedin_url,
+            )
+            if existing:
+                log.info(f"[lead_gen] Skipping {lead.linkedin_url} — already present in another campaign (global dedupe)")
+                return False
+        elif lead.email:
+            existing = await fetch_one(
+                "SELECT id FROM leads WHERE email=$1 LIMIT 1",
+                lead.email,
+            )
+            if existing:
+                log.info(f"[lead_gen] Skipping {lead.email} — already present in another campaign (global dedupe)")
+                return False
+        else:
             return False
     else:
-        # No unique identifier — skip to avoid duplicates
-        return False
+        # Default: within-campaign dedupe
+        if lead.linkedin_url:
+            existing = await fetch_one(
+                "SELECT id FROM leads WHERE campaign_id=$1 AND linkedin_url=$2",
+                campaign_id,
+                lead.linkedin_url,
+            )
+            if existing:
+                return False
+        elif lead.email:
+            existing = await fetch_one(
+                "SELECT id FROM leads WHERE campaign_id=$1 AND email=$2",
+                campaign_id,
+                lead.email,
+            )
+            if existing:
+                return False
+        else:
+            return False
 
     row = await fetch_one(
         """

@@ -144,6 +144,26 @@ async def generic_inbound_event(request: Request):
             "UPDATE leads SET status='bounced' WHERE id=$1",
             lead_id,
         )
+    elif event_type == "unsubscribe":
+        # Mark the lead and add their email to the suppression list so future
+        # provider runs / dispatcher attempts skip them automatically.
+        lead_row = await db.fetch_one(
+            "SELECT email FROM leads WHERE id=$1",
+            lead_id,
+        )
+        await db.execute(
+            "UPDATE leads SET status='unsubscribed' WHERE id=$1",
+            lead_id,
+        )
+        if lead_row and lead_row.get("email"):
+            await db.execute(
+                """
+                INSERT INTO blacklists (entry_type, value, reason)
+                VALUES ('email', $1, 'unsubscribed via webhook')
+                ON CONFLICT (entry_type, value) DO NOTHING
+                """,
+                lead_row["email"].strip().lower(),
+            )
 
     # Queue for sequence event processing (if Redis available)
     if db.redis_client:
