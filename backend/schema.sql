@@ -277,3 +277,125 @@ CREATE TABLE IF NOT EXISTS notification_channels (
     is_active       BOOLEAN NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ── Lead gen (multi-source provider model) ───────────────────────────────────
+CREATE TABLE IF NOT EXISTS lead_gen_configs (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    campaign_id     UUID REFERENCES campaigns(id) ON DELETE CASCADE,
+    source_type     TEXT NOT NULL,
+    config          JSONB NOT NULL DEFAULT '{}',
+    label           TEXT,
+    is_enabled      BOOLEAN DEFAULT TRUE,
+    cron_schedule   TEXT,
+    last_run_at     TIMESTAMPTZ,
+    credit_budget   INT,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_lead_gen_configs_cron
+    ON lead_gen_configs(cron_schedule) WHERE cron_schedule IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS lead_gen_runs (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    campaign_id         UUID REFERENCES campaigns(id) ON DELETE CASCADE,
+    config_id           UUID REFERENCES lead_gen_configs(id) ON DELETE SET NULL,
+    source_type         TEXT NOT NULL,
+    status              TEXT DEFAULT 'pending',
+    leads_found         INT DEFAULT 0,
+    leads_added         INT DEFAULT 0,
+    credits_consumed    INT NOT NULL DEFAULT 0,
+    started_at          TIMESTAMPTZ DEFAULT NOW(),
+    finished_at         TIMESTAMPTZ,
+    error               TEXT,
+    triggered_by        TEXT DEFAULT 'manual',
+    meta                JSONB DEFAULT '{}'
+);
+
+-- ── Notifications ─────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS notifications (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID REFERENCES users(id) ON DELETE CASCADE,
+    type            TEXT NOT NULL,
+    title           TEXT NOT NULL,
+    body            TEXT,
+    link            TEXT,
+    is_read         BOOLEAN DEFAULT FALSE,
+    meta            JSONB DEFAULT '{}',
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notif_user_unread ON notifications(user_id, is_read, created_at DESC);
+
+-- ── Activity log ──────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS activity_log (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID,
+    campaign_id     UUID,
+    lead_id         UUID,
+    action          TEXT NOT NULL,
+    detail          TEXT,
+    meta            JSONB DEFAULT '{}',
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_time ON activity_log(created_at DESC);
+
+-- ── Blacklists ────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS blacklists (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entry_type      TEXT NOT NULL,
+    value           TEXT NOT NULL,
+    reason          TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(entry_type, value)
+);
+
+-- ── Template library ──────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS template_library (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID NOT NULL,
+    name            TEXT NOT NULL,
+    channel         TEXT NOT NULL DEFAULT 'email',
+    category        TEXT NOT NULL DEFAULT 'general',
+    subject         TEXT,
+    body            TEXT NOT NULL,
+    variables       TEXT[] DEFAULT '{}',
+    is_public       BOOLEAN DEFAULT FALSE,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ── Email tracking ────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS email_tracking (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    lead_id         UUID REFERENCES leads(id),
+    campaign_id     UUID REFERENCES campaigns(id),
+    event_type      TEXT NOT NULL,
+    meta            JSONB DEFAULT '{}',
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ── Integration keys (per-user encrypted API keys) ───────────────────────────
+CREATE TABLE IF NOT EXISTS integration_keys (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider        TEXT NOT NULL,
+    field_name      TEXT NOT NULL,
+    encrypted_value TEXT NOT NULL,
+    is_verified     BOOLEAN DEFAULT FALSE,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, provider, field_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_intkeys_user ON integration_keys(user_id);
+
+-- ── Additional performance indexes (migration 002) ────────────────────────────
+CREATE INDEX IF NOT EXISTS idx_queue_status_sched_locked
+    ON queue(status, scheduled_at, locked_at);
+CREATE INDEX IF NOT EXISTS idx_leads_current_node
+    ON leads(current_node_id) WHERE current_node_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_leads_email
+    ON leads(email) WHERE email IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_events_campaign_type
+    ON events(campaign_id, event_type, occurred_at);
