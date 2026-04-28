@@ -1,0 +1,12 @@
+# Browser automation
+selenium>=4.15.0
+
+# Undetected Chromedriver to bypass bot detection on Product Hunt
+undetected-chromedriver>=3.3.7
+
+# For reading/writing CSVs
+pandas>=2.1.1
+
+# Optional: lxml or html5lib if pandas needs them for CSV/HTML parsing
+lxml>=4.9.3
+html5lib>=1.1

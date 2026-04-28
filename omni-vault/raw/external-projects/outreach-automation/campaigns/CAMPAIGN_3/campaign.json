@@ -1,0 +1,68 @@
+{
+  "campaign_id": "CAMPAIGN_3",
+  "name": "Campaign 3",
+  "group": "Default",
+  "status": "active",
+  "simulation_mode": false,
+  "created_at": "2026-02-20T05:26:08Z",
+  "sheets": {
+    "leads_sheet_id": "1D1BGzTQztiVXD8p6tBQEvLzrcrzqFiUYGQHgryf9XqI",
+    "leads_tab": "leads",
+    "lead_full_stats_sheet_id": "1D1BGzTQztiVXD8p6tBQEvLzrcrzqFiUYGQHgryf9XqI",
+    "lead_full_stats_tab": "lead_full_stats",
+    "manual_messages_sheet_id": "1D1BGzTQztiVXD8p6tBQEvLzrcrzqFiUYGQHgryf9XqI",
+    "manual_messages_tab": "manual_messages",
+    "producthunt_sheet_id": "1D1BGzTQztiVXD8p6tBQEvLzrcrzqFiUYGQHgryf9XqI",
+    "producthunt_tab": "producthunt_leads"
+  },
+  "templates": {
+    "step_1": "templates/step_1.txt",
+    "step_2": "templates/step_2.txt",
+    "step_3": "templates/step_3.txt",
+    "step_4": "templates/step_4.txt"
+  },
+  "accounts": {
+    "account_pool_ids": [
+      "OPSlj8WUTneO4yW4Ufzb2g"
+    ],
+    "account_names": {
+      "OPSlj8WUTneO4yW4Ufzb2g": "Praveen_Menon"
+    }
+  },
+  "limits": {
+    "max_leads_per_account": 30,
+    "max_leads_per_day": 30,
+    "invite_delay_min": 90,
+    "invite_delay_max": 240,
+    "followup_jitter_min_seconds": 300,
+    "followup_jitter_max_seconds": 900
+  },
+  "followups": {
+    "first_followup_days": 3,
+    "second_followup_days": 6,
+    "third_followup_days": 9,
+    "first_message_jitter_hours": 48,
+    "followup_1_jitter_days": 3,
+    "followup_2_jitter_days": 3,
+    "followup_3_jitter_days": 3
+  },
+  "send_window": {
+    "timezone_mode": "default",
+    "timezone": "Asia/Kolkata",
+    "start_hour": 9,
+    "end_hour": 22,
+    "days": "Mon,Tue,Wed,Thu,Fri,Sat"
+  },
+  "claude": {
+    "enabled": false,
+    "model": "claude-sonnet-4-6",
+    "max_tokens": 5000,
+    "temperature": 0.6,
+    "message_approval_required": false
+  },
+  "inbound_response": {
+    "enabled": false,
+    "delay_min_minutes": 30,
+    "delay_max_minutes": 180
+  }
+}

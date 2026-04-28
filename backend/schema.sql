@@ -134,6 +134,8 @@ CREATE TABLE IF NOT EXISTS job_search_configs (
     serper_roles            TEXT[] NOT NULL DEFAULT ARRAY['CEO','Founder','CTO','CMO','VP Marketing','Head of Marketing','Director'],
     max_companies           INTEGER NOT NULL DEFAULT 100,
     max_leads_per_company   INTEGER NOT NULL DEFAULT 4,
+    min_employees           INTEGER,
+    max_employees           INTEGER,
     is_enabled              BOOLEAN NOT NULL DEFAULT TRUE,
     created_at              TIMESTAMPTZ DEFAULT NOW()
 );

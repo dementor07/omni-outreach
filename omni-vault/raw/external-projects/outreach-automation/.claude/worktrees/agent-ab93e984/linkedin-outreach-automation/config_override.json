@@ -1,0 +1,22 @@
+{
+  "UNIPILE_BASE": "https://api10.unipile.com:14090",
+  "UNIPILE_API_KEY": "<REDACTED>",
+
+  "ACCOUNTS": [
+    "18jMOXm8SrOxwWP8dXfw3Q","4Qods_8ISEC4jseY7Vbheg","sysaDfAUTOWsyFlpgA3Tzw"
+  ],
+
+  "ACCOUNT_NAMES": {
+    "18jMOXm8SrOxwWP8dXfw3Q": "Johnsy_George","4Qods_8ISEC4jseY7Vbheg": "Ebbin_Daniel","sysaDfAUTOWsyFlpgA3Tzw": "Biju_Daniel"
+  },
+
+  "RUN_INTERVAL_SECONDS": 600,
+  "MAX_LEADS_PER_ACCOUNT": 15,
+
+  "INVITE_DELAY_MIN": 60,
+  "INVITE_DELAY_MAX": 300,
+
+  "FIRST_FOLLOWUP_DAYS": 3,
+  "SECOND_FOLLOWUP_DAYS": 6,
+  "THIRD_FOLLOWUP_DAYS": 9
+}

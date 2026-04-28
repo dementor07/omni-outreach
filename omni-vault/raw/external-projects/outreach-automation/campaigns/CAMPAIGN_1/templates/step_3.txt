@@ -1,0 +1,1 @@
+{{first_name}}, one thing I keep hearing from PH founders is that the launch spike fades fast and then it's back to square one on distribution. Has that been your experience with {{product_name}}?

@@ -1,0 +1,10 @@
+logfire==4.32.0
+rollbar==1.4.6
+psycopg2-binary==2.9.9
+gspread==6.1.1
+google-auth-oauthlib==1.2.0
+python-dotenv==1.0.1
+requests==2.32.3
+anthropic==0.31.0
+pytest==9.0.2
+pytest-anyio==0.0.1

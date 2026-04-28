@@ -1,0 +1,21 @@
+LEAD DETAILS:
+- First name: {{first_name}}
+- LinkedIn URL: {{linkedin_url}}
+- Title: {{title}}
+- Product name: {{product_name}}
+- Product URL: {{product_url}}
+
+SENDER: {{sender_name}}
+
+MESSAGE STEP: {{step}}
+(first_message | followup_1 | followup_2 | followup_3 | inbound_response)
+
+BASE TEMPLATE:
+{{template_body}}
+
+CONVERSATION SO FAR (if any):
+{{conversation_history}}
+
+Personalize the base template for this specific lead using the details above.
+Follow all rules in the system prompt.
+Return ONLY the final message text — no labels, no quotes, no explanation.

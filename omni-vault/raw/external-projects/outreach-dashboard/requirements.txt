@@ -1,0 +1,10 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+jinja2==3.1.4
+psycopg2-binary==2.9.11
+python-dotenv==1.0.1
+requests==2.31.0
+itsdangerous==2.2.0
+google-api-python-client==2.165.0
+google-auth==2.38.0
+gspread==6.2.0

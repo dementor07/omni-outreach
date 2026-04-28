@@ -1,0 +1,1 @@
+Hey {{first_name}}, curious; are you doing any outbound for {{product_name}} at the moment, or mainly relying on inbound?

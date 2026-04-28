@@ -1,0 +1,1 @@
+{{first_name}}, bumping this gently. Saw you've been building in the {{product_name}} space and was genuinely curious how you're thinking about customer acquisition beyond Product Hunt.

@@ -1,0 +1,1 @@
+Hey {{first_name}}, quick question. Are you handling sales yourself right now, or have you got someone else running outreach for {{product_name}}?
