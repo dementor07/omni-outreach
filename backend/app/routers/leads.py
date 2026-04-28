@@ -1,9 +1,16 @@
 
-from fastapi import APIRouter, Depends, HTTPException
+import csv
+import io
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel, field_validator
 
 from app.auth import get_current_user
 from app.db import execute, fetch_all, fetch_one
+from app.services.lead_sources.base import RawLead
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -90,29 +97,154 @@ async def import_leads(
     leads: list[LeadImport],
     user_id: str = Depends(get_current_user),
 ):
+    """JSON batch import — routes through lead_gen.upsert_lead so blacklist +
+    daily cap + dedupe gates apply uniformly."""
+    from app.services.lead_gen import upsert_lead  # avoid circular import
+
     imported = 0
     skipped = 0
+    blacklisted = 0
     for lead in leads:
-        existing = await fetch_one(
-            "SELECT id FROM leads WHERE campaign_id=$1 AND linkedin_url=$2",
-            campaign_id, lead.linkedin_url,
+        raw = RawLead(
+            first_name=lead.first_name or "",
+            last_name=lead.last_name or "",
+            linkedin_url=lead.linkedin_url,
+            email=lead.email,
+            headline=lead.headline or "",
+            company=lead.company or "",
         )
-        if existing:
+        inserted = await upsert_lead(campaign_id, raw, lead.source or "manual")
+        if inserted:
+            imported += 1
+        else:
             skipped += 1
+    return {"imported": imported, "skipped": skipped, "blacklisted": blacklisted}
+
+
+# Column aliases accepted in CSV headers (case-insensitive, strip whitespace)
+_COL_ALIASES: dict[str, str] = {
+    "linkedin_url": "linkedin_url",
+    "linkedin url": "linkedin_url",
+    "linkedinurl": "linkedin_url",
+    "profile_url": "linkedin_url",
+    "profile url": "linkedin_url",
+    "email": "email",
+    "email address": "email",
+    "first_name": "first_name",
+    "first name": "first_name",
+    "firstname": "first_name",
+    "last_name": "last_name",
+    "last name": "last_name",
+    "lastname": "last_name",
+    "surname": "last_name",
+    "headline": "headline",
+    "title": "headline",
+    "job_title": "headline",
+    "job title": "headline",
+    "company": "company",
+    "company_name": "company",
+    "company name": "company",
+    "organization": "company",
+    "phone": "phone",
+    "phone_number": "phone",
+    "phone number": "phone",
+}
+
+
+@router.post("/csv-upload")
+async def csv_upload(
+    campaign_id: str,
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user),
+):
+    """Upload a CSV file of leads into a campaign.
+
+    Accepts flexible column names (see _COL_ALIASES). Requires at least one of
+    linkedin_url or email per row. Routes each row through lead_gen.upsert_lead
+    so blacklist + daily cap + dedupe all apply.
+
+    Returns: {imported, skipped, invalid, errors: [str]}
+    """
+    from app.services.lead_gen import upsert_lead
+
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only .csv files are accepted")
+
+    raw_bytes = await file.read()
+    # Limit to 10 MB
+    if len(raw_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="CSV file exceeds 10 MB limit")
+
+    try:
+        text = raw_bytes.decode("utf-8-sig")  # strips BOM if present
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="CSV must be UTF-8 encoded")
+
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=400, detail="CSV has no headers")
+
+    # Map raw header names → canonical field names
+    header_map: dict[str, str] = {}
+    for raw_col in reader.fieldnames:
+        canonical = _COL_ALIASES.get(raw_col.strip().lower())
+        if canonical:
+            header_map[raw_col] = canonical
+
+    imported = 0
+    skipped = 0
+    invalid = 0
+    errors: list[str] = []
+
+    for row_num, row in enumerate(reader, start=2):  # row 1 is header
+        mapped: dict[str, str] = {}
+        for raw_col, canonical in header_map.items():
+            val = (row.get(raw_col) or "").strip()
+            if val:
+                mapped[canonical] = val
+
+        linkedin_url = mapped.get("linkedin_url")
+        email = mapped.get("email")
+
+        if not linkedin_url and not email:
+            invalid += 1
+            if len(errors) < 20:
+                errors.append(f"Row {row_num}: must have linkedin_url or email")
             continue
-        await execute(
-            """
-            INSERT INTO leads
-                (campaign_id, linkedin_url, email, phone, first_name, last_name,
-                 headline, company, source)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-            ON CONFLICT (campaign_id, linkedin_url) DO NOTHING
-            """,
-            campaign_id, lead.linkedin_url, lead.email, lead.phone,
-            lead.first_name, lead.last_name, lead.headline, lead.company, lead.source,
+
+        # Basic LinkedIn URL normalisation
+        if linkedin_url and "linkedin.com/" not in linkedin_url:
+            invalid += 1
+            if len(errors) < 20:
+                errors.append(f"Row {row_num}: invalid linkedin_url '{linkedin_url}'")
+            continue
+
+        raw_lead = RawLead(
+            first_name=mapped.get("first_name", ""),
+            last_name=mapped.get("last_name", ""),
+            linkedin_url=linkedin_url,
+            email=email,
+            headline=mapped.get("headline", ""),
+            company=mapped.get("company", ""),
         )
-        imported += 1
-    return {"imported": imported, "skipped": skipped}
+
+        try:
+            inserted = await upsert_lead(campaign_id, raw_lead, "csv_upload")
+            if inserted:
+                imported += 1
+            else:
+                skipped += 1
+        except Exception as exc:
+            log.warning("[csv_upload] row %d upsert error: %s", row_num, exc)
+            invalid += 1
+            if len(errors) < 20:
+                errors.append(f"Row {row_num}: {exc}")
+
+    log.info(
+        "[csv_upload] campaign=%s imported=%d skipped=%d invalid=%d",
+        campaign_id, imported, skipped, invalid,
+    )
+    return {"imported": imported, "skipped": skipped, "invalid": invalid, "errors": errors}
 
 
 @router.delete("/{lead_id}", status_code=204)

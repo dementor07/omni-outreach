@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react'
-import { Search, UserRound, X, CheckSquare, Square, StopCircle, RotateCcw, Trash2, ArrowRightLeft } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
+import { Search, UserRound, X, CheckSquare, Square, StopCircle, RotateCcw, Trash2, Upload } from 'lucide-react'
 
 import Badge from '../components/Badge'
 import DataTable from '../components/DataTable'
 import EmptyState from '../components/EmptyState'
 import { useListCampaigns } from '../hooks/useCampaigns'
-import { Lead, useGetLead, useListLeads, useStopLead, useBulkLeadAction } from '../hooks/useLeads'
+import { Lead, useGetLead, useListLeads, useStopLead, useBulkLeadAction, useCsvUpload, CsvUploadResult } from '../hooks/useLeads'
 
 function formatDate(iso?: string | null) {
   return iso ? new Date(iso).toLocaleDateString() : '—'
@@ -20,11 +20,25 @@ export default function Leads() {
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkTarget, setBulkTarget] = useState('')
+  const [csvResult, setCsvResult] = useState<CsvUploadResult | null>(null)
+  const csvInputRef = useRef<HTMLInputElement>(null)
 
   const leadsQuery = useListLeads(campaignId || undefined, page, 25, search || undefined, statusFilter || undefined)
   const stopLead = useStopLead()
   const bulkAction = useBulkLeadAction()
+  const csvUpload = useCsvUpload()
   const selectedLead = useGetLead(selectedLeadId || undefined)
+
+  function handleCsvFile(file: File | undefined) {
+    if (!file || !campaignId) return
+    csvUpload.mutate(
+      { campaignId, file },
+      {
+        onSuccess: (result) => setCsvResult(result),
+        onError: () => setCsvResult(null),
+      },
+    )
+  }
 
   const rows = leadsQuery.data?.leads || []
   const total = leadsQuery.data?.total || 0
@@ -130,6 +144,7 @@ export default function Leads() {
               onChange={(event) => {
                 setCampaignId(event.target.value)
                 setPage(1)
+                setCsvResult(null)
               }}
               className="w-full bg-transparent text-sm text-slate-700 outline-none"
             >
@@ -140,6 +155,28 @@ export default function Leads() {
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* CSV upload button — only active when a campaign is selected */}
+          <div>
+            <input
+              ref={csvInputRef}
+              type="file"
+              accept=".csv"
+              aria-label="Select CSV file to import leads"
+              className="hidden"
+              onChange={(e) => handleCsvFile(e.target.files?.[0])}
+            />
+            <button
+              type="button"
+              disabled={!campaignId || csvUpload.isPending}
+              onClick={() => csvInputRef.current?.click()}
+              aria-label="Upload CSV file of leads"
+              className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 shadow-sm transition hover:border-sky-400 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Upload size={15} />
+              {csvUpload.isPending ? 'Uploading…' : 'Upload CSV'}
+            </button>
           </div>
         </div>
 
@@ -174,6 +211,32 @@ export default function Leads() {
           </div>
         )}
       </section>
+
+      {/* CSV upload result banner */}
+      {csvResult && (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-emerald-800">
+                CSV import complete — {csvResult.imported} imported, {csvResult.skipped} skipped
+                {csvResult.invalid > 0 && `, ${csvResult.invalid} invalid`}
+              </p>
+              {csvResult.errors.length > 0 && (
+                <ul className="mt-2 space-y-0.5 text-xs text-rose-700">
+                  {csvResult.errors.map((e, i) => <li key={i}>{e}</li>)}
+                </ul>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setCsvResult(null)}
+              className="mt-0.5 shrink-0 text-slate-400 hover:text-slate-600"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
 
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         {!campaignId ? (

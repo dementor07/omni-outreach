@@ -120,3 +120,29 @@ export function useBulkLeadAction() {
     },
   })
 }
+
+export interface CsvUploadResult {
+  imported: number
+  skipped: number
+  invalid: number
+  errors: string[]
+}
+
+export function useCsvUpload() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ campaignId, file }: { campaignId: string; file: File }) => {
+      const form = new FormData()
+      form.append('file', file)
+      const { data } = await api.post<CsvUploadResult>(
+        `/leads/csv-upload?campaign_id=${campaignId}`,
+        form,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      )
+      return data
+    },
+    onSuccess: (_, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['leads', variables.campaignId] })
+    },
+  })
+}
