@@ -13,3 +13,6 @@ omni-vault/.obsidian/
 # Claude Code — local MCP config (contains API keys)
 .mcp.json
 .claude/settings.local.json
+
+# Gemini CLI — local MCP config (contains API keys)
+.gemini/settings.json
