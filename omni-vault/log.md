@@ -551,3 +551,35 @@ Files touched (this batch): 2 backend (dispatcher.py, config.py, sequences route
 - Added `check_reply_intent_timeouts` inside `backend/app/services/sequencer.py` to route timed-out leads down the new `timeout` handle based on their last `queue` interaction.
 - Scheduled `cron_reply_intent_timeout` every 30 minutes in `backend/app/worker/tasks.py`.
 - Deployed changes to VPS.
+
+
+## [2026-04-25] fix | reply-intent timeout cron actually registered + autodeploy bypassed
+
+**Bug found by vault-vs-code cross-check**
+
+The reply-intent timeout fallback shipped in `6f3c0c0` defined `cron_reply_intent_timeout()` in `backend/app/worker/tasks.py` but never added it to `WorkerSettings.cron_jobs`. The vault ADR claimed it ran every 30 minutes; it never ran at all. Leads parked at `condition_reply_intent` without a reply have been sitting indefinitely despite the `timeout` branch being live in the sequencer.
+
+Cross-reference path:
+1. `wiki/decisions/reply-intent-timeout.md` claimed a worker cron.
+2. `log.md` line 39126 claimed "every 30 minutes".
+3. `grep cron_jobs` on the actual file showed only 5 jobs registered, none of them the timeout one.
+4. Confirmed by enumerating `WorkerSettings.cron_jobs` inside the running prod worker container.
+
+**Fix shipped in `42a63ad`**
+
+Single-line addition to `cron_jobs`: `cron(cron_reply_intent_timeout, minute={0, 30})`.
+
+**Autodeploy step failed — manual deploy used**
+
+CI lint+test+build passed but the `appleboy/ssh-action` deploy step timed out with `dial tcp ***:22: i/o timeout`. SSH from the workstation to `root@145.223.21.222` still works fine, so the daemon is up. GitHub Actions runner ranges appear to be filtered at the VPS firewall (or Hostinger network layer). Future autodeploys will keep failing until that's resolved.
+
+**Workaround used:** `ssh root@145.223.21.222 -i ~/.ssh/omni_deploy "cd /home/omni-outreach && git pull && docker compose up -d --build"`. Migration was already at 004 head; no schema changes in this commit.
+
+**Verification:**
+- `docker compose exec worker python -c "from app.worker.tasks import WorkerSettings; [print(c.name, c.minute, c.second) for c in WorkerSettings.cron_jobs]"` → emits `cron:cron_reply_intent_timeout {0, 30} 0`. Confirmed scheduled at `:00` and `:30` of every hour.
+- All containers healthy after rebuild.
+- Pre-existing unrelated noise: `cron:process_stream_events failed, AuthenticationError: Authentication required` is a Redis auth issue in the stream processor, predates this change. Logged here so the next session has a starting point.
+
+**Follow-ups added to the queue:**
+1. **VPS firewall vs GitHub Actions** — figure out which IP ranges to allow for `actions/runner` so autodeploy works again. Or switch to a pull-based deploy (a cron on the VPS that polls master), which sidesteps the firewall entirely.
+2. **Stream processor Redis auth** — investigate why arq's process_stream_events can't authenticate while the rest of the worker can.

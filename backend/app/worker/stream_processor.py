@@ -59,7 +59,8 @@ async def _process_unipile_payload(payload: dict) -> None:
 
 async def process_stream_events(ctx: dict) -> None:
     """Cron job to consume events from the Redis stream."""
-    redis = aioredis.from_url("redis://redis:6379", decode_responses=True)
+    from app.config import settings
+    redis = aioredis.from_url(settings.get_redis_url(), decode_responses=True)
 
     # Ensure consumer group exists
     try:

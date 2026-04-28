@@ -108,7 +108,7 @@ The right-side panel opens on node click (`selectedNodeId`). Important custom pa
 - `condition_ai_screen`: `screening_prompt` textarea
 - `condition_lead_source`: source checkboxes used to mint output handles
 - `condition_has_field`: field selector (`email`, `linkedin_url`, `headline`, `company`, `phone`, `first_name`, `last_name`)
-- `condition_reply_intent`: read-only — the handles are the fixed classifier categories (`positive`, `negative`, `neutral`, `out_of_office`, `unsubscribe`, `bounce`)
+- `condition_reply_intent`: Fixed handles for classifier categories (`positive`, `negative`, `neutral`, `out_of_office`, `unsubscribe`, `bounce`, `timeout`) plus `timeout_days` (default 7) for fallback routing.
 - `delay`: `delay_days`
 
 ## Serialization (Critical)
@@ -140,3 +140,4 @@ The TypeScript layer still contains experimental `wait_until` and `goal` union m
 - [[approvals-page]]
 - [[notifier]]
 - [[human-approval-and-reply-intent]]
+t]]

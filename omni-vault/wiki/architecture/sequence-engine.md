@@ -47,7 +47,7 @@ The backend `NodeType` in `backend/app/routers/sequences.py` is the persistence 
 | `condition_ai_screen` | Condition | Immediate — `screener.screen_lead()` verdict routes to `true` / `false` |
 | `condition_lead_source` | Condition | Immediate — routes by `lead.source` or `default` |
 | `condition_has_field` | Condition | Immediate — checks one lead field for presence |
-| `condition_reply_intent` | Condition | Parks unless `lead.last_reply_category` is set, then routes on `positive` / `negative` / `neutral` / `out_of_office` / `unsubscribe` / `bounce` |
+| `condition_reply_intent` | Condition | Parks unless `lead.last_reply_category` is set, then routes on `positive` / `negative` / `neutral` / `out_of_office` / `unsubscribe` / `bounce` / `timeout`. Parks if no reply has been classified yet; routes to `timeout` if `timeout_days` elapsed since last contact. |
 | `event_invite_accepted` | Event / Listener | Parks until `lead.accepted_at` is set |
 | `event_email_opened` | Event / Listener | Parks until `lead.email_opened_at` is set |
 | `event_link_clicked` | Event / Listener | Parks until `lead.link_clicked_at` is set |
