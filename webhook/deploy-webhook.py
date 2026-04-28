@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import subprocess
+import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 logging.basicConfig(
@@ -66,11 +67,10 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         log.info("Deploy triggered")
-        ok, msg = _run_deploy()
-        if ok:
-            self._respond(200, {"status": "deployed"})
-        else:
-            self._respond(500, {"error": msg})
+        # Respond immediately — docker compose restarts nginx which would
+        # break the proxy connection if we waited for the deploy to finish.
+        self._respond(202, {"status": "accepted"})
+        threading.Thread(target=_run_deploy, daemon=True).start()
 
     def _respond(self, code: int, body: dict) -> None:
         payload = json.dumps(body).encode()
