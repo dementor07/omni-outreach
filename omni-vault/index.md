@@ -45,8 +45,8 @@ Last updated: 2026-04-23 (human_approval + condition_reply_intent + action_hot_l
 ## Decisions (ADRs)
 | Page | Summary |
 |------|---------|
+| [[omnichannel-logic-loops]] | How tag-based routing and events power cross-channel loops |
 | [[voice-node-architecture]] | Why Standard/Nested Flow toggle maps to Retell agent types |
-| [[omnichannel-logic-loops]] | How tags, split tests, and events power cross-channel routing |
 | [[lead-generation-injection]] | Apify + Serper autonomous scraping and DAG injection |
 | [[autonomous-feedback-loops]] | Closing the knowledge gaps between Retell, tags, and Lead Gen |
 | [[multi-source-lead-gen]] | Apr 2026 lead gen architecture: provider protocol, RawLead schema, 5 sources (Apify, Apollo, Hunter, ProxyCurl, GitHub), registry, new DB tables |
