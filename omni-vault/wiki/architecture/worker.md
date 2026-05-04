@@ -20,7 +20,6 @@ Background process using **arq**. It owns queue dispatch, acceptance checks, inb
 - The app-side Redis client comes from `settings.get_redis_url()` so background tasks and runtime API code share the same connection pattern.
 
 ## Cron Schedule
-
 | Function | Schedule | What it does |
 |----------|----------|-------------|
 | `dispatch_queue` | Every 30 seconds (`second={0,30}`) | Locks and processes ready queue tasks via `dispatcher.run_once()`, then opportunistically queues LinkedIn invites |
@@ -28,6 +27,7 @@ Background process using **arq**. It owns queue dispatch, acceptance checks, inb
 | `process_stream_events` | Every 5 seconds | Consumes Redis Stream webhook events and updates lead state |
 | `optimize_splits` | Every 10 minutes | Runs Thompson Sampling weight updates |
 | `cron_lead_gen` | Every 5 minutes | Scans enabled `lead_gen_configs` with `cron_schedule` and fires due source runs with `triggered_by="schedule"` |
+| `cron_reply_intent_timeout` | Every 30 minutes (`minute={0, 30}`) | Routes leads parked at `condition_reply_intent` through the `timeout` handle when their last outbound `queue.sent_at` is older than `node.data.timeout_days` (default 7). See [[reply-intent-timeout]]. |
 
 ## Scheduled Lead Gen
 

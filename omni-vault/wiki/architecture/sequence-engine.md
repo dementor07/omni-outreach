@@ -114,6 +114,10 @@ Advance mapping:
 
 Called by `POST /approvals/{id}/resolve`. Advances the parked lead through handle `approve` or `reject` and clears `current_node_id`. Warns and returns early if the lead has no `current_node_id` — which can happen if another path unparked the lead before the approval was resolved.
 
+### `check_reply_intent_timeouts()`
+
+Called by the `cron_reply_intent_timeout` worker job (every 30 minutes). Scans for leads parked at `condition_reply_intent` and routes them through the `timeout` handle if `MAX(queue.sent_at)` for the lead is older than `node.data.timeout_days` (default 7). See [[reply-intent-timeout]] for the semantics — the metric is "elapsed since last outbound", not "time at this node".
+
 ## Split Node — Thompson Sampling
 
 `node.data.weights` structure:

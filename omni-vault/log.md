@@ -693,6 +693,16 @@ Compared live codebase against outreach_automation/job_search_scraper.py (now in
 
 Vault: 621-file clip of both predecessors committed to raw/external-projects/. Gap audit updated (rows 5c, 6d, 8b now ✅). All in commit 583efef.
 
+## [2026-05-04] refactor | Code dedup sprint — HEAD 4f37ab8
+
+Eliminated three categories of duplication across frontend and backend. No behaviour change.
+
+- **`timeAgo`** — three identical inline implementations (NotificationCenter, Activity, Inbox) → extracted to `frontend/src/lib/time.ts` as a named export. All three files now import from there.
+- **`StepIcon`** — two inline local components (SequentialBuilder 30-case, Campaigns 8-case subset) → canonical `frontend/src/components/StepIcon.tsx` (30 cases, size 20). Both files now import from there.
+- **Lead-source helpers** — `_is_linkedin_profile(url)` and `_clean_role(title, company_name)` duplicated between `job_search.py` and `apify_jobs.py` → extracted to `backend/app/services/lead_sources/utils.py`. Both callers import from there.
+
+`Campaigns.tsx` left functionally untouched (only the inline `StepIcon` definition removed — the import replaces it).
+
 ## [2026-04-28] fix+infra | Webhook-based CI/CD deploy + CI build fixes — HEAD d902010
 
 **Context:** CI builds were constantly failing. The previous SSH-based deploy (`appleboy/ssh-action`) timed out on every run because Hostinger's upstream network silently blocks GitHub Actions IP ranges (`dial tcp ***:22: i/o timeout`).
