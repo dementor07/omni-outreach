@@ -35,6 +35,7 @@ import DataTable from '../components/DataTable'
 import EmptyState from '../components/EmptyState'
 import Modal from '../components/Modal'
 import SequentialBuilder from '../components/SequentialBuilder'
+import StepIcon from '../components/StepIcon'
 import { useToast } from '../components/Toast'
 import { formatDate } from '../lib/time'
 import {
@@ -1691,21 +1692,6 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
       </div>
     </div>
   )
-}
-
-function StepIcon({ type }: { type: NodeType }) {
-  const common = { size: 18, strokeWidth: 2, className: "text-slate-600" }
-  switch (type) {
-    case 'action_linkedin_invite':
-    case 'action_linkedin_dm': return <Linkedin {...common} className="text-sky-500" />
-    case 'action_email': return <Mail {...common} className="text-slate-500" />
-    case 'action_whatsapp': return <MessageSquare {...common} className="text-emerald-500" />
-    case 'action_instagram': return <Instagram {...common} className="text-pink-500" />
-    case 'action_telegram': return <Send {...common} className="text-blue-500" />
-    case 'action_voice': return <Phone {...common} className="text-indigo-500" />
-    case 'delay': return <Clock {...common} className="text-amber-500" />
-    default: return <Zap {...common} />
-  }
 }
 
 // ── Shared UI Parts ────────────────────────────────────────────────────────

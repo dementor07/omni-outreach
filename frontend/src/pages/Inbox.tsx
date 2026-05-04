@@ -4,17 +4,7 @@ import { useInbox, useInboxStats } from '../hooks/useInbox'
 import { useListCampaigns } from '../hooks/useCampaigns'
 import EmptyState from '../components/EmptyState'
 import Badge from '../components/Badge'
-
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  const days = Math.floor(hrs / 24)
-  return `${days}d ago`
-}
+import { timeAgo } from '../lib/time'
 
 const CHANNEL_CONFIG: Record<string, { icon: typeof Mail; color: string; bg: string }> = {
   email: { icon: Mail, color: 'text-sky-600', bg: 'bg-sky-100' },

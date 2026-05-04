@@ -6,6 +6,7 @@ import Badge from '../components/Badge'
 import EmptyState from '../components/EmptyState'
 import { useListCampaigns } from '../hooks/useCampaigns'
 import { api } from '../api/client'
+import { timeAgo } from '../lib/time'
 
 interface ActivityEntry {
   id: string
@@ -27,17 +28,6 @@ const ACTION_COLORS: Record<string, string> = {
   campaign_activated: 'emerald',
   campaign_paused: 'amber',
   graph_saved: 'sky',
-}
-
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  const days = Math.floor(hrs / 24)
-  return `${days}d ago`
 }
 
 export default function ActivityPage() {

@@ -6,13 +6,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 
 import httpx
 
 from app.config import settings
 
 from .base import LeadSource, RawLead
+from .utils import is_linkedin_profile, clean_role
 
 log = logging.getLogger(__name__)
 
@@ -77,26 +77,6 @@ def _filter_by_industry(jobs: list[dict], allowed: list[str]) -> list[dict]:
 
 # ── SERPER decision-maker lookup ──────────────────────────────────────────────
 
-def _is_linkedin_profile(url: str) -> bool:
-    return bool(re.search(r"linkedin\.com/in/", url))
-
-
-def _clean_role(title: str, company_name: str) -> str:
-    if not title:
-        return ""
-    title = re.sub(re.escape(company_name), "", title, flags=re.IGNORECASE)
-    for sep in ["|", "-", ",", "•", "–"]:
-        if sep in title:
-            parts = [p.strip() for p in title.split(sep) if p.strip()]
-            if parts:
-                title = parts[0]
-                break
-    keywords = ["CEO", "Founder", "CTO", "CMO", "Marketing", "Director", "Manager", "VP", "Chief", "Head"]
-    if any(k.lower() in title.lower() for k in keywords):
-        return title.strip()
-    return ""
-
-
 async def _search_decision_makers(
     company_name: str,
     roles: list[str],
@@ -125,11 +105,11 @@ async def _search_decision_makers(
                     for item in r.json().get("organic", []):
                         link = item.get("link", "")
                         title = item.get("title", "")
-                        if _is_linkedin_profile(link) and link not in seen_urls:
+                        if is_linkedin_profile(link) and link not in seen_urls:
                             seen_urls.add(link)
                             name = title.split(" - ")[0].strip()
                             parts = name.split()
-                            role_clean = _clean_role(
+                            role_clean = clean_role(
                                 " - ".join(title.split(" - ")[1:]), company_name
                             ) or role
                             found.append(RawLead(
