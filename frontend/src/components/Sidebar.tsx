@@ -4,20 +4,37 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { clsx } from 'clsx'
 
-const navItems = [
-  { to: '/',              label: 'Overview',      icon: LayoutDashboard },
-  { to: '/campaigns',    label: 'Campaigns',     icon: Megaphone },
-  { to: '/leads',        label: 'Leads',         icon: Users },
-  { to: '/queue',        label: 'Queue',         icon: ListTodo },
-  { to: '/lead-sources', label: 'Lead Sources',  icon: Database },
-  { to: '/activity',     label: 'Activity',      icon: Activity },
-  { to: '/blacklist',    label: 'Blacklist',     icon: ShieldOff },
-  { to: '/analytics',    label: 'Analytics',     icon: BarChart3 },
-  { to: '/templates',    label: 'Templates',     icon: FileText },
-  { to: '/inbox',        label: 'Inbox',         icon: Inbox },
-  { to: '/approvals',    label: 'Approvals',     icon: UserCheck },
-  { to: '/job-search',   label: 'Job Search',    icon: Search },
-  { to: '/settings',     label: 'Settings',      icon: Settings },
+type NavItem = { to: string; label: string; icon: React.ElementType }
+type NavGroup = { label: string | null; items: NavItem[] }
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: null,
+    items: [
+      { to: '/',          label: 'Overview',   icon: LayoutDashboard },
+      { to: '/campaigns', label: 'Campaigns',  icon: Megaphone },
+      { to: '/inbox',     label: 'Inbox',      icon: Inbox },
+      { to: '/queue',     label: 'Queue',      icon: ListTodo },
+      { to: '/approvals', label: 'Approvals',  icon: UserCheck },
+    ],
+  },
+  {
+    label: 'Data',
+    items: [
+      { to: '/leads',        label: 'Leads',        icon: Users },
+      { to: '/lead-sources', label: 'Lead Sources', icon: Database },
+      { to: '/job-search',   label: 'Job Search',   icon: Search },
+      { to: '/templates',    label: 'Templates',    icon: FileText },
+      { to: '/blacklist',    label: 'Blacklist',    icon: ShieldOff },
+    ],
+  },
+  {
+    label: 'Insights',
+    items: [
+      { to: '/analytics', label: 'Analytics', icon: BarChart3 },
+      { to: '/activity',  label: 'Activity',  icon: Activity },
+    ],
+  },
 ]
 
 export default function Sidebar() {
@@ -48,32 +65,57 @@ export default function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-0.5">
-        {navItems.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === '/'}
-            className={({ isActive }) =>
-              clsx(
-                'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors',
-                isActive
-                  ? 'bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-white',
-              )
-            }
-          >
-            <Icon size={16} />
-            <span className="flex-1">{label}</span>
-            {to === '/approvals' && pending > 0 && (
-              <span className="rounded-full bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 min-w-[20px] text-center">{pending}</span>
+      <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-4">
+        {NAV_GROUPS.map((group, gi) => (
+          <div key={gi}>
+            {group.label && (
+              <p className="px-3 mb-1.5 text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                {group.label}
+              </p>
             )}
-          </NavLink>
+            <div className="space-y-0.5">
+              {group.items.map(({ to, label, icon: Icon }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={to === '/'}
+                  className={({ isActive }) =>
+                    clsx(
+                      'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+                      isActive
+                        ? 'bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400'
+                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-white',
+                    )
+                  }
+                >
+                  <Icon size={16} />
+                  <span className="flex-1">{label}</span>
+                  {to === '/approvals' && pending > 0 && (
+                    <span className="rounded-full bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 min-w-[20px] text-center">{pending}</span>
+                  )}
+                </NavLink>
+              ))}
+            </div>
+          </div>
         ))}
       </nav>
 
-      {/* Footer */}
-      <div className="px-3 py-4 border-t border-slate-100 dark:border-slate-700">
+      {/* Footer — Settings + Sign out */}
+      <div className="px-3 py-4 border-t border-slate-100 dark:border-slate-700 space-y-0.5">
+        <NavLink
+          to="/settings"
+          className={({ isActive }) =>
+            clsx(
+              'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+              isActive
+                ? 'bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-white',
+            )
+          }
+        >
+          <Settings size={16} />
+          <span className="flex-1">Settings</span>
+        </NavLink>
         <button
           onClick={logout}
           className="flex items-center gap-3 w-full px-3 py-2 rounded-md text-sm font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-white transition-colors"

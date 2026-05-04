@@ -28,7 +28,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
-import { ArrowLeft, X, Trash2 } from 'lucide-react';
+import { ArrowLeft, X, Trash2, GitBranch, Globe, Play, Tag } from 'lucide-react';
 
 type RetellEdge = {
   id: string;
@@ -36,9 +36,15 @@ type RetellEdge = {
   transition_condition: { type: string; prompt: string };
 }
 
+type FunctionCallInfo = {
+  url: string;
+  description: string;
+  speak_during_execution: boolean;
+}
+
 type RetellNode = {
   id: string;
-  type: 'conversation' | 'transfer_call' | 'end';
+  type: 'conversation' | 'transfer_call' | 'end' | 'function_call' | 'branch_condition';
   name: string;
   display_position: { x: number; y: number };
   instruction?: { type: string; text: string };
@@ -46,6 +52,8 @@ type RetellNode = {
   edge?: RetellEdge;
   transfer_destination?: { type: string; number: string };
   transfer_option?: { type: string; enable_bridge_audio_cue: boolean };
+  function_call?: FunctionCallInfo;
+  _is_start?: boolean;
 }
 
 type RetellFlow = {
@@ -100,7 +108,7 @@ function flowToRetellNodes(rfNodes: Node<RetellNode>[], rfEdges: Edge<RetellEdge
       display_position: { x: Math.round(rn.position.x), y: Math.round(rn.position.y) },
     };
 
-    if (updatedNode.type === 'conversation') {
+    if (updatedNode.type === 'conversation' || updatedNode.type === 'function_call' || updatedNode.type === 'branch_condition') {
       updatedNode.edges = retellEdges;
       delete updatedNode.edge;
     } else if (updatedNode.type === 'transfer_call') {
@@ -110,6 +118,7 @@ function flowToRetellNodes(rfNodes: Node<RetellNode>[], rfEdges: Edge<RetellEdge
       delete updatedNode.edges;
       delete updatedNode.edge;
     }
+    delete updatedNode._is_start;
 
     return updatedNode;
   });
@@ -117,9 +126,19 @@ function flowToRetellNodes(rfNodes: Node<RetellNode>[], rfEdges: Edge<RetellEdge
 
 // Custom Node Components
 
+function StartBadge() {
+  return (
+    <div className="absolute -top-5 left-2 flex items-center gap-1 pointer-events-none">
+      <Play size={7} className="text-emerald-400" fill="currentColor" />
+      <span className="text-[8px] font-black uppercase tracking-widest text-emerald-400">Start</span>
+    </div>
+  );
+}
+
 function ConversationNode({ data }: { data: RetellNode }) {
   return (
-    <div className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 w-56 shadow-2xl ring-1 ring-white/10">
+    <div className={`relative bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 w-56 shadow-2xl ${data._is_start ? 'ring-2 ring-emerald-400/70' : 'ring-1 ring-white/10'}`}>
+      {data._is_start && <StartBadge />}
       <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-slate-500" />
       <p className="text-[10px] font-black text-sky-400 uppercase tracking-widest mb-1.5">{data.name}</p>
       <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-700/50">
@@ -134,7 +153,8 @@ function ConversationNode({ data }: { data: RetellNode }) {
 
 function TransferCallNode({ data }: { data: RetellNode }) {
   return (
-    <div className="bg-indigo-950 border border-indigo-800 rounded-xl px-4 py-3 w-56 shadow-2xl ring-1 ring-indigo-400/20">
+    <div className={`relative bg-indigo-950 border border-indigo-800 rounded-xl px-4 py-3 w-56 shadow-2xl ${data._is_start ? 'ring-2 ring-emerald-400/70' : 'ring-1 ring-indigo-400/20'}`}>
+      {data._is_start && <StartBadge />}
       <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-indigo-500" />
       <p className="text-[10px] font-black text-indigo-300 uppercase tracking-widest mb-1.5">{data.name}</p>
       <div className="bg-indigo-900/30 rounded-lg p-2 border border-indigo-700/50">
@@ -149,9 +169,45 @@ function TransferCallNode({ data }: { data: RetellNode }) {
 
 function EndNode({ data }: { data: RetellNode }) {
   return (
-    <div className="bg-rose-950 border border-rose-800 rounded-xl px-4 py-3 w-48 shadow-2xl ring-1 ring-rose-400/20 text-center">
+    <div className="relative bg-rose-950 border border-rose-800 rounded-xl px-4 py-3 w-48 shadow-2xl ring-1 ring-rose-400/20 text-center">
       <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-rose-500" />
       <p className="text-[10px] font-black text-rose-300 uppercase tracking-widest">{data.name}</p>
+    </div>
+  );
+}
+
+function FunctionCallNode({ data }: { data: RetellNode }) {
+  return (
+    <div className={`relative bg-amber-950 border border-amber-800 rounded-xl px-4 py-3 w-56 shadow-2xl ${data._is_start ? 'ring-2 ring-emerald-400/70' : 'ring-1 ring-amber-400/20'}`}>
+      {data._is_start && <StartBadge />}
+      <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-amber-500" />
+      <div className="flex items-center gap-2 mb-1.5">
+        <Globe size={10} className="text-amber-400 shrink-0" />
+        <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest truncate">{data.name}</p>
+      </div>
+      <div className="bg-amber-900/30 rounded-lg p-2 border border-amber-700/50">
+        <p className="text-[11px] text-amber-200 truncate">
+          {data.function_call?.description || data.function_call?.url || 'No function configured'}
+        </p>
+      </div>
+      <Handle type="source" position={Position.Bottom} className="w-2 h-2 !bg-amber-500" />
+    </div>
+  );
+}
+
+function BranchConditionNode({ data }: { data: RetellNode }) {
+  return (
+    <div className={`relative bg-violet-950 border border-violet-800 rounded-xl px-4 py-3 w-56 shadow-2xl ${data._is_start ? 'ring-2 ring-emerald-400/70' : 'ring-1 ring-violet-400/20'}`}>
+      {data._is_start && <StartBadge />}
+      <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-violet-500" />
+      <div className="flex items-center gap-2 mb-1.5">
+        <GitBranch size={10} className="text-violet-400 shrink-0" />
+        <p className="text-[10px] font-black text-violet-400 uppercase tracking-widest truncate">{data.name}</p>
+      </div>
+      <div className="bg-violet-900/30 rounded-lg p-2 border border-violet-700/50">
+        <p className="text-[11px] text-violet-300">Routes based on call context</p>
+      </div>
+      <Handle type="source" position={Position.Bottom} className="w-2 h-2 !bg-violet-500" />
     </div>
   );
 }
@@ -194,6 +250,8 @@ const nodeTypes: NodeTypes = {
   conversation: ConversationNode,
   transfer_call: TransferCallNode,
   end: EndNode,
+  function_call: FunctionCallNode,
+  branch_condition: BranchConditionNode,
 };
 
 const retellEdgeTypes = { custom: CustomEdge };
@@ -213,7 +271,8 @@ function NodeConfigPanel({
   onEdgeUpdate,
   onEdgeDestinationChange,
   onClose,
-  onDelete
+  onDelete,
+  onSetStart,
 }: {
   node: Node<RetellNode>;
   allNodes: Node<RetellNode>[];
@@ -223,6 +282,7 @@ function NodeConfigPanel({
   onEdgeDestinationChange: (edgeId: string, destinationNodeId: string) => void;
   onClose: () => void;
   onDelete: () => void;
+  onSetStart: (id: string) => void;
 }) {
   const data = node.data;
 
@@ -248,7 +308,8 @@ function NodeConfigPanel({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+      <div className="flex-1 overflow-y-auto p-4 space-y-5">
+        {/* Name — always */}
         <div>
           <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Name</label>
           <input
@@ -258,29 +319,100 @@ function NodeConfigPanel({
           />
         </div>
 
-        <div>
-          <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Instructions</label>
-          <textarea
-            value={data.instruction?.text || ''}
-            onChange={(e) => updateData({ instruction: { type: 'prompt', text: e.target.value } })}
-            className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-xs text-white focus:ring-2 focus:ring-sky-500/50 outline-none min-h-[120px] resize-none"
-          />
-        </div>
+        {/* Conversation: agent instructions */}
+        {data.type === 'conversation' && (
+          <div>
+            <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Agent Instructions</label>
+            <textarea
+              value={data.instruction?.text || ''}
+              onChange={(e) => updateData({ instruction: { type: 'prompt', text: e.target.value } })}
+              placeholder="What should the agent say or do in this turn?"
+              className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-xs text-white focus:ring-2 focus:ring-sky-500/50 outline-none min-h-[120px] resize-none"
+            />
+          </div>
+        )}
 
+        {/* Transfer call: phone */}
         {data.type === 'transfer_call' && (
           <div>
-            <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Phone Number</label>
+            <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Transfer to Number</label>
             <input
               value={data.transfer_destination?.number || ''}
               onChange={(e) => updateData({ transfer_destination: { type: 'predefined', number: e.target.value } })}
+              placeholder="+1 555 000 0000"
               className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-xs text-white focus:ring-2 focus:ring-sky-500/50 outline-none"
             />
           </div>
         )}
 
-        {data.type === 'conversation' && (
+        {/* Function call */}
+        {data.type === 'function_call' && (
+          <>
+            <div>
+              <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Presets</label>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { label: 'Tag Lead',     icon: Tag,   url: '/webhooks/tag-lead',      desc: 'Tag this lead based on call outcome' },
+                  { label: 'Send SMS',     icon: Globe, url: '/webhooks/send-sms',      desc: 'Send an SMS to the lead after this step' },
+                  { label: 'Notify Slack', icon: Globe, url: '/webhooks/slack-notify',  desc: 'Post a Slack notification about this call' },
+                ].map(({ label, icon: Icon, url, desc }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => updateData({ function_call: { url, description: desc, speak_during_execution: false } })}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-900/50 border border-amber-700/50 hover:border-amber-500 text-[10px] font-bold text-amber-300 transition-all"
+                  >
+                    <Icon size={9} /> {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Webhook URL</label>
+              <input
+                value={data.function_call?.url || ''}
+                onChange={(e) => updateData({ function_call: { ...data.function_call ?? { description: '', speak_during_execution: false }, url: e.target.value } })}
+                placeholder="https://..."
+                className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-xs text-white focus:ring-2 focus:ring-sky-500/50 outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Description</label>
+              <textarea
+                value={data.function_call?.description || ''}
+                onChange={(e) => updateData({ function_call: { ...data.function_call ?? { url: '', speak_during_execution: false }, description: e.target.value } })}
+                placeholder="What does this function do?"
+                className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-xs text-white focus:ring-2 focus:ring-sky-500/50 outline-none min-h-[60px] resize-none"
+              />
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={data.function_call?.speak_during_execution ?? false}
+                onChange={(e) => updateData({ function_call: { ...data.function_call ?? { url: '', description: '' }, speak_during_execution: e.target.checked } })}
+                className="rounded border-slate-600 bg-slate-800 text-sky-500"
+              />
+              <span className="text-[10px] text-slate-400">Agent speaks while executing</span>
+            </label>
+          </>
+        )}
+
+        {/* Branch condition: hint */}
+        {data.type === 'branch_condition' && (
+          <div className="rounded-xl border border-violet-800/50 bg-violet-900/20 p-3">
+            <p className="text-[10px] text-violet-300 leading-relaxed">
+              Evaluates call context and routes to different destinations. Connect outgoing edges below and set a condition prompt on each.
+            </p>
+          </div>
+        )}
+
+        {/* Outgoing edges — conversation, function_call, branch_condition */}
+        {(data.type === 'conversation' || data.type === 'function_call' || data.type === 'branch_condition') && (
           <div className="space-y-4 pt-4 border-t border-slate-800">
             <h4 className="text-[9px] font-black uppercase tracking-widest text-slate-500">Outgoing Edges</h4>
+            {edges.filter(e => e.source === node.id).length === 0 && (
+              <p className="text-[10px] text-slate-600 italic">No outgoing edges yet. Draw a connection from this node.</p>
+            )}
             {edges.filter(e => e.source === node.id).map((edge) => (
               <div key={edge.id} className="p-3 bg-slate-800/50 rounded-xl border border-slate-700/50 space-y-3">
                 <div>
@@ -288,6 +420,7 @@ function NodeConfigPanel({
                   <textarea
                     value={edge.data?.transition_condition?.prompt || ''}
                     onChange={(e) => onEdgeUpdate(edge.id, { type: 'prompt', prompt: e.target.value })}
+                    placeholder="When should the flow take this path?"
                     className="w-full bg-slate-900 border-none rounded-lg px-2 py-1.5 text-[11px] text-slate-300 focus:ring-1 focus:ring-sky-500 outline-none resize-none"
                   />
                 </div>
@@ -307,6 +440,25 @@ function NodeConfigPanel({
             ))}
           </div>
         )}
+
+        {/* Start node control */}
+        <div className="pt-4 border-t border-slate-800">
+          {data._is_start ? (
+            <div className="flex items-center gap-2 text-emerald-400">
+              <Play size={10} fill="currentColor" />
+              <span className="text-[9px] font-black uppercase tracking-widest">This is the start node</span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onSetStart(node.id)}
+              className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-slate-500 hover:text-emerald-400 transition-colors"
+            >
+              <Play size={10} />
+              Set as start node
+            </button>
+          )}
+        </div>
       </div>
     </aside>
   );
@@ -326,6 +478,7 @@ interface RetellFlowInnerProps {
   handleEdgeUpdate: (edgeId: string, condition: { type: string; prompt: string }) => void;
   handleEdgeDestinationChange: (edgeId: string, destinationNodeId: string) => void;
   addNode: (type: RetellNode['type']) => void;
+  onSetStart: (id: string) => void;
 }
 
 function RetellFlowInner({
@@ -342,6 +495,7 @@ function RetellFlowInner({
   handleEdgeUpdate,
   handleEdgeDestinationChange,
   addNode,
+  onSetStart,
 }: RetellFlowInnerProps) {
   const { deleteElements } = useReactFlow();
 
@@ -368,6 +522,8 @@ function RetellFlowInner({
             nodeColor={(n) => {
               if (n.type === 'end') return '#9f1239';
               if (n.type === 'transfer_call') return '#312e81';
+              if (n.type === 'function_call') return '#78350f';
+              if (n.type === 'branch_condition') return '#3b0764';
               return '#1e293b';
             }}
             style={{ backgroundColor: '#0f172a' }}
@@ -385,28 +541,47 @@ function RetellFlowInner({
             </div>
           </Panel>
           <Panel position="bottom-center">
-            <div className="flex items-center gap-2 bg-slate-900/95 border border-slate-700 rounded-xl px-3 py-2 shadow-2xl backdrop-blur">
-              <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 mr-1">Add Node</span>
+            <div className="flex items-center gap-1.5 bg-slate-900/95 border border-slate-700 rounded-xl px-3 py-2 shadow-2xl backdrop-blur">
+              <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 mr-1">Add</span>
               <button
                 onClick={() => addNode('conversation')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 hover:border-slate-500 text-slate-300 text-[10px] font-bold transition-all"
+                title="Dialogue turn — agent speaks and listens"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 hover:border-slate-500 text-slate-300 text-[10px] font-bold transition-all"
               >
                 <span className="w-2 h-2 rounded-full bg-slate-500 inline-block" />
                 Conversation
               </button>
               <button
+                onClick={() => addNode('branch_condition')}
+                title="Branch — route based on call context"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-violet-950 border border-violet-800 hover:border-violet-600 text-violet-300 text-[10px] font-bold transition-all"
+              >
+                <GitBranch size={10} />
+                Branch
+              </button>
+              <button
+                onClick={() => addNode('function_call')}
+                title="Function — call a webhook or trigger an action"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-950 border border-amber-800 hover:border-amber-600 text-amber-300 text-[10px] font-bold transition-all"
+              >
+                <Globe size={10} />
+                Function
+              </button>
+              <button
                 onClick={() => addNode('transfer_call')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-950 border border-indigo-800 hover:border-indigo-600 text-indigo-300 text-[10px] font-bold transition-all"
+                title="Transfer — hand off to a human agent"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-950 border border-indigo-800 hover:border-indigo-600 text-indigo-300 text-[10px] font-bold transition-all"
               >
                 <span className="w-2 h-2 rounded-full bg-indigo-500 inline-block" />
                 Transfer
               </button>
               <button
                 onClick={() => addNode('end')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-950 border border-rose-900 hover:border-rose-700 text-rose-300 text-[10px] font-bold transition-all"
+                title="End Call"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-rose-950 border border-rose-900 hover:border-rose-700 text-rose-300 text-[10px] font-bold transition-all"
               >
                 <span className="w-2 h-2 rounded-full bg-rose-500 inline-block" />
-                End Call
+                End
               </button>
             </div>
           </Panel>
@@ -426,6 +601,7 @@ function RetellFlowInner({
             deleteElements({ nodes: [{ id: selectedNode.id }] });
             setSelectedNodeId(null);
           }}
+          onSetStart={onSetStart}
         />
       )}
     </div>
@@ -452,13 +628,24 @@ export default function RetellFlowEditor() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
 
+  const handleSetStart = useCallback((nodeId: string) => {
+    setFlow(f => f ? { ...f, start_node_id: nodeId } : f);
+    setNodes(nds => nds.map(n => ({
+      ...n,
+      data: { ...n.data, _is_start: n.id === nodeId },
+    })));
+  }, [setNodes]);
+
   useEffect(() => {
     api.get(`/accounts/voice/${agentId}/flow`)
       .then(res => {
         const flowData = res.data as RetellFlow;
         setFlow(flowData);
         setGlobalPrompt(flowData.global_prompt);
-        setNodes(retellNodesToFlow(flowData.nodes));
+        setNodes(retellNodesToFlow(flowData.nodes).map(n => ({
+          ...n,
+          data: { ...n.data, _is_start: n.id === flowData.start_node_id },
+        })));
         setEdges(retellEdgesToFlow(flowData.nodes));
       })
       .catch(() => {
@@ -527,14 +714,22 @@ export default function RetellFlowEditor() {
 
   const addNode = useCallback((type: RetellNode['type']) => {
     const id = `node-${Date.now()}`;
+    const defaultNames: Record<RetellNode['type'], string> = {
+      conversation:     'New Conversation',
+      transfer_call:    'Transfer Call',
+      end:              'End Call',
+      function_call:    'Function Call',
+      branch_condition: 'Branch',
+    };
     const newRetellNode: RetellNode = {
       id,
       type,
-      name: type === 'conversation' ? 'New Conversation' : type === 'transfer_call' ? 'Transfer Call' : 'End Call',
+      name: defaultNames[type],
       display_position: { x: 200 + Math.random() * 200, y: 200 + Math.random() * 200 },
-      instruction: { type: 'prompt', text: '' },
-      ...(type === 'conversation' ? { edges: [] } : {}),
-      ...(type === 'transfer_call' ? { transfer_destination: { type: 'predefined', number: '' } } : {}),
+      ...(type === 'conversation'     ? { instruction: { type: 'prompt', text: '' }, edges: [] } : {}),
+      ...(type === 'transfer_call'    ? { transfer_destination: { type: 'predefined', number: '' } } : {}),
+      ...(type === 'function_call'    ? { function_call: { url: '', description: '', speak_during_execution: false }, edges: [] } : {}),
+      ...(type === 'branch_condition' ? { edges: [] } : {}),
     };
     const rfNode: Node<RetellNode> = {
       id,
@@ -605,6 +800,7 @@ export default function RetellFlowEditor() {
           handleEdgeUpdate={handleEdgeUpdate}
           handleEdgeDestinationChange={handleEdgeDestinationChange}
           addNode={addNode}
+          onSetStart={handleSetStart}
         />
       </ReactFlowProvider>
     </div>
