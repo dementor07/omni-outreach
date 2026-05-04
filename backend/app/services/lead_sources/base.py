@@ -10,16 +10,26 @@ from dataclasses import dataclass, field
 
 @dataclass
 class RawLead:
-    """Normalised lead shape produced by every lead source."""
-    first_name: str
-    last_name: str
+    """Normalised lead shape produced by every lead source.
+
+    Either linkedin_url or email must be set — upsert_lead will reject leads
+    with neither. All other fields are optional enrichment; store whatever the
+    source provides and let the intake pipeline fill gaps later via action_enrich.
+    """
+    first_name: str = ""
+    last_name: str = ""
     linkedin_url: str | None = None
     email: str | None = None
+    phone: str | None = None
+    location: str | None = None
+    instagram_username: str | None = None
+    telegram_username: str | None = None
+    linkedin_distance: str | None = None
     headline: str = ""
     company: str = ""
     company_linkedin_url: str | None = None
     job_url: str | None = None
-    # Source-specific extra data stored in leads.extra_data
+    # Source-specific extra data — persisted to leads.extra_data (JSONB)
     extra: dict = field(default_factory=dict)
 
 

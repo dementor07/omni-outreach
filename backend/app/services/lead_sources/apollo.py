@@ -129,18 +129,34 @@ class ApolloSource(LeadSource):
                         if linkedin_url and not linkedin_url.startswith("http"):
                             linkedin_url = f"https://www.linkedin.com/in/{linkedin_url}"
 
+                        # Extract first available phone number
+                        phones = person.get("phone_numbers") or []
+                        phone = next(
+                            (p.get("sanitized_number") or p.get("raw_number")
+                             for p in phones if p.get("sanitized_number") or p.get("raw_number")),
+                            None,
+                        )
+
+                        # Build location string from city/state/country
+                        location_parts = filter(None, [
+                            person.get("city"),
+                            person.get("state"),
+                            person.get("country"),
+                        ])
+                        location = ", ".join(location_parts) or None
+
                         all_leads.append(RawLead(
                             first_name=person.get("first_name", ""),
                             last_name=person.get("last_name", ""),
                             linkedin_url=linkedin_url or None,
                             email=person.get("email"),
+                            phone=phone,
+                            location=location,
                             headline=person.get("title", ""),
                             company=org.get("name", "") or person.get("organization_name", ""),
                             company_linkedin_url=org.get("linkedin_url"),
                             extra={
                                 "apollo_id": person.get("id"),
-                                "city": person.get("city"),
-                                "country": person.get("country"),
                                 "seniority": person.get("seniority"),
                                 "departments": person.get("departments", []),
                                 "org_website": org.get("website_url"),
@@ -204,11 +220,22 @@ class ApolloSource(LeadSource):
         if linkedin_url and not linkedin_url.startswith("http"):
             linkedin_url = f"https://www.linkedin.com/in/{linkedin_url}"
 
+        phones = person.get("phone_numbers") or []
+        phone = next(
+            (p.get("sanitized_number") or p.get("raw_number")
+             for p in phones if p.get("sanitized_number") or p.get("raw_number")),
+            None,
+        )
+        location_parts = filter(None, [person.get("city"), person.get("state"), person.get("country")])
+        location = ", ".join(location_parts) or None
+
         return RawLead(
             first_name=person.get("first_name") or lead_data.get("first_name", ""),
             last_name=person.get("last_name") or lead_data.get("last_name", ""),
             linkedin_url=linkedin_url or None,
             email=person.get("email"),
+            phone=phone,
+            location=location,
             headline=person.get("title", ""),
             company=org.get("name", ""),
             company_linkedin_url=org.get("linkedin_url"),

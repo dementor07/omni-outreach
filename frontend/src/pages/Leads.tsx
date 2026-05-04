@@ -1,14 +1,34 @@
 import { useMemo, useRef, useState } from 'react'
-import { Search, UserRound, X, CheckSquare, Square, StopCircle, RotateCcw, Trash2, Upload } from 'lucide-react'
+import { Search, UserRound, UserPlus, X, CheckSquare, Square, StopCircle, RotateCcw, Trash2, Upload, ExternalLink } from 'lucide-react'
 
 import Badge from '../components/Badge'
 import DataTable from '../components/DataTable'
 import EmptyState from '../components/EmptyState'
 import { useListCampaigns } from '../hooks/useCampaigns'
-import { Lead, useGetLead, useListLeads, useStopLead, useBulkLeadAction, useCsvUpload, CsvUploadResult } from '../hooks/useLeads'
+import { Lead, useGetLead, useListLeads, useStopLead, useBulkLeadAction, useCsvUpload, useCreateLead, CsvUploadResult, LeadImportPayload } from '../hooks/useLeads'
 
 function formatDate(iso?: string | null) {
   return iso ? new Date(iso).toLocaleDateString() : '—'
+}
+
+const SOURCE_COLORS: Record<string, string> = {
+  apollo: 'bg-violet-100 text-violet-700',
+  apify_jobs: 'bg-sky-100 text-sky-700',
+  csv: 'bg-amber-100 text-amber-700',
+  manual: 'bg-slate-100 text-slate-600',
+  proxycurl: 'bg-emerald-100 text-emerald-700',
+  github: 'bg-gray-100 text-gray-600',
+  hunter: 'bg-orange-100 text-orange-700',
+}
+
+function SourceBadge({ source }: { source?: string | null }) {
+  if (!source) return null
+  const cls = SOURCE_COLORS[source] ?? 'bg-slate-100 text-slate-600'
+  return (
+    <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${cls}`}>
+      {source}
+    </span>
+  )
 }
 
 export default function Leads() {
@@ -21,12 +41,14 @@ export default function Leads() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkTarget, setBulkTarget] = useState('')
   const [csvResult, setCsvResult] = useState<CsvUploadResult | null>(null)
+  const [showAddModal, setShowAddModal] = useState(false)
   const csvInputRef = useRef<HTMLInputElement>(null)
 
   const leadsQuery = useListLeads(campaignId || undefined, page, 25, search || undefined, statusFilter || undefined)
   const stopLead = useStopLead()
   const bulkAction = useBulkLeadAction()
   const csvUpload = useCsvUpload()
+  const createLead = useCreateLead()
   const selectedLead = useGetLead(selectedLeadId || undefined)
 
   function handleCsvFile(file: File | undefined) {
@@ -90,6 +112,7 @@ export default function Leads() {
           <div>
             <p className="font-medium text-slate-900">{`${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Unknown'}</p>
             <p className="text-xs text-slate-400">{row.company || '—'}</p>
+            <SourceBadge source={row.source} />
           </div>
         ),
       },
@@ -158,8 +181,8 @@ export default function Leads() {
             </select>
           </div>
 
-          {/* CSV upload button — only active when a campaign is selected */}
-          <div>
+          {/* CSV upload + Add Lead buttons — only active when a campaign is selected */}
+          <div className="flex gap-2">
             <input
               ref={csvInputRef}
               type="file"
@@ -177,6 +200,16 @@ export default function Leads() {
             >
               <Upload size={15} />
               {csvUpload.isPending ? 'Uploading…' : 'Upload CSV'}
+            </button>
+            <button
+              type="button"
+              disabled={!campaignId}
+              onClick={() => setShowAddModal(true)}
+              aria-label="Add lead manually"
+              className="flex items-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-700 shadow-sm transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <UserPlus size={15} />
+              Add Lead
             </button>
           </div>
         </div>
@@ -346,6 +379,14 @@ export default function Leads() {
       </section>
 
       <LeadDrawer leadId={selectedLeadId} onClose={() => setSelectedLeadId(null)} query={selectedLead} />
+
+      {showAddModal && campaignId && (
+        <AddLeadModal
+          campaignId={campaignId}
+          onClose={() => setShowAddModal(false)}
+          onCreate={createLead}
+        />
+      )}
     </div>
   )
 }
@@ -359,10 +400,13 @@ function LeadDrawer({
   onClose: () => void
   query: ReturnType<typeof useGetLead>
 }) {
+  const [extraExpanded, setExtraExpanded] = useState(false)
   const open = !!leadId
   const lead = query.data
 
   if (!open) return null
+
+  const hasExtraData = lead?.extra_data && Object.keys(lead.extra_data).length > 0
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/30 backdrop-blur-sm">
@@ -375,10 +419,17 @@ function LeadDrawer({
               {lead ? `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || 'Unknown lead' : 'Loading...'}
             </h2>
             {lead?.linkedin_url && (
-              <a href={lead.linkedin_url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm text-sky-600 hover:text-sky-700">
-                Open LinkedIn profile
+              <a href={lead.linkedin_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1.5 text-sm text-sky-600 hover:text-sky-700">
+                <ExternalLink size={13} /> Open LinkedIn profile
               </a>
             )}
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {lead?.status && <Badge label={lead.status} asStatus />}
+              {lead?.source && <SourceBadge source={lead.source} />}
+              {lead?.tags?.map((t) => (
+                <span key={t} className="rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-medium text-sky-700">{t}</span>
+              ))}
+            </div>
           </div>
           <button type="button" aria-label="Close lead profile" onClick={onClose} className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50">
             <X size={16} />
@@ -393,33 +444,94 @@ function LeadDrawer({
             </div>
           ) : lead ? (
             <>
-              <section className="grid gap-4 sm:grid-cols-2">
-                <Detail label="Company" value={lead.company || '—'} />
-                <Detail label="Status" value={<Badge label={lead.status || 'active'} asStatus />} />
-                <Detail label="Headline" value={lead.headline || '—'} />
-                <Detail label="Source" value={lead.source || '—'} />
-                <Detail label="Email" value={lead.email || '—'} />
-                <Detail label="Phone" value={lead.phone || '—'} />
-                <Detail label="Invited" value={formatDate(lead.invited_at)} />
-                <Detail label="Accepted" value={formatDate(lead.accepted_at)} />
-                <Detail label="Replied" value={formatDate(lead.replied_at)} />
-                <Detail label="Created" value={formatDate(lead.created_at)} />
-              </section>
+              {/* Contact */}
+              <DrawerSection title="Contact">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Detail label="Email" value={lead.email || '—'} />
+                  <Detail label="Phone" value={lead.phone || '—'} />
+                  {lead.instagram_username && (
+                    <Detail label="Instagram" value={`@${lead.instagram_username}`} />
+                  )}
+                  {lead.telegram_username && (
+                    <Detail label="Telegram" value={`@${lead.telegram_username}`} />
+                  )}
+                </div>
+              </DrawerSection>
 
-              {(lead as any).tags?.length > 0 && (
-                <section>
-                  <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Tags</h3>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {((lead as any).tags as string[]).map((tag) => (
-                      <span key={tag} className="rounded-full bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-700">{tag}</span>
-                    ))}
+              {/* Profile */}
+              <DrawerSection title="Profile">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Detail label="Headline" value={lead.headline || '—'} />
+                  <Detail label="Company" value={lead.company || '—'} />
+                  <Detail label="Location" value={lead.location || '—'} />
+                  {lead.linkedin_distance && (
+                    <Detail label="LinkedIn distance" value={lead.linkedin_distance} />
+                  )}
+                </div>
+              </DrawerSection>
+
+              {/* Reply intel */}
+              {(lead.last_reply_text || lead.last_reply_category) && (
+                <DrawerSection title="Reply Intel">
+                  <div className="space-y-3">
+                    {lead.last_reply_category && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-500">Category:</span>
+                        <Badge label={lead.last_reply_category} variant="info" />
+                        {lead.last_reply_confidence != null && (
+                          <span className="text-xs text-slate-400">{Math.round(lead.last_reply_confidence * 100)}% confidence</span>
+                        )}
+                      </div>
+                    )}
+                    {lead.last_reply_text && (
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm italic text-slate-600">
+                        &ldquo;{lead.last_reply_text}&rdquo;
+                      </div>
+                    )}
+                    {lead.last_reply_at && (
+                      <p className="text-xs text-slate-400">Received {formatDate(lead.last_reply_at)}</p>
+                    )}
                   </div>
-                </section>
+                </DrawerSection>
               )}
 
-              <section>
-                <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Timeline</h3>
-                <div className="mt-4 space-y-3">
+              {/* Enrichment data */}
+              {hasExtraData && (
+                <DrawerSection title="Enrichment Data">
+                  <button
+                    type="button"
+                    onClick={() => setExtraExpanded((v) => !v)}
+                    className="text-xs text-sky-600 hover:text-sky-700"
+                  >
+                    {extraExpanded ? 'Collapse ↑' : 'Expand ↓'}
+                  </button>
+                  {extraExpanded && (
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      {Object.entries(lead.extra_data!).filter(([, v]) => v != null && v !== '').map(([k, v]) => (
+                        <Detail key={k} label={k} value={String(v)} />
+                      ))}
+                    </div>
+                  )}
+                </DrawerSection>
+              )}
+
+              {/* Outreach timestamps */}
+              <DrawerSection title="Outreach Timestamps">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Detail label="Invited" value={formatDate(lead.invited_at)} />
+                  <Detail label="Accepted" value={formatDate(lead.accepted_at)} />
+                  <Detail label="Replied" value={formatDate(lead.replied_at)} />
+                  <Detail label="Stopped" value={formatDate(lead.stopped_at)} />
+                  {lead.profile_viewed_at && (
+                    <Detail label="Profile viewed" value={formatDate(lead.profile_viewed_at)} />
+                  )}
+                  <Detail label="Created" value={formatDate(lead.created_at)} />
+                </div>
+              </DrawerSection>
+
+              {/* Timeline */}
+              <DrawerSection title="Timeline">
+                <div className="space-y-3">
                   {lead.timeline.length === 0 ? (
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
                       No events yet for this lead.
@@ -443,7 +555,7 @@ function LeadDrawer({
                     ))
                   )}
                 </div>
-              </section>
+              </DrawerSection>
             </>
           ) : (
             <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-5 text-sm text-rose-700">
@@ -456,11 +568,143 @@ function LeadDrawer({
   )
 }
 
+function DrawerSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">{title}</h3>
+      {children}
+    </section>
+  )
+}
+
 function Detail({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
       <div className="text-xs uppercase tracking-[0.14em] text-slate-400">{label}</div>
       <div className="mt-2 text-sm text-slate-800">{value}</div>
+    </div>
+  )
+}
+
+interface AddLeadModalProps {
+  campaignId: string
+  onClose: () => void
+  onCreate: ReturnType<typeof useCreateLead>
+}
+
+function AddLeadModal({ campaignId, onClose, onCreate }: AddLeadModalProps) {
+  const [form, setForm] = useState<LeadImportPayload>({
+    linkedin_url: '',
+    email: '',
+    phone: '',
+    location: '',
+    first_name: '',
+    last_name: '',
+    company: '',
+    headline: '',
+    source: 'manual',
+  })
+  const [error, setError] = useState<string | null>(null)
+
+  function set(field: keyof LeadImportPayload, value: string) {
+    setForm((prev) => ({ ...prev, [field]: value || null }))
+    setError(null)
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!form.linkedin_url && !form.email) {
+      setError('At least one of LinkedIn URL or Email is required.')
+      return
+    }
+    const payload: LeadImportPayload = {}
+    for (const [k, v] of Object.entries(form)) {
+      if (v) (payload as Record<string, string>)[k] = v as string
+    }
+    onCreate.mutate(
+      { campaignId, lead: payload },
+      {
+        onSuccess: () => onClose(),
+        onError: (err: unknown) => {
+          const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+          setError(msg ?? 'Failed to add lead. They may already exist in this campaign.')
+        },
+      },
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
+      <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-8 shadow-2xl">
+        <div className="mb-6 flex items-start justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-500">Add Lead</p>
+            <h2 className="mt-1.5 text-xl font-semibold text-slate-900">Add a lead manually</h2>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg border border-slate-200 p-2 text-slate-400 hover:bg-slate-50">
+            <X size={16} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <FormField label="First name" value={form.first_name ?? ''} onChange={(v) => set('first_name', v)} />
+            <FormField label="Last name" value={form.last_name ?? ''} onChange={(v) => set('last_name', v)} />
+            <FormField label="LinkedIn URL" value={form.linkedin_url ?? ''} onChange={(v) => set('linkedin_url', v)} placeholder="https://linkedin.com/in/..." className="sm:col-span-2" />
+            <FormField label="Email" value={form.email ?? ''} onChange={(v) => set('email', v)} type="email" className="sm:col-span-2" />
+            <FormField label="Phone" value={form.phone ?? ''} onChange={(v) => set('phone', v)} />
+            <FormField label="Location" value={form.location ?? ''} onChange={(v) => set('location', v)} />
+            <FormField label="Company" value={form.company ?? ''} onChange={(v) => set('company', v)} />
+            <FormField label="Headline / Title" value={form.headline ?? ''} onChange={(v) => set('headline', v)} />
+          </div>
+
+          {error && (
+            <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>
+          )}
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={onClose} className="rounded-2xl border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={onCreate.isPending}
+              className="rounded-2xl bg-sky-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50"
+            >
+              {onCreate.isPending ? 'Adding…' : 'Add Lead'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+function FormField({
+  label,
+  value,
+  onChange,
+  type = 'text',
+  placeholder,
+  className,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  type?: string
+  placeholder?: string
+  className?: string
+}) {
+  return (
+    <div className={className}>
+      <label className="mb-1.5 block text-xs font-medium text-slate-600">{label}</label>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+      />
     </div>
   )
 }

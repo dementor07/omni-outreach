@@ -5,20 +5,32 @@ import { api } from '../api/client'
 export interface Lead {
   id: string
   campaign_id: string
-  linkedin_url: string
+  linkedin_url?: string | null
   email?: string | null
   phone?: string | null
+  location?: string | null
   first_name?: string | null
   last_name?: string | null
   headline?: string | null
   company?: string | null
-  source?: string
-  status?: 'active' | 'stopped'
+  company_linkedin_url?: string | null
+  source?: string | null
+  status?: string | null
+  tags?: string[] | null
+  instagram_username?: string | null
+  telegram_username?: string | null
+  linkedin_distance?: string | null
+  last_reply_text?: string | null
+  last_reply_category?: string | null
+  last_reply_confidence?: number | null
+  last_reply_at?: string | null
   invited_at?: string | null
   accepted_at?: string | null
   replied_at?: string | null
   stopped_at?: string | null
-  created_at?: string
+  profile_viewed_at?: string | null
+  created_at?: string | null
+  extra_data?: Record<string, unknown> | null
 }
 
 export interface LeadTimelineEvent {
@@ -33,9 +45,10 @@ export interface LeadDetail extends Lead {
 }
 
 export interface LeadImportPayload {
-  linkedin_url: string
+  linkedin_url?: string | null
   email?: string | null
   phone?: string | null
+  location?: string | null
   first_name?: string | null
   last_name?: string | null
   headline?: string | null
@@ -70,6 +83,23 @@ export function useGetLead(id?: string) {
     queryFn: async () => {
       const { data } = await api.get<LeadDetail>(`/leads/${id}`)
       return data
+    },
+  })
+}
+
+export function useCreateLead() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ campaignId, lead }: { campaignId: string; lead: LeadImportPayload }) => {
+      const { data } = await api.post<{ id: string; status: string }>(
+        `/leads?campaign_id=${campaignId}`,
+        lead,
+      )
+      return data
+    },
+    onSuccess: (_, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['leads', variables.campaignId] })
+      void queryClient.invalidateQueries({ queryKey: ['campaign-stats', variables.campaignId] })
     },
   })
 }

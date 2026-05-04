@@ -22,11 +22,14 @@ def _dedupe_scope() -> str:
 
 
 async def upsert_lead(campaign_id: str, lead: RawLead, source_type: str) -> bool:
-    """Upsert a single RawLead into the DB. Returns True if newly inserted."""
-    # linkedin_url is the primary identifier — the DB has a NOT NULL constraint
-    # and all outreach is LinkedIn-routed. Leads without it cannot be inserted.
-    if not lead.linkedin_url:
-        log.warning(f"[lead_gen] Skipping lead with no linkedin_url (email={lead.email})")
+    """Upsert a single RawLead into the DB. Returns True if newly inserted.
+
+    Either linkedin_url or email must be present. LinkedIn-URL leads are the
+    primary case; email-only leads (e.g. Apollo contacts without a LI profile)
+    are supported and deduplicated by (campaign_id, email) instead.
+    """
+    if not lead.linkedin_url and not lead.email:
+        log.warning("[lead_gen] Skipping lead with neither linkedin_url nor email")
         return False
 
     # Blacklist gate — refuse to insert leads matching any blocked identifier.
@@ -37,7 +40,7 @@ async def upsert_lead(campaign_id: str, lead: RawLead, source_type: str) -> bool
     if lead.email and await is_blacklisted(lead.email, "email"):
         log.info(f"[lead_gen] Skipping blacklisted email {lead.email}")
         return False
-    if await is_blacklisted(lead.linkedin_url, "linkedin_url"):
+    if lead.linkedin_url and await is_blacklisted(lead.linkedin_url, "linkedin_url"):
         log.info(f"[lead_gen] Skipping blacklisted linkedin_url {lead.linkedin_url}")
         return False
     if lead.company and await is_blacklisted(lead.company, "company"):
@@ -67,10 +70,9 @@ async def upsert_lead(campaign_id: str, lead: RawLead, source_type: str) -> bool
             except Exception as _exc:
                 log.warning(f"[lead_gen] Hunter verify failed for {lead.email}: {_exc}")
 
-    # Cool-off window (sprint #13) — skip leads that had recent outreach in any
-    # campaign within LEAD_COOLOFF_DAYS. Set env var to 0 (default) to disable.
+    # Cool-off window — skip leads that had recent outreach within LEAD_COOLOFF_DAYS.
     _cooloff_days = int(os.environ.get("LEAD_COOLOFF_DAYS", "0"))
-    if _cooloff_days > 0:
+    if _cooloff_days > 0 and lead.linkedin_url:
         _recent = await fetch_one(
             """
             SELECT 1 FROM events e
@@ -107,48 +109,62 @@ async def upsert_lead(campaign_id: str, lead: RawLead, source_type: str) -> bool
             log.info(f"[lead_gen] Campaign {campaign_id} hit daily_lead_cap={cap}; skipping")
             return False
 
-    # Dedupe — defaults to within-campaign. Set LEAD_DEDUPE_SCOPE=global to
-    # treat the lead as a duplicate when it exists in any campaign (closes the
-    # cross-campaign re-contact gap from the lead-gen workflow audit).
+    # Dedupe
     scope = _dedupe_scope()
-    if scope == "global":
-        existing = await fetch_one(
-            "SELECT id FROM leads WHERE linkedin_url=$1 LIMIT 1",
-            lead.linkedin_url,
-        )
-        if existing:
-            log.info(
-                f"[lead_gen] Skipping {lead.linkedin_url} — already present in another campaign (global dedupe)"
+    if lead.linkedin_url:
+        # LinkedIn-URL-based dedupe (primary path)
+        if scope == "global":
+            existing = await fetch_one(
+                "SELECT id FROM leads WHERE linkedin_url=$1 LIMIT 1",
+                lead.linkedin_url,
             )
-            return False
+            if existing:
+                log.info(
+                    f"[lead_gen] Skipping {lead.linkedin_url} — present in another campaign (global dedupe)"
+                )
+                return False
+        else:
+            existing = await fetch_one(
+                "SELECT id FROM leads WHERE campaign_id=$1 AND linkedin_url=$2",
+                campaign_id, lead.linkedin_url,
+            )
+            if existing:
+                return False
     else:
-        # Default: within-campaign dedupe
+        # Email-only dedupe (no LinkedIn URL)
         existing = await fetch_one(
-            "SELECT id FROM leads WHERE campaign_id=$1 AND linkedin_url=$2",
-            campaign_id,
-            lead.linkedin_url,
+            "SELECT id FROM leads WHERE campaign_id=$1 AND email=$2 AND linkedin_url IS NULL",
+            campaign_id, lead.email,
         )
         if existing:
             return False
 
+    import json as _json
     row = await fetch_one(
         """
-        INSERT INTO leads
-            (campaign_id, linkedin_url, email, first_name, last_name, headline,
-             company, company_linkedin_url, job_url, source)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        INSERT INTO leads (
+            campaign_id, linkedin_url, email, phone,
+            first_name, last_name, headline, company,
+            company_linkedin_url, job_url, location,
+            instagram_username, telegram_username, source, extra_data
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
         RETURNING id
         """,
         campaign_id,
         lead.linkedin_url,
         lead.email,
+        lead.phone,
         lead.first_name,
         lead.last_name,
         lead.headline,
         lead.company,
         lead.company_linkedin_url,
         lead.job_url,
+        lead.location,
+        lead.instagram_username,
+        lead.telegram_username,
         source_type,
+        _json.dumps(lead.extra) if lead.extra else "{}",
     )
 
     if row:

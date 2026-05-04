@@ -16,9 +16,10 @@ router = APIRouter()
 
 
 class LeadImport(BaseModel):
-    linkedin_url: str
+    linkedin_url: str | None = None
     email: str | None = None
     phone: str | None = None
+    location: str | None = None
     first_name: str | None = None
     last_name: str | None = None
     headline: str | None = None
@@ -27,11 +28,15 @@ class LeadImport(BaseModel):
 
     @field_validator("linkedin_url")
     @classmethod
-    def validate_linkedin_url(cls, v: str) -> str:
+    def validate_linkedin_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
         v = v.strip()
-        if not v.startswith("https://") or "linkedin.com/" not in v:
+        if v and ("linkedin.com/" not in v):
             raise ValueError("Must be a valid LinkedIn URL (https://...linkedin.com/...)")
-        return v
+        if v and not v.startswith("https://"):
+            v = f"https://www.linkedin.com/in/{v.lstrip('/')}"
+        return v or None
 
     @field_validator("email")
     @classmethod
@@ -41,7 +46,11 @@ class LeadImport(BaseModel):
         v = v.strip()
         if v and ("@" not in v or "." not in v.split("@")[-1]):
             raise ValueError("Invalid email format")
-        return v
+        return v or None
+
+    def requires_identifier(self) -> bool:
+        """At least one of linkedin_url or email must be present."""
+        return bool(self.linkedin_url or self.email)
 
 
 @router.post("", status_code=201)
@@ -54,11 +63,16 @@ async def create_lead(
     daily cap + dedupe + email verification + cool-off all apply."""
     from app.services.lead_gen import upsert_lead
 
+    if not body.requires_identifier():
+        raise HTTPException(status_code=422, detail="At least one of linkedin_url or email is required")
+
     raw = RawLead(
         first_name=body.first_name or "",
         last_name=body.last_name or "",
         linkedin_url=body.linkedin_url,
         email=body.email,
+        phone=body.phone,
+        location=body.location,
         headline=body.headline or "",
         company=body.company or "",
     )
@@ -69,8 +83,8 @@ async def create_lead(
             detail="Lead already exists or was rejected by intake gate (blacklist / dedupe / cap)",
         )
     lead = await fetch_one(
-        "SELECT id FROM leads WHERE campaign_id=$1 AND linkedin_url=$2",
-        campaign_id, raw.linkedin_url,
+        "SELECT id FROM leads WHERE campaign_id=$1 AND (linkedin_url=$2 OR (linkedin_url IS NULL AND email=$3))",
+        campaign_id, raw.linkedin_url, raw.email,
     )
     return {"id": str(lead["id"]) if lead else None, "status": "created"}
 
@@ -136,11 +150,16 @@ async def import_leads(
     skipped = 0
     blacklisted = 0
     for lead in leads:
+        if not (lead.linkedin_url or lead.email):
+            skipped += 1
+            continue
         raw = RawLead(
             first_name=lead.first_name or "",
             last_name=lead.last_name or "",
             linkedin_url=lead.linkedin_url,
             email=lead.email,
+            phone=lead.phone,
+            location=lead.location,
             headline=lead.headline or "",
             company=lead.company or "",
         )
@@ -179,6 +198,12 @@ _COL_ALIASES: dict[str, str] = {
     "phone": "phone",
     "phone_number": "phone",
     "phone number": "phone",
+    "mobile": "phone",
+    "mobile_number": "phone",
+    "location": "location",
+    "city": "location",
+    "country": "location",
+    "region": "location",
 }
 
 
@@ -237,14 +262,14 @@ async def csv_upload(
         linkedin_url = mapped.get("linkedin_url")
         email = mapped.get("email")
 
-        if not linkedin_url:
+        if not linkedin_url and not email:
             invalid += 1
             if len(errors) < 20:
-                errors.append(f"Row {row_num}: linkedin_url is required")
+                errors.append(f"Row {row_num}: at least one of linkedin_url or email is required")
             continue
 
         # Basic LinkedIn URL normalisation
-        if "linkedin.com/" not in linkedin_url:
+        if linkedin_url and "linkedin.com/" not in linkedin_url:
             invalid += 1
             if len(errors) < 20:
                 errors.append(f"Row {row_num}: invalid linkedin_url '{linkedin_url}'")
@@ -255,6 +280,8 @@ async def csv_upload(
             last_name=mapped.get("last_name", ""),
             linkedin_url=linkedin_url,
             email=email,
+            phone=mapped.get("phone"),
+            location=mapped.get("location"),
             headline=mapped.get("headline", ""),
             company=mapped.get("company", ""),
         )
