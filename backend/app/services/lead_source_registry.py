@@ -15,6 +15,7 @@ from .lead_sources.apollo import ApolloSource
 from .lead_sources.base import LeadSource
 from .lead_sources.github import GitHubSource
 from .lead_sources.hunter import HunterSource
+from .lead_sources.manual import ManualSource
 from .lead_sources.proxycurl import ProxyCurlSource
 
 
@@ -42,3 +43,4 @@ registry.register(ApolloSource())
 registry.register(HunterSource())
 registry.register(ProxyCurlSource())
 registry.register(GitHubSource())
+registry.register(ManualSource())
