@@ -186,6 +186,7 @@ const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNode; colo
   { type: 'action_voice',                  label: 'AI Voice Call',     icon: <Phone size={15} />,          color: 'text-indigo-600',  bg: 'bg-indigo-50',  border: 'border-indigo-200' },
   { type: 'action_webhook',                label: 'Webhook / CRM',     icon: <Webhook size={15} />,        color: 'text-orange-600',  bg: 'bg-orange-50',  border: 'border-orange-200' },
   { type: 'action_enrich',                 label: 'Enrich Lead',       icon: <Database size={15} />,       color: 'text-indigo-600',  bg: 'bg-indigo-50',  border: 'border-indigo-200' },
+  { type: 'control_parallel_fork',         label: 'Parallel Fork',     icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
   { type: 'action_hot_lead_alert',         label: 'Hot Lead Alert',    icon: <Flame size={15} />,          color: 'text-rose-600',    bg: 'bg-rose-50',    border: 'border-rose-200' },
   { type: 'action_add_tag',                label: 'Add Tag',           icon: <Tag size={15} />,            color: 'text-slate-600',   bg: 'bg-slate-50',   border: 'border-slate-200' },
   { type: 'action_remove_tag',             label: 'Remove Tag',        icon: <MinusCircle size={15} />,     color: 'text-slate-500',   bg: 'bg-slate-50',   border: 'border-slate-200' },
@@ -238,6 +239,7 @@ const ActionNode = ({ data, id, selected }: NodeProps) => {
   const cfg = NODE_PALETTE.find(p => p.type === nodeType)
   const mode = (data as any).mode || 'simple'
   const configured = !!(data.email_account_id || data.voice_agent_id || nodeType === 'action_linkedin_invite' || (data.template && (data.template as any).body))
+  const isEnrich = nodeType === 'action_enrich'
   
   return (
     <div className={`relative min-w-[220px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : cfg?.border ?? 'border-slate-200'}`}>
@@ -254,7 +256,7 @@ const ActionNode = ({ data, id, selected }: NodeProps) => {
       </div>
 
       <div>
-        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Engagement</p>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{isEnrich ? 'Intelligence' : 'Engagement'}</p>
         <p className="text-xs font-bold text-slate-900">{cfg?.label ?? nodeType}</p>
       </div>
 
@@ -265,16 +267,61 @@ const ActionNode = ({ data, id, selected }: NodeProps) => {
         </div>
       )}
 
-      <div className="mt-3 flex items-center justify-between border-t border-slate-50 pt-3">
-        <span className={`text-[10px] font-medium ${configured ? 'text-emerald-500' : 'text-slate-300'}`}>
-          {configured ? 'Ready' : 'Draft'}
-        </span>
-        <Settings2 size={12} className="text-slate-300" />
-      </div>
-      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-none !bg-slate-300" />
+      {isEnrich ? (
+        <div className="mt-4 grid grid-cols-2 divide-x divide-slate-50 border-t border-slate-50 pt-3">
+          <div className="flex flex-col items-center">
+            <span className="text-[9px] font-black uppercase text-emerald-500">Found</span>
+            <Handle type="source" id="found" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-emerald-400" />
+          </div>
+          <div className="flex flex-col items-center">
+            <span className="text-[9px] font-black uppercase text-rose-400">Empty</span>
+            <Handle type="source" id="not_found" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-rose-400" />
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-3 flex items-center justify-between border-t border-slate-50 pt-3">
+            <span className={`text-[10px] font-medium ${configured ? 'text-emerald-500' : 'text-slate-300'}`}>
+              {configured ? 'Ready' : 'Draft'}
+            </span>
+            <Settings2 size={12} className="text-slate-300" />
+          </div>
+          <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-none !bg-slate-300" />
+        </>
+      )}
     </div>
   )
 }
+
+const ParallelForkNode = ({ selected }: NodeProps) => (
+  <div className={`relative min-w-[260px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-amber-200'}`}>
+    <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
+    <div className="flex items-center gap-3">
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
+        <GitBranch size={14} />
+      </div>
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Control</p>
+        <p className="text-xs font-bold text-slate-900">Parallel Fork</p>
+      </div>
+    </div>
+    <p className="mt-2 text-[10px] text-slate-500 italic">Fires all branches simultaneously.</p>
+    <div className="mt-4 grid grid-cols-5 gap-1 border-t border-slate-50 pt-3">
+      {[1, 2, 3, 4, 5].map(i => (
+        <div key={i} className="flex flex-col items-center">
+          <span className="text-[8px] font-black text-slate-300">B{i}</span>
+          <Handle
+            type="source"
+            id={`branch_${i}`}
+            position={Position.Bottom}
+            style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }}
+            className="!mt-1 !h-2 !w-2 !border-none !bg-amber-400"
+          />
+        </div>
+      ))}
+    </div>
+  </div>
+)
 
 const TriggerNode = ({ selected, data }: NodeProps) => {
   const { id: campaignId } = useParams()
@@ -561,6 +608,7 @@ const nodeTypes = {
   action_webhook: ActionNode,
   action_enrich: ActionNode,
   action_hot_lead_alert: ActionNode,
+  control_parallel_fork: ParallelForkNode,
   human_approval: HumanApprovalNode,
   condition_reply_intent: ReplyIntentNode,
   condition_replied: ConditionNode,

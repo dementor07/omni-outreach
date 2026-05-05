@@ -551,7 +551,10 @@ async def _handle_enrich(task: dict, lead: dict, campaign: dict) -> None:
         {"source": enrich_source, "fields_filled": list(updates.keys())},
     )
     await _mark_sent(task["id"])
-    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
+    
+    # Branch based on whether anything was actually found/filled
+    handle = "found" if updates else "not_found"
+    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]), handle)
 
 
 async def _process_task(task: dict, worker_id: str) -> None:

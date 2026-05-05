@@ -26,6 +26,7 @@ export type NodeType =
   | 'condition_reply_intent'
   | 'human_approval'
   | 'action_hot_lead_alert'
+  | 'control_parallel_fork'
   | 'event_invite_accepted'
   | 'event_email_opened'
   | 'event_link_clicked'

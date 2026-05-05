@@ -164,6 +164,12 @@ async def queue_next_nodes(
             log.info(f"[sequencer] Split node {target_id}: chose arm '{chosen_arm}' for lead {lead_id}")
             await queue_next_nodes(lead_id, target_id, chosen_arm, accumulated_delay)
 
+        elif node_type == "control_parallel_fork":
+            # Fire all branches (up to 5) simultaneously
+            log.info(f"[sequencer] Parallel fork {target_id} for lead {lead_id}")
+            for i in range(1, 6):
+                await queue_next_nodes(lead_id, target_id, f"branch_{i}", accumulated_delay)
+
         elif node_type == "human_approval":
             # Open a new approvals row and park. Resume on POST /approvals/{id}/resolve.
             existing = await fetch_one(
