@@ -767,3 +767,20 @@ The initial webhook URL used `omnioutreach.space`, which has no DNS A record (cu
 - Added "Export CSV" buttons to the Leads tab UI.
 
 **Documentation**: Added a 10+ file "UX Vulnerability Dossier" to the wiki to enforce "Anti-Slop" engineering standards for future development.
+
+
+## [2026-05-05] feat & deploy | Phase 2: Error Visibility & Queue Management
+
+**Queue Management**: Transformed the Queue from a passive viewer into an operational command center.
+
+**1. Error Visibility**
+- Backend `_fail_task` logic now consistently captures the first 500 characters of exceptions.
+- Queue UI (`Queue.tsx`) now displays the `failure_reason` with an `AlertCircle` icon for failed/skipped tasks.
+
+**2. Manual Retry Controls**
+- Added `POST /queue/{task_id}/retry` to reset tasks to `queued` state.
+- Added `POST /queue/bulk-retry` to reset all failed tasks (optionally filtered by campaign/channel).
+- Implemented individual "Retry" buttons and a "Bulk Retry" header action in the Queue dashboard.
+
+**3. Frontend Hooks**
+- Updated `useQueue.ts` to include `useRetryTask` and `useBulkRetryTasks` mutations.
