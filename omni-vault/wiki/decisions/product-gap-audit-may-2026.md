@@ -53,3 +53,7 @@ The agents have built a **Headless State Machine**. They have optimized for **Ba
 2. Refactor `delay` nodes to support `unit: minutes|hours|days`.
 3. Implement a "Parallel Fork" node in the Canvas.
 4. Add a "Drafts" view for Human-AI collaboration.
+
+
+### Status Update (2026-05-05) - Phase 2 Mitigation
+- **Human-in-the-Loop AI**: Implemented an "Edit Draft" feature on the Approvals page. Humans can now modify AI-generated message payloads before clicking "Approve."

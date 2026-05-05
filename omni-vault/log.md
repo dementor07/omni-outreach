@@ -784,3 +784,16 @@ The initial webhook URL used `omnioutreach.space`, which has no DNS A record (cu
 
 **3. Frontend Hooks**
 - Updated `useQueue.ts` to include `useRetryTask` and `useBulkRetryTasks` mutations.
+
+
+## [2026-05-05] feat & deploy | Phase 2: Human Approval Intervention
+
+**Human-in-the-Loop**: Enabled operators to edit AI-generated drafts.
+
+**1. Editable Approvals**
+- Added `PATCH /approvals/{id}` endpoint to update the `payload` of a pending approval.
+- Redesigned the Approvals UI (`Approvals.tsx`) with a high-fidelity "Edit" mode.
+- Operators can now correct AI hallucinations or customize messaging per-lead before final approval.
+
+**2. Backend Integrity**
+- Ensured that edits to the approval payload are persisted, allowing subsequent nodes in the sequence to inherit the corrected data.
