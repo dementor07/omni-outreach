@@ -343,10 +343,19 @@ async def _handle_voice(task: dict, lead: dict, campaign: dict) -> None:
     mode = config.get("mode", "simple")
     retell_flow_id = config.get("retell_flow_id") if mode == "flow" else None
 
+    # Resolve field_mappings: {"retell_var": "lead_field"} → {"retell_var": "actual value"}
+    field_mappings: dict = config.get("field_mappings") or {}
+    dynamic_vars: dict = {
+        var_name: str(lead.get(lead_field) or "")
+        for var_name, lead_field in field_mappings.items()
+        if lead.get(lead_field) is not None
+    }
+
     await voice.make_call(
         agent["retell_agent_id"], lead["phone"],
         metadata={"lead_id": str(lead["id"]), "campaign_id": str(lead["campaign_id"])},
-        conversation_flow_id=retell_flow_id
+        conversation_flow_id=retell_flow_id,
+        retell_llm_dynamic_variables=dynamic_vars or None,
     )
     await _log_event(lead["id"], lead["campaign_id"], "call_made", "voice")
     await _mark_sent(task["id"])

@@ -15,6 +15,7 @@ async def make_call(
     metadata: dict | None = None,
     from_number: str | None = None,
     conversation_flow_id: str | None = None,
+    retell_llm_dynamic_variables: dict | None = None,
 ) -> dict:
     if not phone_number.startswith("+"):
         raise ValueError(
@@ -28,6 +29,8 @@ async def make_call(
     }
     if conversation_flow_id:
         body["conversation_flow_id"] = conversation_flow_id
+    if retell_llm_dynamic_variables:
+        body["retell_llm_dynamic_variables"] = retell_llm_dynamic_variables
 
     _from = from_number or settings.retell_from_number
     if _from:
