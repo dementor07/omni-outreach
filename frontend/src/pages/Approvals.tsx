@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, XCircle, Loader2, UserCheck, Inbox as InboxIcon } from 'lucide-react'
+import { CheckCircle2, XCircle, Loader2, UserCheck, Inbox as InboxIcon, Pencil, Save, X } from 'lucide-react'
 import { clsx } from 'clsx'
 
 import { api } from '../api/client'
@@ -13,7 +13,7 @@ interface Approval {
   lead_id: string
   node_id: string
   title: string
-  payload: Record<string, unknown>
+  payload: Record<string, any>
   status: 'pending' | 'approved' | 'rejected'
   resolution: string | null
   resolved_by: string | null
@@ -56,6 +56,18 @@ export default function Approvals() {
     },
   })
 
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, payload }: { id: string; payload: any }) =>
+      (await api.patch(`/approvals/${id}`, { payload })).data,
+    onSuccess: () => {
+      toast.success('Draft updated')
+      void queryClient.invalidateQueries({ queryKey: ['approvals'] })
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.detail || 'Failed to update draft')
+    },
+  })
+
   function resolve(id: string, resolution: 'approve' | 'reject') {
     setBusyId(id)
     resolveMutation.mutate({ id, resolution })
@@ -64,23 +76,23 @@ export default function Approvals() {
   const rows = approvals || []
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="max-w-4xl mx-auto">
+      <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">Approvals</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Review leads parked at <code>human_approval</code> nodes. Decisions unpark the sequence.
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Approvals</h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Review and edit AI-generated drafts before they reach the lead.
           </p>
         </div>
-        <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
+        <div className="flex items-center gap-1 rounded-2xl border border-slate-200 bg-white p-1 shadow-sm">
           {(['pending', 'approved', 'rejected'] as StatusFilter[]).map(s => (
             <button
               key={s}
               type="button"
               onClick={() => setStatusFilter(s)}
               className={clsx(
-                'px-3 py-1.5 rounded-md text-xs font-semibold capitalize transition-colors',
-                statusFilter === s ? 'bg-sky-500 text-white' : 'text-slate-500 hover:bg-slate-50',
+                'px-4 py-2 rounded-xl text-xs font-bold capitalize transition-all',
+                statusFilter === s ? 'bg-sky-500 text-white shadow-md shadow-sky-100' : 'text-slate-500 hover:bg-slate-50',
               )}
             >
               {s}
@@ -90,16 +102,16 @@ export default function Approvals() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-64">
-          <Loader2 size={24} className="animate-spin text-slate-400" />
+        <div className="flex items-center justify-center py-20">
+          <Loader2 size={32} className="animate-spin text-sky-400" />
         </div>
       ) : rows.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 text-slate-400">
-          <InboxIcon size={40} className="mb-3 opacity-40" />
-          <p className="text-sm">No {statusFilter} approvals</p>
+        <div className="flex flex-col items-center justify-center py-20 rounded-3xl border-2 border-dashed border-slate-200 bg-slate-50/50 text-slate-400">
+          <InboxIcon size={48} className="mb-4 opacity-20" />
+          <p className="text-sm font-medium uppercase tracking-widest">No {statusFilter} approvals</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-6">
           {rows.map(a => (
             <ApprovalCard
               key={a.id}
@@ -107,7 +119,8 @@ export default function Approvals() {
               note={note[a.id] || ''}
               onNoteChange={(v) => setNote(n => ({ ...n, [a.id]: v }))}
               onResolve={resolve}
-              busy={busyId === a.id}
+              onUpdate={(payload) => updateMutation.mutate({ id: a.id, payload })}
+              busy={busyId === a.id || updateMutation.isPending}
               editable={statusFilter === 'pending'}
             />
           ))}
@@ -122,76 +135,132 @@ interface ApprovalCardProps {
   note: string
   onNoteChange: (v: string) => void
   onResolve: (id: string, resolution: 'approve' | 'reject') => void
+  onUpdate: (payload: any) => void
   busy: boolean
   editable: boolean
 }
 
-function ApprovalCard({ approval, note, onNoteChange, onResolve, busy, editable }: ApprovalCardProps) {
+function ApprovalCard({ approval, note, onNoteChange, onResolve, onUpdate, busy, editable }: ApprovalCardProps) {
+  const [isEditing, setIsEditing] = useState(false)
+  const [editedPayload, setEditedPayload] = useState(JSON.stringify(approval.payload, null, 2))
+
   const leadName = [approval.first_name, approval.last_name].filter(Boolean).join(' ') || '—'
-  const payloadPretty = (() => {
-    try { return JSON.stringify(approval.payload, null, 2) } catch { return String(approval.payload) }
-  })()
+
+  const handleSave = () => {
+    try {
+      const parsed = JSON.parse(editedPayload)
+      onUpdate(parsed)
+      setIsEditing(false)
+    } catch {
+      alert('Invalid JSON format')
+    }
+  }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-      <div className="flex items-start gap-3 px-5 py-4 border-b border-slate-100">
-        <div className="flex items-center justify-center w-9 h-9 rounded-lg flex-shrink-0 bg-teal-50 text-teal-600">
-          <UserCheck size={15} />
+    <div className="group relative rounded-3xl border border-slate-200 bg-white shadow-sm transition-all hover:shadow-md overflow-hidden">
+      <div className="flex items-start gap-4 px-6 py-6 border-b border-slate-50">
+        <div className="flex items-center justify-center w-12 h-12 rounded-2xl flex-shrink-0 bg-sky-50 text-sky-600">
+          <UserCheck size={20} />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold text-slate-900">{approval.title}</span>
+            <span className="text-base font-bold text-slate-900">{approval.title}</span>
             {approval.status !== 'pending' && (
               <span className={clsx(
-                'text-[10px] uppercase font-bold px-2 py-0.5 rounded',
+                'text-[10px] uppercase font-black tracking-widest px-2.5 py-1 rounded-lg',
                 approval.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700',
               )}>{approval.status}</span>
             )}
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">
-            {leadName}{approval.company ? ` · ${approval.company}` : ''}{approval.headline ? ` · ${approval.headline}` : ''}
+          <p className="text-sm text-slate-600 mt-1">
+            <span className="font-semibold text-slate-900">{leadName}</span>
+            {approval.company && <span className="text-slate-400"> · {approval.company}</span>}
+            {approval.headline && <span className="text-slate-400 italic"> · {approval.headline}</span>}
           </p>
-          <p className="text-[11px] text-slate-400 mt-0.5">
-            Campaign <span className="font-medium">{approval.campaign_name}</span>
-            {' · '}
-            Created {new Date(approval.created_at).toLocaleString()}
-            {approval.resolved_at && ` · Resolved ${new Date(approval.resolved_at).toLocaleString()}${approval.resolved_by ? ` by ${approval.resolved_by}` : ''}`}
-          </p>
+          <div className="flex items-center gap-2 mt-3 text-[11px] text-slate-400">
+            <span className="font-black uppercase tracking-tighter text-slate-300">Campaign</span>
+            <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-600">{approval.campaign_name}</span>
+            <span className="mx-1 opacity-50">/</span>
+            <span>{new Date(approval.created_at).toLocaleString()}</span>
+          </div>
         </div>
+        
+        {editable && !isEditing && (
+          <button 
+            onClick={() => setIsEditing(true)}
+            className="p-2 rounded-xl text-slate-400 hover:text-sky-600 hover:bg-sky-50 transition-all"
+            title="Edit Draft"
+          >
+            <Pencil size={16} />
+          </button>
+        )}
       </div>
 
-      {payloadPretty && payloadPretty !== '{}' && (
-        <div className="px-5 py-3 bg-slate-50/60">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Preview</p>
-          <pre className="text-[11px] text-slate-700 font-mono whitespace-pre-wrap break-words max-h-64 overflow-auto">{payloadPretty}</pre>
-        </div>
-      )}
+      <div className="relative">
+        {isEditing ? (
+          <div className="p-4 bg-slate-900">
+            <textarea
+              value={editedPayload}
+              onChange={(e) => setEditedPayload(e.target.value)}
+              className="w-full h-64 bg-transparent text-emerald-400 font-mono text-xs outline-none resize-none"
+              spellCheck={false}
+            />
+            <div className="flex justify-end gap-2 mt-2">
+              <button
+                onClick={() => { setIsEditing(false); setEditedPayload(JSON.stringify(approval.payload, null, 2)) }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold text-slate-400 hover:text-white transition-colors"
+              >
+                <X size={12} /> Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[11px] font-bold bg-sky-600 text-white hover:bg-sky-500 transition-colors shadow-lg shadow-sky-900/20"
+              >
+                <Save size={12} /> Save Changes
+              </button>
+            </div>
+          </div>
+        ) : (
+          approval.payload && JSON.stringify(approval.payload) !== '{}' && (
+            <div className="px-6 py-4 bg-slate-50/50">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Message Draft</p>
+              <pre className="text-xs text-slate-700 font-mono whitespace-pre-wrap break-words max-h-64 overflow-auto scrollbar-hide">
+                {typeof approval.payload === 'object' && 'body' in approval.payload 
+                  ? String(approval.payload.body) 
+                  : JSON.stringify(approval.payload, null, 2)}
+              </pre>
+            </div>
+          )
+        )}
+      </div>
 
       {editable && (
-        <div className="px-5 py-3 flex items-center gap-3">
+        <div className="px-6 py-4 bg-white flex items-center gap-4">
           <input
             type="text"
             value={note}
             onChange={(e) => onNoteChange(e.target.value)}
-            placeholder="Note (optional — shown in resolution history)"
-            className="flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500"
+            placeholder="Add internal note..."
+            className="flex-1 bg-slate-50 rounded-2xl border-none px-4 py-2.5 text-sm placeholder:text-slate-400 focus:ring-2 focus:ring-sky-500 transition-all"
           />
-          <button
-            type="button"
-            onClick={() => onResolve(approval.id, 'reject')}
-            disabled={busy}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50"
-          >
-            <XCircle size={13} /> Reject
-          </button>
-          <button
-            type="button"
-            onClick={() => onResolve(approval.id, 'approve')}
-            disabled={busy}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
-          >
-            <CheckCircle2 size={13} /> Approve
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onResolve(approval.id, 'reject')}
+              disabled={busy || isEditing}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-bold text-rose-600 hover:bg-rose-50 transition-all disabled:opacity-30"
+            >
+              <XCircle size={16} /> Reject
+            </button>
+            <button
+              type="button"
+              onClick={() => onResolve(approval.id, 'approve')}
+              disabled={busy || isEditing}
+              className="flex items-center gap-2 px-6 py-2.5 rounded-2xl text-sm font-bold bg-sky-600 text-white hover:bg-sky-700 transition-all shadow-lg shadow-sky-100 disabled:opacity-30"
+            >
+              <CheckCircle2 size={16} /> Approve
+            </button>
+          </div>
         </div>
       )}
     </div>

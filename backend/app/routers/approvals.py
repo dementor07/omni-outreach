@@ -63,6 +63,36 @@ async def approvals_count(user_id: str = Depends(get_current_user)):
     return {"pending": (row or {}).get("pending", 0)}
 
 
+class ApprovalUpdate(BaseModel):
+    title: str | None = None
+    payload: dict | None = None
+
+
+@router.patch("/{approval_id}")
+async def update_approval(
+    approval_id: str,
+    body: ApprovalUpdate,
+    user_id: str = Depends(get_current_user),
+):
+    """Update a pending approval (e.g. edit a draft message)."""
+    approval = await fetch_one(
+        "SELECT id, status FROM approvals WHERE id=$1",
+        approval_id,
+    )
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if approval["status"] != "pending":
+        raise HTTPException(status_code=409, detail=f"Cannot edit {approval['status']} approval")
+
+    if body.title is not None:
+        await execute("UPDATE approvals SET title=$1 WHERE id=$2", body.title, approval_id)
+    if body.payload is not None:
+        import json as _json
+        await execute("UPDATE approvals SET payload=$1 WHERE id=$2", _json.dumps(body.payload), approval_id)
+
+    return {"status": "updated"}
+
+
 class ResolveRequest(BaseModel):
     resolution: Literal["approve", "reject"]
     note: str | None = None
