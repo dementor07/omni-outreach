@@ -1,15 +1,17 @@
 import { useMemo, useState } from 'react'
-import { Inbox, RefreshCw } from 'lucide-react'
+import { Inbox, RefreshCw, RotateCcw, AlertCircle } from 'lucide-react'
 
 import Badge from '../components/Badge'
 import DataTable from '../components/DataTable'
 import EmptyState from '../components/EmptyState'
 import StatCard from '../components/StatCard'
+import { useToast } from '../components/Toast'
 import { useListCampaigns } from '../hooks/useCampaigns'
-import { useQueueList, useQueueStats } from '../hooks/useQueue'
+import { useQueueList, useQueueStats, useRetryTask, useBulkRetryTasks } from '../hooks/useQueue'
 import { formatRelative, formatScheduled } from '../lib/time'
 
 export default function Queue() {
+  const toast = useToast()
   const campaignsQuery = useListCampaigns()
   const [campaignId, setCampaignId] = useState('')
   const [status, setStatus] = useState('')
@@ -17,6 +19,8 @@ export default function Queue() {
 
   const queueStatsQuery = useQueueStats()
   const queueQuery = useQueueList({ campaignId: campaignId || undefined, status: status || undefined, limit: 200 })
+  const retryTask = useRetryTask()
+  const bulkRetry = useBulkRetryTasks()
 
   const campaignMap = useMemo(() => {
     const map: Record<string, string> = {}
@@ -40,6 +44,25 @@ export default function Queue() {
     [queueQuery.data],
   )
 
+  const handleRetry = async (id: string) => {
+    try {
+      await retryTask.mutateAsync(id)
+      toast.success('Task reset to queued')
+    } catch {
+      toast.error('Failed to retry task')
+    }
+  }
+
+  const handleBulkRetry = async () => {
+    if (!window.confirm('Retry all failed tasks matching current filters?')) return
+    try {
+      await bulkRetry.mutateAsync({ campaignId: campaignId || undefined, channel: channel || undefined })
+      toast.success('Failed tasks reset to queued')
+    } catch {
+      toast.error('Bulk retry failed')
+    }
+  }
+
   const lastRefreshed = queueQuery.dataUpdatedAt
 
   return (
@@ -55,12 +78,24 @@ export default function Queue() {
               Filter by campaign, channel, and status to spot backlog pressure or failed tasks quickly.
             </p>
           </div>
-          {lastRefreshed > 0 && (
-            <div className="shrink-0 flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-400">
-              <RefreshCw size={12} />
-              Updated {formatRelative(new Date(lastRefreshed).toISOString())}
-            </div>
-          )}
+          <div className="flex flex-col items-end gap-2">
+            {lastRefreshed > 0 && (
+              <div className="shrink-0 flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-400">
+                <RefreshCw size={12} />
+                Updated {formatRelative(new Date(lastRefreshed).toISOString())}
+              </div>
+            )}
+            {failed > 0 && (
+              <button
+                onClick={handleBulkRetry}
+                disabled={bulkRetry.isPending}
+                className="btn-tactile flex items-center gap-2 rounded-xl bg-rose-50 px-4 py-2 text-xs font-bold text-rose-600 border border-rose-100 hover:bg-rose-100 transition-all shadow-sm shadow-rose-100/50"
+              >
+                <RotateCcw size={13} className={bulkRetry.isPending ? 'animate-spin' : ''} />
+                Retry {failed} Failures
+              </button>
+            )}
+          </div>
         </div>
       </section>
 
@@ -108,9 +143,17 @@ export default function Queue() {
                 key: 'lead',
                 header: 'Lead',
                 render: (row) => (
-                  <span className="font-medium text-slate-900">
-                    {`${row.first_name || ''} ${row.last_name || ''}`.trim() || row.linkedin_url || 'Unknown'}
-                  </span>
+                  <div className="flex flex-col">
+                    <span className="font-medium text-slate-900">
+                      {`${row.first_name || ''} ${row.last_name || ''}`.trim() || row.linkedin_url || 'Unknown'}
+                    </span>
+                    {row.failure_reason && (
+                      <div className="flex items-center gap-1 mt-1 text-[10px] text-rose-500 font-medium">
+                        <AlertCircle size={10} />
+                        <span className="truncate max-w-[180px]" title={row.failure_reason}>{row.failure_reason}</span>
+                      </div>
+                    )}
+                  </div>
                 ),
               },
               {
@@ -136,11 +179,25 @@ export default function Queue() {
               {
                 key: 'retry_count',
                 header: 'Retries',
-                className: 'text-right',
                 render: (row) => (
                   <span className={row.retry_count ? 'text-amber-600 font-medium' : 'text-slate-400'}>
                     {row.retry_count || 0}
                   </span>
+                ),
+              },
+              {
+                key: 'actions',
+                header: '',
+                className: 'text-right',
+                render: (row) => (row.status === 'failed' || row.status === 'skipped') && (
+                  <button
+                    onClick={() => handleRetry(row.id)}
+                    disabled={retryTask.isPending}
+                    className="p-2 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 transition-all"
+                    title="Retry task"
+                  >
+                    <RotateCcw size={14} className={retryTask.isPending ? 'animate-spin' : ''} />
+                  </button>
                 ),
               },
             ]}

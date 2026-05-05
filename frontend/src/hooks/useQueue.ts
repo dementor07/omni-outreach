@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api } from '../api/client'
 
@@ -10,6 +10,7 @@ export interface QueueTask {
   status: string
   scheduled_at?: string | null
   retry_count?: number
+  failure_reason?: string | null
   first_name?: string | null
   last_name?: string | null
   linkedin_url?: string | null
@@ -48,6 +49,37 @@ export function useQueueList(filters: { campaignId?: string; status?: string; li
         },
       })
       return data.tasks
+    },
+  })
+}
+
+export function useRetryTask() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (taskId: string) => {
+      await api.post(`/queue/${taskId}/retry`)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['queue'] })
+      void queryClient.invalidateQueries({ queryKey: ['queue-stats'] })
+    },
+  })
+}
+
+export function useBulkRetryTasks() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (filters: { campaignId?: string; channel?: string }) => {
+      await api.post('/queue/bulk-retry', null, {
+        params: {
+          campaign_id: filters.campaignId,
+          channel: filters.channel,
+        },
+      })
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['queue'] })
+      void queryClient.invalidateQueries({ queryKey: ['queue-stats'] })
     },
   })
 }

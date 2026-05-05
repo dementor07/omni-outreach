@@ -46,3 +46,39 @@ async def queue_stats(user_id: str = Depends(get_current_user)):
         "SELECT channel, status, COUNT(*) AS cnt FROM queue GROUP BY channel, status ORDER BY channel, status"
     )
     return {"stats": rows}
+
+
+@router.post("/{task_id}/retry")
+async def retry_task(task_id: str, user_id: str = Depends(get_current_user)):
+    """Reset a failed or skipped task to 'queued' state."""
+    await execute(
+        "UPDATE queue SET status='queued', failure_reason=NULL, retry_count=0, scheduled_at=NOW() WHERE id=$1",
+        task_id,
+    )
+    return {"status": "queued"}
+
+
+@router.post("/bulk-retry")
+async def bulk_retry_tasks(
+    campaign_id: str | None = None,
+    channel: str | None = None,
+    user_id: str = Depends(get_current_user)
+):
+    """Reset multiple failed tasks to 'queued' state."""
+    conditions = ["status='failed'"]
+    params = []
+    
+    if campaign_id:
+        params.append(campaign_id)
+        conditions.append(f"campaign_id=${len(params)}")
+    if channel:
+        params.append(channel)
+        conditions.append(f"channel=${len(params)}")
+        
+    where = "WHERE " + " AND ".join(conditions)
+    
+    await execute(
+        f"UPDATE queue SET status='queued', failure_reason=NULL, retry_count=0, scheduled_at=NOW() {where}",
+        *params
+    )
+    return {"status": "bulk_queued"}
