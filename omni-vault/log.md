@@ -743,3 +743,27 @@ The initial webhook URL used `omnioutreach.space`, which has no DNS A record (cu
 ### Updated vault
 
 - `wiki/architecture/system-overview.md` — new "CI/CD & Deploy" section documenting the webhook pipeline, UFW rules, `host.docker.internal`, and domain status.
+
+
+## [2026-05-05] refactor & feat | Phase 1: Core Restoration (UX-Centric Updates)
+
+**Auditor-Driven Refactor**: Fixed major "Agent Bias" issues in the UI/UX layer.
+
+**1. Identity Relaxation (Phone-Only Leads)**
+- Generated Alembic `008_phone_only_leads.py` to add a partial unique index on `(campaign_id, phone)`.
+- Updated `upsert_lead` in `lead_gen.py` to allow ingestion of leads with only a Name and Phone number (bypassing the hardcoded LinkedIn/Email requirement).
+- Updated `LeadImport` Pydantic model and `Leads.tsx` frontend validation to match.
+
+**2. The Ignition Switch (Global Campaign Control)**
+- Replaced the passive status badge in `Campaigns.tsx` with an active `Launch / Play / Pause` control set.
+- Campaigns now correctly default to `draft` and require user initiation.
+
+**3. Granular Time Delays**
+- Upgraded the `delay` node in `sequencer.py` to calculate delays based on `seconds`, `minutes`, `hours`, or `days`.
+- Updated `Campaigns.tsx` UI to include a time-unit dropdown for the Delay node.
+
+**4. Data Sovereignty (CSV Export)**
+- Built a new `GET /leads/export` endpoint in `leads.py` that strips internal UUIDs and streams a CSV download.
+- Added "Export CSV" buttons to the Leads tab UI.
+
+**Documentation**: Added a 10+ file "UX Vulnerability Dossier" to the wiki to enforce "Anti-Slop" engineering standards for future development.

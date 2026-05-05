@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { Search, UserRound, UserPlus, X, CheckSquare, Square, StopCircle, RotateCcw, Trash2, Upload, ExternalLink } from 'lucide-react'
+import { Search, UserRound, UserPlus, X, CheckSquare, Square, StopCircle, RotateCcw, Trash2, Upload, ExternalLink, Download } from 'lucide-react'
 
 import Badge from '../components/Badge'
 import DataTable from '../components/DataTable'
@@ -200,6 +200,24 @@ export default function Leads() {
             >
               <Upload size={15} />
               {csvUpload.isPending ? 'Uploading…' : 'Upload CSV'}
+            </button>
+            <button
+              type="button"
+              disabled={!campaignId}
+              onClick={async () => {
+                const { data } = await api.get(`/leads/export?campaign_id=${campaignId}`, { responseType: 'blob' })
+                const url = window.URL.createObjectURL(new Blob([data]))
+                const link = document.createElement('a')
+                link.href = url
+                link.setAttribute('download', `leads_${campaignId}.csv`)
+                document.body.appendChild(link)
+                link.click()
+                link.remove()
+              }}
+              className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 shadow-sm transition hover:border-sky-400 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Download size={15} />
+              Export CSV
             </button>
             <button
               type="button"
@@ -613,8 +631,8 @@ function AddLeadModal({ campaignId, onClose, onCreate }: AddLeadModalProps) {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.linkedin_url && !form.email) {
-      setError('At least one of LinkedIn URL or Email is required.')
+    if (!form.linkedin_url && !form.email && !form.phone) {
+      setError('At least one of LinkedIn URL, Email, or Phone is required.')
       return
     }
     const payload: LeadImportPayload = {}

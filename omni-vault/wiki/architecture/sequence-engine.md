@@ -149,3 +149,8 @@ Called by the `cron_reply_intent_timeout` worker job (every 30 minutes). Scans f
 - [[auto-optimization-engine]]
 - [[canvas-editor]]
 - [[event-bus-architecture]]
+
+## 2026-05-05 Update: Core Restoration
+- **Identity Relaxation**: `leads.linkedin_url` and `leads.email` are now optional. A lead is valid with just a `phone` number.
+- **Ignition Switch**: Campaigns now have a `status` toggle in the UI (Draft -> active/paused).
+- **Granular Delays**: `delay` nodes now support `seconds`, `minutes`, and `hours`.

@@ -66,3 +66,21 @@ Last updated: 2026-04-28 (webhook-based CI/CD deploy; 30 backend node types; rep
 
 | Page | Summary |
 | --- | --- |
+
+
+## May 2026 Audit & Mandates
+
+| Page | Summary |
+| --- | --- |
+| [[anti-slop-protocol]] | **Engineering Standard**: Zero-dead-code, no mega-components, payload validation, and error visibility mandates. |
+| [[mandate-backend-reform]] | Strategy Pattern for nodes, Repository Pattern for SQL, and Sparse Identity contract. |
+| [[mandate-frontend-refactor]] | Atomic design shredding for `Campaigns.tsx` and convergence of sequence editors. |
+| [[product-gap-audit-may-2026]] | Audit of "Impossible Campaigns": Identity lockdown, sub-hour delays, and concurrency blindness. |
+| [[vulnerability-lead-gen-lockdown]] | Identifying the "Data Trap" and the lack of lead export/edit capabilities. |
+| [[case-study-trade-show-followup]] | Real-world stress test: Why Name+Phone campaigns failed at every step before the restoration. |
+| [[vulnerability-editor-missing-nodes]] | Gap analysis: Missing Lead Gen, Transformation, and Enrichment nodes. |
+| [[vulnerability-queue-black-box]] | Why the Queue is a silent failure point for human operators. |
+| [[vulnerability-intake-trigger-desync]] | The temporal trap of leads imported before sequence design completion. |
+| [[vulnerability-vanity-analytics]] | Exposing the lack of A/B branch comparison and deliverability insights. |
+| [[vulnerability-activity-log-skeleton]] | Why the system-wide audit trail was a "Ghost Town." |
+| [[vulnerability-template-siloing]] | The disconnected workflow between the Library and the Editor. |

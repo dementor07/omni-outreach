@@ -110,3 +110,4 @@ The current frontend doesn't yet expose a "New Lead" form — the endpoint is re
 - [[channels]]
 - [[lead-sources-ui]]
 - [[lead-gen-workflow-gap-audit]]
+| Export leads | `GET /leads/export?campaign_id` (Streams CSV) |

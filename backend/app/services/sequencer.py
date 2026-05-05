@@ -82,9 +82,21 @@ async def queue_next_nodes(
             log.info(f"[sequencer] Queued {channel} for lead {lead_id} at {scheduled_at}")
 
         elif node_type == "delay":
-            # Accumulate delay and continue graph traversal — do NOT recurse immediately
-            delay_days = (node["data"] or {}).get("delay_days", 1)
-            new_delay = accumulated_delay + timedelta(days=delay_days)
+            # Accumulate delay and continue graph traversal
+            data = node["data"] or {}
+            delay_val = data.get("delay_value") or data.get("delay_days") or 1
+            unit = data.get("delay_unit", "days")
+            
+            if unit == "seconds":
+                delta = timedelta(seconds=delay_val)
+            elif unit == "minutes":
+                delta = timedelta(minutes=delay_val)
+            elif unit == "hours":
+                delta = timedelta(hours=delay_val)
+            else:
+                delta = timedelta(days=delay_val)
+                
+            new_delay = accumulated_delay + delta
             await queue_next_nodes(lead_id, target_id, "default", new_delay)
 
         elif node_type.startswith("condition_"):

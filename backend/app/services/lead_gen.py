@@ -24,12 +24,12 @@ def _dedupe_scope() -> str:
 async def upsert_lead(campaign_id: str, lead: RawLead, source_type: str) -> bool:
     """Upsert a single RawLead into the DB. Returns True if newly inserted.
 
-    Either linkedin_url or email must be present. LinkedIn-URL leads are the
-    primary case; email-only leads (e.g. Apollo contacts without a LI profile)
-    are supported and deduplicated by (campaign_id, email) instead.
+    Leads must have at least one unique identifier: linkedin_url, email, or phone.
+    LinkedIn-URL is the primary case; email-only and phone-only leads are supported
+    and deduplicated within the campaign scope.
     """
-    if not lead.linkedin_url and not lead.email:
-        log.warning("[lead_gen] Skipping lead with neither linkedin_url nor email")
+    if not lead.linkedin_url and not lead.email and not lead.phone:
+        log.warning("[lead_gen] Skipping lead with no identifier (LI, Email, or Phone)")
         return False
 
     # Blacklist gate — refuse to insert leads matching any blocked identifier.
@@ -130,11 +130,19 @@ async def upsert_lead(campaign_id: str, lead: RawLead, source_type: str) -> bool
             )
             if existing:
                 return False
-    else:
+    elif lead.email:
         # Email-only dedupe (no LinkedIn URL)
         existing = await fetch_one(
             "SELECT id FROM leads WHERE campaign_id=$1 AND email=$2 AND linkedin_url IS NULL",
             campaign_id, lead.email,
+        )
+        if existing:
+            return False
+    else:
+        # Phone-only dedupe (no LinkedIn URL, no Email)
+        existing = await fetch_one(
+            "SELECT id FROM leads WHERE campaign_id=$1 AND phone=$2 AND linkedin_url IS NULL AND email IS NULL",
+            campaign_id, lead.phone,
         )
         if existing:
             return False

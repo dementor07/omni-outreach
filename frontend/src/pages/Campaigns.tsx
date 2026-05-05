@@ -2,7 +2,7 @@ import React, { FormEvent, useEffect, useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { Link, useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom'
-import { Plus, Save, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap, X, ChevronRight, Settings2, Trash2, Radio, Tag, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle, MinusCircle, Brain, Route, Upload, Undo2, Redo2, Copy, Database, Flame, UserCheck } from 'lucide-react'
+import { Plus, Save, Mail, Linkedin, Phone, MessageSquare, Instagram, Send, Clock, Zap, X, ChevronRight, Settings2, Trash2, Radio, Tag, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle, MinusCircle, Brain, Route, Upload, Undo2, Redo2, Copy, Database, Flame, UserCheck, Play, Pause, Rocket, Download } from 'lucide-react'
 import CsvImport from '../components/CsvImport'
 import { useCanvasHistory } from '../hooks/useCanvasHistory'
 import {
@@ -810,11 +810,39 @@ export default function Campaigns() {
             <Link to="/campaigns" className="text-slate-400 hover:text-slate-600">←</Link>
             <div>
               <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{campaignQuery.data?.name || 'Campaign detail'}</h1>
-              <div className="flex gap-2 text-xs text-slate-400">
-                <Badge label={campaignQuery.data?.status || 'active'} asStatus />
-                <span>•</span>
-                <span>{campaignQuery.data?.timezone}</span>
-                {campaignQuery.data?.simulation_mode && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-600 font-bold">Simulation</span>}
+              <div className="mt-1 flex items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  <Badge label={campaignQuery.data?.status || 'draft'} asStatus />
+                  {campaignQuery.data?.status === 'draft' ? (
+                    <button
+                      onClick={() => updateCampaign.mutate({ id: id!, payload: { status: 'active' } })}
+                      className="flex items-center gap-1.5 rounded-lg bg-sky-600 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-white hover:bg-sky-700 transition-all shadow-lg shadow-sky-100"
+                    >
+                      <Rocket size={10} fill="currentColor" />
+                      Launch
+                    </button>
+                  ) : (
+                    <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 shadow-inner">
+                      <button
+                        onClick={() => updateCampaign.mutate({ id: id!, payload: { status: 'active' } })}
+                        title="Resume Campaign"
+                        className={`rounded-md p-1 transition-all ${campaignQuery.data?.status === 'active' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                      >
+                        <Play size={12} fill="currentColor" />
+                      </button>
+                      <button
+                        onClick={() => updateCampaign.mutate({ id: id!, payload: { status: 'paused' } })}
+                        title="Pause Campaign"
+                        className={`rounded-md p-1 transition-all ${campaignQuery.data?.status === 'paused' ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                      >
+                        <Pause size={12} fill="currentColor" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <span className="text-slate-300 text-xs">|</span>
+                <span className="text-xs text-slate-400">{campaignQuery.data?.timezone}</span>
+                {campaignQuery.data?.simulation_mode && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black uppercase text-amber-600">Simulation</span>}
               </div>
             </div>
           </div>
@@ -889,7 +917,25 @@ export default function Campaigns() {
               <div className="h-full rounded-3xl border border-slate-200 bg-white p-6 shadow-sm overflow-auto">
                 <div className="mb-4 flex items-center justify-between">
                   <h2 className="text-lg font-semibold text-slate-900 uppercase tracking-tight">Leads Pipeline</h2>
-                  <button onClick={() => setImportOpen(true)} className="btn-tactile border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50">Import Leads</button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={async () => {
+                        const { data } = await api.get(`/leads/export?campaign_id=${id}`, { responseType: 'blob' })
+                        const url = window.URL.createObjectURL(new Blob([data]))
+                        const link = document.createElement('a')
+                        link.href = url
+                        link.setAttribute('download', `leads_${id}.csv`)
+                        document.body.appendChild(link)
+                        link.click()
+                        link.remove()
+                      }}
+                      className="btn-tactile border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 flex items-center gap-2"
+                    >
+                      <Download size={13} />
+                      Export CSV
+                    </button>
+                    <button onClick={() => setImportOpen(true)} className="btn-tactile border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50">Import Leads</button>
+                  </div>
                 </div>
                 <DataTable
                   columns={[
@@ -1239,16 +1285,31 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
         </div>
 
         {isDelay && (
-          <div>
-            <label className={labelCls}>Wait Duration (Days)</label>
-            <input 
-              type="number" 
-              title="Wait duration in days"
-              min="1" 
-              value={(node.data as any).delay_days || 1} 
-              onChange={(e) => onUpdate({ delay_days: parseInt(e.target.value) || 1 })}
-              className={inputClassName}
-            />
+          <div className="space-y-4">
+            <div>
+              <label className={labelCls}>Wait Duration</label>
+              <div className="flex gap-2">
+                <input 
+                  type="number" 
+                  title="Wait duration value"
+                  min="1" 
+                  value={(node.data as any).delay_value || (node.data as any).delay_days || 1} 
+                  onChange={(e) => onUpdate({ delay_value: parseInt(e.target.value) || 1 })}
+                  className={inputClassName + ' flex-1'}
+                />
+                <select
+                  aria-label="Wait unit"
+                  value={(node.data as any).delay_unit || 'days'}
+                  onChange={(e) => onUpdate({ delay_unit: e.target.value })}
+                  className={inputClassName + ' w-32'}
+                >
+                  <option value="minutes">Minutes</option>
+                  <option value="hours">Hours</option>
+                  <option value="days">Days</option>
+                </select>
+              </div>
+              <p className="mt-2 text-[10px] text-slate-400">Specify how long to wait before moving to the next module.</p>
+            </div>
           </div>
         )}
 

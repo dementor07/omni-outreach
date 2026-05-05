@@ -49,8 +49,8 @@ class LeadImport(BaseModel):
         return v or None
 
     def requires_identifier(self) -> bool:
-        """At least one of linkedin_url or email must be present."""
-        return bool(self.linkedin_url or self.email)
+        """At least one of linkedin_url, email, or phone must be present."""
+        return bool(self.linkedin_url or self.email or self.phone)
 
 
 @router.post("", status_code=201)
@@ -150,7 +150,7 @@ async def import_leads(
     skipped = 0
     blacklisted = 0
     for lead in leads:
-        if not (lead.linkedin_url or lead.email):
+        if not (lead.linkedin_url or lead.email or lead.phone):
             skipped += 1
             continue
         raw = RawLead(
@@ -261,11 +261,12 @@ async def csv_upload(
 
         linkedin_url = mapped.get("linkedin_url")
         email = mapped.get("email")
+        phone = mapped.get("phone")
 
-        if not linkedin_url and not email:
+        if not linkedin_url and not email and not phone:
             invalid += 1
             if len(errors) < 20:
-                errors.append(f"Row {row_num}: at least one of linkedin_url or email is required")
+                errors.append(f"Row {row_num}: at least one of linkedin_url, email, or phone is required")
             continue
 
         # Basic LinkedIn URL normalisation
@@ -303,6 +304,40 @@ async def csv_upload(
         campaign_id, imported, skipped, invalid,
     )
     return {"imported": imported, "skipped": skipped, "invalid": invalid, "errors": errors}
+
+
+@router.get("/export")
+async def export_leads(
+    campaign_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    """Export all leads for a campaign as a CSV file."""
+    leads = await fetch_all(
+        "SELECT * FROM leads WHERE campaign_id=$1 ORDER BY created_at ASC",
+        campaign_id,
+    )
+    
+    output = io.StringIO()
+    if not leads:
+        return {"detail": "No leads to export"}
+
+    # Use first lead's keys as headers, excluding sensitive/internal fields
+    headers = [k for k in leads[0].keys() if k not in ("linkedin_account_id", "instagram_account_id", "telegram_account_id", "current_node_id")]
+    writer = csv.DictWriter(output, fieldnames=headers)
+    writer.writeheader()
+    for lead in leads:
+        # Flatten extra_data or other JSON if needed, for now just cast to string
+        row = {k: lead[k] for k in headers}
+        writer.writerow(row)
+
+    from fastapi.responses import StreamingResponse
+    
+    output.seek(0)
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=leads_{campaign_id}.csv"}
+    )
 
 
 @router.delete("/{lead_id}", status_code=204)
