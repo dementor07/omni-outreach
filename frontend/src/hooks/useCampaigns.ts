@@ -5,7 +5,7 @@ import { api } from '../api/client'
 export interface Campaign {
   id: string
   name: string
-  status?: 'active' | 'paused' | 'archived'
+  status?: 'draft' | 'active' | 'paused' | 'archived'
   daily_lead_cap: number
   invite_daily_cap: number
   simulation_mode: boolean
