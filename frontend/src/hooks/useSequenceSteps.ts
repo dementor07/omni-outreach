@@ -17,6 +17,7 @@ export type NodeType =
   | 'action_add_tag'
   | 'action_remove_tag'
   | 'action_enrich'
+  | 'action_data_transform'
   | 'condition_replied'
   | 'condition_linkedin_distance'
   | 'condition_tag_exists'

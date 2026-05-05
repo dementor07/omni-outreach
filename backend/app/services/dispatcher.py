@@ -557,6 +557,55 @@ async def _handle_enrich(task: dict, lead: dict, campaign: dict) -> None:
     await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]), handle)
 
 
+async def _handle_data_transform(task: dict, lead: dict, campaign: dict) -> None:
+    """Evaluates an AI prompt or basic logic to set a variable in extra_data."""
+    node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
+    node_data = node.get("data") or {}
+    
+    var_name = node_data.get("variable_name", "").strip()
+    transform_type = node_data.get("transform_type", "ai_extract")
+    prompt = node_data.get("prompt", "")
+    
+    if not var_name:
+        raise RuntimeError("No variable_name configured for data transform")
+        
+    value = None
+    
+    if transform_type == "ai_extract":
+        if not prompt:
+            raise RuntimeError("No prompt configured for AI transform")
+        from app.services.screener import get_llm_response
+        rendered_prompt = renderer.render(prompt, lead)
+        # Use Haiku to extract or clean the data
+        try:
+            value = await get_llm_response(
+                f"You are a helpful data cleaning assistant. Follow the instructions strictly and output ONLY the requested cleaned value, nothing else.\n\nInstructions: {rendered_prompt}"
+            )
+        except Exception as e:
+            raise RuntimeError(f"AI transform failed: {e}")
+    else:
+        raise RuntimeError(f"Unknown transform type: {transform_type}")
+        
+    # Store the value in extra_data
+    if value:
+        import json as _json
+        extra = dict(lead.get("extra_data") or {})
+        extra[var_name] = value.strip()
+        
+        await execute(
+            "UPDATE leads SET extra_data=$1 WHERE id=$2",
+            _json.dumps(extra), lead["id"]
+        )
+        log.info(f"[dispatcher] Set variable '{var_name}' to '{value}' for lead {lead['id']}")
+        
+    await _log_event(
+        lead["id"], lead["campaign_id"], "data_transformed", "data_transform",
+        {"variable": var_name, "transform_type": transform_type, "success": bool(value)}
+    )
+    await _mark_sent(task["id"])
+    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
+
+
 async def _process_task(task: dict, worker_id: str) -> None:
     campaign = await fetch_one("SELECT * FROM campaigns WHERE id=$1", task["campaign_id"])
     lead = await fetch_one("SELECT * FROM leads WHERE id=$1", task["lead_id"])
@@ -624,6 +673,7 @@ async def _process_task(task: dict, worker_id: str) -> None:
         elif ch == "remove_tag": await _handle_remove_tag(task, lead, campaign)
         elif ch == "enrich": await _handle_enrich(task, lead, campaign)
         elif ch == "hot_lead_alert": await _handle_hot_lead_alert(task, lead, campaign)
+        elif ch == "data_transform": await _handle_data_transform(task, lead, campaign)
         else: raise RuntimeError(f"Unknown channel: {ch}")
     except Exception as e:
         log.exception(f"[dispatcher] task={task['id']} failed: {e}")

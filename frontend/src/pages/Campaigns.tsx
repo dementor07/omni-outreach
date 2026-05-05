@@ -186,6 +186,7 @@ const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNode; colo
   { type: 'action_voice',                  label: 'AI Voice Call',     icon: <Phone size={15} />,          color: 'text-indigo-600',  bg: 'bg-indigo-50',  border: 'border-indigo-200' },
   { type: 'action_webhook',                label: 'Webhook / CRM',     icon: <Webhook size={15} />,        color: 'text-orange-600',  bg: 'bg-orange-50',  border: 'border-orange-200' },
   { type: 'action_enrich',                 label: 'Enrich Lead',       icon: <Database size={15} />,       color: 'text-indigo-600',  bg: 'bg-indigo-50',  border: 'border-indigo-200' },
+  { type: 'action_data_transform',         label: 'Set Variable / AI', icon: <Brain size={15} />,          color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' },
   { type: 'control_parallel_fork',         label: 'Parallel Fork',     icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
   { type: 'action_hot_lead_alert',         label: 'Hot Lead Alert',    icon: <Flame size={15} />,          color: 'text-rose-600',    bg: 'bg-rose-50',    border: 'border-rose-200' },
   { type: 'action_add_tag',                label: 'Add Tag',           icon: <Tag size={15} />,            color: 'text-slate-600',   bg: 'bg-slate-50',   border: 'border-slate-200' },
@@ -238,7 +239,7 @@ const ActionNode = ({ data, id, selected }: NodeProps) => {
   const nodeType = data.node_type as NodeType
   const cfg = NODE_PALETTE.find(p => p.type === nodeType)
   const mode = (data as any).mode || 'simple'
-  const configured = !!(data.email_account_id || data.voice_agent_id || nodeType === 'action_linkedin_invite' || (data.template && (data.template as any).body))
+  const configured = !!(data.email_account_id || data.voice_agent_id || nodeType === 'action_linkedin_invite' || (data.template && (data.template as any).body) || data.variable_name)
   const isEnrich = nodeType === 'action_enrich'
   
   return (
@@ -607,6 +608,7 @@ const nodeTypes = {
   action_sms: ActionNode,
   action_webhook: ActionNode,
   action_enrich: ActionNode,
+  action_data_transform: ActionNode,
   action_hot_lead_alert: ActionNode,
   control_parallel_fork: ParallelForkNode,
   human_approval: HumanApprovalNode,
@@ -1480,6 +1482,44 @@ function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: {
                 rows={4}
               />
               <p className="mt-2 text-[10px] text-slate-400">If set, the rendered string is wrapped as {`{ "rendered": "…" }`}. Otherwise a full lead JSON is posted.</p>
+            </div>
+          </div>
+        )}
+
+        {nodeType === 'action_data_transform' && (
+          <div className="space-y-3">
+            <div>
+              <label className={labelCls}>Target Variable Name</label>
+              <input
+                type="text"
+                value={(node.data as any).variable_name || ''}
+                onChange={(e) => onUpdate({ variable_name: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_') })}
+                className={inputClassName}
+                placeholder="e.g. clean_company"
+              />
+              <p className="mt-1 text-[10px] text-slate-400">The variable to create or update. Accessible as {`{{variable_name}}`}.</p>
+            </div>
+            <div>
+              <label className={labelCls}>Transformation Type</label>
+              <select
+                aria-label="Transform type"
+                value={(node.data as any).transform_type || 'ai_extract'}
+                onChange={(e) => onUpdate({ transform_type: e.target.value })}
+                className={inputClassName}
+              >
+                <option value="ai_extract">AI Transformation (Claude Haiku)</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Prompt / Instructions</label>
+              <textarea
+                value={(node.data as any).prompt || ''}
+                onChange={(e) => onUpdate({ prompt: e.target.value })}
+                className={inputClassName + ' min-h-[100px]'}
+                placeholder="Take {{company}} and remove 'Inc.', 'LLC', or 'Corp'. If the name is 'Apple Inc.', just output 'Apple'."
+                rows={4}
+              />
+              <p className="mt-2 text-[10px] text-slate-400">Claude will evaluate the lead's data against this prompt and save the exact output to the variable.</p>
             </div>
           </div>
         )}

@@ -10,7 +10,11 @@ def render(template: str, lead: dict) -> str:
     """Replace {{key}} placeholders with lead field values. Missing keys → empty string."""
     subs: dict[str, str] = {}
     for key, val in lead.items():
-        subs[key] = str(val) if val is not None else ""
+        if key == "extra_data" and isinstance(val, dict):
+            for e_key, e_val in val.items():
+                subs[e_key] = str(e_val) if e_val is not None else ""
+        else:
+            subs[key] = str(val) if val is not None else ""
 
     # Populate aliases so both {{first_name}} and {{firstname}} work
     for a, b in _ALIASES:

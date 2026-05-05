@@ -797,3 +797,10 @@ The initial webhook URL used `omnioutreach.space`, which has no DNS A record (cu
 
 **2. Backend Integrity**
 - Ensured that edits to the approval payload are persisted, allowing subsequent nodes in the sequence to inherit the corrected data.
+
+
+**4. Data Transformation / Variable Definition**
+- Added `action_data_transform` node to `dispatcher.py` to allow AI-enabled data cleaning and variable creation.
+- Values are written to `leads.extra_data` as a JSONB dictionary.
+- Updated `renderer.py` to unpack `extra_data`, exposing user-defined variables (e.g. `{{clean_company}}`) to all template bodies and subjects downstream.
+- Added UI configuration for prompt-based extraction via Claude Haiku.
