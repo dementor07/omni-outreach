@@ -804,3 +804,26 @@ The initial webhook URL used `omnioutreach.space`, which has no DNS A record (cu
 - Values are written to `leads.extra_data` as a JSONB dictionary.
 - Updated `renderer.py` to unpack `extra_data`, exposing user-defined variables (e.g. `{{clean_company}}`) to all template bodies and subjects downstream.
 - Added UI configuration for prompt-based extraction via Claude Haiku.
+
+
+## [2026-05-05] refactor & deploy | Phase 4: The Big Shred (Frontend Modularization)
+
+**Architectural Reform**: Paid down massive technical debt by shredding the monolithic `Campaigns.tsx` component.
+
+**1. Modular Directory Structure**
+- Created `src/pages/Campaigns/` with atomic component sub-directories.
+- Extracted `index.tsx` (Container), `types.ts` (Shared Interfaces), and `constants.tsx` (Node Palette).
+
+**2. Canvas Extraction**
+- Moved ReactFlow logic to `components/Canvas/`.
+- Isolated `Nodes.tsx` (Custom Node Renderers) and `CustomEdge.tsx` (Telemetry/Deletable edges).
+- Extracted `NodeSelector.tsx` for clean palette management.
+
+**3. Panel & Sidebar Extraction**
+- Moved monolithic config logic to `components/Sidebar/ConfigSidebar.tsx`.
+- Shredded tab-specific panels into `components/Panels/` (Settings, Sources, Form).
+
+**4. Performance & Types**
+- Unified the `CampaignPayload` and `NodeType` definitions.
+- Resolved all remaining TypeScript strict-mode errors.
+- Reduced `Campaigns.tsx` from 2,100+ lines to a clean 400-line orchestrator.
