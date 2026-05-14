@@ -98,7 +98,8 @@ export default function Campaigns() {
   const { pushState, undo, redo, canUndo, canRedo } = useCanvasHistory()
 
   const leadsQuery = useListLeads(id)
-  
+  const queueListQuery = useQueueList({ campaignId: id, limit: 50 })
+
   useEffect(() => {
     if (graphQuery.data) {
       setNodes(graphQuery.data.nodes as any[])
@@ -331,7 +332,8 @@ export default function Campaigns() {
                   { key: 'status', header: 'Status', render: (row) => <Badge label={row.status} asStatus /> },
                   { key: 'scheduled_at', header: 'Scheduled', render: (row) => formatDate(row.scheduled_at) },
                 ]}
-                rows={useQueueList({ campaignId: id!, limit: 50 }).data || []}
+                rows={queueListQuery.data || []}
+                loading={queueListQuery.isLoading}
               />
             </div>
           )}

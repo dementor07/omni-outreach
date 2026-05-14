@@ -159,11 +159,17 @@ export default function Queue() {
               {
                 key: 'campaign_id',
                 header: 'Campaign',
-                render: (row) => (
-                  <span className="text-slate-600">
-                    {campaignMap[row.campaign_id] ?? <span className="font-mono text-xs text-slate-400">{row.campaign_id.slice(0, 8)}</span>}
-                  </span>
-                ),
+                render: (row) => {
+                  if (!row.campaign_id) {
+                    return <span className="text-slate-300 italic text-xs">—</span>
+                  }
+                  const name = campaignMap[row.campaign_id]
+                  return (
+                    <span className="text-slate-600">
+                      {name ?? <span className="font-mono text-xs text-slate-400">{row.campaign_id.slice(0, 8)}</span>}
+                    </span>
+                  )
+                },
               },
               { key: 'channel', header: 'Channel', render: (row) => <Badge label={row.channel} asChannel /> },
               { key: 'status',  header: 'Status',  render: (row) => <Badge label={row.status}  asStatus  /> },
