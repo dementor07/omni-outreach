@@ -827,3 +827,18 @@ The initial webhook URL used `omnioutreach.space`, which has no DNS A record (cu
 - Unified the `CampaignPayload` and `NodeType` definitions.
 - Resolved all remaining TypeScript strict-mode errors.
 - Reduced `Campaigns.tsx` from 2,100+ lines to a clean 400-line orchestrator.
+
+
+## 2026-05-14 — Queue/Sequence crash fix + postmortem
+
+- **Symptom**: operator antigravity pass found Queue tab in Campaigns detail crashed completely; Sequence tab "sometimes" did too. Global `/queue` page also blanked for some tenants.
+- **Root cause**: `useQueueList` was called inside conditional JSX in `Campaigns/index.tsx:334` (Rules of Hooks violation) — a latent pattern from the pre-shred monolith that became fatal once Phase 4 (`8351051`) made each tab a discrete conditional branch. Second bug: `Queue.tsx:164` did `row.campaign_id.slice(0, 8)` with no null guard.
+- **Fix** (commit `f5b7b09`):
+  - Hoisted `useQueueList` to top of `Campaigns` component so the hook order is stable.
+  - Null-guarded the campaign-id cell in `Queue.tsx` — em-dash placeholder for orphans.
+- **Also shipped today**:
+  - `e85c01e`: restored two backend regressions that `8351051` accidentally swept up — `worker/stream_processor.py` (Redis auth + `last_reply_*` + reply classifier) and `config.py` (URL-encoding on DB/Redis password URLs).
+  - `a84178a`: gitignored `clean_badges.py` (one-off personal script); committed predecessor-repo web clip under `omni-vault/raw/`.
+  - `58a075c`: added `omni-vault/**/*.local.md` gitignore pattern so `omni-vault/credentials.local.md` can hold prod login locally without ever pushing.
+- **Postmortem**: [[wiki/decisions/postmortem-queue-sequence-crash-may-2026]]. Updated [[wiki/decisions/vulnerability-queue-black-box]] and [[wiki/decisions/mandate-frontend-refactor]] with Phase 4 regression notes.
+- **Top follow-ups**: add a top-level React error boundary; wire frontend error reporting (Sentry/GlitchTip); verify `eslint-plugin-react-hooks` is actually installed AND active in CI; investigate origin of null-`campaign_id` queue tasks.

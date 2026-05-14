@@ -39,3 +39,9 @@ The frontend implementation has devolved into "Feature Slop," characterized by m
 - **Shredded the Mega-Component**: `Campaigns.tsx` has been refactored into a modular architecture under `src/pages/Campaigns/`.
 - **Atomic Design**: Logic is now isolated into `Nodes`, `Edges`, `Sidebar`, and `Panels`.
 - **Single Source of Truth**: Unified types and constants now drive both the Canvas and Sequential views.
+
+### Status Update (2026-05-14) — Phase 4 Regression Caught
+- A Rules-of-Hooks violation slipped through the shred and bricked the Queue and Sequence tabs on the Campaigns detail page. Operator-discovered, not test-discovered.
+- Fixed in commit `f5b7b09`. Full breakdown: [[postmortem-queue-sequence-crash-may-2026]].
+- **New mandate clause**: every shred-phase PR must end with a manual "click every tab on every affected route" pass before merge. Compile-clean ≠ render-clean.
+- **Tooling gap**: the codebase has no client-side error boundary or Sentry hook, so this took 8 days to surface. See postmortem follow-ups.
