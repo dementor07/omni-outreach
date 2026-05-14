@@ -150,38 +150,43 @@ export default function Campaigns() {
   if (!id) {
     return (
       <div className="space-y-6">
-        <header className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight text-slate-900 font-display">Campaigns</h1>
-            <p className="text-slate-500 mt-1">Manage your multi-channel outreach flows and lead pipelines.</p>
-          </div>
-          <button
-            onClick={() => { setForm(defaultCampaignForm); setCreateOpen(true) }}
-            className="flex items-center gap-2 rounded-2xl bg-slate-900 px-6 py-3.5 text-sm font-bold text-white shadow-xl shadow-slate-200 transition hover:bg-slate-800 active:scale-95"
-          >
-            <Plus size={18} /> New Campaign
-          </button>
-        </header>
+        <PageHeader
+          screenLabel="Campaigns"
+          eyebrow="Outreach"
+          title="Campaigns"
+          description="Manage your multi-channel outreach flows and lead pipelines."
+          actions={
+            <Button
+              variant="primary"
+              size="md"
+              icon={Plus}
+              onClick={() => { setForm(defaultCampaignForm); setCreateOpen(true) }}
+            >
+              New Campaign
+            </Button>
+          }
+        />
 
         <section className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {campaignsQuery.data?.map((c) => (
-            <div
+            <Card
               key={c.id}
+              padding="lg"
+              className="group cursor-pointer transition-all hover:border-brand-200 hover:shadow-xl hover:shadow-brand-500/5 active:scale-[0.98]"
               onClick={() => navigate(`/campaigns/${c.id}`)}
-              className="group cursor-pointer rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:border-sky-200 hover:shadow-xl hover:shadow-sky-500/5 active:scale-[0.98]"
             >
               <div className="flex items-start justify-between">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-50 text-slate-400 transition-colors group-hover:bg-sky-50 group-hover:text-sky-500">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-50 text-slate-400 transition-colors group-hover:bg-brand-50 group-hover:text-brand-500">
                   <Rocket size={24} />
                 </div>
                 <Badge label={c.status || 'active'} asStatus />
               </div>
-              <h3 className="mt-6 text-lg font-bold text-slate-900">{c.name}</h3>
-              <p className="mt-1 text-sm text-slate-400 line-clamp-1">{c.timezone} • {c.sequence_mode}</p>
-              <div className="mt-8 flex items-center justify-between border-t border-slate-50 pt-4 text-xs font-bold uppercase tracking-widest text-slate-400 transition-colors group-hover:text-sky-600">
+              <h3 className="mt-6 text-lg font-bold text-slate-900 dark:text-white">{c.name}</h3>
+              <p className="mt-1 text-sm text-slate-500 line-clamp-1">{c.timezone} • {c.sequence_mode}</p>
+              <div className="mt-8 flex items-center justify-between border-t border-slate-50 pt-4 text-xs font-bold uppercase tracking-widest text-slate-400 transition-colors group-hover:text-brand-600 dark:border-slate-800">
                 View detail <ChevronRight size={14} />
               </div>
-            </div>
+            </Card>
           ))}
         </section>
 
@@ -205,88 +210,83 @@ export default function Campaigns() {
 
   return (
     <div className="flex h-[calc(100vh-120px)] flex-col gap-6">
-      <header className="flex items-center justify-between rounded-3xl border border-slate-200 bg-white px-8 py-6 shadow-sm">
-        <div className="flex items-center gap-6">
-          <button onClick={() => navigate('/campaigns')} className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50 text-slate-400 hover:bg-slate-100 transition-colors">
-            <ChevronRight size={20} className="rotate-180" />
-          </button>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{campaignQuery.data?.name || 'Campaign detail'}</h1>
-            <div className="mt-1 flex items-center gap-3">
-              <div className="flex items-center gap-1.5">
-                <Badge label={campaignQuery.data?.status || 'draft'} asStatus />
-                {campaignQuery.data?.status === 'draft' ? (
-                  <button
-                    onClick={() => updateCampaign.mutate({ id: id!, payload: { status: 'active' } })}
-                    className="flex items-center gap-1.5 rounded-lg bg-sky-600 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-white hover:bg-sky-700 transition-all shadow-lg shadow-sky-100"
-                  >
-                    <Rocket size={10} fill="currentColor" />
-                    Launch
-                  </button>
-                ) : (
-                  <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 shadow-inner">
-                    <button
-                      onClick={() => updateCampaign.mutate({ id: id!, payload: { status: 'active' } })}
-                      title="Resume Campaign"
-                      className={`rounded-md p-1 transition-all ${campaignQuery.data?.status === 'active' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                    >
-                      <Play size={12} fill="currentColor" />
-                    </button>
-                    <button
-                      onClick={() => updateCampaign.mutate({ id: id!, payload: { status: 'paused' } })}
-                      title="Pause Campaign"
-                      className={`rounded-md p-1 transition-all ${campaignQuery.data?.status === 'paused' ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                    >
-                      <Pause size={12} fill="currentColor" />
-                    </button>
-                  </div>
-                )}
+      <PageHeader
+        screenLabel="Campaign detail"
+        title={campaignQuery.data?.name || 'Campaign detail'}
+        eyebrow="Campaigns"
+        meta={
+          <div className="flex items-center gap-3">
+            <Badge label={campaignQuery.data?.status || 'draft'} asStatus />
+            {campaignQuery.data?.status === 'draft' ? (
+              <Button
+                variant="primary"
+                size="xs"
+                icon={Rocket}
+                onClick={() => updateCampaign.mutate({ id: id!, payload: { status: 'active' } })}
+              >
+                Launch
+              </Button>
+            ) : (
+              <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 shadow-inner dark:border-slate-800 dark:bg-slate-900">
+                <button
+                  onClick={() => updateCampaign.mutate({ id: id!, payload: { status: 'active' } })}
+                  title="Resume Campaign"
+                  className={`rounded-md p-1 transition-all ${campaignQuery.data?.status === 'active' ? 'bg-white text-emerald-600 shadow-sm dark:bg-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  <Play size={12} fill="currentColor" />
+                </button>
+                <button
+                  onClick={() => updateCampaign.mutate({ id: id!, payload: { status: 'paused' } })}
+                  title="Pause Campaign"
+                  className={`rounded-md p-1 transition-all ${campaignQuery.data?.status === 'paused' ? 'bg-white text-amber-600 shadow-sm dark:bg-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  <Pause size={12} fill="currentColor" />
+                </button>
               </div>
-              <span className="text-slate-300 text-xs">|</span>
-              <span className="text-xs text-slate-400">{campaignQuery.data?.timezone}</span>
-              {campaignQuery.data?.simulation_mode && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black uppercase text-amber-600">Simulation</span>}
-            </div>
+            )}
+            <span className="text-slate-300 text-xs dark:text-slate-700">|</span>
+            <span className="text-xs text-slate-500">{campaignQuery.data?.timezone}</span>
+            {campaignQuery.data?.simulation_mode && <Badge label="Simulation" variant="warning" />}
           </div>
-        </div>
-
-        <div className="flex items-center gap-6">
-          {statsQuery.data && (
-            <div className="flex gap-8 border-r border-slate-100 pr-8">
-              <div className="text-center"><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Leads</p><p className="text-lg font-bold text-slate-900">{statsQuery.data.total}</p></div>
-              <div className="text-center"><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Invited</p><p className="text-lg font-bold text-slate-900">{statsQuery.data.invited}</p></div>
-              <div className="text-center"><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Replies</p><p className="text-lg font-bold text-emerald-600">{statsQuery.data.accepted}</p></div>
-            </div>
-          )}
-          <div className="flex gap-2">
-            <button onClick={() => navigate(`/campaigns/${id}/clone`)} className="btn-tactile bg-white px-4 py-2 text-xs font-bold text-slate-600 border border-slate-200 hover:bg-slate-50 flex items-center gap-2">
-              <Copy size={14} /> Clone
-            </button>
-            <button onClick={() => { if (window.confirm('Delete this campaign?')) { deleteCampaign.mutate(id!); navigate('/campaigns') } }} className="btn-tactile bg-white px-4 py-2 text-xs font-bold text-rose-500 border border-rose-100 hover:bg-rose-50 flex items-center gap-2">
-              <Trash2 size={14} /> Delete
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <div className="flex flex-1 gap-6 overflow-hidden">
-        <aside className="w-48 flex flex-col gap-1">
-          {(['leads', 'queue', 'sequence', 'sources', 'settings'] as CampaignTab[]).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setSearchParams({ tab })}
-              className={`flex items-center justify-between rounded-2xl px-5 py-3.5 text-sm font-bold transition-all ${
-                activeTab === tab ? 'bg-slate-900 text-white shadow-xl shadow-slate-200' : 'text-slate-500 hover:bg-white hover:text-slate-900'
-              }`}
+        }
+        actions={
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="md"
+              icon={Copy}
+              onClick={() => navigate(`/campaigns/${id}/clone`)}
             >
-              <span className="capitalize">{tab}</span>
-              {activeTab === tab && <ChevronRight size={14} />}
-            </button>
-          ))}
-        </aside>
+              Clone
+            </Button>
+            <Button
+              variant="danger"
+              size="md"
+              icon={Trash2}
+              onClick={() => { if (window.confirm('Delete this campaign?')) { deleteCampaign.mutate(id!); navigate('/campaigns') } }}
+            >
+              Delete
+            </Button>
+          </div>
+        }
+      />
 
-        <main className="relative flex-1 overflow-hidden">
+      <Tabs
+        value={activeTab}
+        onChange={(v) => setSearchParams({ tab: v })}
+        items={[
+          { value: 'leads', label: 'Leads', icon: Users },
+          { value: 'queue', label: 'Queue', icon: ListTodo },
+          { value: 'sequence', label: 'Sequence', icon: GitBranch },
+          { value: 'sources', label: 'Sources', icon: Database },
+          { value: 'settings', label: 'Settings', icon: Settings },
+        ]}
+      />
+
+      <div className="flex-1 overflow-hidden">
+        <main className="relative h-full overflow-hidden">
           {activeTab === 'leads' && (
-            <div className="h-full flex flex-col rounded-3xl border border-slate-200 bg-white p-8 shadow-sm overflow-hidden">
+            <div className="h-full flex flex-col rounded-2xl border border-slate-200 bg-white p-8 shadow-sm overflow-hidden">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-lg font-semibold text-slate-900 uppercase tracking-tight">Leads Pipeline</h2>
                 <div className="flex gap-2">
@@ -324,7 +324,7 @@ export default function Campaigns() {
           )}
 
           {activeTab === 'queue' && (
-            <div className="h-full overflow-auto rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+            <div className="h-full overflow-auto rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
               <h2 className="mb-6 text-lg font-semibold text-slate-900 uppercase tracking-tight">Sequence Queue</h2>
               <DataTable
                 columns={[
@@ -339,7 +339,7 @@ export default function Campaigns() {
           )}
 
           {activeTab === 'sequence' && (
-            <div className="h-full flex flex-col rounded-3xl border border-slate-200 bg-slate-50 shadow-inner overflow-hidden relative">
+            <div className="h-full flex flex-col rounded-2xl border border-slate-200 bg-slate-50 shadow-inner overflow-hidden relative">
               {campaignQuery.data?.sequence_mode === 'canvas' ? (
                 <div className="flex-1 flex overflow-hidden">
                   <div className="flex-1 relative">
@@ -402,13 +402,13 @@ export default function Campaigns() {
           )}
 
           {activeTab === 'sources' && (
-            <div className="h-full overflow-auto rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+            <div className="h-full overflow-auto rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
               <CampaignSourcesPanel campaignId={id!} />
             </div>
           )}
 
           {activeTab === 'settings' && (
-            <div className="h-full overflow-auto rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+            <div className="h-full overflow-auto rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
               <CampaignSettings campaignId={id!} />
             </div>
           )}

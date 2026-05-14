@@ -23,6 +23,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/analytics': 'Analytics',
   '/activity': 'Activity',
   '/settings': 'Settings',
+  '/style-guide': 'Style guide',
 }
 
 interface TopbarProps {

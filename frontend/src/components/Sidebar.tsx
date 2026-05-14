@@ -39,6 +39,12 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/activity',  label: 'Activity',  icon: Activity },
     ],
   },
+  {
+    label: 'System',
+    items: [
+      { to: '/style-guide', label: 'Style guide', icon: Zap },
+    ],
+  },
 ]
 
 interface SidebarProps {

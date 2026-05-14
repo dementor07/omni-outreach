@@ -42,13 +42,12 @@ export default function NotificationCenter() {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="relative flex items-center justify-center w-9 h-9 rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-colors"
+        className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+        aria-label="Notifications"
       >
-        <Bell size={16} />
+        <Bell size={15} />
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">
-            {unreadCount > 99 ? '99+' : unreadCount}
-          </span>
+          <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white dark:ring-slate-950" />
         )}
       </button>
 
