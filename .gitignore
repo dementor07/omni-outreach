@@ -16,3 +16,8 @@ omni-vault/.obsidian/
 
 # Gemini CLI — local MCP config (contains API keys)
 .gemini/settings.json
+
+# Local-only vault notes (credentials, machine-specific scratch) — never push
+omni-vault/credentials.local.md
+omni-vault/*.local.md
+omni-vault/**/*.local.md
