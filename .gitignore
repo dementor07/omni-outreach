@@ -21,3 +21,6 @@ omni-vault/.obsidian/
 omni-vault/credentials.local.md
 omni-vault/*.local.md
 omni-vault/**/*.local.md
+
+# One-off personal scripts that operate outside the repo
+/clean_badges.py
