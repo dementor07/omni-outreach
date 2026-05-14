@@ -42,12 +42,12 @@ class Settings(BaseSettings):
         import urllib.parse
         if self.database_url:
             return self.database_url.replace("postgresql+asyncpg://", "postgresql://")
-        return f"postgresql://outreach:{urllib.parse.quote(self.db_password)}@db/outreach"
+        return f"postgresql://outreach:{urllib.parse.quote(self.db_password, safe='')}@db/outreach"
 
     def get_redis_url(self) -> str:
         import urllib.parse
         if self.redis_password:
-            return f"redis://:{urllib.parse.quote(self.redis_password)}@redis:6379"
+            return f"redis://:{urllib.parse.quote(self.redis_password, safe='')}@redis:6379"
         return "redis://redis:6379"
 
 

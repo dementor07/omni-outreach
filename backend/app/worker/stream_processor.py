@@ -76,7 +76,8 @@ async def _process_unipile_payload(payload: dict) -> None:
 
 async def process_stream_events(ctx: dict) -> None:
     """Cron job to consume events from the Redis stream."""
-    redis = ctx["redis"]
+    from app.config import settings
+    redis = aioredis.from_url(settings.get_redis_url(), decode_responses=True)
 
     # Ensure consumer group exists
     try:
@@ -98,13 +99,12 @@ async def process_stream_events(ctx: dict) -> None:
 
         for stream, messages in streams:
             for message_id, message_data in messages:
-                # Arq uses decode_responses=False, so keys and values are bytes
-                source = message_data.get(b"source")
-                payload_str = message_data.get(b"payload")
+                source = message_data.get("source")
+                payload_str = message_data.get("payload")
 
-                if source == b"unipile" and payload_str:
+                if source == "unipile" and payload_str:
                     try:
-                        payload = json.loads(payload_str.decode("utf-8"))
+                        payload = json.loads(payload_str)
                         await _process_unipile_payload(payload)
                         # Acknowledge the message so it's removed from pending
                         await redis.xack(STREAM_NAME, GROUP_NAME, message_id)
@@ -113,3 +113,5 @@ async def process_stream_events(ctx: dict) -> None:
 
     except Exception as e:
         log.exception(f"[stream_processor] Error reading from stream: {e}")
+    finally:
+        await redis.aclose()
