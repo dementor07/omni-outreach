@@ -897,3 +897,25 @@ The design bundle (`Downloads/omni-outreach.zip`) shipped with a `pr-handoff/01-
 **What the design bundle contains beyond PR #1**: a redesigned `Dashboard.tsx`, new `Sidebar.tsx` + `Layout.tsx` (left-rail nav replacing the current top nav), `NotificationCenter.tsx` with SSE bell, `useTheme.ts` for class-based dark mode, full set of redesigned screens (`Approvals`, `Blacklist`, `Activity`, `Analytics`, `Login`, etc.), `Omni Dashboard.html` standalone preview, and five overview screenshots. The handoff README only stages PR #1 (env-base); the rest is exploratory and not yet PR-packaged. Future PRs from the same handoff series will land separately under [[mandate-frontend-refactor]].
 
 **Anti-Slop check from the handoff** (passes verbatim): rule 1 (no dead code — `apiBase` consumed by both axios client and SSE hook in the same commit), rule 2 (N/A — no component code), rule 3 (high-signal — `apiBase` is the noun, `VITE_API_BASE` mirrors Vite's prefix convention), rule 5 (errors first-class — existing 401 redirect interceptor unchanged). Rule 4 ("Ready" means human-verified) is satisfied by passing the handoff's local checklist.
+
+
+## 2026-05-14 (later x4) — CI has been broken for 2 days; visual redesign never deployed — HEAD 5163370
+
+**Operator-facing symptom**: user reported "the site doesn't look any different" after applying the dashboard-redesign PR #1. Investigation:
+
+1. Diffed every visual file (`Sidebar.tsx`, `Layout.tsx`, `NotificationCenter.tsx`, `useTheme.ts`, redesigned `Dashboard.tsx`, `Login.tsx`, `Approvals.tsx`, `Blacklist.tsx`, `Activity.tsx`, `Analytics.tsx`, `tailwind.config.ts`, `index.css`) against the design bundle. **All byte-identical** — the visual redesign was already in `master` from earlier commits.
+2. `gh run list` revealed every CI run since the postmortem closure (`6efa9f3`, 2026-05-14 10:31 UTC) failed with `failure` conclusion. 5 consecutive failures over ~70 minutes.
+3. `gh run view --log-failed` showed the lint job (`ruff check backend/`) dying on **22 errors**. The pipeline is `lint → test → build → deploy` so a lint failure aborts before the deploy webhook ever fires. Two days of commits sat in `master` without reaching the VPS.
+4. Three F821 (undefined name) errors were **real production bugs masked as lint hygiene**:
+   - `app/routers/queue.py` — `POST /queue/{id}/retry` and `POST /queue/bulk-retry` called `execute(...)` from `app.db` but never imported it. Both endpoints would have `NameError`'d on first call.
+   - `app/services/job_search.py` — `_parse_employee_range` calls `re.search` on `"10K+"`-style strings; `re` was never imported. Any job-search lead-gen run hitting a `+` employee count would `NameError` mid-pipeline.
+5. The remaining 19 errors were `W291`/`W293` (whitespace) and `I001` (import sort) — auto-fixable.
+
+**Fix shipped (`5163370`)**:
+- Imported `execute` into `routers/queue.py`.
+- Imported `re` into `services/job_search.py`.
+- `ruff check --fix` for the 18 mechanical fixes; `--unsafe-fixes` for the final tail-whitespace fix in an Alembic migration comment.
+
+**Anti-Slop rule 5 violation** (errors are first-class): we shipped two `NameError`-bound endpoints to `master` and the lint tool caught them, but no one looked at CI for two days. Suppressing the signal by ignoring red builds is worse than not having the signal.
+
+**Open follow-up**: confirm `5163370` deploy webhook actually fires once CI is green. If it does, the visual redesign should appear on `srv1575227.hstgr.cloud` for the first time today.
