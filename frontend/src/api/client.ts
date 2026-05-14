@@ -1,12 +1,21 @@
 import axios from 'axios'
 
-// Same-origin default. The deployed SPA is served by the same nginx that
-// proxies /api/* to FastAPI, so `/api` is correct in production. For
-// non-prod (sandbox previews, point-at-staging dev), set VITE_API_BASE in
-// .env.local — e.g. VITE_API_BASE=https://srv1575227.hstgr.cloud/api.
-// Never point this at omnioutreach.space — that domain has no DNS record
-// (alias-only in nginx). See omni-vault/wiki/architecture/system-overview.md.
-const apiBase = import.meta.env.VITE_API_BASE || '/api'
+// Backend base URL. Defaults to "/api" which preserves production behaviour:
+// nginx serves the SPA and proxies /api/* to the backend on the internal
+// Docker network (same origin, no CORS). The vite dev server proxies the
+// same path to localhost:8000 (see vite.config.ts).
+//
+// Override via VITE_API_BASE in `.env.local` when pointing a build at a
+// remote backend (preview deploy, staging, ngrok tunnel) — canonical
+// override is `https://srv1575227.hstgr.cloud/api`. Never point this at
+// `omnioutreach.space`: that domain is configured as an nginx server_name
+// alias but has no DNS A record (NXDOMAIN). See
+// omni-vault/wiki/architecture/system-overview.md.
+//
+// Trailing slash is stripped so callers can write `${apiBase}/foo` without
+// doubling. Exported so non-axios consumers (e.g. EventSource for SSE) can
+// build URLs from the same constant instead of duplicating "/api".
+export const apiBase = (import.meta.env.VITE_API_BASE ?? '/api').replace(/\/$/, '')
 
 export const api = axios.create({
   baseURL: apiBase,

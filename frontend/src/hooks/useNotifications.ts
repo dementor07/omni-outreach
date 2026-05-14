@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '../api/client'
+import { api, apiBase } from '../api/client'
 
 export interface Notification {
   id: string
@@ -32,7 +32,7 @@ export function useNotifications() {
     const token = localStorage.getItem('token')
     if (!token) return
 
-    const es = new EventSource(`/api/notifications/stream?token=${token}`)
+    const es = new EventSource(`${apiBase}/notifications/stream?token=${token}`)
     eventSourceRef.current = es
 
     es.onmessage = (event) => {
