@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2, Shield, ShieldCheck, ShieldX, Eye, EyeOff, Trash2, Plus, Slack, Mail, PowerOff, Power } from 'lucide-react'
+import { Loader2, Shield, ShieldCheck, ShieldX, Eye, EyeOff, Trash2, Plus, Slack, Mail, PowerOff, Power, Linkedin, MessageSquare, Phone, Globe, Bell, Save } from 'lucide-react'
 
 import { api } from '../api/client'
 import Badge from '../components/Badge'
@@ -8,6 +8,10 @@ import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
 import { useToast } from '../components/Toast'
 import { formatDate } from '../lib/time'
+import PageHeader from '../components/PageHeader'
+import Tabs from '../components/Tabs'
+import Button from '../components/Button'
+import Card from '../components/Card'
 
 type SettingsTab = 'linkedin' | 'email' | 'voice' | 'integrations' | 'notifications'
 
@@ -61,10 +65,10 @@ export default function Settings() {
       (await api.post('/accounts/linkedin', payload)).data,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['settings', 'linkedin'] })
-      toast.success('LinkedIn account added.')
+      toast.success('LinkedIn account added')
       setModalOpen(false)
     },
-    onError: () => toast.error('Failed to add LinkedIn account.'),
+    onError: () => toast.error('Failed to add LinkedIn account'),
   })
 
   const addEmail = useMutation({
@@ -72,10 +76,10 @@ export default function Settings() {
       (await api.post('/accounts/email', payload)).data,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['settings', 'email'] })
-      toast.success('Email account added.')
+      toast.success('Email account added')
       setModalOpen(false)
     },
-    onError: () => toast.error('Failed to add email account.'),
+    onError: () => toast.error('Failed to add email account'),
   })
 
   const addVoice = useMutation({
@@ -83,10 +87,10 @@ export default function Settings() {
       (await api.post('/accounts/voice', payload)).data,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['settings', 'voice'] })
-      toast.success('Voice agent added.')
+      toast.success('Voice agent added')
       setModalOpen(false)
     },
-    onError: () => toast.error('Failed to add voice agent.'),
+    onError: () => toast.error('Failed to add voice agent'),
   })
 
   const deleteAccount = useMutation({
@@ -99,9 +103,9 @@ export default function Settings() {
     },
     onSuccess: (_, vars) => {
       void queryClient.invalidateQueries({ queryKey: ['settings', vars.type] })
-      toast.success('Account removed.')
+      toast.success('Account removed')
     },
-    onError: () => toast.error('Failed to remove account.'),
+    onError: () => toast.error('Failed to remove account'),
   })
 
   async function handleTest(id: string) {
@@ -109,11 +113,11 @@ export default function Settings() {
     try {
       const { data } = await api.post<{ ok: boolean; error?: string }>(`/accounts/linkedin/${id}/test`)
       setTestResults((prev) => ({ ...prev, [id]: data }))
-      if (data.ok) toast.success('Connection test passed.')
-      else toast.error(data.error || 'Connection test failed.')
+      if (data.ok) toast.success('Connection test passed')
+      else toast.error(data.error || 'Connection test failed')
     } catch {
       setTestResults((prev) => ({ ...prev, [id]: { ok: false, error: 'Request failed' } }))
-      toast.error('Connection test failed.')
+      toast.error('Connection test failed')
     } finally {
       setTestingId(null)
     }
@@ -122,94 +126,73 @@ export default function Settings() {
   const busy = addLinkedIn.isPending || addEmail.isPending || addVoice.isPending
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-500">Settings</p>
-        <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">
-          Account surfaces for LinkedIn, email, and voice delivery
-        </h1>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
-          Configure sending identities and test integrations without leaving the app shell.
-        </p>
-      </section>
-
-      <div className="flex flex-wrap gap-2">
-        {(['linkedin', 'email', 'voice', 'integrations', 'notifications'] as SettingsTab[]).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            onClick={() => setActiveTab(tab)}
-            className={`rounded-full px-4 py-2 text-sm font-medium transition ${
-              activeTab === tab ? 'bg-sky-500 text-white' : 'bg-white text-slate-500 hover:bg-slate-100'
-            }`}
-          >
-            {tab === 'linkedin' ? 'LinkedIn Accounts' : tab === 'email' ? 'Email Accounts' : tab === 'voice' ? 'Voice Agents' : tab === 'integrations' ? 'Integrations' : 'Notifications'}
-          </button>
-        ))}
-      </div>
-
-      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="mb-5 flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900">
-              {activeTab === 'linkedin' ? 'LinkedIn accounts'
-                : activeTab === 'email' ? 'Email accounts'
-                : activeTab === 'voice' ? 'Voice agents'
-                : activeTab === 'integrations' ? 'Integrations'
-                : 'Notification channels'}
-            </h2>
-            <p className="text-sm text-slate-500">
-              {activeTab === 'notifications'
-                ? 'Where Omni fans out alerts — hot leads, approvals, failures.'
-                : activeTab === 'integrations'
-                ? 'Encrypted API keys per provider.'
-                : 'Provisioned sending identities and test hooks.'}
-            </p>
-          </div>
-          {(activeTab === 'linkedin' || activeTab === 'email' || activeTab === 'voice') && (
-            <button
-              type="button"
+    <div className="space-y-8 pb-12">
+      <PageHeader
+        screenLabel="Settings"
+        eyebrow="System"
+        title="Settings"
+        description="Provisioned sending identities, encrypted API keys, and notification channels."
+        actions={
+          (activeTab === 'linkedin' || activeTab === 'email' || activeTab === 'voice') && (
+            <Button
+              variant="primary"
+              size="md"
+              icon={Plus}
               onClick={() => setModalOpen(true)}
-              className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-600 transition-colors"
             >
-              Add {activeTab === 'voice' ? 'agent' : 'account'}
-            </button>
-          )}
-        </div>
+              Add {activeTab === 'voice' ? 'Agent' : 'Account'}
+            </Button>
+          )
+        }
+      />
 
+      <Tabs
+        activeTab={activeTab}
+        onChange={(id) => setActiveTab(id as SettingsTab)}
+        tabs={[
+          { id: 'linkedin', label: 'LinkedIn', icon: Linkedin },
+          { id: 'email', label: 'Email', icon: Mail },
+          { id: 'voice', label: 'Voice', icon: Phone },
+          { id: 'integrations', label: 'Integrations', icon: Globe },
+          { id: 'notifications', label: 'Notifications', icon: Bell },
+        ]}
+      />
+
+      <Card padding="none">
         {activeTab === 'linkedin' && (
           <DataTable
             columns={[
-              { key: 'name', header: 'Name', render: (row: LinkedInAccount) => <span className="font-medium text-slate-900">{row.name}</span> },
-              { key: 'unipile_id', header: 'Unipile ID', render: (row: LinkedInAccount) => <span className="font-mono text-xs text-slate-500">{row.unipile_id}</span> },
-              { key: 'daily_invite_cap', header: 'Daily cap', className: 'text-right tabular-nums' },
-              { key: 'is_active', header: 'Status', render: (row: LinkedInAccount) => <Badge label={row.is_active ? 'active' : 'paused'} asStatus /> },
+              { key: 'name', header: 'Name', render: (row: LinkedInAccount) => <span className="font-bold text-slate-900 dark:text-white">{row.name}</span> },
+              { key: 'unipile_id', header: 'Unipile ID', render: (row: LinkedInAccount) => <span className="font-mono text-[11px] text-slate-400">{row.unipile_id}</span> },
+              { key: 'daily_invite_cap', header: 'Daily Cap', className: 'text-right tabular-nums font-semibold' },
+              { key: 'is_active', header: 'Status', render: (row: LinkedInAccount) => <Badge label={row.is_active ? 'active' : 'paused'} asStatus dot /> },
               {
                 key: 'actions',
                 header: '',
+                align: 'right',
                 render: (row: LinkedInAccount) => (
-                  <div className="flex items-center justify-end gap-2">
+                  <div className="flex items-center justify-end gap-3">
                     {testResults[row.id] && (
-                      <span className={`text-xs font-medium ${testResults[row.id].ok ? 'text-emerald-600' : 'text-rose-600'}`}>
-                        {testResults[row.id].ok ? 'OK' : 'Failed'}
-                      </span>
+                      <Badge 
+                        label={testResults[row.id].ok ? 'Verified' : 'Error'} 
+                        variant={testResults[row.id].ok ? 'success' : 'danger'} 
+                        size="xs" 
+                      />
                     )}
-                    <button
-                      type="button"
+                    <Button
+                      variant="secondary"
+                      size="xs"
+                      isLoading={testingId === row.id}
                       onClick={() => void handleTest(row.id)}
-                      disabled={testingId === row.id}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors"
                     >
-                      {testingId === row.id && <Loader2 size={12} className="animate-spin" />}
                       Test
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void deleteAccount.mutateAsync({ type: 'linkedin', id: row.id })}
-                      className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50 transition-colors"
-                    >
-                      Remove
-                    </button>
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="xs"
+                      icon={Trash2}
+                      onClick={() => { if (confirm('Remove this account?')) deleteAccount.mutate({ type: 'linkedin', id: row.id }) }}
+                    />
                   </div>
                 ),
               },
@@ -223,23 +206,21 @@ export default function Settings() {
         {activeTab === 'email' && (
           <DataTable
             columns={[
-              { key: 'from_name', header: 'From name' },
-              { key: 'from_email', header: 'From email', render: (row: EmailAccount) => <span className="font-mono text-xs text-slate-600">{row.from_email}</span> },
-              { key: 'is_active', header: 'Status', render: (row: EmailAccount) => <Badge label={row.is_active ? 'active' : 'paused'} asStatus /> },
-              { key: 'created_at', header: 'Created', render: (row: EmailAccount) => formatDate(row.created_at) },
+              { key: 'from_name', header: 'From Name', render: (row: EmailAccount) => <span className="font-bold text-slate-900 dark:text-white">{row.from_name}</span> },
+              { key: 'from_email', header: 'From Email', render: (row: EmailAccount) => <span className="font-mono text-[11px] text-slate-400">{row.from_email}</span> },
+              { key: 'is_active', header: 'Status', render: (row: EmailAccount) => <Badge label={row.is_active ? 'active' : 'paused'} asStatus dot /> },
+              { key: 'created_at', header: 'Created', render: (row: EmailAccount) => <span className="text-xs text-slate-500 tabular-nums">{formatDate(row.created_at)}</span> },
               {
                 key: 'remove',
                 header: '',
+                align: 'right',
                 render: (row: EmailAccount) => (
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => void deleteAccount.mutateAsync({ type: 'email', id: row.id })}
-                      className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50 transition-colors"
-                    >
-                      Remove
-                    </button>
-                  </div>
+                  <Button
+                    variant="danger"
+                    size="xs"
+                    icon={Trash2}
+                    onClick={() => { if (confirm('Remove this account?')) deleteAccount.mutate({ type: 'email', id: row.id }) }}
+                  />
                 ),
               },
             ]}
@@ -252,22 +233,20 @@ export default function Settings() {
         {activeTab === 'voice' && (
           <DataTable
             columns={[
-              { key: 'name', header: 'Name' },
-              { key: 'retell_agent_id', header: 'Retell agent ID', render: (row: VoiceAgent) => <span className="font-mono text-xs text-slate-600">{row.retell_agent_id}</span> },
-              { key: 'is_active', header: 'Status', render: (row: VoiceAgent) => <Badge label={row.is_active ? 'active' : 'paused'} asStatus /> },
+              { key: 'name', header: 'Name', render: (row: VoiceAgent) => <span className="font-bold text-slate-900 dark:text-white">{row.name}</span> },
+              { key: 'retell_agent_id', header: 'Retell Agent ID', render: (row: VoiceAgent) => <span className="font-mono text-[11px] text-slate-400">{row.retell_agent_id}</span> },
+              { key: 'is_active', header: 'Status', render: (row: VoiceAgent) => <Badge label={row.is_active ? 'active' : 'paused'} asStatus dot /> },
               {
                 key: 'remove',
                 header: '',
+                align: 'right',
                 render: (row: VoiceAgent) => (
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => void deleteAccount.mutateAsync({ type: 'voice', id: row.id })}
-                      className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50 transition-colors"
-                    >
-                      Remove
-                    </button>
-                  </div>
+                  <Button
+                    variant="danger"
+                    size="xs"
+                    icon={Trash2}
+                    onClick={() => { if (confirm('Remove this agent?')) deleteAccount.mutate({ type: 'voice', id: row.id }) }}
+                  />
                 ),
               },
             ]}
@@ -277,10 +256,9 @@ export default function Settings() {
           />
         )}
 
-        {activeTab === 'integrations' && <IntegrationsPanel />}
-
-        {activeTab === 'notifications' && <NotificationChannelsPanel />}
-      </section>
+        {activeTab === 'integrations' && <div className="p-6"><IntegrationsPanel /></div>}
+        {activeTab === 'notifications' && <div className="p-6"><NotificationChannelsPanel /></div>}
+      </Card>
 
       <AccountModal
         open={modalOpen}
@@ -319,50 +297,86 @@ function AccountModal({
   }
 
   const title =
-    tab === 'linkedin' ? 'Add LinkedIn account' :
-    tab === 'email'    ? 'Add email account'    :
-                         'Add voice agent'
+    tab === 'linkedin' ? 'Add LinkedIn Account' :
+    tab === 'email'    ? 'Add Email Account'    :
+                         'Add Voice Agent'
 
   return (
     <Modal title={title} open={open} onClose={onClose}>
-      <form className="space-y-4" onSubmit={handleSubmit}>
+      <form className="space-y-5" onSubmit={handleSubmit}>
         {tab === 'linkedin' && (
-          <>
-            <input className={inputCls} placeholder="Account name" value={linkedin.name} onChange={(e) => setLinkedin({ ...linkedin, name: e.target.value })} required />
-            <input className={inputCls} placeholder="Unipile ID" value={linkedin.unipile_id} onChange={(e) => setLinkedin({ ...linkedin, unipile_id: e.target.value })} required />
-            <input className={inputCls} placeholder="Email (optional)" value={linkedin.email} onChange={(e) => setLinkedin({ ...linkedin, email: e.target.value })} />
-            <input className={inputCls} type="number" placeholder="Daily invite cap" value={linkedin.daily_invite_cap} onChange={(e) => setLinkedin({ ...linkedin, daily_invite_cap: Number(e.target.value) })} required />
-          </>
+          <div className="space-y-4">
+            <div>
+              <label className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-slate-400">Account Name</label>
+              <input className={inputCls} placeholder="e.g. Personal Profile" value={linkedin.name} onChange={(e) => setLinkedin({ ...linkedin, name: e.target.value })} required />
+            </div>
+            <div>
+              <label className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-slate-400">Unipile ID</label>
+              <input className={inputCls} placeholder="unipile_..." value={linkedin.unipile_id} onChange={(e) => setLinkedin({ ...linkedin, unipile_id: e.target.value })} required />
+            </div>
+            <div>
+              <label className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-slate-400">Email (Optional)</label>
+              <input className={inputCls} placeholder="email@example.com" value={linkedin.email} onChange={(e) => setLinkedin({ ...linkedin, email: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-slate-400">Daily Invite Cap</label>
+              <input className={inputCls} type="number" value={linkedin.daily_invite_cap} onChange={(e) => setLinkedin({ ...linkedin, daily_invite_cap: Number(e.target.value) })} required />
+            </div>
+          </div>
         )}
         {tab === 'email' && (
-          <>
-            <input className={inputCls} placeholder="From name" value={email.from_name} onChange={(e) => setEmail({ ...email, from_name: e.target.value })} required />
-            <input className={inputCls} placeholder="From email" value={email.from_email} onChange={(e) => setEmail({ ...email, from_email: e.target.value })} required />
-            <input className={inputCls} placeholder="SMTP host (e.g. smtp.gmail.com)" value={email.smtp_host} onChange={(e) => setEmail({ ...email, smtp_host: e.target.value })} required />
-            <div className="grid grid-cols-2 gap-3">
-              <input className={inputCls} type="number" placeholder="Port (587)" value={email.smtp_port} onChange={(e) => setEmail({ ...email, smtp_port: Number(e.target.value) })} required />
-              <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 cursor-pointer">
-                <input type="checkbox" checked={email.smtp_use_tls} onChange={(e) => setEmail({ ...email, smtp_use_tls: e.target.checked })} />
-                Use STARTTLS
-              </label>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-slate-400">From Name</label>
+                <input className={inputCls} placeholder="John Doe" value={email.from_name} onChange={(e) => setEmail({ ...email, from_name: e.target.value })} required />
+              </div>
+              <div>
+                <label className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-slate-400">From Email</label>
+                <input className={inputCls} placeholder="john@example.com" value={email.from_email} onChange={(e) => setEmail({ ...email, from_email: e.target.value })} required />
+              </div>
             </div>
-            <input className={inputCls} placeholder="SMTP username (usually your email)" value={email.smtp_username} onChange={(e) => setEmail({ ...email, smtp_username: e.target.value })} required />
-            <input className={inputCls} type="password" placeholder="SMTP password / app password" value={email.smtp_password} onChange={(e) => setEmail({ ...email, smtp_password: e.target.value })} required />
-          </>
+            <div>
+              <label className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-slate-400">SMTP Host</label>
+              <input className={inputCls} placeholder="smtp.gmail.com" value={email.smtp_host} onChange={(e) => setEmail({ ...email, smtp_host: e.target.value })} required />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-slate-400">Port</label>
+                <input className={inputCls} type="number" placeholder="587" value={email.smtp_port} onChange={(e) => setEmail({ ...email, smtp_port: Number(e.target.value) })} required />
+              </div>
+              <div className="flex items-end">
+                <label className="flex h-[44px] w-full items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 text-xs font-bold text-slate-700 cursor-pointer transition-colors hover:border-brand-300 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                  <input type="checkbox" className="rounded text-brand-600 focus:ring-brand-500" checked={email.smtp_use_tls} onChange={(e) => setEmail({ ...email, smtp_use_tls: e.target.checked })} />
+                  Use STARTTLS
+                </label>
+              </div>
+            </div>
+            <div>
+              <label className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-slate-400">SMTP Username</label>
+              <input className={inputCls} placeholder="user@example.com" value={email.smtp_username} onChange={(e) => setEmail({ ...email, smtp_username: e.target.value })} required />
+            </div>
+            <div>
+              <label className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-slate-400">SMTP Password</label>
+              <input className={inputCls} type="password" placeholder="App password..." value={email.smtp_password} onChange={(e) => setEmail({ ...email, smtp_password: e.target.value })} required />
+            </div>
+          </div>
         )}
         {tab === 'voice' && (
-          <>
-            <input className={inputCls} placeholder="Agent name" value={voice.name} onChange={(e) => setVoice({ ...voice, name: e.target.value })} required />
-            <input className={inputCls} placeholder="Retell agent ID" value={voice.retell_agent_id} onChange={(e) => setVoice({ ...voice, retell_agent_id: e.target.value })} required />
-          </>
+          <div className="space-y-4">
+            <div>
+              <label className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-slate-400">Agent Name</label>
+              <input className={inputCls} placeholder="e.g. AI Assistant" value={voice.name} onChange={(e) => setVoice({ ...voice, name: e.target.value })} required />
+            </div>
+            <div>
+              <label className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-slate-400">Retell Agent ID</label>
+              <input className={inputCls} placeholder="agent_..." value={voice.retell_agent_id} onChange={(e) => setVoice({ ...voice, retell_agent_id: e.target.value })} required />
+            </div>
+          </div>
         )}
-        <div className="flex justify-end gap-3 pt-1">
-          <button type="button" onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
-            Cancel
-          </button>
-          <button type="submit" disabled={busy} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-600 disabled:opacity-60 transition-colors">
-            {busy ? 'Saving...' : 'Save'}
-          </button>
+        <div className="flex justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
+          <Button variant="secondary" size="md" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button type="submit" variant="primary" size="md" isLoading={busy}>Save Account</Button>
         </div>
       </form>
     </Modal>
@@ -370,8 +384,7 @@ function AccountModal({
 }
 
 const inputCls =
-  'w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100'
-
+  'w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 outline-none transition focus:border-brand-400 focus:ring-4 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:ring-brand-900/20'
 
 // ── Integrations Panel ────────────────────────────────────────────────
 
@@ -413,9 +426,9 @@ function IntegrationsPanel() {
       (await api.put('/settings/integrations', payload)).data,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['settings', 'integrations', 'keys'] })
-      toast.success('Key saved and encrypted.')
+      toast.success('Key saved and encrypted')
     },
-    onError: () => toast.error('Failed to save key.'),
+    onError: () => toast.error('Failed to save key'),
   })
 
   const deleteKey = useMutation({
@@ -423,9 +436,9 @@ function IntegrationsPanel() {
       (await api.delete('/settings/integrations', { data: payload })).data,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['settings', 'integrations', 'keys'] })
-      toast.success('Key removed.')
+      toast.success('Key removed')
     },
-    onError: () => toast.error('Failed to remove key.'),
+    onError: () => toast.error('Failed to remove key'),
   })
 
   async function handleVerify(provider: string) {
@@ -436,7 +449,7 @@ function IntegrationsPanel() {
       if (data.verified) toast.success(`${provider} verified!`)
       else toast.error(`${provider} failed: ${data.detail}`)
     } catch {
-      toast.error('Verification request failed.')
+      toast.error('Verification request failed')
     } finally {
       setVerifying(null)
     }
@@ -463,17 +476,17 @@ function IntegrationsPanel() {
     return providerKeys.every((k) => k.is_verified)
   }
 
-  if (providersQuery.isLoading) return <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-sky-500" /></div>
+  if (providersQuery.isLoading) return <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-brand-500" /></div>
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-500">
-          API keys are encrypted at rest (AES-256). Only masked previews are shown.
+        <p className="text-sm font-medium text-slate-500">
+          API keys are encrypted at rest (AES-256). Only masked previews are shown for security.
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-6 sm:grid-cols-2">
         {Object.entries(providers).map(([providerKey, config]) => {
           const verified = isProviderVerified(providerKey)
           const isEditing = editProvider === providerKey
@@ -482,18 +495,30 @@ function IntegrationsPanel() {
           return (
             <div
               key={providerKey}
-              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:shadow-md transition-shadow"
+              className="rounded-2xl border border-slate-200 bg-slate-50/50 p-6 transition-all hover:border-brand-200 dark:border-slate-800 dark:bg-slate-900/50"
             >
-              {/* Header */}
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold text-slate-900">{config.label}</h3>
-                {verified === true && <ShieldCheck className="h-4 w-4 text-emerald-500" />}
-                {verified === false && <ShieldX className="h-4 w-4 text-rose-400" />}
-                {verified === null && <Shield className="h-4 w-4 text-slate-300" />}
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">{config.label}</h3>
+                  <div className="mt-1 flex items-center gap-1.5">
+                    {verified === true ? (
+                      <span className="flex items-center gap-1 text-[10px] font-bold uppercase text-emerald-600">
+                        <ShieldCheck size={12} /> Connected
+                      </span>
+                    ) : verified === false ? (
+                      <span className="flex items-center gap-1 text-[10px] font-bold uppercase text-rose-500">
+                        <ShieldX size={12} /> Verification Failed
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-[10px] font-bold uppercase text-slate-400">
+                        <Shield size={12} /> Not Configured
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
 
-              {/* Fields */}
-              <div className="space-y-2">
+              <div className="space-y-4">
                 {config.fields.map((fieldName) => {
                   const existing = getKeyForField(providerKey, fieldName)
                   const fKey = `${providerKey}.${fieldName}`
@@ -501,48 +526,42 @@ function IntegrationsPanel() {
 
                   return (
                     <div key={fieldName}>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">
+                      <label className="block text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
                         {fieldName.replace(/_/g, ' ')}
-                        {config.required.includes(fieldName) && <span className="text-rose-400 ml-0.5">*</span>}
+                        {config.required.includes(fieldName) && <span className="text-rose-500 ml-1">*</span>}
                       </label>
                       {existing && !isEditing ? (
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-mono text-xs text-slate-600 flex-1 truncate">{existing.masked_value}</span>
-                          <button
-                            type="button"
-                            onClick={() => setShowValues((p) => ({ ...p, [fKey]: !isVisible }))}
-                            className="p-1 text-slate-400 hover:text-slate-600"
-                            title={isVisible ? 'Hide' : 'Show'}
-                          >
-                            {isVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                          </button>
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 rounded-xl bg-white border border-slate-200 px-4 py-2 font-mono text-xs text-slate-600 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-400 truncate">
+                            {existing.masked_value}
+                          </div>
                           <button
                             type="button"
                             onClick={() => void deleteKey.mutateAsync({ provider: providerKey, field_name: fieldName })}
-                            className="p-1 text-slate-400 hover:text-rose-500"
+                            className="p-2 text-slate-300 transition-colors hover:text-rose-500 dark:hover:text-rose-400"
                             title="Remove"
                           >
-                            <Trash2 className="h-3.5 w-3.5" />
+                            <Trash2 size={16} />
                           </button>
                         </div>
                       ) : (
-                        <div className="flex gap-1.5">
+                        <div className="flex gap-2">
                           <input
                             type="password"
-                            className="flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-900 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                            className="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-900 outline-none transition focus:border-brand-400 focus:ring-4 focus:ring-brand-100 dark:bg-slate-900 dark:border-slate-800 dark:text-white dark:focus:ring-brand-900/20"
                             placeholder={`Enter ${fieldName.replace(/_/g, ' ')}`}
                             value={fieldValues[fKey] || ''}
                             onChange={(e) => setFieldValues((p) => ({ ...p, [fKey]: e.target.value }))}
                             onKeyDown={(e) => { if (e.key === 'Enter') handleSaveField(providerKey, fieldName) }}
                           />
-                          <button
-                            type="button"
-                            onClick={() => handleSaveField(providerKey, fieldName)}
+                          <Button
+                            variant="primary"
+                            size="sm"
                             disabled={!fieldValues[fKey]?.trim() || upsertKey.isPending}
-                            className="rounded-lg bg-sky-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-50 transition-colors"
+                            onClick={() => handleSaveField(providerKey, fieldName)}
                           >
                             Save
-                          </button>
+                          </Button>
                         </div>
                       )}
                     </div>
@@ -550,35 +569,22 @@ function IntegrationsPanel() {
                 })}
               </div>
 
-              {/* Actions */}
-              <div className="mt-4 flex gap-2">
+              <div className="mt-8 flex gap-3 pt-6 border-t border-slate-100 dark:border-slate-800">
                 {!isEditing && hasAllKeys && (
-                  <button
-                    type="button"
-                    onClick={() => setEditProvider(providerKey)}
-                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors"
-                  >
-                    Update
-                  </button>
+                  <Button variant="secondary" size="xs" onClick={() => setEditProvider(providerKey)}>Update Keys</Button>
                 )}
                 {isEditing && (
-                  <button
-                    type="button"
-                    onClick={() => setEditProvider(null)}
-                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors"
-                  >
-                    Cancel
-                  </button>
+                  <Button variant="secondary" size="xs" onClick={() => setEditProvider(null)}>Cancel</Button>
                 )}
                 {hasAllKeys && (
-                  <button
-                    type="button"
+                  <Button
+                    variant="secondary"
+                    size="xs"
+                    isLoading={verifying === providerKey}
                     onClick={() => void handleVerify(providerKey)}
-                    disabled={verifying === providerKey}
-                    className="rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 transition-colors"
                   >
-                    {verifying === providerKey ? 'Verifying...' : 'Verify'}
-                  </button>
+                    Verify Connection
+                  </Button>
                 )}
               </div>
             </div>
@@ -615,11 +621,11 @@ function NotificationChannelsPanel() {
       (await api.post('/settings/notification-channels', payload)).data,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['settings', 'notification-channels'] })
-      toast.success('Channel added.')
+      toast.success('Notification channel added')
       setDraft(null)
     },
     onError: (err: unknown) => {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Failed to add channel.'
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Failed to add channel'
       toast.error(msg)
     },
   })
@@ -630,23 +636,23 @@ function NotificationChannelsPanel() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['settings', 'notification-channels'] })
     },
-    onError: () => toast.error('Failed to toggle channel.'),
+    onError: () => toast.error('Failed to toggle channel'),
   })
 
   const deleteChannel = useMutation({
     mutationFn: async (id: string) => (await api.delete(`/settings/notification-channels/${id}`)).data,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['settings', 'notification-channels'] })
-      toast.success('Channel removed.')
+      toast.success('Channel removed')
     },
-    onError: () => toast.error('Failed to remove channel.'),
+    onError: () => toast.error('Failed to remove channel'),
   })
 
   function handleCreate() {
     if (!draft) return
     const target = draft.target.trim()
     if (!draft.name.trim() || !target) {
-      toast.error(draft.channel_type === 'slack' ? 'Name and webhook URL are required.' : 'Name and destination email are required.')
+      toast.error(draft.channel_type === 'slack' ? 'Name and webhook URL are required' : 'Name and destination email are required')
       return
     }
     const config = draft.channel_type === 'slack' ? { webhook_url: target } : { to: target }
@@ -654,126 +660,112 @@ function NotificationChannelsPanel() {
   }
 
   if (channelsQuery.isLoading) {
-    return <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-sky-500" /></div>
+    return <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-brand-500" /></div>
   }
 
   const channels = channelsQuery.data ?? []
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-start justify-between gap-4">
-        <p className="text-sm text-slate-500">
-          Slack webhooks and email destinations are fanned out for hot-lead alerts, approvals, and delivery failures.
+    <div className="space-y-8">
+      <div className="flex items-start justify-between gap-6">
+        <p className="text-sm font-medium text-slate-500 leading-relaxed max-w-xl">
+          Fanned out alerts for hot-lead alerts, approvals, and delivery failures.
         </p>
         {!draft && (
-          <button
-            type="button"
-            onClick={() => setDraft({ channel_type: 'slack', name: '', target: '' })}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-sky-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-600 transition-colors"
-          >
-            <Plus size={14} /> Add channel
-          </button>
+          <Button variant="primary" size="sm" icon={Plus} onClick={() => setDraft({ channel_type: 'slack', name: '', target: '' })}>
+            Add Channel
+          </Button>
         )}
       </div>
 
       {draft && (
-        <div className="rounded-2xl border border-sky-200 bg-sky-50/50 p-4 space-y-3">
+        <div className="rounded-2xl border border-brand-100 bg-brand-50/30 p-6 space-y-6 dark:border-brand-900/20 dark:bg-brand-900/10">
           <div className="flex flex-wrap gap-2">
             {(['slack', 'email'] as const).map((t) => (
               <button
                 key={t}
                 type="button"
                 onClick={() => setDraft((d) => (d ? { ...d, channel_type: t, target: '' } : d))}
-                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition ${
-                  draft.channel_type === t ? 'bg-sky-500 text-white' : 'bg-white text-slate-500 ring-1 ring-slate-200 hover:bg-slate-100'
+                className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-wider transition ${
+                  draft.channel_type === t 
+                    ? 'bg-brand-500 text-white shadow-lg shadow-brand-100 dark:shadow-none' 
+                    : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-800'
                 }`}
               >
-                {t === 'slack' ? <Slack size={12} /> : <Mail size={12} />}
-                {t === 'slack' ? 'Slack webhook' : 'Email'}
+                {t === 'slack' ? <Slack size={13} /> : <Mail size={13} />}
+                {t === 'slack' ? 'Slack Webhook' : 'Email Alert'}
               </button>
             ))}
           </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <input
-              type="text"
-              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
-              placeholder="Channel name (e.g. Hot leads #growth)"
-              value={draft.name}
-              onChange={(e) => setDraft((d) => (d ? { ...d, name: e.target.value } : d))}
-            />
-            <input
-              type={draft.channel_type === 'email' ? 'email' : 'url'}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-mono text-slate-900 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
-              placeholder={draft.channel_type === 'slack' ? 'https://hooks.slack.com/services/…' : 'alerts@example.com'}
-              value={draft.target}
-              onChange={(e) => setDraft((d) => (d ? { ...d, target: e.target.value } : d))}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleCreate() }}
-            />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Display Name</label>
+              <input
+                type="text"
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-brand-400 focus:ring-4 focus:ring-brand-100 dark:bg-slate-900 dark:border-slate-800 dark:text-white dark:focus:ring-brand-900/20"
+                placeholder="e.g. Sales Alerts"
+                value={draft.name}
+                onChange={(e) => setDraft((d) => (d ? { ...d, name: e.target.value } : d))}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Target Destination</label>
+              <input
+                type={draft.channel_type === 'email' ? 'email' : 'url'}
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-mono text-slate-900 outline-none focus:border-brand-400 focus:ring-4 focus:ring-brand-100 dark:bg-slate-900 dark:border-slate-800 dark:text-white dark:focus:ring-brand-900/20"
+                placeholder={draft.channel_type === 'slack' ? 'https://hooks.slack.com/...' : 'alerts@company.com'}
+                value={draft.target}
+                onChange={(e) => setDraft((d) => (d ? { ...d, target: e.target.value } : d))}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleCreate() }}
+              />
+            </div>
           </div>
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setDraft(null)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleCreate}
-              disabled={createChannel.isPending}
-              className="rounded-lg bg-sky-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-600 disabled:opacity-50"
-            >
-              {createChannel.isPending ? 'Saving…' : 'Add channel'}
-            </button>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="secondary" size="sm" onClick={() => setDraft(null)}>Cancel</Button>
+            <Button variant="primary" size="sm" isLoading={createChannel.isPending} onClick={handleCreate}>Create Channel</Button>
           </div>
         </div>
       )}
 
       {channels.length === 0 && !draft ? (
-        <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 p-8 text-center">
-          <p className="text-sm text-slate-500">No notification channels configured yet. Alerts will be dropped silently.</p>
+        <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/50 p-12 text-center dark:border-slate-800">
+          <p className="text-sm font-medium text-slate-400">No notification channels configured yet. Alerts will not be sent.</p>
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="grid gap-3">
           {channels.map((ch) => {
             const config = (ch.config ?? {}) as { webhook_url?: string; to?: string }
             const target = ch.channel_type === 'slack' ? config.webhook_url : config.to
             return (
-              <div key={ch.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
-                <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${
-                  ch.channel_type === 'slack' ? 'bg-violet-50 text-violet-600' : 'bg-amber-50 text-amber-600'
+              <div key={ch.id} className="flex items-center gap-4 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                  ch.channel_type === 'slack' ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30' : 'bg-brand-50 text-brand-600 dark:bg-brand-900/30'
                 }`}>
-                  {ch.channel_type === 'slack' ? <Slack size={14} /> : <Mail size={14} />}
+                  {ch.channel_type === 'slack' ? <Slack size={18} /> : <Mail size={18} />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-slate-900 truncate">{ch.name}</span>
-                    <Badge label={ch.is_active ? 'active' : 'paused'} asStatus />
+                    <span className="text-sm font-bold text-slate-900 dark:text-white truncate">{ch.name}</span>
+                    <Badge label={ch.is_active ? 'active' : 'paused'} asStatus size="xs" dot />
                   </div>
-                  <p className="mt-0.5 truncate font-mono text-[11px] text-slate-400">{target || '—'}</p>
+                  <p className="mt-1 truncate font-mono text-[11px] text-slate-400">{target || '—'}</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => toggleChannel.mutate({ id: ch.id, is_active: !ch.is_active })}
-                  className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                    ch.is_active
-                      ? 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                      : 'border-emerald-200 text-emerald-600 hover:bg-emerald-50'
-                  }`}
-                >
-                  {ch.is_active ? <PowerOff size={12} /> : <Power size={12} />}
-                  {ch.is_active ? 'Pause' : 'Resume'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { if (confirm(`Remove "${ch.name}"?`)) deleteChannel.mutate(ch.id) }}
-                  title={`Remove ${ch.name}`}
-                  aria-label={`Remove ${ch.name}`}
-                  className="rounded-lg border border-rose-200 px-2.5 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50"
-                >
-                  <Trash2 size={12} />
-                </button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="xs"
+                    icon={ch.is_active ? PowerOff : Power}
+                    onClick={() => toggleChannel.mutate({ id: ch.id, is_active: !ch.is_active })}
+                  >
+                    {ch.is_active ? 'Pause' : 'Resume'}
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="xs"
+                    icon={Trash2}
+                    onClick={() => { if (confirm(`Remove "${ch.name}"?`)) deleteChannel.mutate(ch.id) }}
+                  />
+                </div>
               </div>
             )
           })}

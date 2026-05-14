@@ -1,2 +1,2 @@
-export const labelCls = 'mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-400'
-export const inputClassName = 'w-full rounded-xl border-none bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none ring-1 ring-slate-900/5 transition-all focus:bg-white focus:ring-4 focus:ring-sky-100'
+export const labelCls = 'mb-2 block text-[11px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500'
+export const inputClassName = 'w-full rounded-xl border-none bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none ring-1 ring-slate-900/5 transition-all focus:bg-white focus:ring-4 focus:ring-brand-100 dark:bg-slate-900 dark:text-white dark:ring-slate-800 dark:focus:ring-brand-900/20'

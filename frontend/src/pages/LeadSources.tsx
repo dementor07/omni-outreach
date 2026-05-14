@@ -1,12 +1,17 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { PlusCircle, Play, Loader2, CheckCircle2, AlertCircle, Database, ChevronDown, ChevronUp, Trash2, Clock } from 'lucide-react'
+import { PlusCircle, Play, Loader2, CheckCircle2, AlertCircle, Database, ChevronDown, ChevronUp, Trash2, Clock, Plus, Globe } from 'lucide-react'
 import { clsx } from 'clsx'
 
 import { api } from '../api/client'
 import Badge from '../components/Badge'
 import { useToast } from '../components/Toast'
 import { Campaign } from '../hooks/useCampaigns'
+import PageHeader from '../components/PageHeader'
+import Card from '../components/Card'
+import Button from '../components/Button'
+import Modal from '../components/Modal'
+import { FilterBar, Select } from '../components/FilterBar'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -63,8 +68,6 @@ interface LeadGenRun {
   error: string | null
 }
 
-// ── Status badge map ──────────────────────────────────────────────────────────
-
 const runStatusVariant: Record<LeadGenRun['status'], 'neutral' | 'info' | 'success' | 'danger'> = {
   pending: 'neutral',
   running: 'info',
@@ -72,16 +75,14 @@ const runStatusVariant: Record<LeadGenRun['status'], 'neutral' | 'info' | 'succe
   failed: 'danger',
 }
 
-// ── Source icon colour ────────────────────────────────────────────────────────
-
 const SOURCE_COLOURS: Record<string, { bg: string; text: string; border: string }> = {
   apify_jobs:  { bg: 'bg-orange-50',  text: 'text-orange-600', border: 'border-orange-200' },
   apollo:      { bg: 'bg-indigo-50',  text: 'text-indigo-600', border: 'border-indigo-200' },
   hunter:      { bg: 'bg-amber-50',   text: 'text-amber-600',  border: 'border-amber-200' },
-  proxycurl:   { bg: 'bg-sky-50',     text: 'text-sky-600',    border: 'border-sky-200' },
+  proxycurl:   { bg: 'bg-brand-50',     text: 'text-brand-600',    border: 'border-brand-200' },
   github:      { bg: 'bg-slate-50',   text: 'text-slate-700',  border: 'border-slate-300' },
 }
-const DEFAULT_COLOUR = { bg: 'bg-violet-50', text: 'text-violet-600', border: 'border-violet-200' }
+const DEFAULT_COLOUR = { bg: 'bg-brand-50', text: 'text-brand-600', border: 'border-brand-200' }
 
 // ── Schema-driven config form ─────────────────────────────────────────────────
 
@@ -96,29 +97,29 @@ function SchemaForm({ schema, value, onChange }: SchemaFormProps) {
     onChange({ ...value, [key]: v })
   }
 
+  const inputCls = "w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 outline-none transition focus:border-brand-400 focus:ring-4 focus:ring-brand-100 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:focus:ring-brand-900/20"
+  const labelCls = "mb-2 block text-[11px] font-bold uppercase tracking-widest text-slate-400"
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {Object.entries(schema.properties).map(([key, field]) => {
         const current = value[key] ?? field.default ?? ''
         const required = schema.required?.includes(key)
 
         if (field.type === 'array' && field.items?.enum) {
-          // Multi-select checkboxes
           const selected = (current as string[]) || []
           return (
             <div key={key}>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                {field.title}{required && <span className="text-rose-500 ml-0.5">*</span>}
+              <label className={labelCls}>
+                {field.title}{required && <span className="text-rose-500 ml-1">*</span>}
               </label>
-              {field.description && (
-                <p className="text-[11px] text-slate-400 mb-1">{field.description}</p>
-              )}
-              <div className="flex flex-wrap gap-2">
+              {field.description && <p className="mb-2 text-[10px] font-medium text-slate-400">{field.description}</p>}
+              <div className="flex flex-wrap gap-3">
                 {field.items!.enum!.map(opt => (
-                  <label key={opt} className="flex items-center gap-1.5 cursor-pointer">
+                  <label key={opt} className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
-                      className="rounded border-slate-300"
+                      className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                       checked={selected.includes(opt)}
                       onChange={e => {
                         const next = e.target.checked
@@ -127,7 +128,7 @@ function SchemaForm({ schema, value, onChange }: SchemaFormProps) {
                         set(key, next)
                       }}
                     />
-                    <span className="text-xs text-slate-600">{opt}</span>
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{opt}</span>
                   </label>
                 ))}
               </div>
@@ -136,21 +137,18 @@ function SchemaForm({ schema, value, onChange }: SchemaFormProps) {
         }
 
         if (field.type === 'array') {
-          // Array of strings — comma-separated input
           const asString = Array.isArray(current) ? (current as string[]).join(', ') : String(current)
           return (
             <div key={key}>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                {field.title}{required && <span className="text-rose-500 ml-0.5">*</span>}
+              <label className={labelCls}>
+                {field.title}{required && <span className="text-rose-500 ml-1">*</span>}
               </label>
-              {field.description && (
-                <p className="text-[11px] text-slate-400 mb-1">{field.description}</p>
-              )}
+              {field.description && <p className="mb-2 text-[10px] font-medium text-slate-400">{field.description}</p>}
               <textarea
                 rows={2}
                 value={asString}
                 onChange={e => set(key, e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none"
+                className={clsx(inputCls, "resize-none h-auto py-3")}
                 placeholder="Comma-separated values"
               />
             </div>
@@ -159,18 +157,16 @@ function SchemaForm({ schema, value, onChange }: SchemaFormProps) {
 
         if (field.type === 'boolean') {
           return (
-            <div key={key} className="flex items-center gap-2">
+            <div key={key} className="flex items-center gap-3">
               <input
                 type="checkbox"
                 id={key}
-                className="rounded border-slate-300"
+                className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                 checked={Boolean(current)}
                 onChange={e => set(key, e.target.checked)}
               />
-              <label htmlFor={key} className="text-sm text-slate-700">{field.title}</label>
-              {field.description && (
-                <span className="text-[11px] text-slate-400">({field.description})</span>
-              )}
+              <label htmlFor={key} className="text-sm font-semibold text-slate-700 dark:text-slate-300">{field.title}</label>
+              {field.description && <span className="text-[10px] font-medium text-slate-400">({field.description})</span>}
             </div>
           )
         }
@@ -178,15 +174,13 @@ function SchemaForm({ schema, value, onChange }: SchemaFormProps) {
         if (field.type === 'integer') {
           return (
             <div key={key}>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">{field.title}</label>
-              {field.description && (
-                <p className="text-[11px] text-slate-400 mb-1">{field.description}</p>
-              )}
+              <label className={labelCls}>{field.title}</label>
+              {field.description && <p className="mb-2 text-[10px] font-medium text-slate-400">{field.description}</p>}
               <input
                 type="number"
                 value={Number(current)}
                 onChange={e => set(key, parseInt(e.target.value, 10))}
-                className="w-32 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                className={clsx(inputCls, "w-32")}
               />
             </div>
           )
@@ -195,11 +189,11 @@ function SchemaForm({ schema, value, onChange }: SchemaFormProps) {
         if (field.enum) {
           return (
             <div key={key}>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">{field.title}</label>
+              <label className={labelCls}>{field.title}</label>
               <select
                 value={String(current)}
                 onChange={e => set(key, e.target.value)}
-                className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 bg-white"
+                className={inputCls}
               >
                 {field.enum.map(opt => (
                   <option key={opt} value={opt}>{opt}</option>
@@ -209,20 +203,17 @@ function SchemaForm({ schema, value, onChange }: SchemaFormProps) {
           )
         }
 
-        // Default: text input
         return (
           <div key={key}>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
-              {field.title}{required && <span className="text-rose-500 ml-0.5">*</span>}
+            <label className={labelCls}>
+              {field.title}{required && <span className="text-rose-500 ml-1">*</span>}
             </label>
-            {field.description && (
-              <p className="text-[11px] text-slate-400 mb-1">{field.description}</p>
-            )}
+            {field.description && <p className="mb-2 text-[10px] font-medium text-slate-400">{field.description}</p>}
             <input
               type="text"
               value={String(current)}
               onChange={e => set(key, e.target.value)}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+              className={inputCls}
               placeholder={String(field.default ?? '')}
             />
           </div>
@@ -234,22 +225,22 @@ function SchemaForm({ schema, value, onChange }: SchemaFormProps) {
 
 // ── Create config modal ───────────────────────────────────────────────────────
 
-interface CreateConfigModalProps {
+function CreateConfigModal({ open, campaignId, sources, onClose, onSubmit, isLoading }: {
+  open: boolean
   campaignId: string
   sources: LeadSource[]
   onClose: () => void
   onSubmit: (data: { campaign_id: string; source_type: string; config: Record<string, unknown>; label?: string }) => void
   isLoading: boolean
-}
-
-function CreateConfigModal({ campaignId, sources, onClose, onSubmit, isLoading }: CreateConfigModalProps) {
+}) {
   const [selectedSource, setSelectedSource] = useState(sources[0]?.source_type ?? '')
   const [configValues, setConfigValues] = useState<Record<string, unknown>>({})
   const [label, setLabel] = useState('')
 
   const source = sources.find(s => s.source_type === selectedSource)
 
-  function handleSubmit() {
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
     onSubmit({
       campaign_id: campaignId,
       source_type: selectedSource,
@@ -258,294 +249,80 @@ function CreateConfigModal({ campaignId, sources, onClose, onSubmit, isLoading }
     })
   }
 
+  const inputCls = "w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 outline-none transition focus:border-brand-400 focus:ring-4 focus:ring-brand-100 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:focus:ring-brand-900/20"
+  const labelCls = "mb-2 block text-[11px] font-bold uppercase tracking-widest text-slate-400"
+
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-start justify-center z-50 pt-16 px-4 overflow-y-auto">
-      <div className="bg-white rounded-xl w-full max-w-lg shadow-xl mb-10">
-        <div className="px-6 pt-6 pb-4 border-b border-slate-100">
-          <h2 className="text-base font-semibold text-slate-900">New Lead Source Config</h2>
+    <Modal title="Configure Lead Source" open={open} onClose={onClose}>
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <div>
+          <label className={labelCls}>Select Source Provider</label>
+          <div className="grid gap-2">
+            {sources.map(src => {
+              const colour = SOURCE_COLOURS[src.source_type] ?? DEFAULT_COLOUR
+              const active = selectedSource === src.source_type
+              return (
+                <button
+                  key={src.source_type}
+                  type="button"
+                  onClick={() => { setSelectedSource(src.source_type); setConfigValues({}) }}
+                  className={clsx(
+                    'flex items-center gap-4 p-4 rounded-xl border text-left transition-all',
+                    active
+                      ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-900/10'
+                      : 'border-slate-200 hover:border-slate-300 dark:border-slate-800'
+                  )}
+                >
+                  <div className={clsx('flex items-center justify-center w-10 h-10 rounded-xl shrink-0', colour.bg)}>
+                    <Database size={18} className={colour.text} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-slate-900 dark:text-white">{src.display_name}</span>
+                      {src.available ? <CheckCircle2 size={12} className="text-emerald-500" /> : <Badge label="No Key" variant="danger" size="xs" />}
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-1 line-clamp-1">{src.description}</p>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
         </div>
 
-        <div className="px-6 py-5 space-y-5">
-          {/* Source selector */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-2">Source</label>
-            <div className="grid grid-cols-1 gap-2">
-              {sources.map(src => {
-                const colour = SOURCE_COLOURS[src.source_type] ?? DEFAULT_COLOUR
-                return (
-                  <button
-                    key={src.source_type}
-                    onClick={() => { setSelectedSource(src.source_type); setConfigValues({}) }}
-                    className={clsx(
-                      'flex items-start gap-3 p-3 rounded-lg border text-left transition-all',
-                      selectedSource === src.source_type
-                        ? `${colour.bg} ${colour.border} ring-2 ring-inset ${colour.text.replace('text-', 'ring-')}`
-                        : 'border-slate-200 hover:border-slate-300',
-                    )}
-                  >
-                    <div className={clsx('mt-0.5 flex items-center justify-center w-6 h-6 rounded-md flex-shrink-0', colour.bg)}>
-                      <Database size={12} className={colour.text} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-slate-900">{src.display_name}</span>
-                        {src.available
-                          ? <CheckCircle2 size={12} className="text-emerald-500 flex-shrink-0" />
-                          : <AlertCircle size={12} className="text-amber-400 flex-shrink-0" />
-                        }
-                      </div>
-                      <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{src.description}</p>
-                      {!src.available && (
-                        <p className="text-[11px] text-amber-600 mt-1 font-medium">API key not configured — add in Settings</p>
-                      )}
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
+        <div>
+          <label className={labelCls}>Source Label (Internal)</label>
+          <input
+            type="text"
+            value={label}
+            onChange={e => setLabel(e.target.value)}
+            placeholder="e.g. Sales Navigator Export"
+            className={inputCls}
+          />
+        </div>
 
-          {/* Label */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Label (optional)</label>
-            <input
-              type="text"
-              value={label}
-              onChange={e => setLabel(e.target.value)}
-              placeholder="e.g. US SaaS CEOs"
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
-            />
-          </div>
-
-          {/* Source-specific config */}
-          {source && (
-            <div>
-              <p className="text-xs font-semibold text-slate-700 mb-3">Configuration</p>
+        {source && (
+          <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
+            <label className={labelCls}>Provider Configuration</label>
+            <div className="mt-4">
               <SchemaForm
                 schema={source.config_schema}
                 value={configValues}
                 onChange={setConfigValues}
               />
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
-        <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-100">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-900 transition-colors">
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={!selectedSource || isLoading}
-            className="px-4 py-2 bg-sky-600 text-white text-sm rounded-lg hover:bg-sky-700 disabled:opacity-50 transition-colors"
-          >
-            {isLoading ? 'Creating…' : 'Create Config'}
-          </button>
+        <div className="flex justify-end gap-3 pt-6 border-t border-slate-100 dark:border-slate-800">
+          <Button variant="secondary" size="md" onClick={onClose} disabled={isLoading}>Cancel</Button>
+          <Button type="submit" variant="primary" size="md" isLoading={isLoading} disabled={!selectedSource}>Create Configuration</Button>
         </div>
-      </div>
-    </div>
+      </form>
+    </Modal>
   )
 }
 
-// ── Run history ───────────────────────────────────────────────────────────────
-
-function RunHistory({ configId }: { configId: string }) {
-  const { data: runs, isLoading } = useQuery<LeadGenRun[]>({
-    queryKey: ['lead-gen-runs', configId],
-    queryFn: () => api.get('/lead-gen/runs', { params: { config_id: configId } }).then(r => r.data),
-  })
-
-  if (isLoading) return <div className="flex items-center justify-center py-4"><Loader2 size={14} className="animate-spin text-slate-300" /></div>
-  if (!runs?.length) return <p className="text-xs text-slate-400 py-3 text-center">No runs yet</p>
-
-  return (
-    <table className="w-full text-xs">
-      <thead>
-        <tr className="text-[10px] uppercase tracking-widest text-slate-400 border-b border-slate-100">
-          <th className="pb-1 text-left font-medium">Status</th>
-          <th className="pb-1 text-left font-medium">Found</th>
-          <th className="pb-1 text-left font-medium">Added</th>
-          <th className="pb-1 text-left font-medium">Started</th>
-          <th className="pb-1 text-left font-medium">Error</th>
-        </tr>
-      </thead>
-      <tbody>
-        {runs.map(run => (
-          <tr key={run.id} className="border-b border-slate-50 last:border-0">
-            <td className="py-1.5 pr-3">
-              <Badge variant={runStatusVariant[run.status]} label={run.status} />
-            </td>
-            <td className="py-1.5 pr-3 text-slate-700 font-medium">{run.leads_found}</td>
-            <td className="py-1.5 pr-3 text-emerald-600 font-semibold">{run.leads_added}</td>
-            <td className="py-1.5 pr-3 text-slate-400">
-              {new Date(run.started_at).toLocaleString()}
-            </td>
-            <td className="py-1.5 text-rose-500 truncate max-w-[160px]" title={run.error ?? ''}>
-              {run.error ?? '—'}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  )
-}
-
-// ── Config card ───────────────────────────────────────────────────────────────
-
-interface ConfigCardProps {
-  config: LeadGenConfig
-  onRun: (id: string) => void
-  onDelete: (id: string) => void
-  isRunning: boolean
-}
-
-function ConfigCard({ config, onRun, onDelete, isRunning }: ConfigCardProps) {
-  const [expanded, setExpanded] = useState(false)
-  const colour = SOURCE_COLOURS[config.source_type] ?? DEFAULT_COLOUR
-  const queryClient = useQueryClient()
-  const toast = useToast()
-
-  const scheduleMutation = useMutation({
-    mutationFn: (cron_schedule: string) =>
-      api.patch(`/lead-gen/configs/${config.id}`, { cron_schedule }).then(r => r.data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['lead-gen-configs', config.campaign_id] })
-      toast.success('Schedule updated')
-    },
-    onError: () => toast.error('Failed to update schedule'),
-  })
-
-  const currentPreset = CRON_PRESETS.find(p => p.value === (config.cron_schedule ?? ''))
-
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <div className="flex items-center gap-3 px-4 py-3">
-        <div className={clsx('flex items-center justify-center w-8 h-8 rounded-lg flex-shrink-0', colour.bg)}>
-          <Database size={14} className={colour.text} />
-        </div>
-
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold text-slate-900">
-              {config.label ?? config.source_display_name}
-            </span>
-            <Badge variant={config.source_type === 'apify_jobs' ? 'info' : 'neutral'} label={config.source_display_name} />
-            {!config.source_available && (
-              <Badge variant="danger" label="Not configured" />
-            )}
-          </div>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Created {new Date(config.created_at).toLocaleDateString()}
-            {config.cron_schedule && (
-              <span className="ml-2 inline-flex items-center gap-1 text-emerald-600">
-                <Clock size={10} /> {currentPreset?.label ?? config.cron_schedule}
-              </span>
-            )}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-1 flex-shrink-0">
-          <button
-            onClick={() => setExpanded(e => !e)}
-            className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition-colors"
-            title="View run history"
-          >
-            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          </button>
-          <button
-            onClick={() => onDelete(config.id)}
-            className="p-1.5 rounded-md text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-colors"
-            title="Delete config"
-          >
-            <Trash2 size={14} />
-          </button>
-          <button
-            onClick={() => onRun(config.id)}
-            disabled={isRunning || !config.source_available}
-            className={clsx(
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors',
-              config.source_available
-                ? 'bg-sky-600 text-white hover:bg-sky-700 disabled:opacity-50'
-                : 'bg-slate-100 text-slate-400 cursor-not-allowed',
-            )}
-          >
-            {isRunning ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
-            Run
-          </button>
-        </div>
-      </div>
-
-      {expanded && (
-        <div className="border-t border-slate-100 px-4 py-3 space-y-4">
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 flex items-center gap-1.5">
-              <Clock size={10} /> Schedule
-            </p>
-            <select
-              value={config.cron_schedule ?? ''}
-              onChange={e => scheduleMutation.mutate(e.target.value)}
-              disabled={scheduleMutation.isPending}
-              className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 bg-white w-64"
-            >
-              {CRON_PRESETS.map(p => (
-                <option key={p.value} value={p.value}>{p.label}</option>
-              ))}
-            </select>
-            {config.last_run_at && (
-              <span className="ml-3 text-[11px] text-slate-400">
-                Last run {new Date(config.last_run_at).toLocaleString()}
-              </span>
-            )}
-          </div>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Run History</p>
-            <RunHistory configId={config.id} />
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Sources overview grid ─────────────────────────────────────────────────────
-
-function SourcesGrid({ sources }: { sources: LeadSource[] }) {
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-8">
-      {sources.map(src => {
-        const colour = SOURCE_COLOURS[src.source_type] ?? DEFAULT_COLOUR
-        return (
-          <div
-            key={src.source_type}
-            className={clsx(
-              'flex items-start gap-3 p-3 rounded-xl border',
-              src.available ? `${colour.bg} ${colour.border}` : 'bg-slate-50 border-slate-200 opacity-60',
-            )}
-          >
-            <div className={clsx('flex items-center justify-center w-8 h-8 rounded-lg flex-shrink-0 bg-white/70 ring-1', colour.border)}>
-              <Database size={14} className={colour.text} />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-semibold text-slate-900">{src.display_name}</span>
-                {src.available
-                  ? <CheckCircle2 size={11} className="text-emerald-500" />
-                  : <AlertCircle size={11} className="text-amber-400" />
-                }
-              </div>
-              <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed line-clamp-2">{src.description}</p>
-              {!src.available && (
-                <span className="text-[10px] text-amber-600 font-semibold">Needs API key</span>
-              )}
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function LeadSources() {
   const queryClient = useQueryClient()
@@ -585,7 +362,7 @@ export default function LeadSources() {
     mutationFn: (configId: string) => api.delete(`/lead-gen/configs/${configId}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['lead-gen-configs', selectedCampaignId] })
-      toast.success('Config deleted')
+      toast.success('Configuration deleted')
     },
     onError: () => toast.error('Failed to delete config'),
   })
@@ -598,7 +375,7 @@ export default function LeadSources() {
       }).then(r => r.data),
     onSuccess: (data, configId) => {
       setRunningConfigId(null)
-      toast.success(`Run started — ${data.source_type}`)
+      toast.success('Source run triggered')
       queryClient.invalidateQueries({ queryKey: ['lead-gen-runs', configId] })
     },
     onError: (err: unknown) => {
@@ -608,92 +385,130 @@ export default function LeadSources() {
     },
   })
 
-  function handleRun(configId: string) {
-    setRunningConfigId(configId)
-    runMutation.mutate(configId)
-  }
-
-  if (campaignsLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 size={24} className="animate-spin text-slate-400" />
-      </div>
-    )
-  }
+  useEffect(() => {
+    if (campaigns && campaigns.length > 0 && !selectedCampaignId) {
+      setSelectedCampaignId(campaigns[0].id)
+    }
+  }, [campaigns, selectedCampaignId])
 
   return (
-    <div>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-semibold text-slate-900">Lead Sources</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Configure multi-source lead generation per campaign
-          </p>
-        </div>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          disabled={!selectedCampaignId}
-          className="flex items-center gap-2 px-4 py-2 bg-sky-600 text-white text-sm rounded-lg hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          <PlusCircle size={15} />
-          New Config
-        </button>
-      </div>
-
-      {/* Sources overview */}
-      {sources && <SourcesGrid sources={sources} />}
-
-      {/* Campaign selector */}
-      <div className="mb-6">
-        <label className="block text-xs font-semibold text-slate-700 mb-1.5">Campaign</label>
-        <select
-          value={selectedCampaignId}
-          onChange={e => setSelectedCampaignId(e.target.value)}
-          className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 bg-white w-72"
-        >
-          {!selectedCampaignId && <option value="">Select a campaign…</option>}
-          {campaigns?.map(c => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Configs */}
-      {!selectedCampaignId ? (
-        <div className="text-center py-16 text-slate-400 text-sm">
-          Select a campaign to view and configure lead sources
-        </div>
-      ) : configsLoading ? (
-        <div className="flex items-center justify-center h-32">
-          <Loader2 size={20} className="animate-spin text-slate-400" />
-        </div>
-      ) : configs && configs.length > 0 ? (
-        <div className="space-y-3">
-          {configs.map(cfg => (
-            <ConfigCard
-              key={cfg.id}
-              config={cfg}
-              onRun={handleRun}
-              onDelete={id => deleteMutation.mutate(id)}
-              isRunning={runningConfigId === cfg.id}
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="text-center py-16 text-slate-400 text-sm">
-          No lead source configs yet.{' '}
-          <button
+    <div className="space-y-6 pb-12">
+      <PageHeader
+        screenLabel="Lead Gen"
+        eyebrow="Lead Sources"
+        title="Lead Sources"
+        description="Connect and manage external databases and scrapers to feed leads directly into your campaigns."
+        actions={
+          <Button
+            variant="primary"
+            size="md"
+            icon={Plus}
+            disabled={!selectedCampaignId}
             onClick={() => setShowCreateModal(true)}
-            className="text-sky-600 hover:underline"
           >
-            Create one
-          </button>
+            New Source
+          </Button>
+        }
+      />
+
+      {sources && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {sources.map(src => {
+            const colour = SOURCE_COLOURS[src.source_type] ?? DEFAULT_COLOUR
+            return (
+              <Card 
+                key={src.source_type} 
+                padding="md" 
+                className={clsx(
+                  'group transition-all hover:scale-[1.02] active:scale-[0.98]',
+                  !src.available && "opacity-60 grayscale"
+                )}
+              >
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-center justify-between">
+                    <div className={clsx('flex h-12 w-12 items-center justify-center rounded-2xl shadow-sm', colour.bg)}>
+                      <Database size={20} className={colour.text} />
+                    </div>
+                    {src.available ? (
+                      <div className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-500 dark:bg-emerald-900/20">
+                        <CheckCircle2 size={14} />
+                      </div>
+                    ) : (
+                      <Badge label="Needs Key" variant="danger" size="xs" />
+                    )}
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-white">{src.display_name}</h4>
+                    <p className="mt-1 text-[11px] font-medium text-slate-500 leading-relaxed">{src.description}</p>
+                  </div>
+                </div>
+              </Card>
+            )
+          })}
         </div>
       )}
 
+      <FilterBar>
+        <div className="flex items-center gap-3">
+          <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Campaign</label>
+          <Select 
+            value={selectedCampaignId} 
+            onChange={setSelectedCampaignId}
+            className="w-64"
+          >
+            {!selectedCampaignId && <option value="">Select campaign...</option>}
+            {campaigns?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </Select>
+        </div>
+      </FilterBar>
+
+      <div className="space-y-4">
+        {configsLoading ? (
+          <div className="space-y-4">{[0,1,2].map(i => <div key={i} className="h-24 skeleton rounded-2xl" />)}</div>
+        ) : configs && configs.length > 0 ? (
+          <div className="grid gap-3">
+            {configs.map(cfg => (
+              <ConfigCard
+                key={cfg.id}
+                config={cfg}
+                onRun={id => { setRunningConfigId(id); runMutation.mutate(id); }}
+                onDelete={id => { if (confirm('Remove this lead source?')) deleteMutation.mutate(id) }}
+                isRunning={runningConfigId === cfg.id}
+              />
+            ))}
+          </div>
+        ) : selectedCampaignId ? (
+          <Card padding="lg">
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-slate-50 dark:bg-slate-900">
+                <Database size={24} className="text-slate-300" />
+              </div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">No sources connected</h3>
+              <p className="mt-1 text-sm text-slate-500">Connect a lead source provider to start importing prospects automatically.</p>
+              <Button 
+                variant="primary" 
+                size="sm" 
+                className="mt-6" 
+                icon={Plus}
+                onClick={() => setShowCreateModal(true)}
+              >
+                Connect Source
+              </Button>
+            </div>
+          </Card>
+        ) : (
+          <Card padding="lg">
+            <div className="flex flex-col items-center justify-center py-12 text-center text-slate-400">
+              <Globe size={32} strokeWidth={1.5} />
+              <p className="mt-4 text-sm font-medium">Select a campaign to manage lead sources</p>
+            </div>
+          </Card>
+        )}
+      </div>
+
       {showCreateModal && selectedCampaignId && sources && (
         <CreateConfigModal
+          open={showCreateModal}
           campaignId={selectedCampaignId}
           sources={sources}
           onClose={() => setShowCreateModal(false)}
@@ -701,6 +516,158 @@ export default function LeadSources() {
           isLoading={createMutation.isPending}
         />
       )}
+    </div>
+  )
+}
+
+function ConfigCard({ config, onRun, onDelete, isRunning }: {
+  config: LeadGenConfig
+  onRun: (id: string) => void
+  onDelete: (id: string) => void
+  isRunning: boolean
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const colour = SOURCE_COLOURS[config.source_type] ?? DEFAULT_COLOUR
+  const queryClient = useQueryClient()
+  const toast = useToast()
+
+  const scheduleMutation = useMutation({
+    mutationFn: (cron_schedule: string) =>
+      api.patch(`/lead-gen/configs/${config.id}`, { cron_schedule }).then(r => r.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['lead-gen-configs', config.campaign_id] })
+      toast.success('Schedule updated')
+    },
+    onError: () => toast.error('Failed to update schedule'),
+  })
+
+  const currentPreset = CRON_PRESETS.find(p => p.value === (config.cron_schedule ?? ''))
+
+  return (
+    <Card padding="none" className={clsx('overflow-hidden border-l-4', colour.border)}>
+      <div className="p-5">
+        <div className="flex items-center gap-4">
+          <div className={clsx('flex h-10 w-10 items-center justify-center rounded-xl shrink-0', colour.bg)}>
+            <Database size={18} className={colour.text} />
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                {config.label ?? config.source_display_name}
+              </span>
+              <Badge label={config.source_display_name} variant="neutral" size="xs" />
+              {!config.source_available && <Badge label="Not Configured" variant="danger" size="xs" />}
+            </div>
+            <div className="mt-1 flex items-center gap-3">
+              <p className="text-[11px] font-medium text-slate-400">Created {new Date(config.created_at).toLocaleDateString()}</p>
+              {config.cron_schedule && (
+                <div className="flex items-center gap-1.5 text-[11px] font-bold text-brand-600">
+                  <Clock size={11} /> {currentPreset?.label ?? 'Custom Schedule'}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              variant="secondary"
+              size="xs"
+              icon={expanded ? ChevronUp : ChevronDown}
+              onClick={() => setExpanded(!expanded)}
+            />
+            <Button
+              variant="danger"
+              size="xs"
+              icon={Trash2}
+              onClick={() => onDelete(config.id)}
+            />
+            <Button
+              variant="primary"
+              size="sm"
+              icon={isRunning ? undefined : Play}
+              isLoading={isRunning}
+              disabled={!config.source_available}
+              onClick={() => onRun(config.id)}
+            >
+              Run
+            </Button>
+          </div>
+        </div>
+
+        {expanded && (
+          <div className="mt-5 space-y-6 border-t border-slate-100 pt-5 dark:border-slate-800">
+            <div>
+              <label className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-slate-400">Automation Schedule</label>
+              <div className="flex items-center gap-4">
+                <Select
+                  value={config.cron_schedule ?? ''}
+                  onChange={v => scheduleMutation.mutate(v)}
+                  disabled={scheduleMutation.isPending}
+                  className="w-64"
+                >
+                  {CRON_PRESETS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                </Select>
+                {config.last_run_at && (
+                  <span className="text-[11px] font-medium text-slate-400 italic">
+                    Last execution: {new Date(config.last_run_at).toLocaleString()}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div>
+              <label className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-slate-400">Recent Execution History</label>
+              <RunHistory configId={config.id} />
+            </div>
+          </div>
+        )}
+      </div>
+    </Card>
+  )
+}
+
+function RunHistory({ configId }: { configId: string }) {
+  const { data: runs, isLoading } = useQuery<LeadGenRun[]>({
+    queryKey: ['lead-gen-runs', configId],
+    queryFn: () => api.get('/lead-gen/runs', { params: { config_id: configId } }).then(r => r.data),
+  })
+
+  if (isLoading) return <div className="flex justify-center py-6"><Loader2 size={14} className="animate-spin text-slate-300" /></div>
+  if (!runs?.length) return <p className="py-4 text-center text-xs text-slate-400">No previous runs recorded</p>
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-100 dark:border-slate-800">
+      <table className="w-full text-xs text-left">
+        <thead className="bg-slate-50 dark:bg-slate-900/50">
+          <tr>
+            <th className="px-4 py-2 font-bold text-slate-400 uppercase tracking-widest text-[9px]">Status</th>
+            <th className="px-4 py-2 font-bold text-slate-400 uppercase tracking-widest text-[9px]">Success</th>
+            <th className="px-4 py-2 font-bold text-slate-400 uppercase tracking-widest text-[9px]">Timestamp</th>
+            <th className="px-4 py-2 font-bold text-slate-400 uppercase tracking-widest text-[9px]">Outcome</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+          {runs.map(run => (
+            <tr key={run.id}>
+              <td className="px-4 py-2">
+                <Badge label={run.status} variant={runStatusVariant[run.status]} size="xs" />
+              </td>
+              <td className="px-4 py-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-slate-700 dark:text-slate-300">{run.leads_found} found</span>
+                  <span className="font-bold text-emerald-600">+{run.leads_added} added</span>
+                </div>
+              </td>
+              <td className="px-4 py-2 text-slate-400 font-medium tabular-nums">
+                {new Date(run.started_at).toLocaleString()}
+              </td>
+              <td className="px-4 py-2">
+                {run.error ? <span className="text-rose-500 font-medium truncate max-w-[150px] block" title={run.error}>{run.error}</span> : <span className="text-slate-300">—</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

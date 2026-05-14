@@ -100,24 +100,31 @@ function Funnel({ funnel, rates }: { funnel: AnalyticsData['funnel']; rates: Ana
   const t = funnel.total_leads, i = funnel.invited, a = funnel.accepted, r = funnel.replied
   const max = Math.max(1, t, i, a, r)
   const rows = [
-    { label: 'Total leads', value: t, color: 'bg-slate-300', pct: undefined as number | undefined },
-    { label: 'Invited', value: i, color: 'bg-brand-400', pct: t ? Math.round((i / t) * 100) : 0 },
-    { label: 'Accepted', value: a, color: 'bg-emerald-400', pct: rates.accept_rate },
-    { label: 'Replied', value: r, color: 'bg-violet-400', pct: rates.reply_rate },
+    { label: 'Total Leads', value: t, color: 'bg-slate-200 dark:bg-slate-700', pct: undefined as number | undefined },
+    { label: 'Invited', value: i, color: 'bg-brand-500', pct: t ? Math.round((i / t) * 100) : 0 },
+    { label: 'Accepted', value: a, color: 'bg-emerald-500', pct: rates.accept_rate },
+    { label: 'Replied', value: r, color: 'bg-violet-500', pct: rates.reply_rate },
   ]
   return (
-    <div className="space-y-3">
+    <div className="space-y-5">
       {rows.map(row => (
-        <div key={row.label}>
-          <div className="flex items-baseline justify-between text-[12px]">
-            <span className="font-medium text-slate-700 dark:text-slate-200">{row.label}</span>
-            <span className="tabular-nums text-slate-900 dark:text-white">
-              {row.value.toLocaleString()}
-              {row.pct != null && <span className="ml-2 text-[11px] font-semibold text-slate-400">{row.pct}%</span>}
-            </span>
+        <div key={row.label} className="group">
+          <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+            <span>{row.label}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-slate-900 dark:text-white tabular-nums">{row.value.toLocaleString()}</span>
+              {row.pct != null && (
+                <span className="rounded bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-500 dark:bg-slate-800/50">
+                  {row.pct}%
+                </span>
+              )}
+            </div>
           </div>
-          <div className="mt-1 h-3 overflow-hidden rounded-md bg-slate-100 dark:bg-slate-800">
-            <div className={clsx('h-full rounded-md transition-all', row.color)} style={{ width: `${(row.value / max) * 100}%` }} />
+          <div className="relative h-2.5 overflow-hidden rounded-full bg-slate-50 dark:bg-slate-800/50">
+            <div 
+              className={clsx('h-full rounded-full transition-all duration-700 ease-out', row.color)} 
+              style={{ width: `${(row.value / max) * 100}%` }} 
+            />
           </div>
         </div>
       ))}
@@ -129,15 +136,22 @@ function ChannelBar({ channel, value, max }: { channel: string; value: number; m
   const meta = CHANNEL_META[channel] || CHANNEL_META.email
   const pct = max ? Math.round((value / max) * 100) : 0
   return (
-    <div className="flex items-center gap-2.5">
-      <ChannelIcon channel={channel} size="sm" />
-      <span className="w-24 truncate text-[12px] font-medium text-slate-700 dark:text-slate-200">{meta.label}</span>
-      <div className="flex-1">
-        <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-          <div className="h-full rounded-full bg-brand-400" style={{ width: `${pct}%` }} />
+    <div className="flex items-center gap-4 group">
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-50 dark:bg-slate-800/50 text-slate-400 group-hover:text-brand-500 transition-colors">
+        <ChannelIcon channel={channel} size={14} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+          <span>{meta.label}</span>
+          <span className="tabular-nums">{value.toLocaleString()}</span>
+        </div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-slate-50 dark:bg-slate-800/50">
+          <div 
+            className="h-full rounded-full bg-brand-500 transition-all duration-500" 
+            style={{ width: `${pct}%` }} 
+          />
         </div>
       </div>
-      <span className="w-16 text-right text-[12px] tabular-nums text-slate-900 dark:text-white">{value.toLocaleString()}</span>
     </div>
   )
 }
@@ -146,13 +160,21 @@ function DailyActivity30({ rows }: { rows: { events: number }[] }) {
   if (!rows || rows.length === 0) return <EmptyState icon={BarChart3} title="No events" description="A 30-day chart will appear once events fire." />
   const max = Math.max(1, ...rows.map(r => Number(r.events)))
   return (
-    <div className="flex items-end gap-1" style={{ height: 160 }}>
+    <div className="flex items-end gap-1 px-1" style={{ height: 180 }}>
       {rows.map((r, i) => {
         const v = Number(r.events)
         const pct = (v / max) * 100
         return (
-          <div key={i} className="group flex flex-1 flex-col items-center">
-            <div className="w-full rounded-md bg-brand-400/80 transition-colors group-hover:bg-brand-500" style={{ height: `${Math.max(2, pct)}%` }} />
+          <div key={i} className="group relative flex flex-1 flex-col items-center h-full justify-end">
+            <div 
+              className="w-full rounded-t-sm bg-brand-500/20 group-hover:bg-brand-500 transition-all duration-300" 
+              style={{ height: `${Math.max(2, pct)}%` }} 
+              title={`${v} events`}
+            />
+            {/* Tooltip on hover */}
+            <div className="absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity bg-slate-900 text-white text-[10px] px-2 py-1 rounded shadow-xl whitespace-nowrap z-10">
+              {v} events
+            </div>
           </div>
         )
       })}

@@ -56,26 +56,38 @@ export default function Activity() {
         </Card>
       ) : (
         <Card padding="none">
-          <ol className="relative divide-y divide-slate-100 dark:divide-slate-800">
+          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
             {items.map(row => {
-              const verb = (row.action || '').split('.')[0]
-              const color = verbColor[verb] || 'bg-slate-100 text-slate-600'
+              const [category, action] = (row.action || '').split('.')
+              const verb = category.toLowerCase()
+              const color = verbColor[verb] || 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
               return (
-                <li key={row.id} className="flex items-start gap-3 px-4 py-3">
-                  <span className={clsx('mt-0.5 inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg', color)}>
-                    <ActivityIcon size={13} />
-                  </span>
+                <li key={row.id} className="flex items-start gap-4 px-6 py-4 transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-900/50">
+                  <div className={clsx('mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl', color)}>
+                    <ActivityIcon size={14} />
+                  </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="truncate text-sm font-medium text-slate-900 dark:text-white">{row.action || 'event'}</p>
-                      <span className="flex-shrink-0 text-[11px] tabular-nums text-slate-400">{timeAgo(row.created_at)}</span>
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="truncate text-sm font-bold text-slate-900 dark:text-white">
+                          {action || category || 'System Event'}
+                        </span>
+                        <Badge label={category} variant="neutral" size="xs" />
+                      </div>
+                      <span className="flex-shrink-0 text-[11px] font-bold tabular-nums text-slate-400 uppercase tracking-wider">
+                        {timeAgo(row.created_at)}
+                      </span>
                     </div>
-                    {row.detail && <p className="mt-0.5 line-clamp-2 text-[13px] text-slate-500 dark:text-slate-400">{row.detail}</p>}
+                    {row.detail && (
+                      <p className="mt-1 line-clamp-2 text-[13px] font-medium text-slate-500 dark:text-slate-400">
+                        {row.detail}
+                      </p>
+                    )}
                   </div>
                 </li>
               )
             })}
-          </ol>
+          </ul>
         </Card>
       )}
     </div>

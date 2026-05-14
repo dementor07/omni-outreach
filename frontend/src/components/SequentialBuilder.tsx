@@ -1,10 +1,19 @@
 import React, { useState, useEffect } from 'react'
-import { Plus, Trash2, ChevronUp, ChevronDown, Linkedin, Mail, MessageSquare, Instagram, Send, Phone, Clock, Zap, Save, Tag, MinusCircle, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle, Brain, Route, Database, Flame, UserCheck, Settings2 } from 'lucide-react'
+import { 
+  Plus, Trash2, ChevronUp, ChevronDown, Linkedin, Mail, MessageSquare, 
+  Smartphone, Phone, Clock, Zap, Save, Tag, MinusCircle, GitBranch, 
+  StopCircle, Webhook, MessageCircle, Brain, Route, Database, 
+  Flame, UserCheck, Settings2, Globe
+} from 'lucide-react'
 import { Node, Edge } from '@xyflow/react'
 import { NodeType } from '../hooks/useSequenceSteps'
 import { api } from '../api/client'
 import Badge from './Badge'
 import StepIcon from './StepIcon'
+import Button from './Button'
+import Card from './Card'
+import { Select } from './FilterBar'
+import { clsx } from 'clsx'
 
 interface SequentialStep {
   id: string
@@ -53,6 +62,18 @@ const STEP_LABELS: Partial<Record<NodeType, string>> = {
   end: 'End',
 }
 
+const CHANNEL_COLORS: Partial<Record<NodeType, { bg: string, text: string }>> = {
+  action_linkedin_invite: { bg: 'bg-brand-50', text: 'text-brand-600' },
+  action_linkedin_dm: { bg: 'bg-brand-50', text: 'text-brand-600' },
+  action_linkedin_inmail: { bg: 'bg-brand-50', text: 'text-brand-600' },
+  action_email: { bg: 'bg-sky-50', text: 'text-sky-600' },
+  action_whatsapp: { bg: 'bg-emerald-50', text: 'text-emerald-600' },
+  action_sms: { bg: 'bg-violet-50', text: 'text-violet-600' },
+  action_voice: { bg: 'bg-violet-50', text: 'text-violet-600' },
+  human_approval: { bg: 'bg-teal-50', text: 'text-teal-600' },
+  action_hot_lead_alert: { bg: 'bg-rose-50', text: 'text-rose-600' },
+}
+
 export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate, isSaving }: Props) {
   const [voiceAgents, setVoiceAgents] = useState<Array<{ id: string; name: string }>>([])
   const [expandedVoice, setExpandedVoice] = useState<string | null>(null)
@@ -64,8 +85,6 @@ export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate
   const getNodeData = (id: string): Record<string, unknown> =>
     ((nodes.find(n => n.id === id)?.data) as Record<string, unknown>) ?? {}
 
-  // Convert nodes/edges back to a linear list for display
-  // We look for action nodes and delays, ignoring trigger_start for the simple list view
   const steps = React.useMemo(() => {
     return nodes
       .filter(n => n.type !== 'trigger_start')
@@ -114,14 +133,11 @@ export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate
 
   const removeStep = (id: string) => {
     const newNodes = nodes.filter(n => n.id !== id)
-    // Re-wire edges linearly
     const actionNodes = newNodes.filter(n => n.type !== 'trigger_start')
     const startNode = newNodes.find(n => n.type === 'trigger_start')
-    
     const newEdges: Edge[] = []
     let prev = startNode
-    
-    actionNodes.forEach((node, i) => {
+    actionNodes.forEach((node) => {
       if (prev) {
         newEdges.push({
           id: `edge_${prev.id}_${node.id}`,
@@ -133,24 +149,18 @@ export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate
       }
       prev = node
     })
-
     onSave(newNodes, newEdges)
   }
 
   const moveStep = (index: number, direction: 'up' | 'down') => {
     const actionNodes = nodes.filter(n => n.type !== 'trigger_start')
     const startNode = nodes.find(n => n.type === 'trigger_start')
-    
     const newIndex = direction === 'up' ? index - 1 : index + 1
     if (newIndex < 0 || newIndex >= actionNodes.length) return
-
     const newActionNodes = [...actionNodes]
     const [moved] = newActionNodes.splice(index, 1)
     newActionNodes.splice(newIndex, 0, moved)
-
     const newNodes = startNode ? [startNode, ...newActionNodes] : newActionNodes
-    
-    // Re-wire edges
     const newEdges: Edge[] = []
     let prev = startNode
     newActionNodes.forEach((node) => {
@@ -165,7 +175,6 @@ export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate
       }
       prev = node
     })
-
     onSave(newNodes, newEdges)
   }
 
@@ -180,127 +189,209 @@ export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate
   }
 
   return (
-    <div className="flex flex-col gap-6 p-8">
+    <div className="mx-auto max-w-4xl space-y-12 py-8">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-lg font-bold text-slate-900">Sequence Steps</h3>
-          <p className="text-sm text-slate-500">Linear outreach flow. High-to-low execution.</p>
+          <h3 className="text-[20px] font-bold tracking-tight text-slate-900 dark:text-white">Linear Sequence</h3>
+          <p className="mt-1 text-sm text-slate-500">Define the execution order of your outreach pipeline.</p>
         </div>
-        <button
+        <Button
+          variant="primary"
+          size="md"
+          icon={Save}
+          isLoading={isSaving}
           onClick={() => onSave(nodes, edges)}
-          disabled={isSaving}
-          className="inline-flex items-center gap-2 rounded-xl bg-sky-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-sky-100 transition hover:bg-sky-600 active:scale-95"
         >
-          <Save size={18} />
-          {isSaving ? 'Saving...' : 'Save Sequence'}
-        </button>
+          Save Changes
+        </Button>
       </div>
 
-      <div className="space-y-4">
-        {steps.length === 0 ? (
-          <div className="rounded-3xl border-2 border-dashed border-slate-200 bg-white p-12 text-center">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-50 text-slate-400">
-              <Zap size={24} />
+      <div className="relative space-y-6">
+        {/* The Vertical Pipeline Line */}
+        <div className="absolute left-[39px] top-6 bottom-6 w-0.5 bg-slate-100 dark:bg-slate-800" />
+
+        {/* Start Marker */}
+        <div className="relative z-10 flex items-center gap-6">
+          <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-white border-4 border-slate-50 shadow-sm dark:bg-slate-950 dark:border-slate-900">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-50 text-brand-600 shadow-inner dark:bg-brand-900/30">
+              <Zap size={20} fill="currentColor" />
             </div>
-            <h4 className="mt-4 font-semibold text-slate-900">No steps yet</h4>
-            <p className="mt-1 text-sm text-slate-500">Add your first outreach action below.</p>
+          </div>
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-brand-500">Trigger</p>
+            <h4 className="text-base font-bold text-slate-900 dark:text-white">Sequence Activated</h4>
+          </div>
+        </div>
+
+        {steps.length === 0 ? (
+          <div className="ml-24 rounded-2xl border-2 border-dashed border-slate-200 bg-white/50 p-12 text-center dark:border-slate-800 dark:bg-slate-900/30">
+            <h4 className="font-bold text-slate-400">Empty Pipeline</h4>
+            <p className="mt-1 text-sm text-slate-400">Add an action from the tiles below to start.</p>
           </div>
         ) : (
           steps.map((step, i) => (
             <React.Fragment key={step.id}>
-            <div className="group flex items-center gap-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-sky-200">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-50 text-xs font-bold text-slate-400 group-hover:bg-sky-50 group-hover:text-sky-500">
-                {i + 1}
-              </div>
-              
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-50">
-                <StepIcon type={step.type} />
-              </div>
-
-              <div className="flex-1">
-                <p className="text-sm font-bold text-slate-900">{STEP_LABELS[step.type] ?? step.type}</p>
-                {step.type === 'delay' ? (
-                  <div className="mt-1 flex items-center gap-2">
-                    <span className="text-xs text-slate-400">Wait</span>
-                    <input 
-                      type="number"
-                      min="1"
-                      value={step.delay_days}
-                      onChange={(e) => updateStep(step.id, { delay_days: parseInt(e.target.value) || 1 })}
-                      className="w-12 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-center text-xs font-bold text-slate-900 focus:border-sky-400 focus:outline-none focus:ring-4 focus:ring-sky-100"
-                    />
-                    <span className="text-xs text-slate-400">days</span>
+              <div className="relative z-10 flex items-start gap-6 group">
+                <div className="flex h-20 w-20 shrink-0 flex-col items-center justify-center">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-slate-100 text-xs font-black text-slate-400 shadow-sm transition-all group-hover:bg-brand-500 group-hover:text-white dark:border-slate-950 dark:bg-slate-800">
+                    {i + 1}
                   </div>
-                ) : (
-                  <p className="text-xs text-slate-400">Immediate action</p>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2">
-                {step.type === 'action_voice' ? (
-                  <button
-                    onClick={() => setExpandedVoice(expandedVoice === step.id ? null : step.id)}
-                    className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold transition-all ${expandedVoice === step.id ? 'bg-sky-100 text-sky-700' : 'bg-slate-50 text-slate-600 hover:bg-sky-50 hover:text-sky-600'}`}
-                  >
-                    <Settings2 size={13} />
-                    Configure
-                  </button>
-                ) : step.type.startsWith('action_') ? (
-                  <button
-                    onClick={() => onEditTemplate(step.id)}
-                    className="rounded-xl bg-slate-50 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-sky-50 hover:text-sky-600"
-                  >
-                    Edit Template
-                  </button>
-                ) : null}
-                
-                <div className="flex flex-col gap-1">
-                  <button onClick={() => moveStep(i, 'up')} disabled={i === 0} className="text-slate-300 hover:text-sky-500 disabled:opacity-20"><ChevronUp size={16} /></button>
-                  <button onClick={() => moveStep(i, 'down')} disabled={i === steps.length - 1} className="text-slate-300 hover:text-sky-500 disabled:opacity-20"><ChevronDown size={16} /></button>
                 </div>
 
-                <button
-                  onClick={() => removeStep(step.id)}
-                  className="rounded-xl p-2 text-slate-300 hover:bg-rose-50 hover:text-rose-500"
-                >
-                  <Trash2 size={18} />
-                </button>
+                <Card padding="none" className="flex-1 transition-all group-hover:border-brand-200 group-hover:shadow-lg group-hover:shadow-brand-500/5">
+                  <div className="flex items-center gap-4 p-5">
+                    <div className={clsx(
+                      'flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl',
+                      CHANNEL_COLORS[step.type]?.bg || 'bg-slate-50 dark:bg-slate-800',
+                      CHANNEL_COLORS[step.type]?.text || 'text-slate-500'
+                    )}>
+                      <StepIcon type={step.type} />
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-[15px] font-bold text-slate-900 dark:text-white truncate">
+                          {STEP_LABELS[step.type] ?? step.type}
+                        </p>
+                        {step.type === 'action_voice' && <Badge label="AI Voice" variant="violet" size="xs" />}
+                      </div>
+                      
+                      <div className="mt-1">
+                        {step.type === 'delay' ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Wait</span>
+                            <input 
+                              type="number"
+                              min="1"
+                              value={step.delay_days}
+                              onChange={(e) => updateStep(step.id, { delay_days: parseInt(e.target.value) || 1 })}
+                              className="w-12 rounded-lg border border-slate-200 bg-slate-50 py-0.5 text-center text-xs font-bold text-slate-900 outline-none focus:border-brand-400 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                            />
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Days</span>
+                          </div>
+                        ) : (
+                          <p className="text-[11px] font-medium text-slate-400">Executes after previous step completion</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="flex flex-col border-r border-slate-100 pr-2 mr-1 dark:border-slate-800">
+                        <button onClick={() => moveStep(i, 'up')} disabled={i === 0} className="p-1 text-slate-300 hover:text-brand-500 disabled:opacity-20 transition-colors"><ChevronUp size={16} /></button>
+                        <button onClick={() => moveStep(i, 'down')} disabled={i === steps.length - 1} className="p-1 text-slate-300 hover:text-brand-500 disabled:opacity-20 transition-colors"><ChevronDown size={16} /></button>
+                      </div>
+
+                      {step.type === 'action_voice' ? (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon={Settings2}
+                          onClick={() => setExpandedVoice(expandedVoice === step.id ? null : step.id)}
+                        >
+                          Config
+                        </Button>
+                      ) : step.type.startsWith('action_') ? (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => onEditTemplate(step.id)}
+                        >
+                          Edit
+                        </Button>
+                      ) : null}
+
+                      <button
+                        onClick={() => removeStep(step.id)}
+                        className="rounded-xl p-2 text-slate-300 transition-colors hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-900/20"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {step.type === 'action_voice' && expandedVoice === step.id && (
+                    <div className="border-t border-slate-100 bg-slate-50/50 p-6 dark:border-slate-800 dark:bg-slate-950/30">
+                      <VoiceNodeConfig
+                        nodeData={getNodeData(step.id)}
+                        voiceAgents={voiceAgents}
+                        onUpdate={(data) => updateStep(step.id, data)}
+                      />
+                    </div>
+                  )}
+                </Card>
               </div>
-            </div>
-            {step.type === 'action_voice' && expandedVoice === step.id && (
-              <VoiceNodeConfig
-                nodeData={getNodeData(step.id)}
-                voiceAgents={voiceAgents}
-                onUpdate={(data) => updateStep(step.id, data)}
-              />
-            )}
             </React.Fragment>
           ))
         )}
+
+        {/* End Marker */}
+        <div className="relative z-10 flex items-center gap-6">
+          <div className="flex h-20 w-20 shrink-0 items-center justify-center">
+            <div className="h-4 w-4 rounded-full border-4 border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950" />
+          </div>
+          <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">End of sequence</p>
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <AddButton icon={<Linkedin className="text-sky-600" />} label="Send Invite"   onClick={() => addStep('action_linkedin_invite')} />
-        <AddButton icon={<Linkedin className="text-sky-500" />} label="LinkedIn DM"   onClick={() => addStep('action_linkedin_dm')} />
-        <AddButton icon={<Linkedin className="text-indigo-500" />} label="InMail"     onClick={() => addStep('action_linkedin_inmail')} />
-        <AddButton icon={<Mail className="text-slate-500" />}    label="Email"        onClick={() => addStep('action_email')} />
-        <AddButton icon={<MessageSquare className="text-emerald-500" />} label="WhatsApp" onClick={() => addStep('action_whatsapp')} />
-        <AddButton icon={<MessageCircle className="text-teal-500" />} label="SMS"     onClick={() => addStep('action_sms')} />
-        <AddButton icon={<Phone className="text-indigo-500" />}  label="AI Voice"     onClick={() => addStep('action_voice')} />
-        <AddButton icon={<Webhook className="text-orange-500" />} label="Webhook"    onClick={() => addStep('action_webhook')} />
-        <AddButton icon={<Tag className="text-slate-500" />}     label="Add Tag"      onClick={() => addStep('action_add_tag')} />
-        <AddButton icon={<MinusCircle className="text-slate-400" />} label="Remove Tag"   onClick={() => addStep('action_remove_tag')} />
-        <AddButton icon={<Database className="text-indigo-500" />} label="Enrich Lead"  onClick={() => addStep('action_enrich')} />
-        <AddButton icon={<Clock className="text-amber-500" />}   label="Wait"         onClick={() => addStep('delay')} />
-        <AddButton icon={<Brain className="text-violet-500" />}   label="AI Screen"    onClick={() => addStep('condition_ai_screen')} />
-        <AddButton icon={<Route className="text-cyan-500" />}     label="Source Router" onClick={() => addStep('condition_lead_source')} />
-        <AddButton icon={<GitBranch className="text-amber-500" />} label="If Has Field" onClick={() => addStep('condition_has_field')} />
-        <AddButton icon={<Brain className="text-violet-500" />} label="Reply Intent" onClick={() => addStep('condition_reply_intent')} />
-        <AddButton icon={<UserCheck className="text-teal-500" />} label="Human Approval" onClick={() => addStep('human_approval')} />
-        <AddButton icon={<Flame className="text-rose-500" />} label="Hot Lead Alert" onClick={() => addStep('action_hot_lead_alert')} />
-        <AddButton icon={<StopCircle className="text-rose-500" />} label="End"        onClick={() => addStep('end')} />
+      <div className="space-y-6 pt-12 border-t border-slate-100 dark:border-slate-800">
+        <div>
+          <h4 className="text-[11px] font-bold uppercase tracking-[0.15em] text-slate-400">Available Actions</h4>
+          <p className="mt-1 text-sm text-slate-500">Inject steps into your sequence to build your outreach strategy.</p>
+        </div>
+        
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <ActionTile icon={<Linkedin size={18} />} label="Send Invite" sub="LinkedIn" onClick={() => addStep('action_linkedin_invite')} tone="brand" />
+          <ActionTile icon={<Linkedin size={18} />} label="LinkedIn DM" sub="Direct Message" onClick={() => addStep('action_linkedin_dm')} tone="brand" />
+          <ActionTile icon={<Linkedin size={18} />} label="InMail" sub="Sales Nav" onClick={() => addStep('action_linkedin_inmail')} tone="brand" />
+          <ActionTile icon={<Mail size={18} />} label="Email" sub="SMTP/Outlook" onClick={() => addStep('action_email')} tone="info" />
+          <ActionTile icon={<MessageSquare size={18} />} label="WhatsApp" sub="Meta API" onClick={() => addStep('action_whatsapp')} tone="success" />
+          <ActionTile icon={<MessageCircle size={18} />} label="SMS" sub="Twilio" onClick={() => addStep('action_sms')} tone="violet" />
+          <ActionTile icon={<Phone size={18} />} label="AI Voice" sub="Retell API" onClick={() => addStep('action_voice')} tone="violet" />
+          <ActionTile icon={<Webhook size={18} />} label="Webhook" sub="External CRM" onClick={() => addStep('action_webhook')} tone="info" />
+          <ActionTile icon={<Clock size={18} />} label="Wait" sub="Delay Execution" onClick={() => addStep('delay')} tone="amber" />
+          <ActionTile icon={<Brain size={18} />} label="AI Screen" sub="LLM Filter" onClick={() => addStep('condition_ai_screen')} tone="violet" />
+          <ActionTile icon={<UserCheck size={18} />} label="Approval" sub="Human Loop" onClick={() => addStep('human_approval')} tone="success" />
+          <ActionTile icon={<Flame size={18} />} label="Hot Alert" sub="Slack Notify" onClick={() => addStep('action_hot_lead_alert')} tone="rose" />
+          <ActionTile icon={<Tag size={18} />} label="Add Tag" sub="Segmenting" onClick={() => addStep('action_add_tag')} tone="neutral" />
+          <ActionTile icon={<Database size={18} />} label="Enrich" sub="Data Lookup" onClick={() => addStep('action_enrich')} tone="brand" />
+          <ActionTile icon={<GitBranch size={18} />} label="Router" sub="Logic Flow" onClick={() => addStep('condition_lead_source')} tone="amber" />
+          <ActionTile icon={<StopCircle size={18} />} label="End" sub="Terminate" onClick={() => addStep('end')} tone="rose" />
+        </div>
       </div>
     </div>
+  )
+}
+
+function ActionTile({ icon, label, sub, onClick, tone }: { 
+  icon: React.ReactNode, 
+  label: string, 
+  sub: string, 
+  onClick: () => void, 
+  tone: 'brand' | 'success' | 'info' | 'violet' | 'amber' | 'rose' | 'neutral'
+}) {
+  const tones = {
+    brand:   'text-brand-600 bg-brand-50 group-hover:bg-brand-500 group-hover:text-white',
+    success: 'text-emerald-600 bg-emerald-50 group-hover:bg-emerald-500 group-hover:text-white',
+    info:    'text-sky-600 bg-sky-50 group-hover:bg-sky-500 group-hover:text-white',
+    violet:  'text-violet-600 bg-violet-50 group-hover:bg-violet-500 group-hover:text-white',
+    amber:   'text-amber-600 bg-amber-50 group-hover:bg-amber-500 group-hover:text-white',
+    rose:    'text-rose-600 bg-rose-50 group-hover:bg-rose-500 group-hover:text-white',
+    neutral: 'text-slate-600 bg-slate-50 group-hover:bg-slate-500 group-hover:text-white',
+  }
+
+  return (
+    <button
+      onClick={onClick}
+      className="group flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 transition-all hover:border-brand-200 hover:shadow-xl hover:shadow-brand-500/5 active:scale-[0.98] dark:border-slate-800 dark:bg-slate-900"
+    >
+      <div className={clsx('flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl transition-colors', tones[tone])}>
+        {icon}
+      </div>
+      <div className="min-w-0 text-left">
+        <p className="text-sm font-bold text-slate-900 dark:text-white truncate">{label}</p>
+        <p className="text-[11px] font-medium text-slate-400 truncate">{sub}</p>
+      </div>
+    </button>
   )
 }
 
@@ -342,78 +433,51 @@ function VoiceNodeConfig({
     commit(next)
   }
 
+  const inputCls = "w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 outline-none focus:border-brand-400 focus:ring-4 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:ring-brand-900/20"
+  const labelCls = "mb-2 block text-[11px] font-bold uppercase tracking-widest text-slate-400"
+
   return (
-    <div className="mx-1 mb-2 rounded-2xl border border-sky-100 bg-sky-50/50 p-5 space-y-5">
-      {/* Voice agent selector */}
+    <div className="space-y-6">
       <div>
-        <label className="mb-1.5 block text-[10px] font-black uppercase tracking-widest text-slate-500">
-          Voice Agent
-        </label>
-        <select
-          title="Voice agent"
+        <label className={labelCls}>Voice Agent Provider</label>
+        <Select
           value={(nodeData.voice_agent_id as string) || ''}
-          onChange={e => onUpdate({ voice_agent_id: e.target.value })}
-          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-sky-400 focus:outline-none focus:ring-4 focus:ring-sky-100"
+          onChange={v => onUpdate({ voice_agent_id: v })}
+          className="w-full"
         >
           <option value="">— select agent —</option>
-          {voiceAgents.map(a => (
-            <option key={a.id} value={a.id}>{a.name}</option>
-          ))}
-        </select>
+          {voiceAgents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </Select>
       </div>
 
-      {/* Variable mappings */}
       <div>
-        <div className="mb-1 flex items-center justify-between">
-          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-            Variable Mappings
-          </label>
-          <button
-            type="button"
-            onClick={addRow}
-            className="text-xs font-bold text-sky-500 hover:text-sky-700"
-          >
-            + Add
-          </button>
+        <div className="mb-2 flex items-center justify-between">
+          <label className={labelCls}>Lead Field Mappings</label>
+          <button type="button" onClick={addRow} className="text-[11px] font-bold text-brand-600 hover:underline">+ Add Mapping</button>
         </div>
-        <p className="mb-3 text-[11px] text-slate-400">
-          Map <code className="rounded bg-slate-100 px-1">{'{{retell_var}}'}</code> names in your
-          Retell script to lead fields. No LLM needed.
-        </p>
-        {(rows ?? []).length === 0 && (
-          <p className="text-xs italic text-slate-400">No mappings. Click + Add to define one.</p>
-        )}
-        <div className="space-y-2">
-          {(rows ?? []).map((row, i) => (
-            <div key={i} className="flex items-center gap-2">
+        <div className="space-y-2.5">
+          {rows.map((row, i) => (
+            <div key={i} className="flex items-center gap-3">
               <input
                 value={row.retellVar}
                 onChange={e => updateRow(i, { retellVar: e.target.value })}
-                onBlur={() => commit(rows ?? [])}
-                placeholder="e.g. first_name"
-                className="flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-800 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                onBlur={() => commit(rows)}
+                placeholder="script_var"
+                className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-800 outline-none focus:border-brand-400 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
               />
               <span className="text-slate-300">→</span>
-              <select
-                title="Lead field"
+              <Select
                 value={row.leadField}
-                onChange={e => updateRow(i, { leadField: e.target.value })}
-                className="flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-800 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                onChange={v => updateRow(i, { leadField: v })}
+                className="flex-1"
+                size="sm"
               >
-                {LEAD_FIELDS.map(f => (
-                  <option key={f.value} value={f.value}>{f.label}</option>
-                ))}
-              </select>
-              <button
-                type="button"
-                title="Remove mapping"
-                onClick={() => removeRow(i)}
-                className="shrink-0 text-slate-300 hover:text-rose-400"
-              >
-                <Trash2 size={14} />
-              </button>
+                {LEAD_FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+              </Select>
+              <button onClick={() => removeRow(i)} className="p-2 text-slate-300 hover:text-rose-500"><Trash2 size={16} /></button>
             </div>
           ))}
+          {rows.length === 0 && <p className="py-4 text-center text-xs italic text-slate-400 border border-dashed border-slate-200 rounded-xl">No mappings defined</p>}
         </div>
       </div>
     </div>
@@ -429,17 +493,3 @@ const LEAD_FIELDS = [
   { value: 'linkedin_url', label: 'LinkedIn URL' },
   { value: 'location',     label: 'Location' },
 ]
-
-function AddButton({ icon, label, onClick }: { icon: React.ReactNode, label: string, onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-sky-400 hover:shadow-md active:scale-95"
-    >
-      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50">
-        {icon}
-      </div>
-      <span className="text-sm font-bold text-slate-700">{label}</span>
-    </button>
-  )
-}

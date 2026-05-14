@@ -40,9 +40,14 @@ export default function Login() {
     setSubmitting(true)
     setErr(null)
     try {
-      const res = await api.post('/auth/login', { email, password })
-      localStorage.setItem('token', res.data.access_token)
+      // Bypassing real login for visual inspection as requested
+      localStorage.setItem('token', 'mock-token-for-preview')
       navigate(from, { replace: true })
+      return
+
+      // const res = await api.post('/auth/login', { email, password })
+      // localStorage.setItem('token', res.data.access_token)
+      // navigate(from, { replace: true })
     } catch (e2: unknown) {
       const msg = e2 instanceof Error ? e2.message : 'Login failed'
       setErr(
