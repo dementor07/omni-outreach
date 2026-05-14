@@ -31,15 +31,25 @@ const channelVariantMap: Record<string, BadgeVariant> = {
   voice:           'success',
 }
 
+const dotColorClasses: Record<BadgeVariant, string> = {
+  default: 'bg-slate-400',
+  success: 'bg-emerald-500',
+  warning: 'bg-amber-500',
+  error:   'bg-rose-500',
+  info:    'bg-sky-500',
+  muted:   'bg-slate-300',
+}
+
 interface BadgeProps {
   label: string
   variant?: BadgeVariant
   asStatus?: boolean
   asChannel?: boolean
+  dot?: boolean
   className?: string
 }
 
-export default function Badge({ label, variant, asStatus, asChannel, className }: BadgeProps) {
+export default function Badge({ label, variant, asStatus, asChannel, dot, className }: BadgeProps) {
   let resolved: BadgeVariant = variant ?? 'default'
   if (asStatus) resolved = statusVariantMap[label] ?? 'default'
   if (asChannel) resolved = channelVariantMap[label] ?? 'default'
@@ -49,11 +59,12 @@ export default function Badge({ label, variant, asStatus, asChannel, className }
   return (
     <span
       className={clsx(
-        'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium capitalize',
+        'inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium capitalize',
         variantClasses[resolved],
         className,
       )}
     >
+      {dot && <span className={clsx('h-1.5 w-1.5 rounded-full', dotColorClasses[resolved])} />}
       {display}
     </span>
   )
