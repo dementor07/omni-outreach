@@ -862,3 +862,20 @@ The initial webhook URL used `omnioutreach.space`, which has no DNS A record (cu
 **Postmortem follow-ups still open**: Sentry/GlitchTip wiring (needs hosting/cost decision), backend invariant on null `campaign_id` (UI-side null guard is in place; backend origin not yet investigated).
 
 **Anti-Slop tracker**: rule #5 ("Errors are First-Class Citizens") now has frontend enforcement infrastructure. Updated [[wiki/decisions/anti-slop-protocol]], [[wiki/decisions/mandate-frontend-refactor]], and [[wiki/decisions/postmortem-queue-sequence-crash-may-2026]] with the closure status.
+
+
+## 2026-05-14 (later x2) — VITE_API_BASE pre-stage for dashboard redesign — HEAD 4b9b6e2
+
+**Context**: a parallel dashboard-redesign workflow in Claude Design has been writing screens (Approvals, Blacklist, Analytics, Activity, Notifications + Login) against `https://omnioutreach.space/api`. That domain is configured as an nginx `server_name` alias but has no DNS A record (NXDOMAIN); only `srv1575227.hstgr.cloud` resolves. The redesign also suggested wildcarding `*.claudeusercontent.com` in CORS — shared Anthropic infra, would let any user's sandbox hit the backend. Both rejected. Relay sent back with full corrections, vault-grounding instructions, and explicit no-mock-fixtures stance.
+
+**What shipped (this commit only — the design branch itself has not landed yet)**:
+- `frontend/src/api/client.ts` — axios `baseURL` now reads `import.meta.env.VITE_API_BASE || '/api'`. Same-origin default unchanged; `.env.local` can override for sandbox / point-at-VPS dev. Inline comment warns against the omnioutreach.space NXDOMAIN trap and links to [[wiki/architecture/system-overview]].
+- `frontend/src/vite-env.d.ts` — new, types `VITE_API_BASE` so `strict: true` doesn't break.
+- `frontend/.env.example` — documents override surface and the NXDOMAIN warning.
+- `.gitignore` — tighten `.env` rule to also exclude `.env.local` and `.env.*.local` while keeping `.env.example` committable. The old single-line rule was exact-match only and would have let `.env.local` through.
+
+**Verification**: `npm run build` clean, `npm run lint:hooks` 0 errors.
+
+**Endpoint shape audit for the design branch** (every router referenced by the redesign cross-checked against `backend/app/routers/*.py`): all present — `POST /auth/login`, `GET /approvals` + `POST /approvals/{id}/resolve` + `GET /approvals/count` + `PATCH /approvals/{id}`, `GET|POST|DELETE /blacklist` + `POST /blacklist/bulk`, `GET /activity?campaign_id=`, `GET /analytics/{campaign_id}` + `/conversions`, `GET /notifications` + `/stream` + `POST /notifications/read-all` + `POST /notifications/{id}/read`. Field-name binding still needs to happen handler-by-handler when the design branch lands.
+
+**Stance recorded for future ops**: no preview-mode mocks. Real backend or real error UI. Mock fallback hides outages and lets UI ship against shapes that don't match reality.

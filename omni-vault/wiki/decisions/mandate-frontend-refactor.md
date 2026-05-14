@@ -51,3 +51,9 @@ The frontend implementation has devolved into "Feature Slop," characterized by m
 - **Lint enforcement**: ESLint flat-config with `eslint-plugin-react-hooks` now installed; `npm run lint:hooks` is the errors-only gate, currently 0 errors. The original Phase 4 violation has been verified to fail this gate.
 - **Still open from the mandate**: the "operator clicks every tab on the affected pages" checklist is documented but not yet enforced by tooling — until E2E coverage exists, it relies on the reviewer.
 - **Still open from the postmortem**: remote error aggregation (Sentry / GlitchTip), and the backend invariant that no task should reach the UI with a null `campaign_id` (tracked under [[vulnerability-queue-black-box]]).
+
+### Status Update (2026-05-14, later x2) — Pre-stage for dashboard redesign branch
+- `VITE_API_BASE` env-var pre-stage shipped in commit `4b9b6e2` so the in-flight Claude Design dashboard work can rebase onto a clean axios contract without baking the wrong base URL into source.
+- Same-origin (`/api`) remains the production default. Override only via `.env.local` (gitignored).
+- **Hard constraint codified**: never point `VITE_API_BASE` at `omnioutreach.space`. That domain is alias-only in nginx and returns NXDOMAIN. The only live HTTPS endpoint is `srv1575227.hstgr.cloud`. Comment in `client.ts` and `.env.example` both call this out so the next agent doesn't repeat the mistake.
+- **No preview/mock mode**: dashboard either talks to the real backend or surfaces a real error state. Decision recorded; do not reverse without explicit user sign-off.
