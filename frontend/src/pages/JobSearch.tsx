@@ -39,12 +39,12 @@ interface CreateConfigPayload {
 
 // ── Run status badge ──────────────────────────────────────────────────────────
 
-const runStatusVariant: Partial<Record<JobSearchRun['status'], 'muted' | 'info' | 'success' | 'error'>> = {
-  pending:   'muted',
+const runStatusVariant: Partial<Record<JobSearchRun['status'], 'neutral' | 'info' | 'success' | 'danger'>> = {
+  pending:   'neutral',
   running:   'info',
   done:      'success',
   completed: 'success',
-  failed:    'error',
+  failed:    'danger',
 }
 
 // ── Create config modal ───────────────────────────────────────────────────────
@@ -160,7 +160,7 @@ function RunHistoryPanel({ configId }: { configId: string }) {
         return (
           <div key={run.id} className="flex items-center justify-between text-xs text-slate-500">
             <div className="flex items-center gap-2">
-              <Badge label={run.status} variant={runStatusVariant[run.status] ?? 'muted'} />
+              <Badge label={run.status} variant={runStatusVariant[run.status] ?? 'neutral'} />
               <span>{new Date(run.started_at).toLocaleString()}</span>
             </div>
             <div className="flex items-center gap-3">

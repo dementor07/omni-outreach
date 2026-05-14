@@ -1,221 +1,136 @@
-import { useMemo, useState } from 'react'
-import { Inbox, RefreshCw, RotateCcw, AlertCircle } from 'lucide-react'
-
-import Badge from '../components/Badge'
-import DataTable from '../components/DataTable'
-import EmptyState from '../components/EmptyState'
+import { useState, useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { Clock, Lock, Send, AlertCircle, RefreshCw, RotateCcw } from 'lucide-react'
+import { api } from '../api/client'
+import PageHeader from '../components/PageHeader'
 import StatCard from '../components/StatCard'
-import { useToast } from '../components/Toast'
-import { useListCampaigns } from '../hooks/useCampaigns'
-import { useQueueList, useQueueStats, useRetryTask, useBulkRetryTasks } from '../hooks/useQueue'
-import { formatRelative, formatScheduled } from '../lib/time'
+import Card from '../components/Card'
+import Badge from '../components/Badge'
+import Button from '../components/Button'
+import EmptyState from '../components/EmptyState'
+import DataTable from '../components/DataTable'
+import { FilterBar, SearchInput, Select } from '../components/FilterBar'
+import Avatar from '../components/Avatar'
+import ChannelIcon from '../components/ChannelIcon'
+import { fullName, formatScheduled } from '../lib/format'
+import { Inbox } from 'lucide-react'
+import { clsx } from 'clsx'
+
+interface QueueTask { id: string; first_name?: string; last_name?: string; linkedin_url?: string; email?: string; campaign_id?: string; channel: string; status: string; scheduled_at?: string; retry_count?: number; failure_reason?: string }
+interface Campaign { id: string; name: string }
 
 export default function Queue() {
-  const toast = useToast()
-  const campaignsQuery = useListCampaigns()
   const [campaignId, setCampaignId] = useState('')
   const [status, setStatus] = useState('')
   const [channel, setChannel] = useState('')
 
-  const queueStatsQuery = useQueueStats()
-  const queueQuery = useQueueList({ campaignId: campaignId || undefined, status: status || undefined, limit: 200 })
-  const retryTask = useRetryTask()
-  const bulkRetry = useBulkRetryTasks()
+  const campaignsQ = useQuery<Campaign[]>({ queryKey: ['campaigns'], queryFn: () => api.get('/campaigns').then(r => r.data) })
+  const statsQ = useQuery<{ stats: { channel: string; status: string; cnt: number }[] }>({ queryKey: ['queue-stats'], queryFn: () => api.get('/queue/stats').then(r => r.data) })
 
+  const params = new URLSearchParams()
+  if (campaignId) params.set('campaign_id', campaignId)
+  if (status) params.set('status', status)
+  params.set('limit', '200')
+  const queueQ = useQuery<{ tasks: QueueTask[] }>({ queryKey: ['queue', campaignId, status], queryFn: () => api.get(`/queue?${params.toString()}`).then(r => r.data) })
+
+  const tasks = (queueQ.data?.tasks || []).filter(t => !channel || t.channel === channel)
+  const qStats = statsQ.data?.stats || []
+  const queued = qStats.filter(r => r.status === 'queued').reduce((s, r) => s + Number(r.cnt || 0), 0)
+  const locked = qStats.filter(r => r.status === 'locked').reduce((s, r) => s + Number(r.cnt || 0), 0)
+  const sent = qStats.filter(r => r.status === 'sent').reduce((s, r) => s + Number(r.cnt || 0), 0)
+  const failed = qStats.filter(r => r.status === 'failed').reduce((s, r) => s + Number(r.cnt || 0), 0)
+
+  const channels = [...new Set((queueQ.data?.tasks || []).map(t => t.channel))]
   const campaignMap = useMemo(() => {
-    const map: Record<string, string> = {}
-    for (const c of campaignsQuery.data || []) map[c.id] = c.name
-    return map
-  }, [campaignsQuery.data])
-
-  const tasks = useMemo(
-    () => (queueQuery.data || []).filter((t) => !channel || t.channel === channel),
-    [queueQuery.data, channel],
-  )
-
-  const stats = queueStatsQuery.data || []
-  const queued  = stats.filter((r) => r.status === 'queued').reduce((s, r) => s + Number(r.cnt || 0), 0)
-  const locked  = stats.filter((r) => r.status === 'locked').reduce((s, r) => s + Number(r.cnt || 0), 0)
-  const sent    = stats.filter((r) => r.status === 'sent').reduce((s, r) => s + Number(r.cnt || 0), 0)
-  const failed  = stats.filter((r) => r.status === 'failed').reduce((s, r) => s + Number(r.cnt || 0), 0)
-
-  const channels = useMemo(
-    () => [...new Set((queueQuery.data || []).map((t) => t.channel))],
-    [queueQuery.data],
-  )
-
-  const handleRetry = async (id: string) => {
-    try {
-      await retryTask.mutateAsync(id)
-      toast.success('Task reset to queued')
-    } catch {
-      toast.error('Failed to retry task')
-    }
-  }
-
-  const handleBulkRetry = async () => {
-    if (!window.confirm('Retry all failed tasks matching current filters?')) return
-    try {
-      await bulkRetry.mutateAsync({ campaignId: campaignId || undefined, channel: channel || undefined })
-      toast.success('Failed tasks reset to queued')
-    } catch {
-      toast.error('Bulk retry failed')
-    }
-  }
-
-  const lastRefreshed = queueQuery.dataUpdatedAt
+    const m: Record<string, string> = {};
+    (campaignsQ.data || []).forEach(c => { m[c.id] = c.name })
+    return m
+  }, [campaignsQ.data])
 
   return (
     <div className="space-y-6">
-      <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-500">Queue</p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">
-              Watch scheduled outreach before it becomes customer-visible
-            </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
-              Filter by campaign, channel, and status to spot backlog pressure or failed tasks quickly.
-            </p>
-          </div>
-          <div className="flex flex-col items-end gap-2">
-            {lastRefreshed > 0 && (
-              <div className="shrink-0 flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-400">
-                <RefreshCw size={12} />
-                Updated {formatRelative(new Date(lastRefreshed).toISOString())}
-              </div>
-            )}
-            {failed > 0 && (
-              <button
-                onClick={handleBulkRetry}
-                disabled={bulkRetry.isPending}
-                className="btn-tactile flex items-center gap-2 rounded-xl bg-rose-50 px-4 py-2 text-xs font-bold text-rose-600 border border-rose-100 hover:bg-rose-100 transition-all shadow-sm shadow-rose-100/50"
-              >
-                <RotateCcw size={13} className={bulkRetry.isPending ? 'animate-spin' : ''} />
-                Retry {failed} Failures
-              </button>
-            )}
-          </div>
-        </div>
+      <PageHeader
+        screenLabel="Queue"
+        eyebrow="Pipeline"
+        title="Queue"
+        description="Scheduled outreach before it becomes customer-visible. Filter by campaign, channel, and state to spot backlog pressure or failed tasks."
+        actions={
+          <>
+            <Button variant="secondary" size="md" icon={RefreshCw} onClick={() => { queueQ.refetch(); statsQ.refetch() }}>Refresh</Button>
+            {failed > 0 && <Button variant="danger" size="md" icon={RotateCcw}>Retry {failed.toLocaleString()} failures</Button>}
+          </>
+        }
+      />
+
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Queued" value={statsQ.isLoading ? '—' : queued} accent="brand" icon={Clock} />
+        <StatCard label="Locked" value={statsQ.isLoading ? '—' : locked} accent="amber" icon={Lock} />
+        <StatCard label="Sent" value={statsQ.isLoading ? '—' : sent} accent="emerald" icon={Send} />
+        <StatCard label="Failed" value={statsQ.isLoading ? '—' : failed} accent="rose" icon={AlertCircle} />
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Queued"  value={queued}  loading={queueStatsQuery.isLoading} />
-        <StatCard label="Locked"  value={locked}  accent="amber"   loading={queueStatsQuery.isLoading} />
-        <StatCard label="Sent"    value={sent}    accent="emerald" loading={queueStatsQuery.isLoading} />
-        <StatCard label="Failed"  value={failed}  accent="rose"    loading={queueStatsQuery.isLoading} />
-      </section>
+      <FilterBar>
+        <SearchInput placeholder="Search by lead, company, or campaign…" value="" onChange={() => {}} />
+        <Select value={campaignId} onChange={setCampaignId}>
+          <option value="">All campaigns</option>
+          {(campaignsQ.data || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </Select>
+        <Select value={channel} onChange={setChannel}>
+          <option value="">All channels</option>
+          {channels.map(ch => <option key={ch} value={ch}>{(ch || '').replace(/_/g, ' ')}</option>)}
+        </Select>
+        <Select value={status} onChange={setStatus}>
+          <option value="">All statuses</option>
+          {['queued', 'locked', 'sent', 'failed', 'skipped'].map(s => <option key={s} value={s}>{s}</option>)}
+        </Select>
+      </FilterBar>
 
-      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="grid gap-3 md:grid-cols-3 mb-6">
-          <select value={campaignId} onChange={(e) => setCampaignId(e.target.value)} className={inputCls}>
-            <option value="">All campaigns</option>
-            {(campaignsQuery.data || []).map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-          <select value={channel} onChange={(e) => setChannel(e.target.value)} className={inputCls}>
-            <option value="">All channels</option>
-            {channels.map((ch) => (
-              <option key={ch} value={ch}>{ch.replace(/_/g, ' ')}</option>
-            ))}
-          </select>
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputCls}>
-            <option value="">All statuses</option>
-            <option value="queued">queued</option>
-            <option value="locked">locked</option>
-            <option value="sent">sent</option>
-            <option value="failed">failed</option>
-            <option value="skipped">skipped</option>
-          </select>
-        </div>
-
-        {tasks.length === 0 && !queueQuery.isLoading ? (
-          <EmptyState
-            icon={Inbox}
-            title="No tasks match this filter"
-            description="Try widening the campaign or status scope."
-          />
+      <Card padding="none">
+        {queueQ.isLoading ? (
+          <div className="space-y-1 p-4">{[0,1,2,3,4].map(i => <div key={i} className="h-12 skeleton" />)}</div>
+        ) : tasks.length === 0 ? (
+          <EmptyState icon={Inbox} title="No queued tasks" description="Tasks appear here as soon as the sequencer schedules them." />
         ) : (
           <DataTable
             columns={[
-              {
-                key: 'lead',
-                header: 'Lead',
-                render: (row) => (
-                  <div className="flex flex-col">
-                    <span className="font-medium text-slate-900">
-                      {`${row.first_name || ''} ${row.last_name || ''}`.trim() || row.linkedin_url || 'Unknown'}
-                    </span>
+              { key: 'lead', header: 'Lead', render: (row: QueueTask) => (
+                <div className="flex items-center gap-2.5">
+                  <Avatar name={fullName(row)} size={28} />
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-slate-900 dark:text-white">{fullName(row)}</div>
                     {row.failure_reason && (
-                      <div className="flex items-center gap-1 mt-1 text-[10px] text-rose-500 font-medium">
-                        <AlertCircle size={10} />
-                        <span className="truncate max-w-[180px]" title={row.failure_reason}>{row.failure_reason}</span>
+                      <div className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-rose-500">
+                        <AlertCircle size={11} /><span className="truncate">{row.failure_reason}</span>
                       </div>
                     )}
                   </div>
-                ),
+                </div>
+              )},
+              { key: 'campaign', header: 'Campaign', render: (row: QueueTask) => row.campaign_id
+                ? <span className="text-slate-600 dark:text-slate-300">{campaignMap[row.campaign_id] ?? <span className="font-mono text-xs text-slate-400">{String(row.campaign_id).slice(0,8)}</span>}</span>
+                : <span className="text-slate-300">—</span>
               },
-              {
-                key: 'campaign_id',
-                header: 'Campaign',
-                render: (row) => {
-                  if (!row.campaign_id) {
-                    return <span className="text-slate-300 italic text-xs">—</span>
-                  }
-                  const name = campaignMap[row.campaign_id]
-                  return (
-                    <span className="text-slate-600">
-                      {name ?? <span className="font-mono text-xs text-slate-400">{row.campaign_id.slice(0, 8)}</span>}
-                    </span>
-                  )
-                },
-              },
-              { key: 'channel', header: 'Channel', render: (row) => <Badge label={row.channel} asChannel /> },
-              { key: 'status',  header: 'Status',  render: (row) => <Badge label={row.status}  asStatus  /> },
-              {
-                key: 'scheduled_at',
-                header: 'Scheduled',
-                render: (row) => (
-                  <span className="tabular-nums text-slate-500 text-xs">
-                    {formatScheduled(row.scheduled_at)}
-                  </span>
-                ),
-              },
-              {
-                key: 'retry_count',
-                header: 'Retries',
-                render: (row) => (
-                  <span className={row.retry_count ? 'text-amber-600 font-medium' : 'text-slate-400'}>
-                    {row.retry_count || 0}
-                  </span>
-                ),
-              },
-              {
-                key: 'actions',
-                header: '',
-                className: 'text-right',
-                render: (row) => (row.status === 'failed' || row.status === 'skipped') && (
-                  <button
-                    onClick={() => handleRetry(row.id)}
-                    disabled={retryTask.isPending}
-                    className="p-2 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 transition-all"
-                    title="Retry task"
-                  >
-                    <RotateCcw size={14} className={retryTask.isPending ? 'animate-spin' : ''} />
-                  </button>
-                ),
+              { key: 'channel', header: 'Channel', render: (row: QueueTask) => (
+                <div className="flex items-center gap-2">
+                  <ChannelIcon channel={row.channel} size="sm" />
+                  <span className="capitalize text-slate-700 dark:text-slate-300">{(row.channel || '').replace(/_/g, ' ')}</span>
+                </div>
+              )},
+              { key: 'status', header: 'Status', render: (row: QueueTask) => <Badge label={row.status} asStatus dot /> },
+              { key: 'scheduled_at', header: 'Scheduled', render: (row: QueueTask) => <span className="text-xs tabular-nums text-slate-500">{formatScheduled(row.scheduled_at)}</span> },
+              { key: 'retry_count', header: 'Retries', align: 'right' as const, render: (row: QueueTask) => (
+                <span className={clsx('text-xs tabular-nums', row.retry_count ? 'font-semibold text-amber-600' : 'text-slate-400')}>
+                  {row.retry_count || 0}
+                </span>
+              )},
+              { key: 'actions', header: '', align: 'right' as const, render: (row: QueueTask) =>
+                (row.status === 'failed' || row.status === 'skipped') ? <Button variant="ghost" size="sm" icon={RotateCcw}>Retry</Button> : null
               },
             ]}
             rows={tasks}
-            loading={queueQuery.isLoading}
-            emptyMessage="No queue tasks yet."
           />
         )}
-      </section>
+      </Card>
     </div>
   )
 }
-
-const inputCls =
-  'w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100'

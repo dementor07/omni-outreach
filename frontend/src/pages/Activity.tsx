@@ -1,112 +1,83 @@
-import { useQuery } from '@tanstack/react-query'
-import { Activity, Filter } from 'lucide-react'
 import { useState } from 'react'
-
-import Badge from '../components/Badge'
-import EmptyState from '../components/EmptyState'
-import { useListCampaigns } from '../hooks/useCampaigns'
+import { useQuery } from '@tanstack/react-query'
+import { Activity as ActivityIcon, RefreshCw } from 'lucide-react'
+import { clsx } from 'clsx'
 import { api } from '../api/client'
-import { timeAgo } from '../lib/time'
+import PageHeader from '../components/PageHeader'
+import Card from '../components/Card'
+import Button from '../components/Button'
+import EmptyState from '../components/EmptyState'
+import { FilterBar, SearchInput, Select } from '../components/FilterBar'
+import { timeAgo, buildQuery } from '../lib/format'
 
-interface ActivityEntry {
-  id: string
-  action: string
-  detail?: string
-  campaign_id?: string
-  lead_id?: string
-  created_at: string
-}
+interface ActivityRow { id: string; action: string; detail?: string; created_at: string }
+interface Campaign { id: string; name: string }
 
-const ACTION_COLORS: Record<string, string> = {
-  lead_imported: 'emerald',
-  invite_sent: 'sky',
-  dm_sent: 'sky',
-  email_sent: 'sky',
-  reply_received: 'amber',
-  lead_stopped: 'rose',
-  task_failed: 'rose',
-  campaign_activated: 'emerald',
-  campaign_paused: 'amber',
-  graph_saved: 'sky',
-}
-
-export default function ActivityPage() {
+export default function Activity() {
   const [campaignId, setCampaignId] = useState('')
-  const campaignsQuery = useListCampaigns()
-
-  const activityQuery = useQuery({
+  const campaignsQ = useQuery<Campaign[]>({ queryKey: ['campaigns'], queryFn: () => api.get('/campaigns').then(r => r.data) })
+  const activityQ = useQuery<{ activity: ActivityRow[] }>({
     queryKey: ['activity', campaignId],
-    queryFn: async () => {
-      const params = campaignId ? `?campaign_id=${campaignId}&limit=100` : '?limit=100'
-      const { data } = await api.get<{ activity: ActivityEntry[] }>(`/activity${params}`)
-      return data.activity
-    },
-    refetchInterval: 15_000,
+    queryFn: () => api.get(`/activity${buildQuery({ campaign_id: campaignId, limit: 200 })}`).then(r => r.data),
   })
 
-  const entries = activityQuery.data ?? []
+  const items = activityQ.data?.activity || []
+
+  const verbColor: Record<string, string> = {
+    create: 'bg-emerald-50 text-emerald-600',
+    update: 'bg-amber-50 text-amber-600',
+    delete: 'bg-rose-50 text-rose-600',
+    error: 'bg-rose-50 text-rose-600',
+  }
 
   return (
     <div className="space-y-6">
-      <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-500">Activity</p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">
-              System-wide activity feed
-            </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
-              Every action across all campaigns in one timeline. Filter by campaign to focus.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <Filter size={14} className="text-slate-400" />
-            <select
-              value={campaignId}
-              onChange={(e) => setCampaignId(e.target.value)}
-              className="bg-transparent text-sm text-slate-700 outline-none"
-            >
-              <option value="">All campaigns</option>
-              {(campaignsQuery.data ?? []).map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </section>
+      <PageHeader
+        screenLabel="Activity"
+        eyebrow="Audit"
+        title="Activity log"
+        description="Every action the system or operators took — campaigns paused, leads imported, approvals resolved."
+        actions={<Button variant="secondary" size="md" icon={RefreshCw} onClick={() => activityQ.refetch()}>Refresh</Button>}
+      />
 
-      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        {activityQuery.isLoading ? (
-          <div className="space-y-3">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="skeleton h-12 w-full rounded-xl" />
-            ))}
-          </div>
-        ) : entries.length === 0 ? (
-          <EmptyState
-            icon={Activity}
-            title="No activity yet"
-            description="Actions will appear here as campaigns run."
-          />
-        ) : (
-          <div className="space-y-1">
-            {entries.map((entry) => (
-              <div
-                key={entry.id}
-                className="flex items-center gap-4 rounded-xl px-4 py-3 hover:bg-slate-50 transition-colors"
-              >
-                <div className="shrink-0">
-                  <Badge label={entry.action.replace(/_/g, ' ')} variant={ACTION_COLORS[entry.action] as any || 'default'} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-slate-700 truncate">{entry.detail || entry.action}</p>
-                </div>
-                <span className="shrink-0 text-xs text-slate-400 tabular-nums">{timeAgo(entry.created_at)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+      <FilterBar>
+        <SearchInput placeholder="Search actions, details…" value="" onChange={() => {}} />
+        <Select value={campaignId} onChange={setCampaignId}>
+          <option value="">All campaigns</option>
+          {(campaignsQ.data || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </Select>
+      </FilterBar>
+
+      {activityQ.isLoading ? (
+        <div className="space-y-2">{[0,1,2,3,4].map(i => <div key={i} className="h-14 skeleton rounded-2xl" />)}</div>
+      ) : items.length === 0 ? (
+        <Card padding="lg">
+          <EmptyState icon={ActivityIcon} title="No activity yet" description="System and operator actions will stream in here." />
+        </Card>
+      ) : (
+        <Card padding="none">
+          <ol className="relative divide-y divide-slate-100 dark:divide-slate-800">
+            {items.map(row => {
+              const verb = (row.action || '').split('.')[0]
+              const color = verbColor[verb] || 'bg-slate-100 text-slate-600'
+              return (
+                <li key={row.id} className="flex items-start gap-3 px-4 py-3">
+                  <span className={clsx('mt-0.5 inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg', color)}>
+                    <ActivityIcon size={13} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="truncate text-sm font-medium text-slate-900 dark:text-white">{row.action || 'event'}</p>
+                      <span className="flex-shrink-0 text-[11px] tabular-nums text-slate-400">{timeAgo(row.created_at)}</span>
+                    </div>
+                    {row.detail && <p className="mt-0.5 line-clamp-2 text-[13px] text-slate-500 dark:text-slate-400">{row.detail}</p>}
+                  </div>
+                </li>
+              )
+            })}
+          </ol>
+        </Card>
+      )}
     </div>
   )
 }

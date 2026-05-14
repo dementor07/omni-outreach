@@ -1,3 +1,4 @@
+import { clsx } from 'clsx'
 import type { ReactNode } from 'react'
 
 interface PageHeaderProps {
@@ -6,11 +7,15 @@ interface PageHeaderProps {
   description?: string
   actions?: ReactNode
   meta?: ReactNode
+  screenLabel?: string
 }
 
-export default function PageHeader({ eyebrow, title, description, actions, meta }: PageHeaderProps) {
+export default function PageHeader({ eyebrow, title, description, actions, meta, screenLabel }: PageHeaderProps) {
   return (
-    <header className="flex flex-col gap-4 border-b border-slate-200/80 pb-6 lg:flex-row lg:items-end lg:justify-between dark:border-slate-800">
+    <header
+      data-screen-label={screenLabel}
+      className="flex flex-col gap-4 border-b border-slate-200/80 pb-6 lg:flex-row lg:items-end lg:justify-between dark:border-slate-800"
+    >
       <div className="min-w-0">
         {eyebrow && (
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brand-500">

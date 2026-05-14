@@ -65,11 +65,11 @@ interface LeadGenRun {
 
 // ── Status badge map ──────────────────────────────────────────────────────────
 
-const runStatusVariant: Record<LeadGenRun['status'], 'muted' | 'info' | 'success' | 'error'> = {
-  pending: 'muted',
+const runStatusVariant: Record<LeadGenRun['status'], 'neutral' | 'info' | 'success' | 'danger'> = {
+  pending: 'neutral',
   running: 'info',
   done: 'success',
-  failed: 'error',
+  failed: 'danger',
 }
 
 // ── Source icon colour ────────────────────────────────────────────────────────
@@ -429,9 +429,9 @@ function ConfigCard({ config, onRun, onDelete, isRunning }: ConfigCardProps) {
             <span className="text-sm font-semibold text-slate-900">
               {config.label ?? config.source_display_name}
             </span>
-            <Badge variant={config.source_type === 'apify_jobs' ? 'info' : 'muted'} label={config.source_display_name} />
+            <Badge variant={config.source_type === 'apify_jobs' ? 'info' : 'neutral'} label={config.source_display_name} />
             {!config.source_available && (
-              <Badge variant="error" label="Not configured" />
+              <Badge variant="danger" label="Not configured" />
             )}
           </div>
           <p className="text-xs text-slate-400 mt-0.5">

@@ -1,152 +1,157 @@
 import { useState } from 'react'
-import { Inbox as InboxIcon, Mail, Linkedin, MessageSquare, Phone, Filter, User } from 'lucide-react'
-import { useInbox, useInboxStats } from '../hooks/useInbox'
-import { useListCampaigns } from '../hooks/useCampaigns'
-import EmptyState from '../components/EmptyState'
+import { useQuery } from '@tanstack/react-query'
+import { Filter, Sparkles, MessageSquare, Dot, CheckCircle2, Inbox as InboxIcon } from 'lucide-react'
+import { clsx } from 'clsx'
+import { api } from '../api/client'
+import PageHeader from '../components/PageHeader'
+import Card from '../components/Card'
 import Badge from '../components/Badge'
-import { timeAgo } from '../lib/time'
+import Button from '../components/Button'
+import EmptyState from '../components/EmptyState'
+import { FilterBar, SearchInput, Select, Toggle } from '../components/FilterBar'
+import ChannelIcon, { CHANNEL_META } from '../components/ChannelIcon'
+import { fullName, timeAgo } from '../lib/format'
 
-const CHANNEL_CONFIG: Record<string, { icon: typeof Mail; color: string; bg: string }> = {
-  email: { icon: Mail, color: 'text-sky-600', bg: 'bg-sky-100' },
-  linkedin: { icon: Linkedin, color: 'text-blue-600', bg: 'bg-blue-100' },
-  whatsapp: { icon: MessageSquare, color: 'text-emerald-600', bg: 'bg-emerald-100' },
-  sms: { icon: Phone, color: 'text-violet-600', bg: 'bg-violet-100' },
-}
+interface InboxMsg { id: string; first_name?: string; last_name?: string; linkedin_url?: string; email?: string; company?: string; channel: string; occurred_at: string; meta?: { subject?: string; body?: string; message?: string; text?: string; reply_category?: string } }
+interface Campaign { id: string; name: string }
 
 export default function Inbox() {
   const [channelFilter, setChannelFilter] = useState('')
   const [campaignFilter, setCampaignFilter] = useState('')
-  const [page, setPage] = useState(1)
+  const [search, setSearch] = useState('')
 
-  const { data, isLoading } = useInbox(channelFilter || undefined, campaignFilter || undefined, undefined, page)
-  const stats = useInboxStats()
-  const campaigns = useListCampaigns()
+  const statsQ = useQuery<{ total: number; by_channel: { channel: string; cnt: number }[] }>({ queryKey: ['inbox-stats'], queryFn: () => api.get('/inbox/stats').then(r => r.data) })
+  const campaignsQ = useQuery<Campaign[]>({ queryKey: ['campaigns'], queryFn: () => api.get('/campaigns').then(r => r.data) })
+
+  const params = new URLSearchParams()
+  if (channelFilter) params.set('channel', channelFilter)
+  if (campaignFilter) params.set('campaign_id', campaignFilter)
+  const inboxQ = useQuery<{ messages: InboxMsg[] }>({ queryKey: ['inbox', channelFilter, campaignFilter], queryFn: () => api.get(`/inbox?${params.toString()}`).then(r => r.data) })
+
+  const messages = inboxQ.data?.messages || []
+  const visible = search
+    ? messages.filter(m => {
+        const blob = `${fullName(m)} ${m.company || ''} ${m.meta?.subject || ''} ${m.meta?.body || m.meta?.message || ''}`.toLowerCase()
+        return blob.includes(search.toLowerCase())
+      })
+    : messages
+
+  const byChannel = statsQ.data?.by_channel || []
+  const totalInbox = statsQ.data?.total ?? 0
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900">Unified Inbox</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            All inbound replies across channels
-            {stats.data && <span className="ml-2 font-semibold text-sky-600">· {stats.data.total} total</span>}
-          </p>
-        </div>
-      </div>
-
-      {/* Channel stats chips */}
-      {stats.data && stats.data.by_channel.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {stats.data.by_channel.map((ch) => {
-            const cfg = CHANNEL_CONFIG[ch.channel] || CHANNEL_CONFIG.email
-            const Icon = cfg.icon
-            return (
+      <PageHeader
+        screenLabel="Inbox"
+        eyebrow="Replies"
+        title="Unified inbox"
+        description="Every inbound reply across LinkedIn, email, WhatsApp, SMS, and voice — one stream."
+        actions={
+          <>
+            <Button variant="secondary" size="md" icon={Filter}>Saved views</Button>
+            <Button variant="primary" size="md" icon={Sparkles}>AI summarise</Button>
+          </>
+        }
+        meta={
+          totalInbox > 0 && !statsQ.isLoading ? (
+            <div className="flex flex-wrap items-center gap-1.5">
               <button
-                key={ch.channel}
-                onClick={() => setChannelFilter(channelFilter === ch.channel ? '' : ch.channel)}
-                className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-colors ${channelFilter === ch.channel ? 'border-sky-300 bg-sky-50 text-sky-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                onClick={() => setChannelFilter('')}
+                className={clsx(
+                  'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold transition-colors',
+                  !channelFilter ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300',
+                )}
               >
-                <Icon size={13} />
-                <span className="capitalize">{ch.channel}</span>
-                <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold">{ch.cnt}</span>
+                All <span className="tabular-nums opacity-70">{totalInbox.toLocaleString()}</span>
               </button>
-            )
-          })}
-        </div>
-      )}
+              {byChannel.map(ch => {
+                const meta = CHANNEL_META[ch.channel] || CHANNEL_META.email
+                const Ic = meta.icon
+                const active = channelFilter === ch.channel
+                return (
+                  <button
+                    key={ch.channel}
+                    onClick={() => setChannelFilter(active ? '' : ch.channel)}
+                    className={clsx(
+                      'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold transition-colors',
+                      active ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300',
+                    )}
+                  >
+                    <Ic size={12} />
+                    {meta.label}
+                    <span className="tabular-nums opacity-70">{Number(ch.cnt).toLocaleString()}</span>
+                  </button>
+                )
+              })}
+            </div>
+          ) : null
+        }
+      />
 
-      {/* Filters */}
-      <div className="flex gap-3">
-        <select
-          value={campaignFilter}
-          onChange={(e) => { setCampaignFilter(e.target.value); setPage(1) }}
-          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
-        >
+      <FilterBar>
+        <SearchInput placeholder="Search replies, names, companies…" value={search} onChange={setSearch} />
+        <Select value={campaignFilter} onChange={setCampaignFilter}>
           <option value="">All campaigns</option>
-          {(campaigns.data || []).map((c) => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-        </select>
-      </div>
+          {(campaignsQ.data || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </Select>
+        <Toggle
+          value="all"
+          onChange={() => {}}
+          items={[
+            { value: 'all', label: 'All', icon: InboxIcon },
+            { value: 'unread', label: 'Unread', icon: Dot },
+            { value: 'positive', label: 'Positive', icon: CheckCircle2 },
+          ]}
+        />
+      </FilterBar>
 
-      {/* Message list */}
-      {isLoading ? (
-        <div className="space-y-3">
-          {[1, 2, 3, 4].map((i) => <div key={i} className="h-20 animate-pulse rounded-xl bg-slate-100" />)}
-        </div>
-      ) : !data?.messages.length ? (
-        <EmptyState icon={MessageSquare} title="No messages yet" description="Inbound replies will appear here when leads respond to your outreach." />
+      {inboxQ.isLoading ? (
+        <div className="space-y-2">{[0,1,2,3].map(i => <div key={i} className="h-20 skeleton rounded-2xl" />)}</div>
+      ) : visible.length === 0 ? (
+        <Card padding="lg">
+          <EmptyState
+            icon={MessageSquare}
+            title={search ? 'No matches' : 'No replies yet'}
+            description={search ? 'Try a different query or clear filters.' : 'Inbound replies will appear here when leads respond to your outreach.'}
+          />
+        </Card>
       ) : (
         <div className="space-y-2">
-          {data.messages.map((msg) => {
-            const cfg = CHANNEL_CONFIG[msg.channel] || CHANNEL_CONFIG.email
-            const Icon = cfg.icon
-            const name = [msg.first_name, msg.last_name].filter(Boolean).join(' ') || 'Unknown'
-            const preview = msg.meta?.body || msg.meta?.message || msg.meta?.text || JSON.stringify(msg.meta)
-
-            return (
-              <div key={msg.id} className="rounded-xl border border-slate-200 bg-white p-4 transition-shadow hover:shadow-sm">
-                <div className="flex items-start gap-3">
-                  <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full ${cfg.bg}`}>
-                    <Icon size={16} className={cfg.color} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-slate-900">{name}</span>
-                        {msg.company && <span className="text-xs text-slate-400">at {msg.company}</span>}
-                        <Badge label={msg.channel} asChannel />
-                      </div>
-                      <span className="flex-shrink-0 text-xs text-slate-400">{timeAgo(msg.occurred_at)}</span>
-                    </div>
-                    {msg.meta?.subject && (
-                      <div className="mt-1 text-xs font-medium text-slate-600">{msg.meta.subject}</div>
-                    )}
-                    <p className="mt-1 line-clamp-2 text-sm text-slate-600 leading-relaxed">
-                      {typeof preview === 'string' ? preview : '—'}
-                    </p>
-                    {msg.meta?.reply_category && (
-                      <div className="mt-2">
-                        <Badge
-                          label={msg.meta.reply_category}
-                          variant={
-                            msg.meta.reply_category === 'positive' ? 'success' :
-                            msg.meta.reply_category === 'negative' ? 'error' :
-                            'info'
-                          }
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {/* Pagination */}
-      {data && data.total > 30 && (
-        <div className="flex justify-center gap-2">
-          <button
-            disabled={page <= 1}
-            onClick={() => setPage(page - 1)}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm disabled:opacity-40"
-          >
-            Previous
-          </button>
-          <span className="flex items-center px-3 text-sm text-slate-500">
-            Page {page} of {Math.ceil(data.total / 30)}
-          </span>
-          <button
-            disabled={page >= Math.ceil(data.total / 30)}
-            onClick={() => setPage(page + 1)}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm disabled:opacity-40"
-          >
-            Next
-          </button>
+          {visible.map(msg => <InboxRow key={msg.id} msg={msg} />)}
         </div>
       )}
     </div>
+  )
+}
+
+function InboxRow({ msg }: { msg: InboxMsg }) {
+  const preview = msg.meta?.body || msg.meta?.message || msg.meta?.text || ''
+  const cat = msg.meta?.reply_category
+  const catVariant = cat === 'positive' ? 'success' : cat === 'negative' ? 'danger' : 'info'
+  return (
+    <Card padding="none" className="group cursor-pointer transition-shadow hover:shadow-sm">
+      <div className="flex items-start gap-3 p-4">
+        <ChannelIcon channel={msg.channel} size="md" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{fullName(msg)}</span>
+              {msg.company && <span className="truncate text-xs text-slate-500">at {msg.company}</span>}
+              <Badge label={msg.channel} asChannel />
+              {cat && <Badge label={cat} variant={catVariant as 'success' | 'danger' | 'info'} dot />}
+            </div>
+            <span className="flex-shrink-0 text-[11px] tabular-nums text-slate-400">{timeAgo(msg.occurred_at)}</span>
+          </div>
+          {msg.meta?.subject && (
+            <div className="mt-1 truncate text-[13px] font-medium text-slate-600 dark:text-slate-300">{msg.meta.subject}</div>
+          )}
+          {preview && (
+            <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-slate-500 dark:text-slate-400">
+              {typeof preview === 'string' ? preview : '—'}
+            </p>
+          )}
+        </div>
+      </div>
+    </Card>
   )
 }

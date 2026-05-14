@@ -1,30 +1,32 @@
 import { clsx } from 'clsx'
-import type { ReactNode } from 'react'
+import type { ElementType, HTMLAttributes, ReactNode } from 'react'
 
-interface CardProps {
-  children: ReactNode
-  className?: string
+interface CardProps extends HTMLAttributes<HTMLElement> {
+  as?: ElementType
   padding?: 'none' | 'sm' | 'md' | 'lg'
+  children?: ReactNode
 }
 
-const paddingClass = {
-  none: '',
-  sm: 'p-4',
-  md: 'p-5',
-  lg: 'p-6',
-} as const
-
-export function Card({ children, className = '', padding = 'md' }: CardProps) {
+export default function Card({
+  as: Tag = 'div',
+  className = '',
+  padding = 'md',
+  children,
+  ...rest
+}: CardProps) {
   return (
-    <div
+    <Tag
       className={clsx(
         'rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900',
-        paddingClass[padding],
+        padding === 'sm' && 'p-4',
+        padding === 'md' && 'p-5',
+        padding === 'lg' && 'p-6',
         className,
       )}
+      {...rest}
     >
       {children}
-    </div>
+    </Tag>
   )
 }
 
