@@ -8,13 +8,14 @@ Lead gen pipeline:
 """
 import asyncio
 import logging
+import re
 
 import httpx
 
 from app.config import settings
 from app.db import execute, fetch_one
 from app.services.lead_sources.base import RawLead
-from app.services.lead_sources.utils import is_linkedin_profile, clean_role
+from app.services.lead_sources.utils import clean_role, is_linkedin_profile
 
 log = logging.getLogger(__name__)
 

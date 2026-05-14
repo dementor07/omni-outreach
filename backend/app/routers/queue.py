@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from app.auth import get_current_user
-from app.db import fetch_all
+from app.db import execute, fetch_all
 
 router = APIRouter()
 
@@ -67,16 +67,16 @@ async def bulk_retry_tasks(
     """Reset multiple failed tasks to 'queued' state."""
     conditions = ["status='failed'"]
     params = []
-    
+
     if campaign_id:
         params.append(campaign_id)
         conditions.append(f"campaign_id=${len(params)}")
     if channel:
         params.append(channel)
         conditions.append(f"channel=${len(params)}")
-        
+
     where = "WHERE " + " AND ".join(conditions)
-    
+
     await execute(
         f"UPDATE queue SET status='queued', failure_reason=NULL, retry_count=0, scheduled_at=NOW() {where}",
         *params

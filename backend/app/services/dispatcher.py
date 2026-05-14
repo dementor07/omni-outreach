@@ -551,7 +551,7 @@ async def _handle_enrich(task: dict, lead: dict, campaign: dict) -> None:
         {"source": enrich_source, "fields_filled": list(updates.keys())},
     )
     await _mark_sent(task["id"])
-    
+
     # Branch based on whether anything was actually found/filled
     handle = "found" if updates else "not_found"
     await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]), handle)
@@ -561,16 +561,16 @@ async def _handle_data_transform(task: dict, lead: dict, campaign: dict) -> None
     """Evaluates an AI prompt or basic logic to set a variable in extra_data."""
     node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
     node_data = node.get("data") or {}
-    
+
     var_name = node_data.get("variable_name", "").strip()
     transform_type = node_data.get("transform_type", "ai_extract")
     prompt = node_data.get("prompt", "")
-    
+
     if not var_name:
         raise RuntimeError("No variable_name configured for data transform")
-        
+
     value = None
-    
+
     if transform_type == "ai_extract":
         if not prompt:
             raise RuntimeError("No prompt configured for AI transform")
@@ -585,19 +585,19 @@ async def _handle_data_transform(task: dict, lead: dict, campaign: dict) -> None
             raise RuntimeError(f"AI transform failed: {e}")
     else:
         raise RuntimeError(f"Unknown transform type: {transform_type}")
-        
+
     # Store the value in extra_data
     if value:
         import json as _json
         extra = dict(lead.get("extra_data") or {})
         extra[var_name] = value.strip()
-        
+
         await execute(
             "UPDATE leads SET extra_data=$1 WHERE id=$2",
             _json.dumps(extra), lead["id"]
         )
         log.info(f"[dispatcher] Set variable '{var_name}' to '{value}' for lead {lead['id']}")
-        
+
     await _log_event(
         lead["id"], lead["campaign_id"], "data_transformed", "data_transform",
         {"variable": var_name, "transform_type": transform_type, "success": bool(value)}

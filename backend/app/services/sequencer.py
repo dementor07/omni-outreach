@@ -86,7 +86,7 @@ async def queue_next_nodes(
             data = node["data"] or {}
             delay_val = data.get("delay_value") or data.get("delay_days") or 1
             unit = data.get("delay_unit", "days")
-            
+
             if unit == "seconds":
                 delta = timedelta(seconds=delay_val)
             elif unit == "minutes":
@@ -95,7 +95,7 @@ async def queue_next_nodes(
                 delta = timedelta(hours=delay_val)
             else:
                 delta = timedelta(days=delay_val)
-                
+
             new_delay = accumulated_delay + delta
             await queue_next_nodes(lead_id, target_id, "default", new_delay)
 

@@ -12,7 +12,7 @@ import httpx
 from app.config import settings
 
 from .base import LeadSource, RawLead
-from .utils import is_linkedin_profile, clean_role
+from .utils import clean_role, is_linkedin_profile
 
 log = logging.getLogger(__name__)
 

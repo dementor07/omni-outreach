@@ -316,7 +316,7 @@ async def export_leads(
         "SELECT * FROM leads WHERE campaign_id=$1 ORDER BY created_at ASC",
         campaign_id,
     )
-    
+
     output = io.StringIO()
     if not leads:
         return {"detail": "No leads to export"}
@@ -331,7 +331,7 @@ async def export_leads(
         writer.writerow(row)
 
     from fastapi.responses import StreamingResponse
-    
+
     output.seek(0)
     return StreamingResponse(
         io.BytesIO(output.getvalue().encode("utf-8")),

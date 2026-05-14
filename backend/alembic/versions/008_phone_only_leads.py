@@ -5,12 +5,13 @@ Revises: 007
 Create Date: 2026-05-05
 
 Changes:
-- Adds a partial unique index on (campaign_id, phone) where linkedin_url IS NULL 
+- Adds a partial unique index on (campaign_id, phone) where linkedin_url IS NULL
   and email IS NULL and phone IS NOT NULL.
   This enables leads with ONLY a name and phone number (e.g. trade show contacts)
   while preserving dedupe logic.
 """
 from collections.abc import Sequence
+
 from alembic import op
 
 revision: str = "008"
