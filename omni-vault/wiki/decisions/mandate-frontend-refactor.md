@@ -45,3 +45,9 @@ The frontend implementation has devolved into "Feature Slop," characterized by m
 - Fixed in commit `f5b7b09`. Full breakdown: [[postmortem-queue-sequence-crash-may-2026]].
 - **New mandate clause**: every shred-phase PR must end with a manual "click every tab on every affected route" pass before merge. Compile-clean ≠ render-clean.
 - **Tooling gap**: the codebase has no client-side error boundary or Sentry hook, so this took 8 days to surface. See postmortem follow-ups.
+
+### Status Update (2026-05-14, later) — Postmortem follow-ups partially closed
+- **Render-throw safety net**: top-level `<ErrorBoundary>` shipped in commit `93673e7` (`frontend/src/components/ErrorBoundary.tsx`). Future shred phases that smuggle in a runtime crash will surface as an in-app fallback panel instead of a blank screen.
+- **Lint enforcement**: ESLint flat-config with `eslint-plugin-react-hooks` now installed; `npm run lint:hooks` is the errors-only gate, currently 0 errors. The original Phase 4 violation has been verified to fail this gate.
+- **Still open from the mandate**: the "operator clicks every tab on the affected pages" checklist is documented but not yet enforced by tooling — until E2E coverage exists, it relies on the reviewer.
+- **Still open from the postmortem**: remote error aggregation (Sentry / GlitchTip), and the backend invariant that no task should reach the UI with a null `campaign_id` (tracked under [[vulnerability-queue-black-box]]).

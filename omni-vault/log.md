@@ -842,3 +842,23 @@ The initial webhook URL used `omnioutreach.space`, which has no DNS A record (cu
   - `58a075c`: added `omni-vault/**/*.local.md` gitignore pattern so `omni-vault/credentials.local.md` can hold prod login locally without ever pushing.
 - **Postmortem**: [[wiki/decisions/postmortem-queue-sequence-crash-may-2026]]. Updated [[wiki/decisions/vulnerability-queue-black-box]] and [[wiki/decisions/mandate-frontend-refactor]] with Phase 4 regression notes.
 - **Top follow-ups**: add a top-level React error boundary; wire frontend error reporting (Sentry/GlitchTip); verify `eslint-plugin-react-hooks` is actually installed AND active in CI; investigate origin of null-`campaign_id` queue tasks.
+
+
+## 2026-05-14 (later) — ErrorBoundary + ESLint rules-of-hooks gate — HEAD 93673e7
+
+**What shipped**:
+- `frontend/src/components/ErrorBoundary.tsx` (new) — class-component boundary wrapping the authenticated `<Outlet />` in `App.tsx`. Per-route reset via `useLocation` pathname key, manual "Retry this view" reset, "Copy debug info" clipboard export with route/timestamp/UA/message/stacks.
+- `frontend/eslint.config.js` (new) — ESLint 9 flat-config, `js.configs.recommended` + `tseslint.configs.recommended` + `eslint-plugin-react-hooks` flat plugin. `rules-of-hooks: error`, `exhaustive-deps: warn`. `no-explicit-any` off (xyflow generics), `no-unused-vars` warn with `_`-prefix escape.
+- `frontend/package.json` — new dev deps (`eslint`, `@eslint/js`, `eslint-plugin-react-hooks`, `typescript-eslint`, `globals`); new scripts: `lint`, `lint:hooks`.
+
+**Verification**:
+- `npm run build` — clean.
+- `npm run lint:hooks` — 0 errors.
+- `npm run lint` — 0 errors, 52 warnings (exhaustive-deps + unused-vars).
+- Regression test: re-injected the original `useQueueList({...}).data` inside conditional JSX on `Campaigns/index.tsx:335`. ESLint reported *"React Hook 'useQueueList' is called conditionally."* Reverted to clean.
+
+**Postmortem follow-ups closed**: ErrorBoundary, lint rule, hook-in-JSX audit (the lint gate makes the manual `grep` audit redundant).
+
+**Postmortem follow-ups still open**: Sentry/GlitchTip wiring (needs hosting/cost decision), backend invariant on null `campaign_id` (UI-side null guard is in place; backend origin not yet investigated).
+
+**Anti-Slop tracker**: rule #5 ("Errors are First-Class Citizens") now has frontend enforcement infrastructure. Updated [[wiki/decisions/anti-slop-protocol]], [[wiki/decisions/mandate-frontend-refactor]], and [[wiki/decisions/postmortem-queue-sequence-crash-may-2026]] with the closure status.
