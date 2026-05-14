@@ -63,3 +63,9 @@ The frontend implementation has devolved into "Feature Slop," characterized by m
 - Two improvements over the in-house `4b9b6e2` pre-stage: `apiBase` is now exported (not module-local) and trailing-slash-stripped, and `useNotifications.ts` derives its SSE URL from `apiBase` instead of hardcoding `/api`. The latter was a real bug: `EventSource` bypasses axios's `baseURL`, so any non-default `VITE_API_BASE` would have broken real-time notifications.
 - Subsequent PRs from the same handoff series (full sidebar redesign, hero overhaul, NotificationCenter component, theme toggle, redesigned Approvals/Blacklist/Analytics/Activity/Login screens) are exploratory in the bundle but not yet PR-packaged. Each must land as its own commit with anti-slop + rules-of-hooks self-check, per the handoff convention.
 - Verification gate passed: `npm run lint:hooks` 0 errors, `npm run lint` baseline-stable (52 warnings), `npm run build` clean.
+
+### Status Update (2026-05-14, later x4) — Overview screen ported
+- Commit `1c45157`: first substantive screen port from the standalone design bundle (`Downloads/omni-design-preview/`). Overview/Dashboard ships with four new shared primitives (`Card` + `CardHeader`, `Button`, `PageHeader`, extended `StatCard`, `Badge.dot`) that every subsequent screen will reuse.
+- Decision: hand-port each screen one commit at a time, no big-bang rewrite. The bundle is the visual reference; real router shapes (verified per [[postmortem-queue-sequence-crash-may-2026]] follow-up) are the data contract.
+- Decision: no preview/mock mode. Dashboard queries either hit the real backend or surface per-panel error/empty states. Confirmed and codified earlier today.
+- Verification: `npm run build` clean, `npm run lint:hooks` 0 errors. Visual verification gated on the in-flight VPS deploy completing (CI was red for 2 days, fixed in `5163370` and `feab4df`).

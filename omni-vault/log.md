@@ -919,3 +919,25 @@ The design bundle (`Downloads/omni-outreach.zip`) shipped with a `pr-handoff/01-
 **Anti-Slop rule 5 violation** (errors are first-class): we shipped two `NameError`-bound endpoints to `master` and the lint tool caught them, but no one looked at CI for two days. Suppressing the signal by ignoring red builds is worse than not having the signal.
 
 **Open follow-up**: confirm `5163370` deploy webhook actually fires once CI is green. If it does, the visual redesign should appear on `srv1575227.hstgr.cloud` for the first time today.
+
+
+## 2026-05-14 (later x5) — Overview screen redesigned with new primitives — HEAD 1c45157
+
+First substantive port from the design bundle. User confirmed direction: full port (option #2), starting with Overview because it's the highest visual impact and lowest router-binding risk.
+
+**Shipped (commit `1c45157`)**:
+- New primitives under `frontend/src/components/`:
+  - `Card.tsx` — single radius (rounded-2xl), border, dark-mode classes. Padding sm/md/lg/none. Companion `CardHeader` with title/description/actions.
+  - `Button.tsx` — three sizes (xs/sm/md) × four variants (primary/secondary/ghost/danger). Brand-primary fills replace the old slate-900 buttons. `icon` + `iconRight` Lucide slots.
+  - `PageHeader.tsx` — eyebrow/title/description/actions slot. Every screen will use this.
+- `StatCard.tsx` extended (back-compat): added `brand`/`violet`/`slate` accents, `hint` prop for subtitle copy ("Across all campaigns"), compact 26px tabular-num value, optional trend pill rendered inline with the value, dark-mode classes throughout. Old `accent`/`trend` shapes preserved.
+- `Badge.tsx` extended: new `dot` prop adds a leading colored indicator (`bg-emerald-500` etc.) matching the design's status pills. Used in dashboard's "live" badge and per-campaign status badge.
+- `Dashboard.tsx` rewritten end-to-end against real hooks (`useOverviewStats`, `useDailyActivity`, `useResponseRates`, `useListCampaigns`, `useQueueStats`). Four-stat hero row → three secondary stats → daily-activity stacked bar chart (14d, Sent/Failed/Queued) + response-rates funnel cards → channel-breakdown table + campaigns mini-list. Per-panel loading skeletons (`.skeleton` utility from `index.css`), per-panel empty states from `EmptyState`. No mock fixtures; queries fail visibly per the no-preview-mode stance.
+
+**Anti-Slop self-check**:
+- Rule 1 (no dead code): every new primitive is consumed in Dashboard.tsx in the same commit. PageHeader, Card, CardHeader, Button — all wired.
+- Rule 2 (no mega-component): Dashboard.tsx is 313 lines including three helper sub-components (`DailyActivityChart`, `ResponseRateRow`, `CampaignMiniRow`). Could be split if it grows, but stays well under the 800-line cap.
+- Rule 4 ("Ready" = human-verified): build clean, `npm run lint:hooks` 0 errors. Visual verification deferred until the deploy lands (background watcher still waiting on the in-flight docker rebuild).
+- Rule 5 (errors first-class): query errors surface per-panel via the existing TanStack Query loading/error states. Future commits will likely add explicit error UI per panel.
+
+**Subsequent screens to port from the bundle** (will land as separate commits using the same primitives): Queue (filter bar + retry actions), Inbox (thread list + drawer), Leads (filterable table + drawer), Templates (card grid), Blacklist (filter + add-entry modal), Analytics (per-campaign funnels), Activity (event stream). The bundle has each one fully designed in `screens.jsx` / `screens2.jsx`.
