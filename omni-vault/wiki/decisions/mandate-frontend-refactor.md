@@ -57,3 +57,9 @@ The frontend implementation has devolved into "Feature Slop," characterized by m
 - Same-origin (`/api`) remains the production default. Override only via `.env.local` (gitignored).
 - **Hard constraint codified**: never point `VITE_API_BASE` at `omnioutreach.space`. That domain is alias-only in nginx and returns NXDOMAIN. The only live HTTPS endpoint is `srv1575227.hstgr.cloud`. Comment in `client.ts` and `.env.example` both call this out so the next agent doesn't repeat the mistake.
 - **No preview/mock mode**: dashboard either talks to the real backend or surfaces a real error state. Decision recorded; do not reverse without explicit user sign-off.
+
+### Status Update (2026-05-14, later x3) — Design-tool PR #1 applied
+- Commit `526bc25` lands the dashboard-redesign series' first PR (handoff doc: `pr-handoff/01-env-base.md` in the design bundle at `Downloads/omni-outreach.zip`).
+- Two improvements over the in-house `4b9b6e2` pre-stage: `apiBase` is now exported (not module-local) and trailing-slash-stripped, and `useNotifications.ts` derives its SSE URL from `apiBase` instead of hardcoding `/api`. The latter was a real bug: `EventSource` bypasses axios's `baseURL`, so any non-default `VITE_API_BASE` would have broken real-time notifications.
+- Subsequent PRs from the same handoff series (full sidebar redesign, hero overhaul, NotificationCenter component, theme toggle, redesigned Approvals/Blacklist/Analytics/Activity/Login screens) are exploratory in the bundle but not yet PR-packaged. Each must land as its own commit with anti-slop + rules-of-hooks self-check, per the handoff convention.
+- Verification gate passed: `npm run lint:hooks` 0 errors, `npm run lint` baseline-stable (52 warnings), `npm run build` clean.

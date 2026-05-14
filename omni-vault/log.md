@@ -879,3 +879,21 @@ The initial webhook URL used `omnioutreach.space`, which has no DNS A record (cu
 **Endpoint shape audit for the design branch** (every router referenced by the redesign cross-checked against `backend/app/routers/*.py`): all present — `POST /auth/login`, `GET /approvals` + `POST /approvals/{id}/resolve` + `GET /approvals/count` + `PATCH /approvals/{id}`, `GET|POST|DELETE /blacklist` + `POST /blacklist/bulk`, `GET /activity?campaign_id=`, `GET /analytics/{campaign_id}` + `/conversions`, `GET /notifications` + `/stream` + `POST /notifications/read-all` + `POST /notifications/{id}/read`. Field-name binding still needs to happen handler-by-handler when the design branch lands.
 
 **Stance recorded for future ops**: no preview-mode mocks. Real backend or real error UI. Mock fallback hides outages and lets UI ship against shapes that don't match reality.
+
+
+## 2026-05-14 (later x3) — Applied design-tool PR #1 (SSE URL fix) — HEAD 526bc25
+
+The design bundle (`Downloads/omni-outreach.zip`) shipped with a `pr-handoff/01-env-base.md` README describing PR #1 of the dashboard-redesign series. Read it, found two improvements over what I'd already shipped in `4b9b6e2`:
+
+1. `apiBase` should be **exported** (was module-local const), so non-axios consumers can reuse it.
+2. `useNotifications.ts` was hardcoding `/api/notifications/stream` for the SSE `EventSource`. Because `EventSource` bypasses the axios `baseURL`, that path would break the moment `VITE_API_BASE` points to a remote backend. The design caught this; my pre-stage missed it.
+
+**Applied (commit `526bc25`)**:
+- `frontend/src/api/client.ts` — export `apiBase`, strip trailing slash with `.replace(/\/$/, '')`, expand the comment to document the omnioutreach.space NXDOMAIN trap and the canonical override URL.
+- `frontend/src/hooks/useNotifications.ts` — import `apiBase`, use it for the SSE URL.
+
+**Verification** (per handoff checklist): `npm run lint:hooks` 0 errors, `npm run lint` 0 errors / 52 warnings (matches baseline), `npm run build` clean.
+
+**What the design bundle contains beyond PR #1**: a redesigned `Dashboard.tsx`, new `Sidebar.tsx` + `Layout.tsx` (left-rail nav replacing the current top nav), `NotificationCenter.tsx` with SSE bell, `useTheme.ts` for class-based dark mode, full set of redesigned screens (`Approvals`, `Blacklist`, `Activity`, `Analytics`, `Login`, etc.), `Omni Dashboard.html` standalone preview, and five overview screenshots. The handoff README only stages PR #1 (env-base); the rest is exploratory and not yet PR-packaged. Future PRs from the same handoff series will land separately under [[mandate-frontend-refactor]].
+
+**Anti-Slop check from the handoff** (passes verbatim): rule 1 (no dead code — `apiBase` consumed by both axios client and SSE hook in the same commit), rule 2 (N/A — no component code), rule 3 (high-signal — `apiBase` is the noun, `VITE_API_BASE` mirrors Vite's prefix convention), rule 5 (errors first-class — existing 401 redirect interceptor unchanged). Rule 4 ("Ready" means human-verified) is satisfied by passing the handoff's local checklist.
