@@ -17,23 +17,33 @@ interface DailyRow { day: string; status: string; cnt: number }
 interface QueueStat { channel: string; status: string; cnt: number }
 interface Campaign { id: string; name: string; status: string; timezone: string; daily_lead_cap: number; invite_daily_cap: number; simulation_mode: boolean }
 
-export default function Dashboard() {
-  const overview = useQuery<OverviewStats>({ queryKey: ['overview-stats'], queryFn: () => api.get('/overview/stats').then(r => r.data) })
-  const rates = useQuery<ResponseRate[]>({ queryKey: ['overview-rates'], queryFn: () => api.get('/overview/response-rates').then(r => r.data) })
-  const dailyQ = useQuery<DailyRow[]>({ queryKey: ['overview-daily'], queryFn: () => api.get('/overview/daily-activity').then(r => r.data) })
-  const campaignsQ = useQuery<Campaign[]>({ queryKey: ['campaigns'], queryFn: () => api.get('/campaigns').then(r => r.data) })
-  const queueStatsQ = useQuery<{ stats: QueueStat[] }>({ queryKey: ['queue-stats'], queryFn: () => api.get('/queue/stats').then(r => r.data) })
+interface ConsolidatedData {
+  stats: OverviewStats
+  daily_activity: DailyRow[]
+  response_rates: ResponseRate[]
+  queue_stats: QueueStat[]
+}
 
-  const stats = overview.data || {} as OverviewStats
-  const queueStats = queueStatsQ.data?.stats || []
+export default function Dashboard() {
+  const { data: dashboard, isLoading, refetch } = useQuery<ConsolidatedData>({ 
+    queryKey: ['dashboard-consolidated'], 
+    queryFn: () => api.get('/overview/consolidated').then(r => r.data) 
+  })
+  const campaignsQ = useQuery<Campaign[]>({ 
+    queryKey: ['campaigns'], 
+    queryFn: () => api.get('/campaigns').then(r => r.data) 
+  })
+
+  const stats = dashboard?.stats || {} as OverviewStats
+  const queueStats = dashboard?.queue_stats || []
   const queued = queueStats.filter(r => r.status === 'queued').reduce((s, r) => s + Number(r.cnt || 0), 0)
   const failed = queueStats.filter(r => r.status === 'failed').reduce((s, r) => s + Number(r.cnt || 0), 0)
   const campaigns = campaignsQ.data || []
   const activeCampaigns = campaigns.filter(c => c.status !== 'archived').length
-  const ratesArr = rates.data || []
+  const ratesArr = dashboard?.response_rates || []
 
   function refreshAll() {
-    overview.refetch(); rates.refetch(); dailyQ.refetch(); queueStatsQ.refetch()
+    refetch(); campaignsQ.refetch()
   }
 
   return (
@@ -53,28 +63,28 @@ export default function Dashboard() {
 
       {/* Top stats */}
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total leads" value={overview.isLoading ? '—' : (stats.total_leads ?? 0)} icon={Users} accent="brand" hint="Across all campaigns" />
-        <StatCard label="Invited" value={overview.isLoading ? '—' : (stats.invited ?? 0)} icon={Send} accent="emerald" />
-        <StatCard label="Accepted" value={overview.isLoading ? '—' : (stats.accepted ?? 0)} icon={CheckCircle2} accent="amber" />
-        <StatCard label="Messages sent" value={overview.isLoading ? '—' : (stats.sent ?? 0)} icon={Activity} accent="brand" />
+        <StatCard label="Total leads" value={isLoading ? '—' : (stats.total_leads ?? 0)} icon={Users} accent="brand" hint="Across all campaigns" />
+        <StatCard label="Invited" value={isLoading ? '—' : (stats.invited ?? 0)} icon={Send} accent="emerald" />
+        <StatCard label="Accepted" value={isLoading ? '—' : (stats.accepted ?? 0)} icon={CheckCircle2} accent="amber" />
+        <StatCard label="Messages sent" value={isLoading ? '—' : (stats.sent ?? 0)} icon={Activity} accent="brand" />
       </section>
 
       {/* Secondary stats */}
       <section className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Active campaigns" value={campaignsQ.isLoading ? '—' : activeCampaigns} icon={Megaphone} accent="emerald" />
-        <StatCard label="Queued tasks" value={queueStatsQ.isLoading ? '—' : queued} icon={ListTodo} accent="brand" />
-        <StatCard label="Failed tasks" value={queueStatsQ.isLoading ? '—' : failed} icon={AlertCircle} accent="rose" />
+        <StatCard label="Queued tasks" value={isLoading ? '—' : queued} icon={ListTodo} accent="brand" />
+        <StatCard label="Failed tasks" value={isLoading ? '—' : failed} icon={AlertCircle} accent="rose" />
       </section>
 
       {/* Charts row */}
       <section className="grid gap-4 xl:grid-cols-2">
         <Card padding="lg">
           <CardHeader title="Daily activity" description="Queue executions over the last 14 days" actions={<Badge label="live" variant="success" dot />} />
-          <DailyActivityChart data={dailyQ.data} loading={dailyQ.isLoading} />
+          <DailyActivityChart data={dashboard?.daily_activity} loading={isLoading} />
         </Card>
         <Card padding="lg">
           <CardHeader title="Response rates" description="Invite → Accept → Reply funnel per campaign" />
-          {rates.isLoading ? (
+          {isLoading ? (
             <div className="space-y-3">{[0,1,2].map(i => <div key={i} className="h-14 skeleton" />)}</div>
           ) : ratesArr.length === 0 ? (
             <EmptyState icon={TrendingUp} title="No campaign data yet" description="Funnels appear once a campaign has leads." />
@@ -88,7 +98,7 @@ export default function Dashboard() {
       <section className="grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
         <Card padding="lg">
           <CardHeader title="Channel breakdown" description="Queue performance by channel and state" actions={<Button variant="ghost" size="sm" icon={MoreHorizontal} />} />
-          {queueStatsQ.isLoading ? (
+          {isLoading ? (
             <div className="space-y-2">{[0,1,2,3].map(i => <div key={i} className="h-10 skeleton" />)}</div>
           ) : queueStats.length === 0 ? (
             <EmptyState icon={ListTodo} title="No queue activity" description="Tasks across LinkedIn, email, WhatsApp, and voice will land here." />
