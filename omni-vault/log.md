@@ -969,3 +969,29 @@ Today's three commits cleaned all of that up:
 - `npm run build` clean, `npm run lint:hooks` 0 errors, backend `ruff check` clean.
 
 **Pending vault catch-up acknowledged**: index.md "Last updated" was still 2026-04-28; should be revised next time the index is touched. Skipping that this turn — the log is now current.
+
+
+## 2026-05-15 (later) — chrome-devtools-mcp loop caught two prod 500s; API renamed to "Omni API"
+
+Wired `chrome-devtools-mcp` into `.mcp.json` (alongside `obsidian`). New tool surface: navigate / screenshot / snapshot / console / network / click / fill / evaluate / wait_for / performance traces — the antigravity-equivalent loop.
+
+Drove the live deployed dashboard at `https://srv1575227.hstgr.cloud/`. AdGuard interstitial blocked the Hostinger shared-cert subdomain initially (false-positive phishing flag); user paused AdGuard so the loop could continue.
+
+**Two production 500s surfaced from a single page-load** — both real backend bugs the lint gate could not catch:
+
+1. `notifications.py` — three handlers annotated `user: dict = Depends(get_current_user)` and dereferenced `user["id"]`. But `get_current_user` returns the JWT subject as a `str` (see `backend/app/auth.py:27`). Every `GET /api/notifications`, `POST /api/notifications/{id}/read`, and `POST /api/notifications/read-all` 500'd on the first line. Polling every 30s. Silent because TanStack Query retried and dropped.
+
+2. `overview.py` — both `/daily-activity` and the new `/consolidated` aggregator selected `DATE(executed_at)` from the `queue` table. No such column exists; the queue schema has `scheduled_at` and `sent_at`. Rewrote to `COALESCE(sent_at, scheduled_at)`. Daily activity panel has been showing "No activity data" since the redesign deployed because of this.
+
+`activity.py` also had the same `user: dict` annotation mismatch — fixed to `user_id: str` (variable was never indexed there, so it was a type lie not a runtime bug).
+
+Commit `2a6cd8b`. CI green across all four jobs (lint / test / build / deploy). Reloaded the live dashboard via chrome-devtools-mcp and verified every dashboard request now returns 200 (`/health`, `/approvals/count`, `/notifications`, `/overview/consolidated`, `/campaigns`).
+
+**Naming**: user named the backend canonically as **Omni API** (not "Omni Outreach API", not "the backend"). Bumped `FastAPI(title="Omni API", description=...)` in `backend/app/main.py` so `/docs` and `/openapi.json` reflect the canonical name. Commit `121801a`. New vault page `wiki/decisions/omni-api-naming.md` documents the surfaces and the don't-use list.
+
+**Anti-Slop Protocol rule 5 reinforcement**: errors are first-class citizens — but only if a real client exercises the endpoint. Static review missed both bugs because (a) FastAPI dependency types lie at runtime when the dep returns a different shape than annotated, and (b) `ruff` doesn't reach inside SQL strings. The chrome-devtools loop is now the canonical post-deploy verification step.
+
+**Open follow-ups**:
+- DNS for `omnioutreach.space` (still NXDOMAIN; alias-only in nginx).
+- Add a small backend smoke test that exercises each authenticated GET with a real JWT against a real schema — would have caught both today's bugs at CI time.
+- Consider whether `overview.py` should grow integration tests now that it owns the consolidated aggregator.
