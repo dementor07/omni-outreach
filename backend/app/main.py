@@ -63,7 +63,12 @@ async def lifespan(app: FastAPI):
     await close_redis()
 
 
-app = FastAPI(title="Omni Outreach", version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="Omni API",
+    description="Backend for Omni — multi-channel outreach control plane.",
+    version="0.1.0",
+    lifespan=lifespan,
+)
 
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
