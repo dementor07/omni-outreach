@@ -941,3 +941,31 @@ First substantive port from the design bundle. User confirmed direction: full po
 - Rule 5 (errors first-class): query errors surface per-panel via the existing TanStack Query loading/error states. Future commits will likely add explicit error UI per panel.
 
 **Subsequent screens to port from the bundle** (will land as separate commits using the same primitives): Queue (filter bar + retry actions), Inbox (thread list + drawer), Leads (filterable table + drawer), Templates (card grid), Blacklist (filter + add-entry modal), Analytics (per-campaign funnels), Activity (event stream). The bundle has each one fully designed in `screens.jsx` / `screens2.jsx`.
+
+
+## 2026-05-15 — Premium UI migration follow-through: build unblocked + consolidated endpoint shipped
+
+Returning after a break. The git tree had 4 unreleased commits since last session (`3a37f8c` → `9d9601a` → `2a44b2f` → `213c868`) plus 6 dirty files. The premium-UI migration from those commits had introduced TS call sites that the primitives didn't support yet — 39 TypeScript errors across 9 files. Dashboard was also mid-rewrite to use a not-yet-shipped consolidated endpoint, with the inline interfaces accidentally dropped.
+
+Today's three commits cleaned all of that up:
+
+**`ae60f26` — feat(overview): consolidated dashboard aggregator endpoint**
+- New `GET /overview/consolidated` returns `{ stats, daily_activity, response_rates, queue_stats }` in one round trip. Four parallel queries → one.
+- `Dashboard.tsx` rewired to the new endpoint. The four original endpoints (`/stats`, `/daily-activity`, `/response-rates`, `/queue/stats`) stay live for other consumers.
+- Inline interfaces restored in Dashboard.tsx (`OverviewStats`, `ResponseRate`, `DailyRow`, `QueueStat`, `Campaign`).
+- This is the "option #3 — one big API for the dashboard" we discussed earlier in the session.
+
+**`ddd8fd0` — feat(frontend): runtime API host override + remove mock interceptor**
+- `apiBase` is now mutable. Source order: `localStorage.omni_api_base` → `VITE_API_BASE` → `/api`.
+- New `updateApiBase(newBase)` setter for the topbar and login API switchers.
+- Removed the dev-only mock interceptor that faked `/campaigns`, `/sequences/demo`, `/lead-gen/sources` etc. Confirmed no-mock stance per [[anti-slop-protocol]] rule 5: real backend or real error UI.
+- Login restored to real `POST /auth/login` (the `mock-token-for-preview` shortcut is gone).
+- Topbar + Login: API status pills now test the *draft* URL, not the active one; Save/Apply gated on a passing health check.
+- `vite.config.ts`: dev proxy now forwards `/api/*` to the live VPS (`https://srv1575227.hstgr.cloud`) instead of `localhost:8000`.
+
+**`6823068` — fix(ui): extend design primitives to match call sites**
+- `Badge.size` (`xs` | `sm` | `md`), `Button.isLoading` (spinner), `Tabs` accepts both `items`/`value` and `tabs`/`activeTab`, `ChannelIcon.size` accepts a number, `Select.disabled`, `Activity.tsx` `Badge` import added.
+- All extensions additive; no existing call site affected.
+- `npm run build` clean, `npm run lint:hooks` 0 errors, backend `ruff check` clean.
+
+**Pending vault catch-up acknowledged**: index.md "Last updated" was still 2026-04-28; should be revised next time the index is touched. Skipping that this turn — the log is now current.

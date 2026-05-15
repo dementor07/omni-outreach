@@ -69,3 +69,13 @@ The frontend implementation has devolved into "Feature Slop," characterized by m
 - Decision: hand-port each screen one commit at a time, no big-bang rewrite. The bundle is the visual reference; real router shapes (verified per [[postmortem-queue-sequence-crash-may-2026]] follow-up) are the data contract.
 - Decision: no preview/mock mode. Dashboard queries either hit the real backend or surface per-panel error/empty states. Confirmed and codified earlier today.
 - Verification: `npm run build` clean, `npm run lint:hooks` 0 errors. Visual verification gated on the in-flight VPS deploy completing (CI was red for 2 days, fixed in `5163370` and `feab4df`).
+
+### Status Update (2026-05-15) — Premium UI migration build unblocked
+
+The four premium-UI commits between `3a37f8c` and `213c868` (UI parity / Style Guide / SequentialBuilder refresh / LeadSources + JobSearch + Analytics + Activity restyle) introduced primitive call sites ahead of the primitives themselves. 39 TS errors blocked the build for ~12 hours. Fixed in commit `6823068` by extending — never breaking — the primitive surface:
+- `Badge.size`, `Button.isLoading`, `ChannelIcon.size: number`, `Select.disabled`, `Tabs` accepts `tabs`/`activeTab` aliases.
+- One missing import (`Badge` in `Activity.tsx`).
+
+Lesson recorded under [[anti-slop-protocol]]: design-tool drops can introduce call-site assumptions ahead of the primitives. Build the primitives in the same commit, or land an extension PR before the call sites. Don't ship to master with a broken `tsc -b`.
+
+Also: the consolidated dashboard aggregator (`ae60f26`) closes the "five loading states for one page" fragmentation. Single TanStack Query, atomic snapshot, fewer waterfalls. Original per-resource endpoints remain available for other consumers.
