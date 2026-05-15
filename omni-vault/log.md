@@ -995,3 +995,29 @@ Commit `2a6cd8b`. CI green across all four jobs (lint / test / build / deploy). 
 - DNS for `omnioutreach.space` (still NXDOMAIN; alias-only in nginx).
 - Add a small backend smoke test that exercises each authenticated GET with a real JWT against a real schema — would have caught both today's bugs at CI time.
 - Consider whether `overview.py` should grow integration tests now that it owns the consolidated aggregator.
+
+
+## 2026-05-15 (later x2) — rose brand + canvas/Campaigns redesign
+
+User direction: "improve the design of that goddamn campaign page and canvas. It's the biggest visual eyesore. Also switch to the rose palette of the style guide."
+
+Drove the live site via chrome-devtools-mcp to see the current state. Screenshots confirmed:
+- Campaigns list grid is fine
+- Campaigns detail header was visually anemic (cramped meta-row, no hierarchy)
+- Canvas was the eyesore: brutalist slate-900 NodeSelector, oversized slate-900 "Save Sequence" block, washed-out grid, floating MiniMap
+
+Two commits today:
+
+**`95ffbe4` — refactor(theme): switch brand palette from sky to rose**
+- `tailwind.config.ts`: brand.50→900 now maps to Tailwind's stock rose ramp (#fff1f2 → #881337).
+- `Nodes.tsx`: 12 selected-state ring occurrences across every node type now use `border-brand-500 ring-brand-500/10`. ActionNode's "Nested Architecture" chip dropped sky hardcodes for neutral slate.
+
+**`c966c64` — feat(campaigns): redesign detail header, panels, and canvas chrome**
+- Header: structured status strip (Badge → Launch/Resume-Pause segmented → divider → TZ → Simulation). Resume/Pause buttons gained explicit copy.
+- Panels: every raw-div container replaced with `<Card padding="lg">`. CardHeader-style section titles. Button primitives instead of `btn-tactile` markup.
+- Canvas: Background grid #cbd5e1 → #e2e8f0 (gap=24 size=1.4). Controls + MiniMap chrome unified (rounded-xl border bg-white + dark-mode). MiniMap nodes tinted brand-400 (#fb7185). Undo/Redo now a slim segmented control. Save Sequence is now `<Button variant="primary" size="sm" isLoading={...}>` — the prior slate-900 chunk is gone.
+- NodeSelector: full rewrite. Bordered Trigger CTA (rose primary), `text-[12px] font-medium` items with `NODE_PALETTE`-driven icon wells, 56px width to fit longer labels. No more uppercase-tracking-[0.2em] cramped headers.
+
+Vault writeback: new ADR [[wiki/decisions/canvas-rose-redesign]] documents every surface change, the anti-slop check, and the open follow-ups (channel-color hygiene in `NODE_PALETTE`, dark-mode canvas verification, control-flow node visual consolidation).
+
+Verification: `npm run build` clean, `npm run lint:hooks` 0 errors, CI watcher running on the live deploy. Visual confirmation pending the chrome-devtools-mcp screenshot after the webhook redeploy.

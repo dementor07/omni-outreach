@@ -62,6 +62,7 @@ Last updated: 2026-04-28 (webhook-based CI/CD deploy; 30 backend node types; rep
 | [[stubbed-channels-policy]] | Historical ADR for the typed-before-handler staging phase; superseded now that SMS/Webhook/Instagram/Telegram are live |
 | [[system-gaps-sprint]] | Apr 2026 20-cycle sprint closing 140+ gaps: notifications, activity log, blacklist, tracking, analytics, template library, inbox, reply classifier, CSV import, bulk actions, dark mode, campaign cloning |
 | [[omni-api-naming]] | May 2026 naming ADR: the backend FastAPI service is canonically the **Omni API**. Sets OpenAPI title, downstream-consumer conventions, and the don't-use list (no "Omni Outreach API", no `omnioutreach.space` until DNS lands) |
+| [[canvas-rose-redesign]] | May 2026: brand palette switched sky → rose; Campaign-detail header / panels / canvas chrome / NodeSelector rebuilt against Card + Button + Badge + Tabs primitives. Selection rings now `border-brand-500 ring-brand-500/10`. |
 
 ## Competitors
 
