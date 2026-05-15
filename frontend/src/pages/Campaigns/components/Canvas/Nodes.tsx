@@ -12,7 +12,7 @@ export const EventNode = ({ data, selected }: NodeProps) => {
   const cfg = NODE_PALETTE.find(p => p.type === nodeType)
   
   return (
-    <div className={`relative min-w-[200px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-rose-200'}`}>
+    <div className={`relative min-w-[200px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : 'border-rose-200'}`}>
       <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
       <div className="flex items-center gap-3">
         <div className={`flex h-8 w-8 items-center justify-center rounded-lg bg-rose-50 text-rose-500`}>
@@ -39,7 +39,7 @@ export const ActionNode = ({ data, id, selected }: NodeProps) => {
   const isEnrich = nodeType === 'action_enrich'
   
   return (
-    <div className={`relative min-w-[220px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : cfg?.border ?? 'border-slate-200'}`}>
+    <div className={`relative min-w-[220px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : cfg?.border ?? 'border-slate-200'}`}>
       <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
       
       <div className="flex items-center justify-between mb-3">
@@ -58,9 +58,9 @@ export const ActionNode = ({ data, id, selected }: NodeProps) => {
       </div>
 
       {mode === 'flow' && (
-        <div className="mt-3 flex items-center gap-1.5 rounded-lg border border-dashed border-sky-200 bg-sky-50/50 p-2">
-          <Zap size={10} className="text-sky-500" />
-          <span className="text-[9px] font-bold uppercase tracking-tight text-sky-600">Nested Architecture</span>
+        <div className="mt-3 flex items-center gap-1.5 rounded-lg border border-dashed border-slate-300 bg-slate-50/50 p-2 dark:border-slate-700 dark:bg-slate-800/50">
+          <Zap size={10} className="text-slate-500 dark:text-slate-400" />
+          <span className="text-[9px] font-bold uppercase tracking-tight text-slate-600 dark:text-slate-300">Nested Architecture</span>
         </div>
       )}
 
@@ -107,7 +107,7 @@ export const TriggerNode = ({ selected, data }: NodeProps) => {
   const scheduledCount = configs.filter(c => c.cron_schedule).length
 
   return (
-    <div className={`relative min-w-[180px] rounded-xl border-2 bg-slate-900 p-4 shadow-lg transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-slate-800'}`}>
+    <div className={`relative min-w-[180px] rounded-xl border-2 bg-slate-900 p-4 shadow-lg transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : 'border-slate-800'}`}>
       <div className="flex items-center gap-3 text-white">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/20">
           <Zap size={14} fill="currentColor" />
@@ -158,7 +158,7 @@ export const ConditionNode = ({ data, selected }: NodeProps) => {
   const cfg = NODE_PALETTE.find(p => p.type === nodeType)
 
   return (
-    <div className={`relative min-w-[200px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : cfg?.border ?? 'border-amber-200'}`}>
+    <div className={`relative min-w-[200px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : cfg?.border ?? 'border-amber-200'}`}>
       <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
       <div className="flex items-center gap-3">
         <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${cfg?.bg ?? 'bg-amber-50'} ${cfg?.color ?? 'text-amber-500'}`}>
@@ -193,7 +193,7 @@ const REPLY_INTENT_HANDLES: { id: string; label: string; color: string; dot: str
 ]
 
 export const ReplyIntentNode = ({ selected }: NodeProps) => (
-  <div className={`relative min-w-[260px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-violet-200'}`}>
+  <div className={`relative min-w-[260px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : 'border-violet-200'}`}>
     <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
     <div className="flex items-center gap-3">
       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-50 text-violet-600">
@@ -224,7 +224,7 @@ export const ReplyIntentNode = ({ selected }: NodeProps) => (
 export const HumanApprovalNode = ({ data, selected }: NodeProps) => {
   const title = (data as any)?.title || 'Awaiting human approval'
   return (
-    <div className={`relative min-w-[220px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-teal-200'}`}>
+    <div className={`relative min-w-[220px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : 'border-teal-200'}`}>
       <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
       <div className="flex items-center gap-3">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-50 text-teal-600">
@@ -250,7 +250,7 @@ export const HumanApprovalNode = ({ data, selected }: NodeProps) => {
 }
 
 export const DelayNode = ({ data, id, selected }: NodeProps<Node<{ delay_value?: number; delay_days?: number; delay_unit?: string; onChange?: (id: string, val: number) => void }>>) => (
-  <div className={`relative min-w-[160px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-slate-200'}`}>
+  <div className={`relative min-w-[160px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : 'border-slate-200'}`}>
     <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
@@ -267,7 +267,7 @@ export const DelayNode = ({ data, id, selected }: NodeProps<Node<{ delay_value?:
 )
 
 export const WaitUntilNode = ({ data, id, selected }: NodeProps<Node<{ wait_until_date?: string; wait_until_time?: string; onChange?: (id: string, field: string, val: string) => void }>>) => (
-  <div className={`relative min-w-[200px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-orange-200'}`}>
+  <div className={`relative min-w-[200px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : 'border-orange-200'}`}>
     <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
     <div className="flex items-center gap-2 mb-2">
       <Clock size={14} className="text-orange-500" />
@@ -293,7 +293,7 @@ export const SplitNode = ({ data, selected }: NodeProps) => {
   const falseRate = Math.round((fA / (fA + fB)) * 100)
 
   return (
-    <div className={`relative min-w-[200px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-purple-200'}`}>
+    <div className={`relative min-w-[200px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : 'border-purple-200'}`}>
       <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
       <div className="flex items-center gap-3">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-50 text-purple-600">
@@ -321,7 +321,7 @@ export const SplitNode = ({ data, selected }: NodeProps) => {
 }
 
 export const GoalNode = ({ data, selected }: NodeProps) => (
-  <div className={`relative min-w-[180px] rounded-xl border-2 bg-emerald-50 p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-emerald-200'}`}>
+  <div className={`relative min-w-[180px] rounded-xl border-2 bg-emerald-50 p-4 shadow-sm transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : 'border-emerald-200'}`}>
     <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
     <div className="flex items-center gap-2 mb-1">
       <Zap size={14} className="text-emerald-600" />
@@ -333,7 +333,7 @@ export const GoalNode = ({ data, selected }: NodeProps) => (
 )
 
 export const EndNode = ({ selected }: NodeProps) => (
-  <div className={`relative min-w-[160px] rounded-xl border-2 bg-rose-50 p-4 text-center shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-rose-200'}`}>
+  <div className={`relative min-w-[160px] rounded-xl border-2 bg-rose-50 p-4 text-center shadow-sm transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : 'border-rose-200'}`}>
     <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
     <p className="text-[10px] font-bold uppercase tracking-widest text-rose-500">Terminal</p>
     <p className="text-sm font-extrabold tracking-tight text-rose-700">End Sequence</p>
@@ -341,7 +341,7 @@ export const EndNode = ({ selected }: NodeProps) => (
 )
 
 export const ParallelForkNode = ({ selected }: NodeProps) => (
-  <div className={`relative min-w-[260px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-sky-500 ring-4 ring-sky-500/10' : 'border-amber-200'}`}>
+  <div className={`relative min-w-[260px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : 'border-amber-200'}`}>
     <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
     <div className="flex items-center gap-3">
       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
