@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Zap, AlertCircle, ChevronDown } from 'lucide-react'
+import { Zap, AlertCircle, ChevronDown, RefreshCw } from 'lucide-react'
 import { clsx } from 'clsx'
-import { api, apiBase } from '../api/client'
+import { api, apiBase, updateApiBase } from '../api/client'
 import Button from '../components/Button'
 import Card from '../components/Card'
 
@@ -20,17 +20,24 @@ export default function Login() {
   // API health check
   const [apiOk, setApiOk] = useState<boolean | null>(null)
   const [checking, setChecking] = useState(false)
+  const [draftBase, setDraftBase] = useState(apiBase)
 
   async function checkApi() {
     setChecking(true)
     try {
-      const res = await fetch(`${apiBase}/health`)
+      const res = await fetch(`${draftBase.replace(/\/$/, '')}/health`)
       setApiOk(res.ok)
     } catch {
       setApiOk(false)
     } finally {
       setChecking(false)
     }
+  }
+
+  function handleSave() {
+    updateApiBase(draftBase)
+    setShowApi(false)
+    window.location.reload()
   }
 
   useEffect(() => { checkApi() }, [])
@@ -40,27 +47,22 @@ export default function Login() {
     setSubmitting(true)
     setErr(null)
     try {
-      // Bypassing real login for visual inspection as requested
-      localStorage.setItem('token', 'mock-token-for-preview')
+      const res = await api.post('/auth/login', { email, password })
+      localStorage.setItem('token', res.data.access_token)
       navigate(from, { replace: true })
-      return
-
-      // const res = await api.post('/auth/login', { email, password })
-      // localStorage.setItem('token', res.data.access_token)
-      // navigate(from, { replace: true })
-    } catch (e2: unknown) {
-      const msg = e2 instanceof Error ? e2.message : 'Login failed'
+    } catch (e2: any) {
+      const msg = e2.response?.data?.detail || e2.message || 'Login failed'
       setErr(
         msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('Network Error')
-          ? "Could not reach the backend. Check the API endpoint below — the dashboard must be served from an origin allowed by your backend's CORS."
-          : msg.includes('401') ? 'Invalid email or password' : msg,
+          ? "Could not reach the backend. Check the API host below."
+          : e2.response?.status === 401 ? 'Invalid email or password' : msg,
       )
     } finally {
       setSubmitting(false)
     }
   }
 
-  const apiLabel = checking ? 'Checking…' : apiOk ? 'Backend reachable' : 'Backend unreachable'
+  const apiLabel = checking ? 'Checking…' : apiOk ? 'API connected' : apiOk === false ? 'API offline' : 'No connection'
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-8 dark:bg-[rgb(2,6,23)]">
@@ -118,15 +120,38 @@ export default function Login() {
         </Card>
 
         {/* API status */}
-        <button
-          onClick={() => setShowApi((v) => !v)}
-          className="mt-4 inline-flex w-full items-center justify-center gap-2 text-[12px] text-slate-500 transition-colors hover:text-slate-700"
-        >
-          <span className={clsx('h-2 w-2 rounded-full', apiOk ? 'bg-emerald-500' : 'bg-rose-500')} />
-          <span>{apiLabel}</span>
-          <span className="font-mono text-slate-400">{apiBase}</span>
-          <ChevronDown size={11} className={clsx('transition-transform', showApi && 'rotate-180')} />
-        </button>
+        <div className="mt-4">
+          <button
+            onClick={() => setShowApi((v) => !v)}
+            className="inline-flex w-full items-center justify-center gap-2 text-[12px] text-slate-500 transition-colors hover:text-slate-700"
+          >
+            <span className={clsx('h-2 w-2 rounded-full', apiOk ? 'bg-emerald-500' : 'bg-rose-500')} />
+            <span>{apiLabel}</span>
+            <span className="font-mono text-slate-400">{apiBase}</span>
+            <ChevronDown size={11} className={clsx('transition-transform', showApi && 'rotate-180')} />
+          </button>
+          
+          {showApi && (
+            <div className="mt-3 space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-lg dark:border-slate-800 dark:bg-slate-900">
+              <div>
+                <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-slate-400">API Host</label>
+                <input
+                  type="text"
+                  value={draftBase}
+                  onChange={(e) => setDraftBase(e.target.value)}
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-xs text-slate-700 outline-none focus:border-brand-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                 <span className="text-[11px] text-slate-500">{apiOk ? 'Healthy ✓' : 'Checking…'}</span>
+                 <div className="flex gap-2">
+                   <Button size="xs" variant="ghost" onClick={checkApi} icon={RefreshCw}>Test</Button>
+                   <Button size="xs" variant="primary" onClick={handleSave} disabled={!apiOk}>Apply</Button>
+                 </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

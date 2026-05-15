@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { LayoutDashboard, Moon, Sun, Search, Command, ChevronDown, Settings, LogOut, RefreshCw } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useTheme } from '../hooks/useTheme'
-import { apiBase } from '../api/client'
+import { apiBase, updateApiBase } from '../api/client'
 import NotificationCenter from './NotificationCenter'
 import Button from './Button'
 import Avatar from './Avatar'
@@ -48,13 +48,21 @@ export default function Topbar({ onToggleSidebar }: TopbarProps) {
   async function checkApi() {
     setChecking(true)
     try {
-      const res = await fetch(`${apiBase}/health`)
+      // Test the DRAFT base, not the current global base
+      const res = await fetch(`${draftBase.replace(/\/$/, '')}/health`)
       setApiOk(res.ok)
     } catch {
       setApiOk(false)
     } finally {
       setChecking(false)
     }
+  }
+
+  function handleSave() {
+    updateApiBase(draftBase)
+    setShowApi(false)
+    // Reload to ensure all queries pick up the new base URL
+    window.location.reload()
   }
 
   useEffect(() => { checkApi() }, [])
@@ -130,6 +138,7 @@ export default function Topbar({ onToggleSidebar }: TopbarProps) {
                 </span>
                 <div className="flex items-center gap-1.5">
                   <Button size="sm" variant="ghost" onClick={checkApi} icon={RefreshCw}>Test</Button>
+                  <Button size="sm" variant="primary" onClick={handleSave} disabled={!apiOk}>Save</Button>
                 </div>
               </div>
             </div>
