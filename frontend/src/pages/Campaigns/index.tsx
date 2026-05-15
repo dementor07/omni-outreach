@@ -222,8 +222,8 @@ export default function Campaigns() {
         title={campaignQuery.data?.name || 'Campaign detail'}
         eyebrow="Campaigns"
         meta={
-          <div className="flex items-center gap-3">
-            <Badge label={campaignQuery.data?.status || 'draft'} asStatus />
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge label={campaignQuery.data?.status || 'draft'} asStatus dot />
             {campaignQuery.data?.status === 'draft' ? (
               <Button
                 variant="primary"
@@ -234,33 +234,51 @@ export default function Campaigns() {
                 Launch
               </Button>
             ) : (
-              <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 shadow-inner dark:border-slate-800 dark:bg-slate-900">
+              <div className="flex h-7 rounded-md border border-slate-200 bg-white p-0.5 dark:border-slate-700 dark:bg-slate-900">
                 <button
+                  type="button"
                   onClick={() => updateCampaign.mutate({ id: id!, payload: { status: 'active' } })}
-                  title="Resume Campaign"
-                  className={`rounded-md p-1 transition-all ${campaignQuery.data?.status === 'active' ? 'bg-white text-emerald-600 shadow-sm dark:bg-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
+                  title="Resume campaign"
+                  className={`flex items-center gap-1 rounded px-2 text-[11px] font-semibold transition-colors ${
+                    campaignQuery.data?.status === 'active'
+                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                      : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+                  }`}
                 >
-                  <Play size={12} fill="currentColor" />
+                  <Play size={11} fill="currentColor" /> Resume
                 </button>
                 <button
+                  type="button"
                   onClick={() => updateCampaign.mutate({ id: id!, payload: { status: 'paused' } })}
-                  title="Pause Campaign"
-                  className={`rounded-md p-1 transition-all ${campaignQuery.data?.status === 'paused' ? 'bg-white text-amber-600 shadow-sm dark:bg-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
+                  title="Pause campaign"
+                  className={`flex items-center gap-1 rounded px-2 text-[11px] font-semibold transition-colors ${
+                    campaignQuery.data?.status === 'paused'
+                      ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                      : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+                  }`}
                 >
-                  <Pause size={12} fill="currentColor" />
+                  <Pause size={11} fill="currentColor" /> Pause
                 </button>
               </div>
             )}
-            <span className="text-slate-300 text-xs dark:text-slate-700">|</span>
-            <span className="text-xs text-slate-500">{campaignQuery.data?.timezone}</span>
-            {campaignQuery.data?.simulation_mode && <Badge label="Simulation" variant="warning" />}
+            <span className="h-3 w-px bg-slate-200 dark:bg-slate-700" />
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              <span className="text-[10px] uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">TZ</span>
+              {campaignQuery.data?.timezone}
+            </span>
+            {campaignQuery.data?.simulation_mode && (
+              <>
+                <span className="h-3 w-px bg-slate-200 dark:bg-slate-700" />
+                <Badge label="Simulation" variant="warning" dot />
+              </>
+            )}
           </div>
         }
         actions={
           <div className="flex items-center gap-2">
             <Button
               variant="secondary"
-              size="md"
+              size="sm"
               icon={Copy}
               onClick={() => navigate(`/campaigns/${id}/clone`)}
             >
@@ -268,7 +286,7 @@ export default function Campaigns() {
             </Button>
             <Button
               variant="danger"
-              size="md"
+              size="sm"
               icon={Trash2}
               onClick={() => { if (window.confirm('Delete this campaign?')) { deleteCampaign.mutate(id!); navigate('/campaigns') } }}
             >
@@ -293,11 +311,17 @@ export default function Campaigns() {
       <div className="flex-1 overflow-hidden">
         <main className="relative h-full overflow-hidden">
           {activeTab === 'leads' && (
-            <div className="h-full flex flex-col rounded-2xl border border-slate-200 bg-white p-8 shadow-sm overflow-hidden">
+            <Card padding="lg" className="flex h-full flex-col overflow-hidden">
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-slate-900 uppercase tracking-tight">Leads Pipeline</h2>
-                <div className="flex gap-2">
-                  <button
+                <div>
+                  <h2 className="text-[15px] font-semibold text-slate-900 dark:text-white">Leads pipeline</h2>
+                  <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">Imported and discovered leads flowing through this campaign.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={Download}
                     onClick={async () => {
                       const { data } = await api.get(`/leads/export?campaign_id=${id}`, { responseType: 'blob' })
                       const url = window.URL.createObjectURL(new Blob([data]))
@@ -308,18 +332,18 @@ export default function Campaigns() {
                       link.click()
                       link.remove()
                     }}
-                    className="btn-tactile border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 flex items-center gap-2"
                   >
-                    <Download size={13} />
                     Export CSV
-                  </button>
-                  <button onClick={() => setImportOpen(true)} className="btn-tactile border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50">Import Leads</button>
+                  </Button>
+                  <Button size="sm" variant="primary" icon={Plus} onClick={() => setImportOpen(true)}>
+                    Import Leads
+                  </Button>
                 </div>
               </div>
               <DataTable
                 columns={[
-                  { key: 'lead', header: 'Lead Name', render: (row) => <div><p className="font-bold text-slate-900">{`${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Unknown'}</p><p className="text-xs text-slate-400">{row.company || '—'}</p></div> },
-                  { key: 'status', header: 'Status', render: (row) => <Badge label={row.status || 'active'} asStatus /> },
+                  { key: 'lead', header: 'Lead Name', render: (row) => <div><p className="font-semibold text-slate-900 dark:text-white">{`${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Unknown'}</p><p className="text-xs text-slate-400">{row.company || '—'}</p></div> },
+                  { key: 'status', header: 'Status', render: (row) => <Badge label={row.status || 'active'} asStatus dot /> },
                   { key: 'invited_at', header: 'Invited', render: (row) => formatDate(row.invited_at) },
                   { key: 'accepted_at', header: 'Accepted', render: (row) => formatDate(row.accepted_at) },
                   { key: 'replied_at', header: 'Replied', render: (row) => formatDate(row.replied_at) },
@@ -327,29 +351,32 @@ export default function Campaigns() {
                 rows={leadsQuery.data?.leads || []}
                 loading={leadsQuery.isLoading}
               />
-            </div>
+            </Card>
           )}
 
           {activeTab === 'queue' && (
-            <div className="h-full overflow-auto rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-              <h2 className="mb-6 text-lg font-semibold text-slate-900 uppercase tracking-tight">Sequence Queue</h2>
+            <Card padding="lg" className="h-full overflow-auto">
+              <div className="mb-4">
+                <h2 className="text-[15px] font-semibold text-slate-900 dark:text-white">Sequence queue</h2>
+                <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">Tasks scheduled for this campaign across every channel.</p>
+              </div>
               <DataTable
                 columns={[
                   { key: 'channel', header: 'Channel', render: (row) => <Badge label={row.channel} asChannel /> },
-                  { key: 'status', header: 'Status', render: (row) => <Badge label={row.status} asStatus /> },
+                  { key: 'status', header: 'Status', render: (row) => <Badge label={row.status} asStatus dot /> },
                   { key: 'scheduled_at', header: 'Scheduled', render: (row) => formatDate(row.scheduled_at) },
                 ]}
                 rows={queueListQuery.data || []}
                 loading={queueListQuery.isLoading}
               />
-            </div>
+            </Card>
           )}
 
           {activeTab === 'sequence' && (
-            <div className="h-full flex flex-col rounded-2xl border border-slate-200 bg-slate-50 shadow-inner overflow-hidden relative">
+            <div className="relative flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/50">
               {campaignQuery.data?.sequence_mode === 'canvas' ? (
-                <div className="flex-1 flex overflow-hidden">
-                  <div className="flex-1 relative">
+                <div className="flex flex-1 overflow-hidden">
+                  <div className="relative flex-1">
                     <ReactFlow
                       nodes={nodes}
                       edges={edges}
@@ -363,28 +390,53 @@ export default function Campaigns() {
                       connectionLineType={ConnectionLineType.Bezier}
                       fitView
                     >
-                      <Background color="#cbd5e1" gap={20} />
-                      <Controls className="!bg-white !border-slate-200 !shadow-xl !rounded-xl overflow-hidden" />
-                      <MiniMap className="!bg-white !border-slate-200 !shadow-xl !rounded-2xl" nodeStrokeWidth={3} zoomable pannable />
+                      <Background color="#e2e8f0" gap={24} size={1.4} />
+                      <Controls className="!overflow-hidden !rounded-xl !border !border-slate-200 !bg-white !shadow-md dark:!border-slate-700 dark:!bg-slate-900" />
+                      <MiniMap
+                        className="!overflow-hidden !rounded-xl !border !border-slate-200 !bg-white !shadow-md dark:!border-slate-700 dark:!bg-slate-900"
+                        nodeStrokeWidth={3}
+                        nodeColor="#fb7185"
+                        maskColor="rgba(15, 23, 42, 0.04)"
+                        zoomable
+                        pannable
+                      />
                       <NodeSelector onAdd={addNode} />
-                      
-                      <Panel position="top-right" className="flex gap-2">
-                        <div className="flex items-center gap-1 rounded-2xl border border-slate-200 bg-white/80 backdrop-blur-md p-1 shadow-xl">
-                          <button onClick={() => { const h = undo(); if (h) { setNodes(h.nodes); setEdges(h.edges); } }} disabled={!canUndo} className="p-2.5 rounded-xl hover:bg-slate-50 disabled:opacity-20 transition-all"><Undo2 size={16} /></button>
-                          <button onClick={() => { const h = redo(); if (h) { setNodes(h.nodes); setEdges(h.edges); } }} disabled={!canRedo} className="p-2.5 rounded-xl hover:bg-slate-50 disabled:opacity-20 transition-all"><Redo2 size={16} /></button>
+
+                      <Panel position="top-right" className="flex items-center gap-2">
+                        <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white/90 p-0.5 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-900/90">
+                          <button
+                            type="button"
+                            onClick={() => { const h = undo(); if (h) { setNodes(h.nodes); setEdges(h.edges); } }}
+                            disabled={!canUndo}
+                            title="Undo"
+                            className="rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900 disabled:opacity-30 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+                          >
+                            <Undo2 size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { const h = redo(); if (h) { setNodes(h.nodes); setEdges(h.edges); } }}
+                            disabled={!canRedo}
+                            title="Redo"
+                            className="rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900 disabled:opacity-30 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+                          >
+                            <Redo2 size={14} />
+                          </button>
                         </div>
-                        <button
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          icon={Save}
                           onClick={handleSaveSequence}
-                          disabled={saveGraph.isPending}
-                          className="flex items-center gap-2 rounded-2xl bg-slate-900 px-5 py-2.5 text-xs font-black uppercase tracking-widest text-white shadow-xl transition hover:bg-slate-800 disabled:opacity-50 active:scale-95"
+                          isLoading={saveGraph.isPending}
                         >
-                          <Save size={14} /> {saveGraph.isPending ? 'Saving...' : 'Save Sequence'}
-                        </button>
+                          {saveGraph.isPending ? 'Saving' : 'Save sequence'}
+                        </Button>
                       </Panel>
                     </ReactFlow>
                   </div>
                   {selectedNodeId && (
-                    <div className="w-96 bg-white border-l border-slate-200 shadow-2xl z-20">
+                    <div className="z-20 w-96 border-l border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
                       <ConfigSidebar
                         nodeId={selectedNodeId}
                         nodes={nodes}
@@ -396,28 +448,28 @@ export default function Campaigns() {
                   )}
                 </div>
               ) : (
-                <div className="flex-1 overflow-auto bg-white p-8">
-                   <SequentialBuilder 
-                     nodes={nodes} 
-                     edges={edges} 
-                     onSave={handleSaveSequence}
-                     onEditTemplate={(nodeId) => setSelectedNodeId(nodeId)}
-                   />
+                <div className="flex-1 overflow-auto bg-white p-8 dark:bg-slate-900">
+                  <SequentialBuilder
+                    nodes={nodes}
+                    edges={edges}
+                    onSave={handleSaveSequence}
+                    onEditTemplate={(nodeId) => setSelectedNodeId(nodeId)}
+                  />
                 </div>
               )}
             </div>
           )}
 
           {activeTab === 'sources' && (
-            <div className="h-full overflow-auto rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+            <Card padding="lg" className="h-full overflow-auto">
               <CampaignSourcesPanel campaignId={id!} />
-            </div>
+            </Card>
           )}
 
           {activeTab === 'settings' && (
-            <div className="h-full overflow-auto rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+            <Card padding="lg" className="h-full overflow-auto">
               <CampaignSettings campaignId={id!} />
-            </div>
+            </Card>
           )}
         </main>
       </div>
