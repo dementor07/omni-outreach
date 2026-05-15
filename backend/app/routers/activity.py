@@ -24,7 +24,7 @@ async def log_activity(action: str, detail: str = None, user_id: str = None,
 async def list_activity(
     campaign_id: str | None = None,
     limit: int = Query(default=50, le=200),
-    user: dict = Depends(get_current_user),
+    user_id: str = Depends(get_current_user),  # noqa: ARG001  reserved for future per-user scoping
 ):
     if campaign_id:
         rows = await fetch_all(

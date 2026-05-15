@@ -62,9 +62,8 @@ async def notification_stream(user_id: str = Depends(get_current_user)):
 async def list_notifications(
     unread_only: bool = False,
     limit: int = Query(default=30, le=100),
-    user: dict = Depends(get_current_user),
+    user_id: str = Depends(get_current_user),
 ):
-    user_id = str(user["id"])
     if unread_only:
         rows = await fetch_all(
             "SELECT * FROM notifications WHERE user_id=$1 AND is_read=FALSE ORDER BY created_at DESC LIMIT $2",
@@ -82,18 +81,18 @@ async def list_notifications(
 
 
 @router.post("/{notification_id}/read")
-async def mark_read(notification_id: str, user: dict = Depends(get_current_user)):
+async def mark_read(notification_id: str, user_id: str = Depends(get_current_user)):
     await execute(
         "UPDATE notifications SET is_read=TRUE WHERE id=$1 AND user_id=$2",
-        notification_id, str(user["id"]),
+        notification_id, user_id,
     )
     return {"status": "ok"}
 
 
 @router.post("/read-all")
-async def mark_all_read(user: dict = Depends(get_current_user)):
+async def mark_all_read(user_id: str = Depends(get_current_user)):
     await execute(
         "UPDATE notifications SET is_read=TRUE WHERE user_id=$1 AND is_read=FALSE",
-        str(user["id"]),
+        user_id,
     )
     return {"status": "ok"}

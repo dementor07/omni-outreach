@@ -38,12 +38,12 @@ async def daily_activity(user_id: str = Depends(get_current_user)):
     rows = await fetch_all(
         """
         SELECT
-            DATE(executed_at) AS day,
+            DATE(COALESCE(sent_at, scheduled_at)) AS day,
             status,
             COUNT(*) AS cnt
         FROM queue
-        WHERE executed_at >= CURRENT_DATE - INTERVAL '14 days'
-        GROUP BY DATE(executed_at), status
+        WHERE COALESCE(sent_at, scheduled_at) >= CURRENT_DATE - INTERVAL '14 days'
+        GROUP BY DATE(COALESCE(sent_at, scheduled_at)), status
         ORDER BY day
         """
     )
@@ -93,12 +93,12 @@ async def overview_consolidated(user_id: str = Depends(get_current_user)):
     activity_rows = await fetch_all(
         """
         SELECT
-            DATE(executed_at) AS day,
+            DATE(COALESCE(sent_at, scheduled_at)) AS day,
             status,
             COUNT(*) AS cnt
         FROM queue
-        WHERE executed_at >= CURRENT_DATE - INTERVAL '14 days'
-        GROUP BY DATE(executed_at), status
+        WHERE COALESCE(sent_at, scheduled_at) >= CURRENT_DATE - INTERVAL '14 days'
+        GROUP BY DATE(COALESCE(sent_at, scheduled_at)), status
         ORDER BY day
         """
     )
