@@ -59,15 +59,17 @@ interface SelectProps {
   children: ReactNode
   className?: string
   size?: 'sm' | 'md'
+  disabled?: boolean
 }
 
-export function Select({ value, onChange, children, className = '', size = 'md' }: SelectProps) {
+export function Select({ value, onChange, children, className = '', size = 'md', disabled }: SelectProps) {
   const h = size === 'sm' ? 'h-8 text-xs px-2.5 pr-7' : 'h-9 text-sm px-3 pr-8'
   return (
-    <div className={clsx('relative', className)}>
+    <div className={clsx('relative', className, disabled && 'opacity-60 pointer-events-none')}>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
         className={clsx(
           'appearance-none rounded-lg border border-slate-200 bg-white font-medium text-slate-700 outline-none transition-colors hover:border-slate-300 focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200',
           h,

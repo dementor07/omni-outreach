@@ -25,17 +25,30 @@ const channelTone: Record<string, { bg: string; text: string; dark: string }> = 
 
 interface ChannelIconProps {
   channel: string
-  size?: 'sm' | 'md' | 'lg'
+  /** Preset bucket ('sm' | 'md' | 'lg') OR an exact pixel size for the inner icon (the wrapper auto-sizes). */
+  size?: 'sm' | 'md' | 'lg' | number
 }
 
 export default function ChannelIcon({ channel, size = 'md' }: ChannelIconProps) {
   const meta = CHANNEL_META[channel] || CHANNEL_META.email
   const tone = channelTone[meta.tone] || channelTone.info
-  const sz = size === 'sm' ? 'h-7 w-7' : size === 'lg' ? 'h-10 w-10' : 'h-8 w-8'
-  const ic = size === 'sm' ? 12 : size === 'lg' ? 16 : 14
+  let sz: string
+  let ic: number
+  if (typeof size === 'number') {
+    ic = size
+    // Wrapper sized ~50% larger than icon to keep proportional padding
+    const wrap = Math.round(size * 1.7)
+    sz = `h-[${wrap}px] w-[${wrap}px]`
+  } else {
+    sz = size === 'sm' ? 'h-7 w-7' : size === 'lg' ? 'h-10 w-10' : 'h-8 w-8'
+    ic = size === 'sm' ? 12 : size === 'lg' ? 16 : 14
+  }
   const IconComp = meta.icon
   return (
-    <span className={clsx('inline-flex flex-shrink-0 items-center justify-center rounded-lg', sz, tone.bg, tone.text, tone.dark)}>
+    <span
+      className={clsx('inline-flex flex-shrink-0 items-center justify-center rounded-lg', sz, tone.bg, tone.text, tone.dark)}
+      style={typeof size === 'number' ? { width: Math.round(size * 1.7), height: Math.round(size * 1.7) } : undefined}
+    >
       <IconComp size={ic} />
     </span>
   )

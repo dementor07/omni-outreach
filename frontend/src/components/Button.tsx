@@ -30,9 +30,31 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   as?: ElementType
   size?: ButtonSize
   variant?: ButtonVariant
-  icon?: LucideIcon | React.ComponentType<{ size?: number }>
-  iconRight?: LucideIcon | React.ComponentType<{ size?: number }>
+  icon?: LucideIcon | React.ComponentType<{ size?: number; className?: string }>
+  iconRight?: LucideIcon | React.ComponentType<{ size?: number; className?: string }>
+  isLoading?: boolean
   children?: ReactNode
+}
+
+function Spinner({ size }: { size: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      className="animate-spin"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+      <path
+        d="M22 12a10 10 0 0 1-10 10"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
 }
 
 export default function Button({
@@ -41,24 +63,29 @@ export default function Button({
   variant = 'secondary',
   icon: IconComp,
   iconRight: IconR,
+  isLoading,
+  disabled,
   children,
   className = '',
   ...rest
 }: ButtonProps) {
   const iconSize = size === 'md' ? 15 : 13
+  const isDisabled = disabled || isLoading
   return (
     <Comp
       className={clsx(
         'inline-flex items-center justify-center rounded-lg font-semibold transition-colors active:scale-[0.98]',
         sizeClasses[size],
         variantClasses[variant],
+        isDisabled && 'opacity-60 pointer-events-none',
         className,
       )}
+      disabled={isDisabled}
       {...rest}
     >
-      {IconComp && <IconComp size={iconSize} />}
+      {isLoading ? <Spinner size={iconSize} /> : IconComp && <IconComp size={iconSize} />}
       {children}
-      {IconR && <IconR size={iconSize} />}
+      {!isLoading && IconR && <IconR size={iconSize} />}
     </Comp>
   )
 }

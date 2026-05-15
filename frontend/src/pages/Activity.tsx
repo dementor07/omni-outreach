@@ -7,6 +7,7 @@ import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import EmptyState from '../components/EmptyState'
+import Badge from '../components/Badge'
 import { FilterBar, SearchInput, Select } from '../components/FilterBar'
 import { timeAgo, buildQuery } from '../lib/format'
 

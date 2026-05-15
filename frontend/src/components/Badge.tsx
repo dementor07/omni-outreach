@@ -31,12 +31,21 @@ const dotColor: Record<string, string> = {
 
 export type BadgeVariant = keyof typeof badgeVariant
 
+export type BadgeSize = 'xs' | 'sm' | 'md'
+
+const sizeClasses: Record<BadgeSize, string> = {
+  xs: 'px-1.5 py-0 text-[10px]',
+  sm: 'px-2 py-0.5 text-[11px]',
+  md: 'px-2.5 py-0.5 text-xs',
+}
+
 interface BadgeProps {
   label: string
   variant?: BadgeVariant
   asStatus?: boolean
   asChannel?: boolean
   dot?: boolean
+  size?: BadgeSize
   icon?: React.ComponentType<{ size?: number }>
   className?: string
   children?: ReactNode
@@ -48,6 +57,7 @@ export default function Badge({
   asStatus,
   asChannel,
   dot,
+  size = 'sm',
   icon: IconComp,
   className = '',
 }: BadgeProps) {
@@ -61,7 +71,8 @@ export default function Badge({
   return (
     <span
       className={clsx(
-        'inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-medium capitalize',
+        'inline-flex items-center gap-1.5 rounded-md font-medium capitalize',
+        sizeClasses[size],
         badgeVariant[v],
         className,
       )}
