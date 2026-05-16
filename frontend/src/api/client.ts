@@ -9,8 +9,7 @@ import axios from 'axios'
 // remote backend (preview deploy, staging, ngrok tunnel) — canonical
 // override is `https://srv1575227.hstgr.cloud/api`. Never point this at
 // `omnioutreach.space`: that domain is configured as an nginx server_name
-// alias but has no DNS A record (NXDOMAIN). See
-// omni-vault/wiki/architecture/system-overview.md.
+// alias but has no DNS A record (NXDOMAIN). See omni-vault/wiki/architecture/system-overview.md.
 //
 // Trailing slash is stripped so callers can write `${apiBase}/foo` without
 // doubling. Exported so non-axios consumers (e.g. EventSource for SSE) can

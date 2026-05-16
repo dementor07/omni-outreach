@@ -33,6 +33,8 @@ def _run_deploy() -> tuple[bool, str]:
         ["git", "pull", "origin", "master"],
         ["docker", "compose", "up", "-d", "--build", "--remove-orphans"],
         ["docker", "compose", "exec", "-T", "backend", "alembic", "upgrade", "head"],
+        ["docker", "compose", "exec", "-T", "flink-jobmanager", "flink", "run", "-d", "-py", "/opt/flink/usrlib/orchestrator.py"],
+        ["docker", "image", "prune", "-f"],
     ]
     for step in steps:
         log.info("Running: %s", " ".join(step))

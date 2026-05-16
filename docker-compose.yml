@@ -10,6 +10,7 @@ services:
       - --overprovisioned
       - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
       - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --memory 1G
     ports:
       - "19092:19092"
 
@@ -126,6 +127,8 @@ services:
       - "3000:3000"
     depends_on:
       - backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   pgdata:
