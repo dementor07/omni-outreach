@@ -1,9 +1,0 @@
-{
-    "API_KEY": "YOUR_API_KEY",
-    "ACCOUNT_ID": "YOUR_ACCOUNT_ID",
-
-    "BASE_URL": "https://api24.unipile.com:15425/api/v1",
-
-    "INVITATION_LIMIT": 30,
-    "FOLLOWUP_DAYS": 3
-}

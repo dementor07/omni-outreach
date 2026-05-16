@@ -1,1 +1,0 @@
-Hi {first_name}, I saw your product on Product Hunt — looks really interesting!

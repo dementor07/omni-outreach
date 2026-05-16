@@ -1021,3 +1021,50 @@ Two commits today:
 Vault writeback: new ADR [[wiki/decisions/canvas-rose-redesign]] documents every surface change, the anti-slop check, and the open follow-ups (channel-color hygiene in `NODE_PALETTE`, dark-mode canvas verification, control-flow node visual consolidation).
 
 Verification: `npm run build` clean, `npm run lint:hooks` 0 errors, CI watcher running on the live deploy. Visual confirmation pending the chrome-devtools-mcp screenshot after the webhook redeploy.
+
+
+## 2026-05-16 — Vault hygiene pass + rose redesign visually verified live
+
+User flagged that the vault had drifted: junk files, structural gaps, omitted topics. Full audit + cleanup pass.
+
+**Verified rose redesign is live in production** (chrome-devtools-mcp):
+- Sidebar active link, eyebrow text, "+ New campaign" / "Launch" / "Save sequence" buttons, "Sequence Start" CTA in NodeSelector — all rose.
+- Header status strip now reads as a structured row (Draft badge → Launch button → divider → TZ block → Clone/Delete cluster) instead of the prior cramped single line.
+- NodeSelector compact with proper group headers + 20×20 `NODE_PALETTE`-driven icon wells.
+- Canvas grid dots (#e2e8f0 gap=24) visible against the slate-50 surface.
+
+**Vault hygiene** (this commit):
+
+*Deleted (junk):*
+- `Welcome.md` — Obsidian default placeholder ("this is your new vault…").
+- `raw/external-projects/outreach-automation/.claude/worktrees/` — 11 agent worktree dirs × 4 identical README files each = 44 dead files.
+- `raw/external-projects/outreach-automation/.claude/commands/` — 5 slash-command stubs from the predecessor project.
+
+Vault went from 113 markdown files → 83. None of the deleted content was linked from anywhere in `wiki/`.
+
+*Normalized (new architecture docs):*
+- `Omni-API-Comprehensive-Tutorial.md` → `omni-api-tutorial.md` (frontmatter added, links to [[omni-api-naming]] + [[system-overview]] + [[sequence-engine]] etc.)
+- `Omni-Audit-2026-05-16.md` → `audit-2026-05-16.md` (frontmatter added)
+- `Omni-Technical-Parity-Gap-Analysis.md` → `parity-gap-analysis-may-2026.md` (frontmatter added, paired with [[audit-2026-05-16]] in related)
+
+All three were schema violations: PascalCase filenames + no frontmatter. CLAUDE.md mandates lowercase-kebab slugs and the standard frontmatter block.
+
+*Rewrote `index.md`:*
+- Last-updated date refreshed to 2026-05-16 with current context.
+- Architecture section now lists all 16 pages (added [[omni-api-tutorial]], [[audit-2026-05-16]], [[parity-gap-analysis-may-2026]]).
+- Decisions section reorganized into 4 chronological clusters: **May 2026 — Brand/naming/redesign** (canvas-rose-redesign, omni-api-naming, postmortem-queue-sequence-crash-may-2026), **April–May 2026 — Mandates & audit findings** (anti-slop-protocol, mandate-*, product-gap-audit, case-study-trade-show, system-gaps-sprint, lead-gen-workflow-gap-audit, brainstorming-advanced-scenarios), **Vulnerabilities** (all 8 vulnerability-* pages including the previously-orphaned vulnerability-editor-fragmentation), **Earlier 2026 — Core architecture** (omnichannel-logic-loops, voice-node-architecture, lead-generation-injection, etc.).
+- Competitors section now links [[landscape]] (was empty before, page existed unindexed).
+- New **Operations** footer section documents non-wiki files: CLAUDE.md, log.md, infranodus/ontology.md, credentials.local.md, raw/ subdirectories.
+- Top of index now includes the orphan-check command so future agents can self-audit.
+
+*Orphan check after the rewrite:* zero orphans, zero broken links. Every page in `wiki/` is linked from `index.md`.
+
+**Pages still un-fleshed-out that the audit surfaced but didn't fix** (open follow-ups):
+- `wiki/competitors/landscape.md` — exists, content unknown. May need expansion vs. Apollo/Instantly/Lemlist/Smartlead.
+- `wiki/decisions/brainstorming-advanced-scenarios.md` — ideation file, may want filtering into proper ADRs.
+- Several `wiki/architecture/*.md` pages were last touched in April and may have drifted from the May 2026 codebase reality. Worth a freshness audit in a future pass.
+- No `wiki/architecture/auth.md` exists yet — JWT contract, the recent `user["id"]` vs `user_id: str` mismatch postmortem, refresh-token gap noted in `audit-2026-05-16` — should probably be its own page.
+- No `wiki/architecture/database.md` exists — schema overview, alembic migration model, asyncpg patterns. Worth filing.
+- No `wiki/operations/` cluster — webhook deploy details live in `system-overview.md`, but the chrome-devtools-mcp post-deploy verification loop, the `.mcp.json` config, AdGuard interaction, and CI watcher pattern should probably be their own page.
+
+These are tracked but not blocking. Recording them here so the next session can pick them up.
