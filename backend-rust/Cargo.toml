@@ -19,7 +19,7 @@ hyper = "0.14"
 hyper-proxy = "0.9"
 
 # Email
-lettre = { version = "0.10", features = ["tokio-rustls-tls", "smtp-transport", "builder"] }
+lettre = { version = "0.10", features = ["tokio1-rustls-tls", "smtp-transport", "builder"] }
 
 # Messaging
 rdkafka = { version = "0.36", features = ["cmake-build"] }
