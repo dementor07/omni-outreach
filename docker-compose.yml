@@ -64,7 +64,8 @@ services:
   # --- The Brain (Python Control Plane) ---
   backend:
     build:
-      context: ./backend
+      context: .
+      dockerfile: ./backend/Dockerfile
     environment:
       DATABASE_URL: postgresql://postgres:password@postgres:5432/postgres
       REDIS_URL: redis://dragonfly:6379
@@ -81,7 +82,8 @@ services:
   # --- SOTA Bridge Workers ---
   sync-worker:
     build:
-      context: ./backend
+      context: .
+      dockerfile: ./backend/Dockerfile
     command: python -m app.services.stream_sync
     environment:
       DATABASE_URL: postgresql://postgres:password@postgres:5432/postgres
@@ -92,7 +94,8 @@ services:
 
   transition-worker:
     build:
-      context: ./backend
+      context: .
+      dockerfile: ./backend/Dockerfile
     command: python -m app.services.transition_worker
     environment:
       DATABASE_URL: postgresql://postgres:password@postgres:5432/postgres

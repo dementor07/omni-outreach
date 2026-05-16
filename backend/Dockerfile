@@ -10,13 +10,13 @@ RUN addgroup --system app && adduser --system --ingroup app app
 WORKDIR /app
 
 # Deps layer (cached unless requirements change)
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # App code
-COPY alembic.ini .
-COPY alembic ./alembic
-COPY app ./app
+COPY backend/alembic.ini .
+COPY backend/alembic ./alembic
+COPY backend/app ./app
 COPY scripts ./scripts
 
 RUN chown -R app:app /app
