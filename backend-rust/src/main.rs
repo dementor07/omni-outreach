@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match consumer.recv().await {
             Err(e) => error!("Kafka error: {}", e),
             Ok(borrowed_message) => {
-                let payload = match borrowed_message.payload_view::<str>() {
+                let payload = match borrowed_message.payload::<str>() {
                     None => continue,
                     Some(Ok(s)) => s,
                     Some(Err(e)) => {
