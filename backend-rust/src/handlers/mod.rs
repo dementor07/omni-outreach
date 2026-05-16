@@ -3,7 +3,7 @@ pub mod linkedin;
 
 use crate::models::{ActionCommand, ExecutionResult, ChannelType};
 
-pub async fn dispatch(command: ActionCommand) -> ExecutionResult {
+pub async fn dispatch(command: &ActionCommand) -> ExecutionResult {
     match command.channel {
         ChannelType::Email => email::handle_email(command).await,
         ChannelType::LinkedInInvite => linkedin::handle_linkedin_invite(command).await,

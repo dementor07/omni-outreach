@@ -61,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 info!("Executing command {} for channel {:?}", command_id, command.channel);
 
                 // 4. DISPATCH TO SOTA HANDLERS
-                let mut result = handlers::dispatch(command.clone()).await;
+                let mut result = handlers::dispatch(&command).await;
                 result.metadata = command.metadata.clone(); // Mirror context for Flink
 
                 // 5. Report Result back to the stream

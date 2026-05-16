@@ -2,7 +2,7 @@ use crate::models::{ActionCommand, ExecutionResult, TaskStatus};
 use crate::proxy::ProxyManager;
 use tracing::{info, error};
 
-pub async fn handle_linkedin_invite(command: ActionCommand) -> ExecutionResult {
+pub async fn handle_linkedin_invite(command: &ActionCommand) -> ExecutionResult {
     let payload = &command.payload;
     let unipile_id = payload["unipile_id"].as_str().unwrap_or("");
     let provider_id = payload["provider_id"].as_str().unwrap_or("");

@@ -3,7 +3,7 @@ use lettre::transport::smtp::authentication::Credentials;
 use lettre::{Message, SmtpTransport, Transport};
 use tracing::{info, error};
 
-pub async fn handle_email(command: ActionCommand) -> ExecutionResult {
+pub async fn handle_email(command: &ActionCommand) -> ExecutionResult {
     let payload = &command.payload;
     
     // Extract SMTP settings from payload
