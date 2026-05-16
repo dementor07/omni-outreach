@@ -19,13 +19,13 @@ hyper = "0.14"
 hyper-proxy = "0.9"
 
 # Email
-lettre = { version = "0.10.4", features = ["tokio1-rustls-tls", "smtp-transport", "builder"] }
+lettre = { version = "0.10.4", features = ["tokio1-native-tls", "smtp-transport", "builder"] }
 
 # Messaging
 rdkafka = { version = "0.33" }
 
 # Database (for state recovery)
-sqlx = { version = "0.7.1", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json"] }
+sqlx = { version = "0.7.1", features = ["runtime-tokio-native-tls", "postgres", "chrono", "uuid", "json"] }
 
 # Logging
 tracing = "0.1"
