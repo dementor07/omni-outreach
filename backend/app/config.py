@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     apify_api_key: str = ""
     serper_api_key: str = ""
 
+    # SOTA Event Bus
+    kafka_brokers: str = "redpanda:9092"
+    deploy_webhook_secret: str = ""
+
     # Optional lead gen integrations
     apollo_api_key: str = ""
     hunter_api_key: str = ""

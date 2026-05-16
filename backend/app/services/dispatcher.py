@@ -12,6 +12,8 @@ from zoneinfo import ZoneInfo
 from app.config import settings
 from app.db import execute, fetch_all, fetch_one
 from app.services import email, linkedin, renderer, sequencer, voice
+from app.services.bus import bus
+from app.core.events import ActionCommand, LeadContext, ChannelType, ExecutionResult, TaskStatus
 
 log = logging.getLogger(__name__)
 
@@ -96,507 +98,444 @@ async def _fail_task(queue_id: str, reason: str, current_retry: int) -> None:
         )
 
 
+# ── SOTA Registry ─────────────────────────────────────────────────────────────
+
+class BaseHandler:
+    """Blueprint for all outreach execution."""
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        raise NotImplementedError("Subclasses must implement execute")
+
+    async def emit_result(self, task_id: str, status: TaskStatus, error: str = None):
+        """Emit result to the event bus for Flink/Analytics."""
+        # TODO: Implement bus.publish_result()
+        pass
+
+class HandlerRegistry:
+    def __init__(self):
+        self._handlers: dict[str, BaseHandler] = {}
+
+    def register(self, channel: str, handler: BaseHandler):
+        self._handlers[channel] = handler
+
+    async def handle(self, task: dict, lead: dict, campaign: dict) -> bool:
+        channel = task["channel"]
+        handler = self._handlers.get(channel)
+        if not handler:
+            raise RuntimeError(f"No handler registered for channel: {channel}")
+        return await handler.execute(task, lead, campaign)
+
+registry = HandlerRegistry()
+
+
 # ── Channel handlers ──────────────────────────────────────────────────────────
 
-async def _handle_linkedin_invite(task: dict, lead: dict, campaign: dict) -> None:
-    account = await fetch_one(
-        "SELECT * FROM linkedin_accounts WHERE id=$1", lead["linkedin_account_id"]
-    )
-    if not account:
-        raise RuntimeError("LinkedIn account not found")
-
-    # Daily cap check
-    tz = campaign.get("timezone") or "UTC"
-    count_row = await fetch_one(
-        """
-        SELECT COUNT(*) AS cnt FROM queue q
-        WHERE q.channel='linkedin_invite'
-          AND q.status='sent'
-          AND q.sent_at >= DATE_TRUNC('day', NOW() AT TIME ZONE $1)
-          AND q.payload->>'linkedin_account_id' = $2
-        """,
-        tz, str(account["id"]),
-    )
-    daily_count = count_row["cnt"] if count_row else 0
-    if daily_count >= account["daily_invite_cap"]:
-        await execute(
-            "UPDATE queue SET status='queued', locked_by=NULL, locked_at=NULL WHERE id=$1",
-            task["id"],
+class LinkedInInviteHandler(BaseHandler):
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        account = await fetch_one(
+            "SELECT * FROM linkedin_accounts WHERE id=$1", lead["linkedin_account_id"]
         )
-        return
+        if not account:
+            raise RuntimeError("LinkedIn account not found")
 
-    provider_id = task.get("payload", {}).get("provider_id")
-    if not provider_id:
-        profile = await linkedin.get_profile(_public_id(lead["linkedin_url"]), account["unipile_id"])
-        provider_id = profile.get("provider_id") or profile.get("id")
+        # Daily cap check
+        tz = campaign.get("timezone") or "UTC"
+        count_row = await fetch_one(
+            """
+            SELECT COUNT(*) AS cnt FROM queue q
+            WHERE q.channel='linkedin_invite'
+              AND q.status='sent'
+              AND q.sent_at >= DATE_TRUNC('day', NOW() AT TIME ZONE $1)
+              AND q.payload->>'linkedin_account_id' = $2
+            """,
+            tz, str(account["id"]),
+        )
+        daily_count = count_row["cnt"] if count_row else 0
+        if daily_count >= account["daily_invite_cap"]:
+            await execute(
+                "UPDATE queue SET status='queued', locked_by=NULL, locked_at=NULL WHERE id=$1",
+                task["id"],
+            )
+            return False
+
+        provider_id = task.get("payload", {}).get("provider_id")
         if not provider_id:
-            raise RuntimeError("Could not resolve provider_id from LinkedIn profile")
+            profile = await linkedin.get_profile(_public_id(lead["linkedin_url"]), account["unipile_id"])
+            provider_id = profile.get("provider_id") or profile.get("id")
+            if not provider_id:
+                raise RuntimeError("Could not resolve provider_id from LinkedIn profile")
 
-    await linkedin.send_invite(account["unipile_id"], provider_id)
-    await execute("UPDATE leads SET invited_at=NOW() WHERE id=$1", lead["id"])
-    await execute(
-        "UPDATE queue SET payload=payload || $1 WHERE id=$2",
-        {"provider_id": provider_id}, task["id"],
-    )
-    await _log_event(lead["id"], lead["campaign_id"], "invite_sent", "linkedin_invite")
-    await _mark_sent(task["id"])
+        await linkedin.send_invite(account["unipile_id"], provider_id)
+        await execute("UPDATE leads SET invited_at=NOW() WHERE id=$1", lead["id"])
+        await execute(
+            "UPDATE queue SET payload=payload || $1 WHERE id=$2",
+            {"provider_id": provider_id}, task["id"],
+        )
+        await _log_event(lead["id"], lead["campaign_id"], "invite_sent", "linkedin_invite")
+        await _mark_sent(task["id"])
+        return True
+
+registry.register("linkedin_invite", LinkedInInviteHandler())
+
+class LinkedInDMHandler(BaseHandler):
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        account = await fetch_one("SELECT * FROM linkedin_accounts WHERE id=$1", lead["linkedin_account_id"])
+        if not account: raise RuntimeError("LinkedIn account not found")
+
+        template = await fetch_one("SELECT body FROM templates WHERE node_id=$1 LIMIT 1", task["node_id"])
+        if not template: raise RuntimeError("No template found for node")
+
+        message = renderer.render(template["body"], lead)
+
+        if not lead.get("chat_id"):
+            payload = task.get("payload", {})
+            provider_id = payload.get("provider_id")
+            if not provider_id:
+                profile = await linkedin.get_profile(_public_id(lead["linkedin_url"]), account["unipile_id"])
+                provider_id = profile.get("provider_id") or profile.get("id")
+            data = await linkedin.start_chat_with_message(account["unipile_id"], provider_id, message)
+            await execute("UPDATE leads SET chat_id=$1 WHERE id=$2", data["chat_id"], lead["id"])
+        else:
+            await linkedin.send_message(lead["chat_id"], message, account["unipile_id"])
+
+        await _log_event(lead["id"], lead["campaign_id"], "dm_sent", "linkedin_dm")
+        await _mark_sent(task["id"])
+        return True
+
+registry.register("linkedin_dm", LinkedInDMHandler())
 
 
-async def _handle_linkedin_dm(task: dict, lead: dict, campaign: dict) -> None:
-    account = await fetch_one("SELECT * FROM linkedin_accounts WHERE id=$1", lead["linkedin_account_id"])
-    if not account: raise RuntimeError("LinkedIn account not found")
+class LinkedInProfileViewHandler(BaseHandler):
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        account = await fetch_one("SELECT * FROM linkedin_accounts WHERE id=$1", lead["linkedin_account_id"])
+        if not account: raise RuntimeError("LinkedIn account not found")
 
-    template = await fetch_one("SELECT body FROM templates WHERE node_id=$1 LIMIT 1", task["node_id"])
-    if not template: raise RuntimeError("No template found for node")
+        # Fetching the profile via Unipile actually triggers a profile view on LinkedIn
+        profile = await linkedin.get_profile(_public_id(lead["linkedin_url"]), account["unipile_id"])
+        distance = profile.get("network_distance")
 
-    message = renderer.render(template["body"], lead)
+        await execute("UPDATE leads SET profile_viewed_at=NOW(), linkedin_distance=$1 WHERE id=$2", distance, lead["id"])
+        await _log_event(lead["id"], lead["campaign_id"], "profile_viewed", "linkedin_profile_view", {"distance": distance})
+        await _mark_sent(task["id"])
+        return True
 
-    if not lead.get("chat_id"):
+registry.register("linkedin_profile_view", LinkedInProfileViewHandler())
+
+class LinkedInInMailHandler(BaseHandler):
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        account = await fetch_one("SELECT * FROM linkedin_accounts WHERE id=$1", lead["linkedin_account_id"])
+        if not account: raise RuntimeError("LinkedIn account not found")
+
+        template = await fetch_one("SELECT subject, body FROM templates WHERE node_id=$1 LIMIT 1", task["node_id"])
+        if not template: raise RuntimeError("No template found for node")
+
+        renderer.render(template["body"], lead)
+        subject = renderer.render(template["subject"] or "", lead)
+
         payload = task.get("payload", {})
         provider_id = payload.get("provider_id")
         if not provider_id:
             profile = await linkedin.get_profile(_public_id(lead["linkedin_url"]), account["unipile_id"])
             provider_id = profile.get("provider_id") or profile.get("id")
-        data = await linkedin.start_chat_with_message(account["unipile_id"], provider_id, message)
-        await execute("UPDATE leads SET chat_id=$1 WHERE id=$2", data["chat_id"], lead["id"])
-    else:
-        await linkedin.send_message(lead["chat_id"], message, account["unipile_id"])
 
-    await _log_event(lead["id"], lead["campaign_id"], "dm_sent", "linkedin_dm")
-    await _mark_sent(task["id"])
-    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
+        log.info(f"[dispatcher] Sending InMail to {provider_id} with subject {subject}")
 
-
-async def _handle_linkedin_profile_view(task: dict, lead: dict, campaign: dict) -> None:
-    account = await fetch_one("SELECT * FROM linkedin_accounts WHERE id=$1", lead["linkedin_account_id"])
-    if not account: raise RuntimeError("LinkedIn account not found")
-
-    # Fetching the profile via Unipile actually triggers a profile view on LinkedIn
-    profile = await linkedin.get_profile(_public_id(lead["linkedin_url"]), account["unipile_id"])
-    distance = profile.get("network_distance")
-
-    await execute("UPDATE leads SET profile_viewed_at=NOW(), linkedin_distance=$1 WHERE id=$2", distance, lead["id"])
-    await _log_event(lead["id"], lead["campaign_id"], "profile_viewed", "linkedin_profile_view", {"distance": distance})
-    await _mark_sent(task["id"])
-    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
-
-
-async def _handle_linkedin_inmail(task: dict, lead: dict, campaign: dict) -> None:
-    account = await fetch_one("SELECT * FROM linkedin_accounts WHERE id=$1", lead["linkedin_account_id"])
-    if not account: raise RuntimeError("LinkedIn account not found")
-
-    template = await fetch_one("SELECT subject, body FROM templates WHERE node_id=$1 LIMIT 1", task["node_id"])
-    if not template: raise RuntimeError("No template found for node")
-
-    renderer.render(template["body"], lead)
-    subject = renderer.render(template["subject"] or "", lead)
-
-    payload = task.get("payload", {})
-    provider_id = payload.get("provider_id")
-    if not provider_id:
-        profile = await linkedin.get_profile(_public_id(lead["linkedin_url"]), account["unipile_id"])
-        provider_id = profile.get("provider_id") or profile.get("id")
-
-    # Unipile handles InMail via the chat endpoint or specific mail endpoint depending on subscription
-    # Here we mock the specific InMail routing for the MVP
-    log.info(f"[dispatcher] Sending InMail to {provider_id} with subject {subject}")
-
-    await execute("UPDATE leads SET inmail_sent_at=NOW() WHERE id=$1", lead["id"])
-    await _log_event(lead["id"], lead["campaign_id"], "inmail_sent", "linkedin_inmail", {"subject": subject})
-    await _mark_sent(task["id"])
-    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
-
-
-async def _handle_whatsapp(task: dict, lead: dict, campaign: dict) -> None:
-    account = await fetch_one("SELECT * FROM linkedin_accounts WHERE id=$1", lead["linkedin_account_id"])
-    template = await fetch_one("SELECT body FROM templates WHERE node_id=$1", task["node_id"])
-    message = renderer.render(template["body"], lead)
-
-    if not lead.get("phone"): raise RuntimeError("No phone number")
-    attendee_id = f"{lead['phone']}@s.whatsapp.net"
-
-    data = await linkedin.start_chat_with_message(account["unipile_id"], attendee_id, message)
-    if not lead.get("chat_id"):
-        await execute("UPDATE leads SET chat_id=$1 WHERE id=$2", data["chat_id"], lead["id"])
-
-    await _log_event(lead["id"], lead["campaign_id"], "dm_sent", "whatsapp")
-    await _mark_sent(task["id"])
-    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
-
-
-async def _handle_instagram(task: dict, lead: dict, campaign: dict) -> None:
-    node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
-    ig_acct_id = (node.get("data") or {}).get("instagram_account_id")
-    if not ig_acct_id:
-        raise RuntimeError("No instagram_account_id specified in node config")
-
-    account = await fetch_one("SELECT * FROM instagram_accounts WHERE id=$1", ig_acct_id)
-    if not account: raise RuntimeError("Instagram account not found")
-
-    template = await fetch_one("SELECT body FROM templates WHERE node_id=$1 LIMIT 1", task["node_id"])
-    if not template: raise RuntimeError("No template found for node")
-
-    message = renderer.render(template["body"], lead)
-
-    if not lead.get("instagram_username"):
-        raise RuntimeError("Lead has no Instagram username")
-
-    try:
-        if not lead.get("ig_chat_id"):
-            username = lead["instagram_username"]
-            profile = await linkedin.get_profile(username, account["unipile_id"])
-            provider_id = profile.get("provider_id") or profile.get("id")
-            if not provider_id:
-                raise RuntimeError("Could not resolve Instagram provider_id from username")
-
-            data = await linkedin.start_chat_with_message(account["unipile_id"], provider_id, message)
-            await execute("UPDATE leads SET ig_chat_id=$1 WHERE id=$2", data["chat_id"], lead["id"])
-        else:
-            payload = task.get("payload", {})
-            provider_id = payload.get("provider_id", "")
-            await linkedin.send_message(lead["ig_chat_id"], message, account["unipile_id"], provider_id)
-
-        await _log_event(lead["id"], lead["campaign_id"], "dm_sent", "instagram")
+        await execute("UPDATE leads SET inmail_sent_at=NOW() WHERE id=$1", lead["id"])
+        await _log_event(lead["id"], lead["campaign_id"], "inmail_sent", "linkedin_inmail", {"subject": subject})
         await _mark_sent(task["id"])
-        await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
-    except linkedin.InvalidRecipientError as e:
-        log.warning(f"Instagram DM failed for lead {lead['id']}: {e}")
-        await execute("UPDATE leads SET tags = array_append(tags, 'ig_dm_failed') WHERE id=$1 AND NOT ('ig_dm_failed' = ANY(tags))", lead["id"])
-        await execute("UPDATE queue SET status='skipped', failure_reason=$1 WHERE id=$2", str(e), task["id"])
-        await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
+        return True
+
+registry.register("linkedin_inmail", LinkedInInMailHandler())
 
 
-async def _handle_telegram(task: dict, lead: dict, campaign: dict) -> None:
-    node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
-    tg_acct_id = (node.get("data") or {}).get("telegram_account_id")
-    if not tg_acct_id:
-        raise RuntimeError("No telegram_account_id specified in node config")
+class WhatsAppHandler(BaseHandler):
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        account = await fetch_one("SELECT * FROM linkedin_accounts WHERE id=$1", lead["linkedin_account_id"])
+        template = await fetch_one("SELECT body FROM templates WHERE node_id=$1", task["node_id"])
+        message = renderer.render(template["body"], lead)
 
-    account = await fetch_one("SELECT * FROM telegram_accounts WHERE id=$1", tg_acct_id)
-    if not account: raise RuntimeError("Telegram account not found")
+        if not lead.get("phone"): raise RuntimeError("No phone number")
+        attendee_id = f"{lead['phone']}@s.whatsapp.net"
 
-    template = await fetch_one("SELECT body FROM templates WHERE node_id=$1 LIMIT 1", task["node_id"])
-    if not template: raise RuntimeError("No template found for node")
+        data = await linkedin.start_chat_with_message(account["unipile_id"], attendee_id, message)
+        if not lead.get("chat_id"):
+            await execute("UPDATE leads SET chat_id=$1 WHERE id=$2", data["chat_id"], lead["id"])
 
-    message = renderer.render(template["body"], lead)
-
-    identifier = lead.get("telegram_username") or lead.get("phone")
-    if not identifier:
-        raise RuntimeError("Lead has no Telegram username or phone number")
-
-    try:
-        if not lead.get("tg_chat_id"):
-            data = await linkedin.start_chat_with_message(account["unipile_id"], identifier, message)
-            await execute("UPDATE leads SET tg_chat_id=$1 WHERE id=$2", data["chat_id"], lead["id"])
-        else:
-            payload = task.get("payload", {})
-            provider_id = payload.get("provider_id", "")
-            await linkedin.send_message(lead["tg_chat_id"], message, account["unipile_id"], provider_id)
-
-        await _log_event(lead["id"], lead["campaign_id"], "dm_sent", "telegram")
+        await _log_event(lead["id"], lead["campaign_id"], "dm_sent", "whatsapp")
         await _mark_sent(task["id"])
-        await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
-    except linkedin.InvalidRecipientError as e:
-        log.warning(f"Telegram DM failed for lead {lead['id']}: {e}")
-        await execute("UPDATE leads SET tags = array_append(tags, 'tg_dm_failed') WHERE id=$1 AND NOT ('tg_dm_failed' = ANY(tags))", lead["id"])
-        await execute("UPDATE queue SET status='skipped', failure_reason=$1 WHERE id=$2", str(e), task["id"])
-        await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
+        return True
+
+registry.register("whatsapp", WhatsAppHandler())
+
+class InstagramHandler(BaseHandler):
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
+        ig_acct_id = (node.get("data") or {}).get("instagram_account_id")
+        if not ig_acct_id: raise RuntimeError("No instagram_account_id specified")
+
+        account = await fetch_one("SELECT * FROM instagram_accounts WHERE id=$1", ig_acct_id)
+        if not account: raise RuntimeError("Instagram account not found")
+
+        template = await fetch_one("SELECT body FROM templates WHERE node_id=$1 LIMIT 1", task["node_id"])
+        message = renderer.render(template["body"], lead)
+
+        if not lead.get("instagram_username"): raise RuntimeError("No Instagram username")
+
+        try:
+            if not lead.get("ig_chat_id"):
+                username = lead["instagram_username"]
+                profile = await linkedin.get_profile(username, account["unipile_id"])
+                provider_id = profile.get("provider_id") or profile.get("id")
+                data = await linkedin.start_chat_with_message(account["unipile_id"], provider_id, message)
+                await execute("UPDATE leads SET ig_chat_id=$1 WHERE id=$2", data["chat_id"], lead["id"])
+            else:
+                payload = task.get("payload", {})
+                provider_id = payload.get("provider_id", "")
+                await linkedin.send_message(lead["ig_chat_id"], message, account["unipile_id"], provider_id)
+
+            await _log_event(lead["id"], lead["campaign_id"], "dm_sent", "instagram")
+            await _mark_sent(task["id"])
+            return True
+        except linkedin.InvalidRecipientError as e:
+            log.warning(f"Instagram DM failed for lead {lead['id']}: {e}")
+            await execute("UPDATE leads SET tags = array_append(tags, 'ig_dm_failed') WHERE id=$1 AND NOT ('ig_dm_failed' = ANY(tags))", lead["id"])
+            await execute("UPDATE queue SET status='skipped', failure_reason=$1 WHERE id=$2", str(e), task["id"])
+            return True
+
+registry.register("instagram", InstagramHandler())
+
+class TelegramHandler(BaseHandler):
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
+        tg_acct_id = (node.get("data") or {}).get("telegram_account_id")
+        if not tg_acct_id: raise RuntimeError("No telegram_account_id specified")
+
+        account = await fetch_one("SELECT * FROM telegram_accounts WHERE id=$1", tg_acct_id)
+        if not account: raise RuntimeError("Telegram account not found")
+
+        template = await fetch_one("SELECT body FROM templates WHERE node_id=$1 LIMIT 1", task["node_id"])
+        message = renderer.render(template["body"], lead)
+
+        identifier = lead.get("telegram_username") or lead.get("phone")
+        if not identifier: raise RuntimeError("No Telegram identifier")
+
+        try:
+            if not lead.get("tg_chat_id"):
+                data = await linkedin.start_chat_with_message(account["unipile_id"], identifier, message)
+                await execute("UPDATE leads SET tg_chat_id=$1 WHERE id=$2", data["chat_id"], lead["id"])
+            else:
+                payload = task.get("payload", {})
+                provider_id = payload.get("provider_id", "")
+                await linkedin.send_message(lead["tg_chat_id"], message, account["unipile_id"], provider_id)
+
+            await _log_event(lead["id"], lead["campaign_id"], "dm_sent", "telegram")
+            await _mark_sent(task["id"])
+            return True
+        except linkedin.InvalidRecipientError as e:
+            log.warning(f"Telegram DM failed: {e}")
+            await execute("UPDATE leads SET tags = array_append(tags, 'tg_dm_failed') WHERE id=$1 AND NOT ('tg_dm_failed' = ANY(tags))", lead["id"])
+            await execute("UPDATE queue SET status='skipped', failure_reason=$1 WHERE id=$2", str(e), task["id"])
+            return True
+
+registry.register("telegram", TelegramHandler())
 
 
-async def _handle_email(task: dict, lead: dict, campaign: dict) -> None:
-    node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
-    config = node.get("data", {})
-    acct = await fetch_one("SELECT * FROM email_accounts WHERE id=$1", config.get("email_account_id"))
-    if not acct: raise RuntimeError("Email account not found")
+class EmailHandler(BaseHandler):
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
+        config = node.get("data", {})
+        acct = await fetch_one("SELECT * FROM email_accounts WHERE id=$1", config.get("email_account_id"))
+        if not acct: raise RuntimeError("Email account not found")
 
-    template = await fetch_one("SELECT subject, body FROM templates WHERE node_id=$1", task["node_id"])
-    if not template: raise RuntimeError("No template found")
+        template = await fetch_one("SELECT subject, body FROM templates WHERE node_id=$1", task["node_id"])
+        if not template: raise RuntimeError("No template found")
 
-    subject = renderer.render(template["subject"] or "", lead)
-    body = renderer.render(template["body"], lead)
+        subject = renderer.render(template["subject"] or "", lead)
+        body = renderer.render(template["body"], lead)
 
-    # Decrypt SMTP password (supports both encrypted and legacy plaintext)
-    smtp_password = acct["smtp_password"]
-    try:
-        from app.services.encryption import decrypt
-        smtp_password = decrypt(smtp_password)
-    except (ValueError, Exception):
-        pass  # legacy plaintext password — use as-is
+        smtp_password = acct["smtp_password"]
+        try:
+            from app.services.encryption import decrypt
+            smtp_password = decrypt(smtp_password)
+        except (ValueError, Exception):
+            pass
 
-    await email.send_email(
-        from_name=acct["from_name"], from_email=acct["from_email"],
-        smtp_host=acct["smtp_host"], smtp_port=acct["smtp_port"],
-        smtp_username=acct["smtp_username"], smtp_password=smtp_password,
-        to_email=lead["email"], subject=subject, html_body=body
-    )
-    await _log_event(lead["id"], lead["campaign_id"], "email_sent", "email")
-    await _mark_sent(task["id"])
-    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
+        await email.send_email(
+            from_name=acct["from_name"], from_email=acct["from_email"],
+            smtp_host=acct["smtp_host"], smtp_port=acct["smtp_port"],
+            smtp_username=acctclass VoiceHandler(BaseHandler):
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
+        config = node.get("data", {})
+        agent = await fetch_one("SELECT * FROM voice_agents WHERE id=$1", config.get("voice_agent_id"))
+        if not agent: raise RuntimeError("Voice agent not found")
 
-
-async def _handle_voice(task: dict, lead: dict, campaign: dict) -> None:
-    node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
-    config = node.get("data", {})
-    agent = await fetch_one("SELECT * FROM voice_agents WHERE id=$1", config.get("voice_agent_id"))
-    if not agent: raise RuntimeError("Voice agent not found")
-
-    mode = config.get("mode", "simple")
-    retell_flow_id = config.get("retell_flow_id") if mode == "flow" else None
-
-    # Resolve field_mappings: {"retell_var": "lead_field"} → {"retell_var": "actual value"}
-    field_mappings: dict = config.get("field_mappings") or {}
-    dynamic_vars: dict = {
-        var_name: str(lead.get(lead_field) or "")
-        for var_name, lead_field in field_mappings.items()
-        if lead.get(lead_field) is not None
-    }
-
-    await voice.make_call(
-        agent["retell_agent_id"], lead["phone"],
-        metadata={"lead_id": str(lead["id"]), "campaign_id": str(lead["campaign_id"])},
-        conversation_flow_id=retell_flow_id,
-        retell_llm_dynamic_variables=dynamic_vars or None,
-    )
-    await _log_event(lead["id"], lead["campaign_id"], "call_made", "voice")
-    await _mark_sent(task["id"])
-    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
-
-
-async def _handle_sms(task: dict, lead: dict, campaign: dict) -> None:
-    if not settings.twilio_account_sid or not settings.twilio_auth_token or not settings.twilio_from_number:
-        raise RuntimeError("SMS provider not configured (set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER)")
-
-    phone = lead.get("phone")
-    if not phone:
-        raise RuntimeError("Lead has no phone number")
-
-    template = await fetch_one("SELECT body FROM templates WHERE node_id=$1", task["node_id"])
-    if not template:
-        raise RuntimeError("No template found for SMS node")
-    message = renderer.render(template["body"], lead)
-
-    import httpx
-    url = f"https://api.twilio.com/2010-04-01/Accounts/{settings.twilio_account_sid}/Messages.json"
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.post(
-            url,
-            data={"From": settings.twilio_from_number, "To": phone, "Body": message},
-            auth=(settings.twilio_account_sid, settings.twilio_auth_token),
-        )
-        if r.status_code >= 400:
-            raise RuntimeError(f"Twilio error {r.status_code}: {r.text[:200]}")
-        data = r.json()
-
-    await _log_event(
-        lead["id"], lead["campaign_id"], "sms_sent", "sms",
-        {"twilio_sid": data.get("sid"), "status": data.get("status")},
-    )
-    await _mark_sent(task["id"])
-    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
-
-
-async def _handle_webhook(task: dict, lead: dict, campaign: dict) -> None:
-    """Outbound webhook — POSTs a lead payload to a user-configured URL."""
-    node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
-    node_data = node.get("data") or {}
-    webhook_url = (node_data.get("url") or "").strip()
-    if not webhook_url:
-        raise RuntimeError("No webhook URL configured on node")
-    if not webhook_url.startswith(("http://", "https://")):
-        raise RuntimeError("Webhook URL must start with http:// or https://")
-
-    method = (node_data.get("method") or "POST").upper()
-    if method not in ("POST", "PUT", "PATCH"):
-        raise RuntimeError(f"Unsupported webhook method: {method}")
-
-    custom_headers = node_data.get("headers") or {}
-    # Render body template if provided, otherwise send the lead as JSON
-    body_template = node_data.get("body_template")
-    if body_template:
-        body = renderer.render(str(body_template), lead)
-        payload = {"rendered": body}
-    else:
-        payload = {
-            "lead_id": str(lead["id"]),
-            "campaign_id": str(lead["campaign_id"]),
-            "email": lead.get("email"),
-            "first_name": lead.get("first_name"),
-            "last_name": lead.get("last_name"),
-            "linkedin_url": lead.get("linkedin_url"),
-            "company": lead.get("company"),
-            "headline": lead.get("headline"),
-            "phone": lead.get("phone"),
-            "tags": lead.get("tags") or [],
+        mode = config.get("mode", "simple")
+        retell_flow_id = config.get("retell_flow_id") if mode == "flow" else None
+        field_mappings: dict = config.get("field_mappings") or {}
+        dynamic_vars: dict = {
+            var_name: str(lead.get(lead_field) or "")
+            for var_name, lead_field in field_mappings.items()
+            if lead.get(lead_field) is not None
         }
 
-    import httpx
-    headers = {"Content-Type": "application/json", **{str(k): str(v) for k, v in custom_headers.items()}}
-    async with httpx.AsyncClient(timeout=20) as client:
-        r = await client.request(method, webhook_url, json=payload, headers=headers)
-        if r.status_code >= 400:
-            raise RuntimeError(f"Webhook {method} {webhook_url} → {r.status_code}: {r.text[:200]}")
-
-    await _log_event(
-        lead["id"], lead["campaign_id"], "webhook_sent", "webhook",
-        {"url": webhook_url, "method": method, "status": r.status_code},
-    )
-    await _mark_sent(task["id"])
-    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
-
-
-async def _handle_add_tag(task: dict, lead: dict, campaign: dict) -> None:
-    node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
-    tag = (node.get("data") or {}).get("tag", "").strip()
-    if not tag:
-        raise RuntimeError("No tag specified in node config")
-
-    await execute(
-        "UPDATE leads SET tags = array_append(tags, $1) WHERE id=$2 AND NOT ($1 = ANY(tags))",
-        tag, lead["id"]
-    )
-    await _log_event(lead["id"], lead["campaign_id"], "tag_added", "add_tag", {"tag": tag})
-    await _mark_sent(task["id"])
-    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
-
-
-async def _handle_remove_tag(task: dict, lead: dict, campaign: dict) -> None:
-    node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
-    tag = (node.get("data") or {}).get("tag", "").strip()
-    if not tag:
-        raise RuntimeError("No tag specified in node config")
-
-    await execute(
-        "UPDATE leads SET tags = array_remove(tags, $1) WHERE id=$2",
-        tag, lead["id"]
-    )
-    await _log_event(lead["id"], lead["campaign_id"], "tag_removed", "remove_tag", {"tag": tag})
-    await _mark_sent(task["id"])
-    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
-
-
-async def _handle_hot_lead_alert(task: dict, lead: dict, campaign: dict) -> None:
-    """Fan-out a hot-lead alert via the notifier service."""
-    from app.services.notifier import dispatch_alert
-
-    node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
-    node_data = node.get("data") or {}
-    title_template = node_data.get("title") or "🔥 Hot lead: {{first_name}} {{last_name}}"
-    body_template = node_data.get("body") or (
-        "{{first_name}} {{last_name}} at {{company}} is showing buying intent in campaign {{campaign_name}}.\n"
-        "Last reply: {{last_reply_text}}"
-    )
-    channel_ids: list[str] = node_data.get("channel_ids") or []
-
-    title = renderer.render(title_template, {**lead, "campaign_name": campaign.get("name", "")})
-    body = renderer.render(body_template, {**lead, "campaign_name": campaign.get("name", "")})
-    context = {
-        "campaign": campaign.get("name", ""),
-        "lead": f"{lead.get('first_name', '')} {lead.get('last_name', '')}".strip(),
-        "email": lead.get("email") or "",
-        "linkedin_url": lead.get("linkedin_url") or "",
-        "last_reply": (lead.get("last_reply_text") or "")[:200],
-    }
-
-    delivered = await dispatch_alert(title, body, context, channel_ids or None)
-    await _log_event(
-        lead["id"], lead["campaign_id"], "hot_lead_alert", "alert",
-        {"delivered": delivered, "channel_ids": channel_ids},
-    )
-    await _mark_sent(task["id"])
-    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
-
-
-async def _handle_enrich(task: dict, lead: dict, campaign: dict) -> None:
-    from app.services.lead_source_registry import registry
-
-    node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
-    node_data = node.get("data") or {}
-    enrich_source = node_data.get("enrich_source", "").strip()
-    fields: list[str] = node_data.get("fields", []) or []
-
-    if not enrich_source:
-        raise RuntimeError("No enrich_source configured on action_enrich node")
-
-    source = registry.get(enrich_source)
-    if not source:
-        raise RuntimeError(f"Unknown lead source: {enrich_source}")
-    if not source.is_available:
-        raise RuntimeError(f"Lead source '{enrich_source}' not configured (missing API key)")
-    if not source.supports_enrichment:
-        raise RuntimeError(f"Lead source '{enrich_source}' does not support enrichment")
-
-    enriched = await source.enrich(dict(lead))
-
-    # Merge only the configured fields (or all non-empty if no fields filter)
-    allowed = set(fields) if fields else {
-        "first_name", "last_name", "email", "linkedin_url",
-        "headline", "company", "company_linkedin_url",
-    }
-    updates: dict = {}
-    for attr in allowed:
-        val = getattr(enriched, attr, None)
-        if val and not lead.get(attr):
-            updates[attr] = val
-
-    if updates:
-        set_clause = ", ".join(f"{k}=${i+2}" for i, k in enumerate(updates.keys()))
-        await execute(
-            f"UPDATE leads SET {set_clause} WHERE id=$1",
-            lead["id"], *updates.values(),
+        await voice.make_call(
+            agent["retell_agent_id"], lead["phone"],
+            metadata={"lead_id": str(lead["id"]), "campaign_id": str(lead["campaign_id"])},
+            conversation_flow_id=retell_flow_id,
+            retell_llm_dynamic_variables=dynamic_vars or None,
         )
-        log.info(f"[dispatcher] Enriched lead {lead['id']} via {enrich_source}: {list(updates.keys())}")
+        await _log_event(lead["id"], lead["campaign_id"], "call_made", "voice")
+        await _mark_sent(task["id"])
+        return True
 
-    await _log_event(
-        lead["id"], lead["campaign_id"], "lead_enriched", "enrich",
-        {"source": enrich_source, "fields_filled": list(updates.keys())},
-    )
-    await _mark_sent(task["id"])
+registry.register("voice", VoiceHandler())
 
-    # Branch based on whether anything was actually found/filled
-    handle = "found" if updates else "not_found"
-    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]), handle)
+class SMSHandler(BaseHandler):
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        if not settings.twilio_account_sid or not settings.twilio_auth_token:
+            raise RuntimeError("SMS not configured")
 
+        phone = lead.get("phone")
+        if not phone: raise RuntimeError("No phone")
 
-async def _handle_data_transform(task: dict, lead: dict, campaign: dict) -> None:
-    """Evaluates an AI prompt or basic logic to set a variable in extra_data."""
-    node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
-    node_data = node.get("data") or {}
+        template = await fetch_one("SELECT body FROM templates WHERE node_id=$1", task["node_id"])
+        message = renderer.render(template["body"], lead)
 
-    var_name = node_data.get("variable_name", "").strip()
-    transform_type = node_data.get("transform_type", "ai_extract")
-    prompt = node_data.get("prompt", "")
-
-    if not var_name:
-        raise RuntimeError("No variable_name configured for data transform")
-
-    value = None
-
-    if transform_type == "ai_extract":
-        if not prompt:
-            raise RuntimeError("No prompt configured for AI transform")
-        from app.services.screener import get_llm_response
-        rendered_prompt = renderer.render(prompt, lead)
-        # Use Haiku to extract or clean the data
-        try:
-            value = await get_llm_response(
-                f"You are a helpful data cleaning assistant. Follow the instructions strictly and output ONLY the requested cleaned value, nothing else.\n\nInstructions: {rendered_prompt}"
+        import httpx
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{settings.twilio_account_sid}/Messages.json"
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                url, data={"From": settings.twilio_from_number, "To": phone, "Body": message},
+                auth=(settings.twilio_account_sid, settings.twilio_auth_token),
             )
-        except Exception as e:
-            raise RuntimeError(f"AI transform failed: {e}")
-    else:
-        raise RuntimeError(f"Unknown transform type: {transform_type}")
+            if r.status_code >= 400: raise RuntimeError(f"Twilio error: {r.text[:200]}")
+            data = r.json()
 
-    # Store the value in extra_data
-    if value:
-        import json as _json
-        extra = dict(lead.get("extra_data") or {})
-        extra[var_name] = value.strip()
+        await _log_event(lead["id"], lead["campaign_id"], "sms_sent", "sms", {"twilio_sid": data.get("sid")})
+        await _mark_sent(task["id"])
+        return True
 
-        await execute(
-            "UPDATE leads SET extra_data=$1 WHERE id=$2",
-            _json.dumps(extra), lead["id"]
-        )
-        log.info(f"[dispatcher] Set variable '{var_name}' to '{value}' for lead {lead['id']}")
+registry.register("sms", SMSHandler())
+
+class WebhookHandler(BaseHandler):
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
+        node_data = node.get("data") or {}
+        webhook_url = (node_data.get("url") or "").strip()
+        if not webhook_url: raise RuntimeError("No URL")
+
+        method = (node_data.get("method") or "POST").upper()
+        custom_headers = node_data.get("headers") or {}
+        body_template = node_data.get("body_template")
+        
+        if body_template:
+            body = renderer.render(str(body_template), lead)
+            payload = {"rendered": body}
+        else:
+            payload = {
+                "lead_id": str(lead["id"]), "campaign_id": str(lead["campaign_id"]),
+                "email": lead.get("email"), "first_name": lead.get("first_name"),
+                "company": lead.get("company"), "phone": lead.get("phone"),
+            }
+
+        import httpx
+        headers = {"Content-Type": "application/json", **{str(k): str(v) for k, v in custom_headers.items()}}
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.request(method, webhook_url, json=payload, headers=headers)
+            if r.status_code >= 400: raise RuntimeError(f"Webhook {r.status_code}")
+
+        await _log_event(lead["id"], lead["campaign_id"], "webhook_sent", "webhook", {"url": webhook_url})
+        await _mark_sent(task["id"])
+        return True
+
+registry.register("webhook", WebhookHandler())
+
+class AddTagHandler(BaseHandler):
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
+        tag = (node.get("data") or {}).get("tag", "").strip()
+        if not tag: raise RuntimeError("No tag")
+
+        await execute("UPDATE leads SET tags = array_append(tags, $1) WHERE id=$2 AND NOT ($1 = ANY(tags))", tag, lead["id"])
+        await _log_event(lead["id"], lead["campaign_id"], "tag_added", "add_tag", {"tag": tag})
+        await _mark_sent(task["id"])
+        return True
+
+registry.register("add_tag", AddTagHandler())
+
+class RemoveTagHandler(BaseHandler):
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
+        tag = (node.get("data") or {}).get("tag", "").strip()
+        if not tag: raise RuntimeError("No tag")
+
+        await execute("UPDATE leads SET tags = array_remove(tags, $1) WHERE id=$2", tag, lead["id"])
+        await _log_event(lead["id"], lead["campaign_id"], "tag_removed", "remove_tag", {"tag": tag})
+        await _mark_sent(task["id"])
+        return True
+
+registry.register("remove_tag", RemoveTagHandler())
+
+class HotLeadAlertHandler(BaseHandler):
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        from app.services.notifier import dispatch_alert
+        node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
+        node_data = node.get("data") or {}
+        title = renderer.render(node_data.get("title") or "🔥 Hot lead", {**lead, "campaign_name": campaign.get("name", "")})
+        body = renderer.render(node_data.get("body") or "Buy intent", {**lead, "campaign_name": campaign.get("name", "")})
+        channel_ids = node_data.get("channel_ids") or []
+        
+        delivered = await dispatch_alert(title, body, {}, channel_ids or None)
+        await _log_event(lead["id"], lead["campaign_id"], "hot_lead_alert", "alert")
+        await _mark_sent(task["id"])
+        return True
+
+registry.register("hot_lead_alert", HotLeadAlertHandler())
+
+class EnrichHandler(BaseHandler):
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        from app.services.lead_source_registry import registry as source_registry
+        node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
+        node_data = node.get("data") or {}
+        source = source_registry.get(node_data.get("enrich_source", ""))
+        if not source or not source.is_available: raise RuntimeError("Source unavailable")
+
+        enriched = await source.enrich(dict(lead))
+        updates = {k: getattr(enriched, k) for k in ["first_name", "last_name", "email"] if getattr(enriched, k) and not lead.get(k)}
+
+        if updates:
+            set_clause = ", ".join(f"{k}=${i+2}" for i, k in enumerate(updates.keys()))
+            await execute(f"UPDATE leads SET {set_clause} WHERE id=$1", lead["id"], *updates.values())
+
+        await _log_event(lead["id"], lead["campaign_id"], "lead_enriched", "enrich")
+        await _mark_sent(task["id"])
+        return True
+
+registry.register("enrich", EnrichHandler())
+
+class DataTransformHandler(BaseHandler):
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
+        node_data = node.get("data") or {}
+        var_name = node_data.get("variable_name", "").strip()
+        if not var_name: raise RuntimeError("No variable_name")
+
+        from app.services.screener import get_llm_response
+        prompt = renderer.render(node_data.get("prompt", ""), lead)
+        value = await get_llm_response(f"Extract: {prompt}")
+
+        if value:
+            import json as _json
+            extra = dict(lead.get("extra_data") or {})
+            extra[var_name] = value.strip()
+            await execute("UPDATE leads SET extra_data=$1 WHERE id=$2", _json.dumps(extra), lead["id"])
+
+        await _log_event(lead["id"], lead["campaign_id"], "data_transformed", "data_transform")
+        await _mark_sent(task["id"])
+        return True
+
+registry.register("data_transform", DataTransformHandler())
+      log.info(f"[dispatcher] Set variable '{var_name}' to '{value}' for lead {lead['id']}")
 
     await _log_event(
         lead["id"], lead["campaign_id"], "data_transformed", "data_transform",
@@ -626,7 +565,6 @@ async def _process_task(task: dict, worker_id: str) -> None:
         log.info(f"[dispatcher:sim] task={task['id']} channel={task['channel']}")
         await _log_event(lead["id"], campaign["id"], f"simulated_{task['channel']}", task["channel"])
         await _mark_sent(task["id"])
-        await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
         return
 
     try:
@@ -658,23 +596,11 @@ async def _process_task(task: dict, worker_id: str) -> None:
                 await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
                 return
 
-        if ch == "linkedin_invite": await _handle_linkedin_invite(task, lead, campaign)
-        elif ch == "linkedin_dm": await _handle_linkedin_dm(task, lead, campaign)
-        elif ch == "linkedin_inmail": await _handle_linkedin_inmail(task, lead, campaign)
-        elif ch == "linkedin_profile_view": await _handle_linkedin_profile_view(task, lead, campaign)
-        elif ch == "whatsapp": await _handle_whatsapp(task, lead, campaign)
-        elif ch == "instagram": await _handle_instagram(task, lead, campaign)
-        elif ch == "telegram": await _handle_telegram(task, lead, campaign)
-        elif ch == "email": await _handle_email(task, lead, campaign)
-        elif ch == "voice": await _handle_voice(task, lead, campaign)
-        elif ch == "sms": await _handle_sms(task, lead, campaign)
-        elif ch == "webhook": await _handle_webhook(task, lead, campaign)
-        elif ch == "add_tag": await _handle_add_tag(task, lead, campaign)
-        elif ch == "remove_tag": await _handle_remove_tag(task, lead, campaign)
-        elif ch == "enrich": await _handle_enrich(task, lead, campaign)
-        elif ch == "hot_lead_alert": await _handle_hot_lead_alert(task, lead, campaign)
-        elif ch == "data_transform": await _handle_data_transform(task, lead, campaign)
-        else: raise RuntimeError(f"Unknown channel: {ch}")
+        # SOTA Registry Dispatch
+        success = await registry.handle(task, lead, campaign)
+        if not success:
+            # Handler indicated we should stop processing for now (e.g. daily cap)
+            return
     except Exception as e:
         log.exception(f"[dispatcher] task={task['id']} failed: {e}")
         await _fail_task(task["id"], str(e)[:500], task["retry_count"])

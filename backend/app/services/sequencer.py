@@ -1,10 +1,13 @@
 import json
 import logging
 import random
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from app.db import execute, fetch_all, fetch_one
 from app.services import notifier
+from app.services.bus import bus
+from app.core.events import ActionCommand, LeadContext, ChannelType
 
 log = logging.getLogger(__name__)
 
@@ -69,7 +72,42 @@ async def queue_next_nodes(
         node_type = node["node_type"]
 
         if node_type.startswith("action_"):
-            channel = node_type.replace("action_", "")
+            channel_str = node_type.replace("action_", "")
+            
+            # Map to ChannelType enum
+            try:
+                channel = ChannelType(channel_str)
+            except ValueError:
+                log.error(f"[sequencer] Unknown channel type: {channel_str}")
+                continue
+
+            # Create the SOTA ActionCommand
+            command = ActionCommand(
+                command_id=uuid.uuid4(),
+                task_id=uuid.uuid4(),  # Temporary until we retire the queue table completely
+                channel=channel,
+                lead=LeadContext(
+                    id=lead["id"],
+                    campaign_id=lead["campaign_id"],
+                    email=lead.get("email"),
+                    linkedin_url=lead.get("linkedin_url"),
+                    first_name=lead.get("first_name"),
+                    last_name=lead.get("last_name"),
+                    company=lead.get("company"),
+                    chat_id=lead.get("chat_id"),
+                    extra_data=dict(lead.get("extra_data") or {})
+                ),
+                payload=(node["data"] or {}),
+                metadata={
+                    "node_id": str(target_id),
+                    "accumulated_delay_seconds": accumulated_delay.total_seconds()
+                }
+            )
+
+            # Publish to the stream
+            await bus.publish_command(command)
+            
+            # Legacy mirror (optional, but keeps old UI working for now)
             scheduled_at = datetime.now(UTC) + accumulated_delay
             await execute(
                 """
@@ -77,27 +115,15 @@ async def queue_next_nodes(
                 VALUES ($1, $2, $3, $4, 'queued', $5)
                 ON CONFLICT DO NOTHING
                 """,
-                lead["campaign_id"], lead_id, target_id, channel, scheduled_at,
+                lead["campaign_id"], lead_id, target_id, channel_str, scheduled_at,
             )
-            log.info(f"[sequencer] Queued {channel} for lead {lead_id} at {scheduled_at}")
+            log.info(f"[sequencer] Streamed and Queued {channel_str} for lead {lead_id}")
 
         elif node_type == "delay":
-            # Accumulate delay and continue graph traversal
-            data = node["data"] or {}
-            delay_val = data.get("delay_value") or data.get("delay_days") or 1
-            unit = data.get("delay_unit", "days")
-
-            if unit == "seconds":
-                delta = timedelta(seconds=delay_val)
-            elif unit == "minutes":
-                delta = timedelta(minutes=delay_val)
-            elif unit == "hours":
-                delta = timedelta(hours=delay_val)
-            else:
-                delta = timedelta(days=delay_val)
-
-            new_delay = accumulated_delay + delta
-            await queue_next_nodes(lead_id, target_id, "default", new_delay)
+            # SOTA: Delays are handled by Flink's timer service.
+            # We simply log the arrival at the delay node.
+            log.info(f"[sequencer] Lead {lead_id} reached delay node {target_id}. Flink takes over.")
+            await execute("UPDATE leads SET current_node_id=$1 WHERE id=$2", target_id, lead_id)
 
         elif node_type.startswith("condition_"):
             if node_type == "condition_replied":

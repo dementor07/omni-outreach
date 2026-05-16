@@ -1,0 +1,32 @@
+[package]
+name = "execution-engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Async Runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Network & APIs
+reqwest = { version = "0.11", features = ["json", "socks"] }
+hyper = "0.14"
+hyper-proxy = "0.9"
+
+# Email
+lettre = { version = "0.10", features = ["tokio-rustls-tls", "smtp-transport", "builder"] }
+
+# Messaging
+rdkafka = { version = "0.36", features = ["cmake-build"] }
+
+# Database (for state recovery)
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"

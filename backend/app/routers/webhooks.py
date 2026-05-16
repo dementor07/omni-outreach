@@ -176,3 +176,40 @@ async def generic_inbound_event(request: Request):
             log.warning("Failed to queue sequence event to Redis")
 
     return {"status": "processed", "lead_id": lead_id, "event_type": event_type}
+
+
+@router.post("/deploy")
+async def deploy_webhook(request: Request, background_tasks: BackgroundTasks):
+    """
+    SOTA Deployment Hook:
+    Triggered by GitHub Actions to pull the latest code and rebuild the grid.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    expected_token = app_settings.deploy_webhook_secret or app_settings.secret_key
+    
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing Bearer token")
+    
+    token = auth_header.replace("Bearer ", "")
+    if token != expected_token:
+        log.warning(f"Unauthorized deploy attempt from {request.client.host}")
+        raise HTTPException(status_code=401, detail="Invalid deploy token")
+
+    # Trigger async deployment to avoid timeout in GitHub Action
+    import subprocess
+    import os
+
+    def run_deploy():
+        try:
+            log.info("Starting VPS deployment sequence...")
+            # 1. Sync from master
+            subprocess.run(["git", "pull", "origin", "master"], check=True, cwd="/home/omni-outreach")
+            # 2. Rebuild the entire SOTA grid
+            subprocess.run(["docker", "compose", "up", "--build", "-d"], check=True, cwd="/home/omni-outreach")
+            log.info("SOTA Deployment successful.")
+        except Exception as e:
+            log.error(f"SOTA Deployment failed: {e}")
+
+    background_tasks.add_task(run_deploy)
+    
+    return {"status": "deployment_triggered"}

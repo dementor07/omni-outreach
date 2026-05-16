@@ -40,3 +40,8 @@ Unipile API also used to fetch lead profile data (headline, name) to cache in `l
 - [[system-overview]]
 - [[channels]]
 - [[sequence-engine]]
+
+### SOTA: Rust-Native Delivery
+As of 2026-05-16, the delivery of Unipile messages and invitations has been migrated to the **Rust Execution Engine**. 
+- **Interface**: Python emits an `ActionCommand` via the event bus.
+- **Reliability**: Rust handles the HTTPS handshake and proxy rotation, ensuring zero Python overhead for long-running I/O.

@@ -1,76 +1,38 @@
+# Worker Architecture (SOTA)
+
+## 1. Overview
+The Worker layer has evolved from a single Python background process into a **Polyglot Execution Plane**.
+
 ---
-title: Worker (arq + Cron Jobs)
-category: architecture
-tags: [worker, arq, cron, redis, background]
-sources: []
-updated: 2026-04-21
+
+## 2. Worker Types
+
+### A. The Python Worker (arq / cron)
+- **Role**: High-level scheduled tasks and AI rendering.
+- **Tasks**: `cron_lead_gen` (Intake), `render_ai_messages`.
+- **Logic**: Sits in `backend/app/worker/`.
+
+### B. The Rust Worker (Execution Engine)
+- **Role**: High-throughput, low-latency I/O.
+- **Topics**: Consumes from `outreach.commands`.
+- **Channels**: Email (SMTP), LinkedIn (Unipile), Webhooks.
+- **Performance**: Capable of handling thousands of concurrent outbound connections.
+
+### C. The Flink Worker (Orchestrator)
+- **Role**: Stateful journey management.
+- **State**: Manages Lead ID keyed state and process timers.
+
 ---
 
-# Worker
+## 3. Scaling Strategy
+- **Python Workers**: Scale horizontally for AI heavy lifting.
+- **Rust Workers**: Scale based on the **Lag** of the Redpanda command topic.
+- **Flink TaskManagers**: Scale based on the volume of active lead journeys.
 
-`backend/app/worker/tasks.py`
-`backend/app/worker/stream_processor.py`
+---
 
-Background process using **arq**. It owns queue dispatch, acceptance checks, inbound event processing, split optimization, and scheduled lead generation.
-
-## Redis / Connection Model
-
-- Worker startup initializes the asyncpg pool and Redis client explicitly.
-- `WorkerSettings.redis_settings = RedisSettings(host="redis", password=_redis_password)` mirrors the authenticated Redis setup used in Docker.
-- The app-side Redis client comes from `settings.get_redis_url()` so background tasks and runtime API code share the same connection pattern.
-
-## Cron Schedule
-| Function | Schedule | What it does |
-|----------|----------|-------------|
-| `dispatch_queue` | Every 30 seconds (`second={0,30}`) | Locks and processes ready queue tasks via `dispatcher.run_once()`, then opportunistically queues LinkedIn invites |
-| `check_acceptances` | Every 5 minutes | Polls for accepted LinkedIn invites and resumes sequences |
-| `process_stream_events` | Every 5 seconds | Consumes Redis Stream webhook events and updates lead state |
-| `optimize_splits` | Every 10 minutes | Runs Thompson Sampling weight updates |
-| `cron_lead_gen` | Every 5 minutes | Scans enabled `lead_gen_configs` with `cron_schedule` and fires due source runs with `triggered_by="schedule"` |
-| `cron_reply_intent_timeout` | Every 30 minutes (`minute={0, 30}`) | Routes leads parked at `condition_reply_intent` through the `timeout` handle when their last outbound `queue.sent_at` is older than `node.data.timeout_days` (default 7). See [[reply-intent-timeout]]. |
-
-## Scheduled Lead Gen
-
-`cron_lead_gen(ctx)` is the key Apr 2026 addition:
-
-- Imports `croniter` lazily so the worker can log a clear warning if the dependency is missing.
-- Reads enabled configs where `cron_schedule IS NOT NULL`.
-- Uses `last_run_at` as the schedule base, falling back to "one year ago" so newly scheduled configs can fire immediately when due.
-- Calls `run_lead_gen(campaign_id, config_id, triggered_by="schedule")`.
-
-This is what turns [[lead-sources-ui]] from a manual trigger screen into an autonomous intake loop.
-
-## Stream Processor
-
-`stream_processor.py` uses Redis consumer group `event_router_group` and consumer `worker_1`.
-
-For inbound `message.received` events buffered on `omni_inbound_events`:
-
-1. Find the lead by `chat_id`
-2. Set `replied_at=NOW()` and status `replied`
-3. Insert the inbound payload into `inbound_messages`
-4. Call `sequencer.evaluate_conditions(lead_id)` to resume parked graph nodes
-
-## Worker Config
-
-```python
-class WorkerSettings:
-    redis_settings = RedisSettings(host="redis", password=_redis_password)
-    max_jobs = 1
-    job_timeout = 300
-```
-
-`max_jobs=1` keeps execution serialized and pairs cleanly with the dispatcher's `SKIP LOCKED` strategy.
-
-## Startup / Shutdown
-
-- `on_startup`: initialize DB pool and Redis
-- `on_shutdown`: close DB pool and Redis cleanly
-
-## Related Pages
-
-- [[dispatcher]]
-- [[lead-sources-ui]]
-- [[event-bus-architecture]]
-- [[sequence-engine]]
-- [[auto-optimization-engine]]
+## 4. Error Handling & DLQ
+Every worker follows the **Dead Letter Queue (DLQ)** pattern:
+1. **Retriable Failure**: Re-publish to topic with backoff.
+2. **Fatal Failure**: Publish to `outreach.dead_letter` for human intervention.
+3. **Success**: Publish to `outreach.results`.

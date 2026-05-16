@@ -59,3 +59,16 @@ This document identifies complex, real-world campaign scenarios that require "Co
 
 ## Summary for Claude (The "Fixer")
 To make this a "User Tool," we must move away from **"Linear Sequences of Strings"** and toward a **"Dynamic Logic Engine with Granular Orchestration."**
+
+
+## Status Update (2026-05-16) — What's shipped since
+
+Re-reviewed against the May 2026 codebase:
+
+- **Scenario 1 — Concurrency**: PARTIAL. `control_parallel_fork` is now a real backend node type (see [[sequence-engine]]'s 30-node contract); `worker.max_jobs = 1` still serializes execution at the worker level (flagged in [[audit-2026-05-16]] as a critical gap).
+- **Scenario 2 — Sub-hour urgency**: SHIPPED. `delay` nodes now accept `seconds`, `minutes`, `hours`, `days` (see "2026-05-05 Update: Core Restoration" in [[sequence-engine]]).
+- **Scenario 3 — ABM company locking**: STILL OPEN. No cross-lead state awareness implemented yet.
+- **Scenario 4 — Smart retry on action failure**: STILL OPEN. Action handlers still have one output. `_fail_task` retries up to 3 times then dead-letters; no error-branch handle.
+- **Scenario 5 — Variable logic**: PARTIAL. `action_data_transform` ("Set Variable / AI") node exists in the canvas palette; computational expressions still limited.
+- **Scenario 6 — Human takeover**: SHIPPED. `human_approval` node + `condition_reply_intent` with `unsubscribe`/`out_of_office` handles (see [[human-approval-and-reply-intent]]).
+- **Constant audit**: time units shipped; campaign status (`draft` / `active` / `paused`) shipped per the 2026-05-05 ignition-switch work; rate-limit granularity still per-day only.

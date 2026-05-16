@@ -1,0 +1,49 @@
+import json
+import logging
+import asyncio
+from aiokafka import AIOKafkaConsumer
+from app.config import settings
+from app.services.sequencer import queue_next_nodes
+
+log = logging.getLogger(__name__)
+
+async def run_transition_worker():
+    """
+    SOTA Transition Worker:
+    Listens for Flink's 'Transition' signals and advances the lead to the next DAG node.
+    """
+    consumer = AIOKafkaConsumer(
+        "outreach.transitions",
+        bootstrap_servers=settings.kafka_brokers,
+        group_id="omni-brain-transition",
+        auto_offset_reset="latest"
+    )
+    
+    await consumer.start()
+    log.info("[transition-worker] Brain listening for Flink transition signals...")
+    
+    try:
+        async for msg in consumer:
+            try:
+                data = json.loads(msg.value)
+                lead_id = data.get("lead_id")
+                source_node_id = data.get("source_node_id")
+                handle = data.get("handle", "default")
+                
+                if not lead_id or not source_node_id:
+                    continue
+
+                log.info(f"[transition-worker] Advancing lead {lead_id} from {source_node_id} (handle={handle})")
+                
+                # The sequencer will now emit the command for the NEXT node in the DAG
+                await queue_next_nodes(str(lead_id), str(source_node_id), handle=handle)
+                
+            except Exception as e:
+                log.error(f"[transition-worker] Failed to process transition: {e}")
+
+    finally:
+        await consumer.stop()
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(run_transition_worker())

@@ -31,24 +31,22 @@ jobs:
           POSTGRES_USER: outreach
           POSTGRES_PASSWORD: testpass
         ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U outreach"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
       redis:
         image: redis:7-alpine
         ports: ["6379:6379"]
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
+      redpanda:
+        image: docker.redpanda.com/redpandadata/redpanda:latest
+        ports: ["9092:9092", "19092:19092"]
+        command: >-
+          redpanda start --smp 1 --overprovisioned 
+          --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092 
+          --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
     env:
       DATABASE_URL: postgresql://outreach:testpass@localhost:5432/outreach_test
       DB_PASSWORD: testpass
       SECRET_KEY: ci-test-secret-key-not-for-production
       REDIS_PASSWORD: ""
+      KAFKA_BROKERS: localhost:19092
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -58,7 +56,7 @@ jobs:
         working-directory: backend
         run: |
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio httpx ruff
+          pip install pytest pytest-asyncio httpx ruff aiokafka
       - name: Init database
         run: |
           PGPASSWORD=testpass psql -h localhost -U outreach -d outreach_test -f backend/schema.sql
@@ -75,6 +73,10 @@ jobs:
         run: docker build -t omni-outreach-backend ./backend
       - name: Build frontend image
         run: docker build -t omni-outreach-frontend ./frontend
+      - name: Build rust muscle image
+        run: docker build -t omni-outreach-rust ./backend-rust
+      - name: Build flink lungs image
+        run: docker build -t omni-outreach-flink ./backend-flink
 
   deploy:
     runs-on: ubuntu-latest

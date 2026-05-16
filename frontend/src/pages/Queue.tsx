@@ -16,7 +16,20 @@ import { fullName, formatScheduled } from '../lib/format'
 import { Inbox } from 'lucide-react'
 import { clsx } from 'clsx'
 
-interface QueueTask { id: string; first_name?: string; last_name?: string; linkedin_url?: string; email?: string; campaign_id?: string; channel: string; status: string; scheduled_at?: string; retry_count?: number; failure_reason?: string }
+interface QueueTask { 
+  id: string; 
+  first_name?: string; 
+  last_name?: string; 
+  linkedin_url?: string; 
+  email?: string; 
+  campaign_id?: string; 
+  channel: string; 
+  status: string; 
+  scheduled_at?: string; 
+  retry_count?: number; 
+  failure_reason?: string;
+  executed_by?: 'python' | 'rust' | 'flink'
+}
 interface Campaign { id: string; name: string }
 
 export default function Queue() {
@@ -35,9 +48,10 @@ export default function Queue() {
 
   const tasks = (queueQ.data?.tasks || []).filter(t => !channel || t.channel === channel)
   const qStats = statsQ.data?.stats || []
+  
   const queued = qStats.filter(r => r.status === 'queued').reduce((s, r) => s + Number(r.cnt || 0), 0)
   const locked = qStats.filter(r => r.status === 'locked').reduce((s, r) => s + Number(r.cnt || 0), 0)
-  const sent = qStats.filter(r => r.status === 'sent').reduce((s, r) => s + Number(r.cnt || 0), 0)
+  const sota = qStats.filter(r => r.status === 'migrated' || r.status === 'streaming').reduce((s, r) => s + Number(r.cnt || 0), 0)
   const failed = qStats.filter(r => r.status === 'failed').reduce((s, r) => s + Number(r.cnt || 0), 0)
 
   const channels = [...new Set((queueQ.data?.tasks || []).map(t => t.channel))]
@@ -53,7 +67,7 @@ export default function Queue() {
         screenLabel="Queue"
         eyebrow="Pipeline"
         title="Queue"
-        description="Scheduled outreach before it becomes customer-visible. Filter by campaign, channel, and state to spot backlog pressure or failed tasks."
+        description="Scheduled outreach before it becomes customer-visible. SOTA tasks are now processed via the Rust Execution Engine."
         actions={
           <>
             <Button variant="secondary" size="md" icon={RefreshCw} onClick={() => { queueQ.refetch(); statsQ.refetch() }}>Refresh</Button>
@@ -65,7 +79,7 @@ export default function Queue() {
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Queued" value={statsQ.isLoading ? '—' : queued} accent="brand" icon={Clock} />
         <StatCard label="Locked" value={statsQ.isLoading ? '—' : locked} accent="amber" icon={Lock} />
-        <StatCard label="Sent" value={statsQ.isLoading ? '—' : sent} accent="emerald" icon={Send} />
+        <StatCard label="Sent" value={statsQ.isLoading ? '—' : sota} accent="emerald" icon={Send} />
         <StatCard label="Failed" value={statsQ.isLoading ? '—' : failed} accent="rose" icon={AlertCircle} />
       </section>
 
@@ -81,7 +95,7 @@ export default function Queue() {
         </Select>
         <Select value={status} onChange={setStatus}>
           <option value="">All statuses</option>
-          {['queued', 'locked', 'sent', 'failed', 'skipped'].map(s => <option key={s} value={s}>{s}</option>)}
+          {['queued', 'locked', 'sent', 'failed', 'skipped', 'migrated', 'streaming'].map(s => <option key={s} value={s}>{s}</option>)}
         </Select>
       </FilterBar>
 

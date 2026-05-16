@@ -74,7 +74,7 @@ async def startup(ctx: dict) -> None:
     dsn = settings.get_asyncpg_dsn()
     await init_pool(dsn)
     await init_redis(settings.get_redis_url())
-    log.info("[worker] DB pool and Redis initialized")
+    log.info("[worker] SOTA Maintenance Worker initialized")
 
 
 async def shutdown(ctx: dict) -> None:
@@ -88,11 +88,8 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
     cron_jobs = [
-        cron(dispatch_queue, second={0, 30}),
-        cron(check_acceptances, minute=set(range(0, 60, 5))),
-        cron(process_stream_events, second=set(range(0, 60, 5))),
+        # Maintenance only. Delivery and Progression are now handled by Rust/Flink.
         cron(optimize_splits, minute=set(range(0, 60, 10))),
-        cron(cron_lead_gen, minute=set(range(0, 60, 5))),
         cron(cron_reply_intent_timeout, minute={0, 30}),
     ]
     max_jobs = 1

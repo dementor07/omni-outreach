@@ -69,3 +69,8 @@ Inside `RetellFlowEditor`:
 - [[voice-node-architecture]]
 - [[system-overview]]
 - [[channels]]
+
+
+---
+## SOTA Update (2026-05-16)
+Voice call triggers have been migrated to the **Rust Execution Engine**. Python no longer calls the Retell API directly; it emits a `voice` channel command to the Redpanda bus, which the Rust Muscle executes with sub-millisecond latency.

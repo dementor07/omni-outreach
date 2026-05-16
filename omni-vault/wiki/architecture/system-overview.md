@@ -1,129 +1,67 @@
 ---
-title: System Overview
+title: System Overview (SOTA)
 category: architecture
-tags: [backend, frontend, infra, docker]
-sources: []
-updated: 2026-04-28
+tags: [backend, frontend, infra, streaming, rust, flink, redpanda]
+updated: 2026-05-16
 ---
 
-# System Overview
+# System Overview (Omni SOTA)
 
-Omni is a multi-channel outreach automation SaaS evolving into a programmable outbound operating system. It now covers both sides of the loop:
+Omni is a **Stateful Stream Processing Grid** for multi-channel outreach. It has transitioned from a legacy Postgres-polling architecture to a high-performance, event-driven infrastructure designed for massive scale.
 
-- **Lead intake** — provider-driven, optionally scheduled lead generation
-- **Lead execution** — graph-based outreach across multiple channels
+## 1. Architectural Philosophy: The "Brain & Muscle" Split
+We decouple the **Intelligence** of the system from the **Execution** of the system.
 
-## Core Abstractions
+- **The Brain (Python)**: Handles AI Rendering, Campaign Strategy, and the Control Plane.
+- **The Muscle (Rust)**: Handles high-concurrency Network I/O, Webhooks, and Proxies.
+- **The Spine (Redpanda)**: The immutable event log connecting Brain and Muscle.
+- **The Lungs (Flink)**: The stateful memory for lead journeys and real-time analytics.
 
-- **Lead**: stateful record traversing the graph and carrying source/timeline metadata
-- **Node**: trigger, action, condition, event/listener, or control module
-- **Edge**: transition rule keyed by output handle
-- **Event**: signal that resumes parked leads or enriches campaign telemetry
+---
 
-## Stack
+## 2. The SOTA Stack
 
-| Layer | Tech |
-|-------|------|
-| Frontend | React 18, TypeScript, Vite, Tailwind CSS, @xyflow/react |
-| Edge | nginx serving the SPA and proxying `/api/*` |
-| Backend | FastAPI, asyncpg, Alembic, structured JSON logging |
-| Database | PostgreSQL 16 |
-| Queue / Streams | Redis 7 + arq |
-| Infra | Docker Compose on VPS `145.223.21.222`, HTTPS via Let's Encrypt |
+| Layer | Technology | Role |
+| :--- | :--- | :--- |
+| **Frontend** | React 18, @xyflow/react | The Command Center. |
+| **Control Plane** | **Python (FastAPI)** | The Logic and AI engine. |
+| **Execution Plane**| **Rust (Tokio)** | High-speed outbound delivery. |
+| **Stream Bus** | **Redpanda** | Durable event distribution. |
+| **Orchestration** | **Apache Flink** | Lead state and timers. |
+| **Memory** | **DragonflyDB** | Sub-ms telemetry and state cache. |
+| **Persistence** | **PostgreSQL 16** | Relational metadata and analytical sink. |
 
-## Runtime Services
+---
 
-- `frontend` — built SPA plus trust-signal static pages behind nginx
-- `backend` — FastAPI app, internal to the proxy network
-- `worker` — background cron/queue/event processor
-- `db` — PostgreSQL 16
-- `redis` — authenticated Redis for queueing and streams
+## 3. Core Service Map
 
-## Key Flows
+- `frontend`: React SPA for campaign building and mission control.
+- `backend`: Python Control Plane. Emits `ActionCommand` events to Redpanda.
+- `execution-engine`: Rust Muscle. Consumes commands and executes I/O (Unipile, SMTP).
+- `journey-orchestrator`: Flink Lungs. Manages lead position in the DAG and timing.
+- `redpanda`: The single source of truth for all system events.
 
-### Lead Intake
+---
 
-- `routers/lead_gen.py` exposes provider registry metadata, config CRUD, trigger, and run history APIs.
-- `services/lead_gen.py` dispatches provider searches, writes `lead_gen_runs`, updates `last_run_at`, and inserts deduplicated leads.
-- `worker/tasks.py` runs `cron_lead_gen` every 5 minutes for scheduled configs.
-- New leads immediately enter the graph through `sequencer.schedule_new_lead()`.
+## 4. Key Data Flows
 
-### Sequence Execution
+### Outreach Execution
+1. **Sequencer (Python)**: Publishes `ActionCommand` to `outreach.commands`.
+2. **Worker (Rust)**: Picks up command, executes I/O via **Proxy**, and publishes `ExecutionResult`.
+3. **Orchestrator (Flink)**: Receives result, updates **Managed State**, and registers a **Timer** for the next node.
+4. **Analytics (Flink)**: Aggregates results and sinks metrics to **DragonflyDB** for the UI.
 
-- Campaigns render either the [[canvas-editor]] or [[sequential-builder]].
-- Graphs save to `sequence_nodes` and `sequence_edges`.
-- Queue rows are executed by the [[dispatcher]].
-- Events, reply state, and telemetry resume parked leads and feed optimization.
+### Webhook Ingestion
+1. **Ingestor (Rust)**: Receives high-load webhooks (LinkedIn/Email) and slams them into Redpanda.
+2. **Brain (Python)**: Consumes filtered webhooks for AI sentiment analysis.
 
-### Delivery and Integrations
+---
 
-- Human-facing delivery channels are documented in [[channels]].
-- Unipile powers LinkedIn, WhatsApp, Instagram, and Telegram.
-- Retell powers voice calls.
-- SMTP, Twilio, and generic webhooks fill the remaining delivery surface.
-
-## Key Directories
-
-```text
-omni-outreach/
-├── backend/app/
-│   ├── routers/            FastAPI route handlers
-│   ├── services/           sequencer, dispatcher, lead sources, integrations
-│   ├── worker/             arq cron jobs and stream processor
-│   └── db.py               asyncpg / Redis helpers
-├── backend/tests/          pytest smoke fixtures and API checks
-├── frontend/src/
-│   ├── pages/              full-page React views
-│   ├── components/         shared UI and builder primitives
-│   ├── hooks/              data + graph hooks
-│   └── api/client.ts       authenticated API client
-└── omni-vault/             canonical project memory
-```
-
-## CI/CD & Deploy
-
-### Pipeline (`.github/workflows/ci.yml`)
-
-Four jobs run sequentially on every master push:
-
-1. **lint** — `ruff check backend/`
-2. **test** — pytest against ephemeral Postgres 16 + Redis 7 services; DB seeded from `schema.sql`
-3. **build** — `docker build` for backend and frontend images
-4. **deploy** — `curl -sf -X POST -H "Authorization: Bearer $DEPLOY_WEBHOOK_SECRET" https://srv1575227.hstgr.cloud/deploy`
-
-Deploy only fires on master push when `DEPLOY_WEBHOOK_SECRET` is set in GitHub repo secrets.
-
-### Webhook Deploy (`webhook/deploy-webhook.py`)
-
-Replaced `appleboy/ssh-action` SSH deploy (which timed out because Hostinger's upstream blocks GitHub Actions IP ranges). New approach:
-
-- `deploy-webhook.py` runs as a **systemd service** on the VPS at port 9000
-- nginx in the frontend container proxies `POST /deploy` → `http://host.docker.internal:9000/deploy` (the `/deploy` location is restricted to POST and requires the Bearer token)
-- CI `curl`s `https://srv1575227.hstgr.cloud/deploy` — HTTPS on 443, always open
-- Webhook validates the token with `hmac.compare_digest`, responds **202 Accepted immediately**, then runs the deploy in a background thread:
-  1. `git pull origin master`
-  2. `docker compose up -d --build --remove-orphans`
-  3. `docker compose exec -T backend alembic upgrade head`
-
-The 202-before-deploy pattern is required because step 2 restarts the nginx container, which would kill the active proxy connection and return `curl` exit code 56 if the response hadn't already been sent.
-
-### VPS Networking
-
-- **UFW rules** — port 9000 explicitly allowed for all Docker Compose bridge subnets:
-  - `172.17.0.0/16` (legacy docker0), `172.18.0.0/16`, `172.19.0.0/16`, `172.20.0.0/16`
-- **`host.docker.internal`** — `extra_hosts: ["host.docker.internal:host-gateway"]` on the `frontend` service enables the nginx container to reach the host-level webhook daemon
-- **Domain** — `srv1575227.hstgr.cloud` is the active HTTPS endpoint (Let's Encrypt cert). `omnioutreach.space` is configured as an nginx `server_name` alias but has no DNS A record yet.
-
-### Quality Gate
-
-The backend includes a lightweight pytest smoke suite covering health, auth, and unauthorized access checks. CI initializes the DB pool/Redis client in test fixtures, and `/health` is allowed to report `degraded` when Redis is only partially wired in the test environment.
-
-## Related Pages
-
-- [[sequence-engine]]
-- [[dispatcher]]
-- [[worker]]
-- [[lead-sources-ui]]
-- [[channels]]
-- [[retell-integration]]
-- [[unipile-integration]]
+## 5. Related Specifications
+- [[sota-migration-blueprint]]
+- [[sota-brain-muscle-boundary]]
+- [[sota-event-schemas]]
+- [[sota-rust-worker-protocol]]
+- [[sota-flink-state-machine]]
+- [[dispatcher]] (Legacy Reference)
+- [[sequence-engine]] (Legacy Reference)

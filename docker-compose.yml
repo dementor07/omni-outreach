@@ -1,92 +1,108 @@
+version: '3.8'
+
 services:
-  db:
-    image: postgres:16-alpine
-    restart: unless-stopped
+  # --- The Spine (Event Bus) ---
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    command:
+      - redpanda start
+      - --smp 1
+      - --overprovisioned
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "19092:19092"
+
+  # --- The Memory (State & Cache) ---
+  dragonfly:
+    image: 'docker.dragonflydb.io/dragonflydb/dragonfly'
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:15-alpine
     environment:
-      POSTGRES_DB: outreach
-      POSTGRES_USER: outreach
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U outreach"]
-      interval: 5s
-      retries: 5
-    networks:
-      - internal
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
 
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    command: redis-server --requirepass ${REDIS_PASSWORD:-changeme}
-    volumes:
-      - redisdata:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
-      interval: 5s
-      retries: 5
-    networks:
-      - internal
+  # --- The Muscle (Rust Execution) ---
+  execution-engine:
+    build:
+      context: ./backend-rust
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    depends_on:
+      - redpanda
 
+  # --- The Lungs (Flink Orchestration) ---
+  flink-jobmanager:
+    build:
+      context: ./backend-flink
+    ports:
+      - "8081:8081"
+    command: jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+      - KAFKA_BROKERS=redpanda:9092
+
+  flink-taskmanager:
+    build:
+      context: ./backend-flink
+    depends_on:
+      - flink-jobmanager
+    command: taskmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 2
+      - KAFKA_BROKERS=redpanda:9092
+
+  # --- The Brain (Python Control Plane) ---
   backend:
-    build: ./backend
-    restart: unless-stopped
-    env_file: .env
+    build:
+      context: ./backend
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/postgres
+      REDIS_URL: redis://dragonfly:6379
+      KAFKA_BROKERS: redpanda:9092
     depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    expose:
-      - "8000"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
-    networks:
-      - internal
+      - postgres
+      - redpanda
+      - dragonfly
+    ports:
+      - "8000:8000"
 
-  worker:
-    build: ./backend
-    restart: unless-stopped
-    command: python -m app.worker.main
-    env_file: .env
-    healthcheck:
-      disable: true
+  # --- SOTA Bridge Workers ---
+  sync-worker:
+    build:
+      context: ./backend
+    command: python -m app.services.stream_sync
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/postgres
+      KAFKA_BROKERS: redpanda:9092
     depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - internal
+      - postgres
+      - redpanda
+
+  transition-worker:
+    build:
+      context: ./backend
+    command: python -m app.services.transition_worker
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/postgres
+      KAFKA_BROKERS: redpanda:9092
+    depends_on:
+      - postgres
+      - redpanda
 
   frontend:
-    build: ./frontend
-    restart: unless-stopped
+    build:
+      context: ./frontend
     ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./certs:/etc/nginx/certs:ro
-      - ./certbot/www:/var/www/certbot:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "3000:3000"
     depends_on:
-      backend:
-        condition: service_healthy
-    networks:
-      - internal
-      - external
-
-volumes:
-  pgdata:
-  redisdata:
-
-networks:
-  internal:
-    driver: bridge
-  external:
-    driver: bridge
+      - backend
