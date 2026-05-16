@@ -5,6 +5,7 @@ mod proxy;
 use models::{ActionCommand};
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::producer::{FutureProducer, FutureRecord};
+use rdkafka::message::Message;
 use rdkafka::ClientConfig;
 use std::time::Duration;
 use tracing::{info, error};
@@ -40,12 +41,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match consumer.recv().await {
             Err(e) => error!("Kafka error: {}", e),
             Ok(borrowed_message) => {
-                let payload = match borrowed_message.payload::<str>() {
+                let payload = match borrowed_message.payload() {
                     None => continue,
-                    Some(Ok(s)) => s,
-                    Some(Err(e)) => {
-                        error!("Error deserializing message: {}", e);
-                        continue;
+                    Some(b) => match std::str::from_utf8(b) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            error!("Error decoding UTF-8: {}", e);
+                            continue;
+                        }
                     }
                 };
 
