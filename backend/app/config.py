@@ -2,8 +2,8 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    db_password: str
-    secret_key: str
+    db_password: str = "changeme"
+    secret_key: str = "changeme"
     database_url: str = ""
 
     frontend_url: str = "http://localhost:5173"  # CORS origin
