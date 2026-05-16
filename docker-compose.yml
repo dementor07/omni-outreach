@@ -14,15 +14,18 @@ services:
       - "19092:19092"
 
   # --- The Memory (State & Cache) ---
-  dragonfly:
-    image: 'docker.dragonflydb.io/dragonflydb/dragonfly'
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17
     ports:
       - "6379:6379"
 
-  postgres:
-    image: postgres:15-alpine
+  db:
+    image: postgres:16-alpine
     environment:
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD: OmniOutreach2026
+      POSTGRES_USER: outreach
+      POSTGRES_DB: outreach
     ports:
       - "5432:5432"
 
@@ -32,8 +35,10 @@ services:
       context: ./backend-rust
     environment:
       KAFKA_BROKERS: redpanda:9092
+      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
     depends_on:
       - redpanda
+      - db
 
   # --- The Lungs (Flink Orchestration) ---
   flink-jobmanager:
@@ -47,6 +52,8 @@ services:
         FLINK_PROPERTIES=
         jobmanager.rpc.address: flink-jobmanager
       - KAFKA_BROKERS=redpanda:9092
+    depends_on:
+      - redpanda
 
   flink-taskmanager:
     build:
@@ -67,15 +74,15 @@ services:
       context: .
       dockerfile: ./backend/Dockerfile
     environment:
-      DATABASE_URL: postgresql://postgres:password@postgres:5432/postgres
-      REDIS_URL: redis://dragonfly:6379
+      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
+      REDIS_URL: redis://:d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17@redis:6379
       KAFKA_BROKERS: redpanda:9092
-      DB_PASSWORD: password
-      SECRET_KEY: sota_secret_key_2024
+      DB_PASSWORD: OmniOutreach2026
+      SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
     depends_on:
-      - postgres
+      - db
       - redpanda
-      - dragonfly
+      - redis
     volumes:
       - ./scripts:/app/scripts
     ports:
@@ -88,11 +95,13 @@ services:
       dockerfile: ./backend/Dockerfile
     command: python -m app.services.stream_sync
     environment:
-      DATABASE_URL: postgresql://postgres:password@postgres:5432/postgres
+      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
       KAFKA_BROKERS: redpanda:9092
+      REDIS_URL: redis://:d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17@redis:6379
     depends_on:
-      - postgres
+      - db
       - redpanda
+      - redis
 
   transition-worker:
     build:
@@ -100,10 +109,10 @@ services:
       dockerfile: ./backend/Dockerfile
     command: python -m app.services.transition_worker
     environment:
-      DATABASE_URL: postgresql://postgres:password@postgres:5432/postgres
+      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
       KAFKA_BROKERS: redpanda:9092
     depends_on:
-      - postgres
+      - db
       - redpanda
 
   frontend:
