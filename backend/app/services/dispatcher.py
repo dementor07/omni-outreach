@@ -10,10 +10,9 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.config import settings
+from app.core.events import TaskStatus
 from app.db import execute, fetch_all, fetch_one
 from app.services import email, linkedin, renderer, sequencer, voice
-from app.services.bus import bus
-from app.core.events import ActionCommand, LeadContext, ChannelType, ExecutionResult, TaskStatus
 
 log = logging.getLogger(__name__)
 
@@ -362,7 +361,18 @@ class EmailHandler(BaseHandler):
         await email.send_email(
             from_name=acct["from_name"], from_email=acct["from_email"],
             smtp_host=acct["smtp_host"], smtp_port=acct["smtp_port"],
-            smtp_username=acctclass VoiceHandler(BaseHandler):
+            smtp_username=acct["smtp_username"], smtp_password=smtp_password,
+            smtp_use_tls=acct.get("smtp_use_tls", True),
+            to_email=lead["email"], subject=subject, body_html=body,
+        )
+        await _log_event(lead["id"], lead["campaign_id"], "email_sent", "email")
+        await _mark_sent(task["id"])
+        return True
+
+registry.register("email", EmailHandler())
+
+
+class VoiceHandler(BaseHandler):
     async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
         node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
         config = node.get("data", {})
@@ -427,7 +437,7 @@ class WebhookHandler(BaseHandler):
         method = (node_data.get("method") or "POST").upper()
         custom_headers = node_data.get("headers") or {}
         body_template = node_data.get("body_template")
-        
+
         if body_template:
             body = renderer.render(str(body_template), lead)
             payload = {"rendered": body}
@@ -484,8 +494,8 @@ class HotLeadAlertHandler(BaseHandler):
         title = renderer.render(node_data.get("title") or "🔥 Hot lead", {**lead, "campaign_name": campaign.get("name", "")})
         body = renderer.render(node_data.get("body") or "Buy intent", {**lead, "campaign_name": campaign.get("name", "")})
         channel_ids = node_data.get("channel_ids") or []
-        
-        delivered = await dispatch_alert(title, body, {}, channel_ids or None)
+
+        await dispatch_alert(title, body, {}, channel_ids or None)
         await _log_event(lead["id"], lead["campaign_id"], "hot_lead_alert", "alert")
         await _mark_sent(task["id"])
         return True
@@ -532,18 +542,10 @@ class DataTransformHandler(BaseHandler):
 
         await _log_event(lead["id"], lead["campaign_id"], "data_transformed", "data_transform")
         await _mark_sent(task["id"])
+        await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
         return True
 
 registry.register("data_transform", DataTransformHandler())
-      log.info(f"[dispatcher] Set variable '{var_name}' to '{value}' for lead {lead['id']}")
-
-    await _log_event(
-        lead["id"], lead["campaign_id"], "data_transformed", "data_transform",
-        {"variable": var_name, "transform_type": transform_type, "success": bool(value)}
-    )
-    await _mark_sent(task["id"])
-    await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
-
 
 async def _process_task(task: dict, worker_id: str) -> None:
     campaign = await fetch_one("SELECT * FROM campaigns WHERE id=$1", task["campaign_id"])

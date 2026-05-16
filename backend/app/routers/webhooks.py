@@ -3,7 +3,7 @@ import hmac
 import json
 import logging
 
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel
 
 import app.db as db
@@ -186,10 +186,10 @@ async def deploy_webhook(request: Request, background_tasks: BackgroundTasks):
     """
     auth_header = request.headers.get("Authorization", "")
     expected_token = app_settings.deploy_webhook_secret or app_settings.secret_key
-    
+
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing Bearer token")
-    
+
     token = auth_header.replace("Bearer ", "")
     if token != expected_token:
         log.warning(f"Unauthorized deploy attempt from {request.client.host}")
@@ -197,7 +197,6 @@ async def deploy_webhook(request: Request, background_tasks: BackgroundTasks):
 
     # Trigger async deployment to avoid timeout in GitHub Action
     import subprocess
-    import os
 
     def run_deploy():
         try:
@@ -211,5 +210,5 @@ async def deploy_webhook(request: Request, background_tasks: BackgroundTasks):
             log.error(f"SOTA Deployment failed: {e}")
 
     background_tasks.add_task(run_deploy)
-    
+
     return {"status": "deployment_triggered"}

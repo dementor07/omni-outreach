@@ -1,5 +1,7 @@
 import asyncio
+
 from app.db import execute
+
 
 async def migrate():
     print("Running SOTA Migration: Creating stream_log table...")

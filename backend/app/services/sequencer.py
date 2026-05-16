@@ -4,10 +4,10 @@ import random
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from app.core.events import ActionCommand, ChannelType, LeadContext
 from app.db import execute, fetch_all, fetch_one
 from app.services import notifier
 from app.services.bus import bus
-from app.core.events import ActionCommand, LeadContext, ChannelType
 
 log = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ async def queue_next_nodes(
 
         if node_type.startswith("action_"):
             channel_str = node_type.replace("action_", "")
-            
+
             # Map to ChannelType enum
             try:
                 channel = ChannelType(channel_str)
@@ -106,7 +106,7 @@ async def queue_next_nodes(
 
             # Publish to the stream
             await bus.publish_command(command)
-            
+
             # Legacy mirror (optional, but keeps old UI working for now)
             scheduled_at = datetime.now(UTC) + accumulated_delay
             await execute(

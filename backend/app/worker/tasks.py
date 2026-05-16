@@ -7,7 +7,6 @@ from arq.cron import cron
 
 from app.services import dispatcher
 from app.services.optimization import run_optimization
-from app.worker.stream_processor import process_stream_events
 
 log = logging.getLogger(__name__)
 

@@ -1,7 +1,9 @@
+import asyncio
 import json
 import logging
-import asyncio
+
 from aiokafka import AIOKafkaConsumer
+
 from app.config import settings
 from app.services.sequencer import queue_next_nodes
 
@@ -18,10 +20,10 @@ async def run_transition_worker():
         group_id="omni-brain-transition",
         auto_offset_reset="latest"
     )
-    
+
     await consumer.start()
     log.info("[transition-worker] Brain listening for Flink transition signals...")
-    
+
     try:
         async for msg in consumer:
             try:
@@ -29,15 +31,15 @@ async def run_transition_worker():
                 lead_id = data.get("lead_id")
                 source_node_id = data.get("source_node_id")
                 handle = data.get("handle", "default")
-                
+
                 if not lead_id or not source_node_id:
                     continue
 
                 log.info(f"[transition-worker] Advancing lead {lead_id} from {source_node_id} (handle={handle})")
-                
+
                 # The sequencer will now emit the command for the NEXT node in the DAG
                 await queue_next_nodes(str(lead_id), str(source_node_id), handle=handle)
-                
+
             except Exception as e:
                 log.error(f"[transition-worker] Failed to process transition: {e}")
 

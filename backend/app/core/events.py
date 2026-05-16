@@ -1,9 +1,11 @@
 from datetime import datetime
-from enum import Enum
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, UUID4
+from enum import StrEnum
+from typing import Any
 
-class TaskStatus(str, Enum):
+from pydantic import UUID4, BaseModel, Field
+
+
+class TaskStatus(StrEnum):
     QUEUED = "queued"
     LOCKED = "locked"
     SENT = "sent"
@@ -12,7 +14,7 @@ class TaskStatus(str, Enum):
     SKIPPED = "skipped"
     PENDING_APPROVAL = "pending_approval"
 
-class ChannelType(str, Enum):
+class ChannelType(StrEnum):
     LINKEDIN_INVITE = "linkedin_invite"
     LINKEDIN_DM = "linkedin_dm"
     LINKEDIN_INMAIL = "linkedin_inmail"
@@ -30,7 +32,7 @@ class ChannelType(str, Enum):
     HOT_LEAD_ALERT = "hot_lead_alert"
     DATA_TRANSFORM = "data_transform"
 
-class EventType(str, Enum):
+class EventType(StrEnum):
     COMMAND_TASK = "command_task"          # Python -> Bus -> Execution (Rust/Python)
     RESULT_TASK = "result_task"            # Execution -> Bus -> Orchestration (Flink/Python)
     STATE_TRANSITION = "state_transition"  # Orchestration -> Bus -> Telemetry/UI
@@ -39,13 +41,13 @@ class EventType(str, Enum):
 class LeadContext(BaseModel):
     id: UUID4
     campaign_id: UUID4
-    email: Optional[str] = None
-    linkedin_url: Optional[str] = None
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    company: Optional[str] = None
-    chat_id: Optional[str] = None
-    extra_data: Dict[str, Any] = Field(default_factory=dict)
+    email: str | None = None
+    linkedin_url: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    company: str | None = None
+    chat_id: str | None = None
+    extra_data: dict[str, Any] = Field(default_factory=dict)
 
 class ActionCommand(BaseModel):
     """The 'Work Order' for the Execution Plane (Rust/Python)"""
@@ -53,25 +55,25 @@ class ActionCommand(BaseModel):
     task_id: UUID4  # Legacy queue ID for now
     channel: ChannelType
     lead: LeadContext
-    payload: Dict[str, Any] = Field(default_factory=dict)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     occurred_at: datetime = Field(default_factory=datetime.utcnow)
 
 class ExecutionResult(BaseModel):
     """The 'Receipt' from the Execution Plane"""
     command_id: UUID4
     status: TaskStatus
-    error: Optional[str] = None
+    error: str | None = None
     is_retriable: bool = True
-    telemetry: Dict[str, Any] = Field(default_factory=dict)
+    telemetry: dict[str, Any] = Field(default_factory=dict)
     occurred_at: datetime = Field(default_factory=datetime.utcnow)
 
 class StateTransition(BaseModel):
     """The signal that a Lead has moved in the DAG"""
     lead_id: UUID4
     campaign_id: UUID4
-    from_node: Optional[UUID4] = None
+    from_node: UUID4 | None = None
     to_node: UUID4
     event_type: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     occurred_at: datetime = Field(default_factory=datetime.utcnow)

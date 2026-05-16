@@ -1,7 +1,9 @@
+import asyncio
 import json
 import logging
-import asyncio
+
 from aiokafka import AIOKafkaConsumer
+
 from app.config import settings
 from app.db import execute
 
@@ -18,17 +20,17 @@ async def run_sync_worker():
         group_id="omni-postgres-sync",
         auto_offset_reset="earliest"
     )
-    
+
     await consumer.start()
     log.info("[sync-worker] Started result-to-postgres bridge")
-    
+
     try:
         async for msg in consumer:
             data = json.loads(msg.value)
             task_id = data.get("task_id")
             status = data.get("status")
             error = data.get("error")
-            
+
             if not task_id:
                 continue
 
