@@ -62,7 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 // 4. DISPATCH TO SOTA HANDLERS
                 let mut result = handlers::dispatch(command.clone()).await;
-                result.metadata = command.metadata; // Mirror context for Flink
+                result.metadata = command.metadata.clone(); // Mirror context for Flink
 
                 // 5. Report Result back to the stream
                 let result_json = serde_json::to_string(&result)?;

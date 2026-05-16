@@ -3,7 +3,7 @@ use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum ChannelType {
     #[serde(rename = "email")]
     Email,
@@ -17,7 +17,7 @@ pub enum ChannelType {
     Webhook,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LeadContext {
     pub id: Uuid,
     pub campaign_id: Uuid,
@@ -28,7 +28,7 @@ pub struct LeadContext {
     pub proxy_settings: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ActionCommand {
     pub command_id: Uuid,
     pub task_id: Uuid,
@@ -39,7 +39,7 @@ pub struct ActionCommand {
     pub occurred_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum TaskStatus {
     #[serde(rename = "sent")]
     Sent,
@@ -49,7 +49,7 @@ pub enum TaskStatus {
     RateLimited,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ExecutionResult {
     pub command_id: Uuid,
     pub task_id: Uuid,
