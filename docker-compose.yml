@@ -17,6 +17,8 @@ services:
   redis:
     image: redis:7-alpine
     command: redis-server --requirepass d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17
+    volumes:
+      - redisdata:/data
     ports:
       - "6379:6379"
 
@@ -26,6 +28,8 @@ services:
       POSTGRES_PASSWORD: OmniOutreach2026
       POSTGRES_USER: outreach
       POSTGRES_DB: outreach
+    volumes:
+      - pgdata:/var/lib/postgresql/data
     ports:
       - "5432:5432"
 
@@ -122,3 +126,11 @@ services:
       - "3000:3000"
     depends_on:
       - backend
+
+volumes:
+  pgdata:
+    external: true
+    name: omni-outreach_pgdata
+  redisdata:
+    external: true
+    name: omni-outreach_redisdata
