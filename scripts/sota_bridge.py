@@ -1,7 +1,8 @@
 import asyncio
 import logging
 from uuid import uuid4
-from app.db import fetch_all, execute
+from app.db import fetch_all, execute, init_pool
+from app.config import settings
 from app.core.events import ActionCommand, LeadContext, ChannelType
 from app.services.bus import bus
 
@@ -14,6 +15,9 @@ async def migrate_legacy_queue():
     Moves legacy tasks from Postgres 'queue' to the Redpanda 'outreach.commands' topic.
     """
     log.info("Starting SOTA Migration Bridge...")
+    
+    # 0. Initialize DB Pool
+    await init_pool(settings.get_asyncpg_dsn())
     
     # 1. Fetch all pending tasks from the legacy queue
     legacy_tasks = await fetch_all(
