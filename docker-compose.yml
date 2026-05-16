@@ -73,6 +73,8 @@ services:
       - postgres
       - redpanda
       - dragonfly
+    volumes:
+      - ./scripts:/app/scripts
     ports:
       - "8000:8000"
 
