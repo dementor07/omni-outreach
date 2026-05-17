@@ -128,10 +128,22 @@ async def queue_next_nodes(
             log.info(f"[sequencer] dispatched {channel_str} for lead {lead_id} (mode={mode})")
 
         elif node_type == "delay":
-            # SOTA: Delays are handled by Flink's timer service.
-            # We simply log the arrival at the delay node.
-            log.info(f"[sequencer] Lead {lead_id} reached delay node {target_id}. Flink takes over.")
+            # Compute deterministic wait from node.data. Supports both legacy
+            # (delay_days: int) and the current frontend keys (delay_value + delay_unit).
+            d = node["data"] or {}
+            unit = str(d.get("delay_unit") or "days").lower()
+            try:
+                amount = float(d.get("delay_value") if d.get("delay_value") is not None else d.get("delay_days", 0))
+            except (TypeError, ValueError):
+                amount = 0.0
+            unit_seconds = {"seconds": 1, "minutes": 60, "hours": 3600, "days": 86400, "weeks": 604800}.get(unit, 86400)
+            extra_seconds = amount * unit_seconds
+            new_accumulated = accumulated_delay + timedelta(seconds=extra_seconds)
+            log.info(f"[sequencer] delay node {target_id}: +{amount} {unit} (cumulative {new_accumulated.total_seconds()}s)")
             await execute("UPDATE leads SET current_node_id=$1 WHERE id=$2", target_id, lead_id)
+            # Recurse into the next nodes with the cumulative delay; the queue insert
+            # will fire scheduled_at = now() + new_accumulated downstream.
+            await queue_next_nodes(lead_id, target_id, "default", new_accumulated)
 
         elif node_type.startswith("condition_"):
             if node_type == "condition_replied":
@@ -159,7 +171,8 @@ async def queue_next_nodes(
                 log.info(f"[sequencer] Source router for lead {lead_id}: source={lead_source} → handle={branch}")
                 await queue_next_nodes(lead_id, target_id, branch, accumulated_delay)
             elif node_type == "condition_has_field":
-                field_name = (node["data"] or {}).get("field", "email")
+                d = node["data"] or {}
+                field_name = d.get("field_name") or d.get("field") or "email"
                 has_value = bool(lead.get(field_name))
                 branch = "true" if has_value else "false"
                 log.info(f"[sequencer] Field check for lead {lead_id}: field={field_name} present={has_value}")
