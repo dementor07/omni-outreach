@@ -1,4 +1,3 @@
-
 import csv
 import io
 import logging
@@ -84,7 +83,9 @@ async def create_lead(
         )
     lead = await fetch_one(
         "SELECT id FROM leads WHERE campaign_id=$1 AND (linkedin_url=$2 OR (linkedin_url IS NULL AND email=$3))",
-        campaign_id, raw.linkedin_url, raw.email,
+        campaign_id,
+        raw.linkedin_url,
+        raw.email,
     )
     return {"id": str(lead["id"]) if lead else None, "status": "created"}
 
@@ -118,13 +119,15 @@ async def list_leads(
     where = " AND ".join(conditions)
     rows = await fetch_all(
         f"SELECT * FROM leads WHERE {where} ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}",
-        *params, page_size, offset,
+        *params,
+        page_size,
+        offset,
     )
     total = await fetch_one(f"SELECT COUNT(*) AS cnt FROM leads WHERE {where}", *params)
     return {"leads": rows, "total": total["cnt"], "page": page, "page_size": page_size}
 
 
-@router.get("/{lead_id}")
+@router.get("/{lead_id:uuid}")
 async def get_lead(lead_id: str, user_id: str = Depends(get_current_user)):
     lead = await fetch_one("SELECT * FROM leads WHERE id=$1", lead_id)
     if not lead:
@@ -301,7 +304,10 @@ async def csv_upload(
 
     log.info(
         "[csv_upload] campaign=%s imported=%d skipped=%d invalid=%d",
-        campaign_id, imported, skipped, invalid,
+        campaign_id,
+        imported,
+        skipped,
+        invalid,
     )
     return {"imported": imported, "skipped": skipped, "invalid": invalid, "errors": errors}
 
@@ -322,7 +328,11 @@ async def export_leads(
         return {"detail": "No leads to export"}
 
     # Use first lead's keys as headers, excluding sensitive/internal fields
-    headers = [k for k in leads[0].keys() if k not in ("linkedin_account_id", "instagram_account_id", "telegram_account_id", "current_node_id")]
+    headers = [
+        k
+        for k in leads[0].keys()
+        if k not in ("linkedin_account_id", "instagram_account_id", "telegram_account_id", "current_node_id")
+    ]
     writer = csv.DictWriter(output, fieldnames=headers)
     writer.writeheader()
     for lead in leads:
@@ -336,11 +346,11 @@ async def export_leads(
     return StreamingResponse(
         io.BytesIO(output.getvalue().encode("utf-8")),
         media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=leads_{campaign_id}.csv"}
+        headers={"Content-Disposition": f"attachment; filename=leads_{campaign_id}.csv"},
     )
 
 
-@router.delete("/{lead_id}", status_code=204)
+@router.delete("/{lead_id:uuid}", status_code=204)
 async def stop_lead(lead_id: str, user_id: str = Depends(get_current_user)):
     lead = await fetch_one("SELECT id FROM leads WHERE id=$1", lead_id)
     if not lead:
@@ -397,7 +407,8 @@ async def bulk_lead_action(body: BulkAction, user_id: str = Depends(get_current_
         for lid in body.lead_ids:
             await execute(
                 "UPDATE leads SET tags = array_append(tags, $1) WHERE id=$2 AND NOT ($1 = ANY(tags))",
-                body.tag, lid,
+                body.tag,
+                lid,
             )
             affected += 1
 

@@ -96,6 +96,17 @@ export default function Campaigns() {
   const [form, setForm] = useState<CampaignPayload>(defaultCampaignForm)
   const [importOpen, setImportOpen] = useState(false)
 
+  // Auto-open the create modal when arriving with ?new=1 (e.g., from Dashboard).
+  useEffect(() => {
+    if (!id && searchParams.get('new') === '1') {
+      setForm(defaultCampaignForm)
+      setCreateOpen(true)
+      const next = new URLSearchParams(searchParams)
+      next.delete('new')
+      setSearchParams(next, { replace: true })
+    }
+  }, [id, searchParams, setSearchParams])
+
   // Sequence / Canvas State
   const graphQuery = useGetGraph(id || undefined)
   const saveGraph = useSaveGraph()
