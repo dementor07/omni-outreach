@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     twilio_from_number: str = ""
 
     redis_password: str = "changeme"
+    redis_url: str = ""  # If set, takes precedence over redis_password-derived URL.
 
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24  # 24h
@@ -58,7 +59,9 @@ class Settings(BaseSettings):
     def get_redis_url(self) -> str:
         import urllib.parse
 
-        if self.redis_password:
+        if self.redis_url:
+            return self.redis_url
+        if self.redis_password and self.redis_password != "changeme":
             return f"redis://:{urllib.parse.quote(self.redis_password, safe='')}@redis:6379"
         return "redis://redis:6379"
 
