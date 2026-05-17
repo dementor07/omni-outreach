@@ -1068,3 +1068,27 @@ All three were schema violations: PascalCase filenames + no frontmatter. CLAUDE.
 - No `wiki/operations/` cluster — webhook deploy details live in `system-overview.md`, but the chrome-devtools-mcp post-deploy verification loop, the `.mcp.json` config, AdGuard interaction, and CI watcher pattern should probably be their own page.
 
 These are tracked but not blocking. Recording them here so the next session can pick them up.
+
+## 2026-05-16 (later) - SOTA stream bus bridge aligned via Obsidian API
+
+User explicitly required MCP/API-first vault access. The active Codex tool surface did not expose the Obsidian MCP resources, but `.mcp.json` pointed to the Obsidian Local REST endpoint; used that API to read the vault recursively (92 markdown files) and perform this writeback. `credentials.local.md` was detected and intentionally redacted from summaries.
+
+Code continuation from [[sota-migration-blueprint]] Phase 1:
+- Added `aiokafka` to backend requirements.
+- `EventBus.publish_command()` now double-writes every `ActionCommand` to `stream_log` and Redpanda `outreach.commands` when `event_bus_mode=streaming` (default), with a lazy producer closed during FastAPI shutdown.
+- `sequencer.queue_next_nodes()` now uses the same UUID for streamed `ActionCommand.task_id` and mirrored `queue.id`, so `stream_sync` can update the correct legacy UI row from Rust results.
+- `stream_sync` and `transition_worker` now initialize/close their own asyncpg pools when run as standalone Docker services.
+
+Validation:
+- `ruff check backend/` passed.
+- `python -m compileall -q backend/app` passed.
+- Installed backend requirements locally so tests could start.
+- `pytest backend/tests/` reached setup but failed with `asyncpg.exceptions.InvalidPasswordError` for local `outreach@testpass@localhost:5432/outreach_test`; local Postgres credentials do not match the test fixture.
+
+Open follow-up: reconcile [[sota-event-schemas]] with the live `ActionCommand` envelope (`channel`/`payload`/`task_id`) and Rust `ExecutionResult` status values (`sent`/`failed`/`rate_limited`).
+
+## 2026-05-16 - VPS Stream Bridge Restored
+- Used the VPS checkout at `/home/omni-outreach`, not only local files. Pulled VPS to `a8df582`, copied the stream bridge backend changes, rebuilt backend/frontend/workers, and restarted the live Compose stack.
+- Created the Redpanda topics `outreach.commands`, `outreach.results`, `outreach.transitions`, `outreach.telemetry`, and `outreach.dead_letter`; restarted the Rust execution engine after topics existed.
+- Restored public frontend bindings on `80/443`, mounted the existing VPS certs into nginx, and passed `REDIS_PASSWORD` into backend and bridge workers. Disabled inherited backend healthchecks on the long-running worker services because they do not expose `/api/health`.
+- Live checks passed on the VPS: `https://srv1575227.hstgr.cloud/api/health` returned API/DB/Redis ok, frontend returned HTTP 200, `ruff check app` passed, `python -m compileall -q app` passed, and mounted backend tests against `outreach_test` passed (`4 passed`, one passlib deprecation warning).

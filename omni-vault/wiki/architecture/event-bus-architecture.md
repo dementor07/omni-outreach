@@ -24,8 +24,8 @@ The Event Bus is the **Single Source of Truth** for the Omni SOTA stack. We have
 
 ## 4. The "Strangler" Logic
 During the migration from Postgres to Redpanda:
-1. **Double Write**: The Python `bus.py` writes to both Redpanda and the `stream_log` table.
-2. **Topic Primary**: Workers are instructed to prioritize the Topic over the DB table.
+1. **Double Write**: The Python `bus.py` writes to both Redpanda and the `stream_log` table. Implemented 2026-05-16 via lazy `AIOKafkaProducer` on `EventBus.publish_command()`.
+2. **Topic Primary**: Workers are instructed to prioritize the Topic over the DB table. The sequencer now uses the same UUID for the `ActionCommand.task_id` and the mirrored `queue.id`, so Rust results can update the legacy UI row deterministically.
 3. **Recovery**: In the event of a Redpanda crash, the `stream_log` table can be used to re-seed the topics.
 
 ---
@@ -33,3 +33,6 @@ During the migration from Postgres to Redpanda:
 ## 5. Security & Isolation
 - **Encryption**: TLS 1.3 for all internal traffic.
 - **SASL/SCRAM**: Each worker has its own credentials with scoped ACLs (e.g., Rust workers cannot write to `outreach.transitions`).
+
+### 2026-05-16 Deployment Note
+The double-write path is live on the VPS. `Bus.publish_command()` persists the legacy `stream_log` row and, in streaming mode, also sends the same command to Redpanda topic `outreach.commands`. Required topics were created manually on the VPS and the execution engine was restarted after creation.

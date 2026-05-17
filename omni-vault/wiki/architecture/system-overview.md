@@ -65,3 +65,28 @@ We decouple the **Intelligence** of the system from the **Execution** of the sys
 - [[sota-flink-state-machine]]
 - [[dispatcher]] (Legacy Reference)
 - [[sequence-engine]] (Legacy Reference)
+
+
+---
+
+## 6. 2026-05-17 Status — What's actually running on the VPS
+
+The blueprint above describes the target. As of the 2026-05-16 deploy on `srv1575227.hstgr.cloud`, this is what is live:
+
+| Layer | State | Notes |
+| --- | --- | --- |
+| Frontend | Live | Rose brand; Campaigns/canvas redesign shipped 2026-05-15. |
+| Backend (Omni API) | Live | FastAPI, asyncpg, alembic head `008`. Double-writes commands to `stream_log` + Redpanda. |
+| Redpanda | Live | Topics `outreach.commands / results / transitions / telemetry / dead_letter` created on VPS. |
+| Rust execution engine | **Not yet deployed** | Commands published but no Rust consumer attached on VPS. Legacy Python `dispatcher.run_once()` still does the work. |
+| Flink journey orchestrator | **Not yet deployed** | `outreach.transitions` has no producer in prod — `transition_worker` is idle. |
+| DragonflyDB | **Not yet deployed** | Telemetry overlay still reads from Postgres. |
+| `sync-worker` | Live | Consumes `outreach.results` → updates `queue` + `leads`. Healthcheck disabled (no HTTP). |
+| `transition-worker` | Live but idle | Consumer group is up; awaits Flink producer. |
+
+Naming and brand:
+- Backend is canonically the **Omni API** (`omni-api-naming` ADR).
+- Brand palette is **rose** (`canvas-rose-redesign` ADR).
+- Overview endpoint consolidated; frontend reads `VITE_API_BASE`.
+
+The "SOTA" in this page's title refers to the target architecture. Today, the Python control plane still owns execution; the streaming spine is wired but the Rust muscle and Flink lungs are scaffolded, not running. See [[deploy-pipeline]] for the actual VPS topology and [[sota-event-schemas]] for the wire contracts.

@@ -39,3 +39,13 @@ During the migration, we still use the Postgres `queue` table as a "Legacy Mirro
 ## 5. Performance Metrics
 - **Legacy Latency**: 30s - 60s (Polling delay).
 - **SOTA Latency**: < 100ms (Event-driven trigger).
+
+
+---
+
+## 6. 2026-05-17 Status
+
+- **Python dispatcher is still authoritative.** The Rust execution engine has not been deployed to the VPS — `outreach.commands` is being produced but not consumed by Rust. The Python `run_once()` loop continues to claim and execute tasks via `FOR UPDATE SKIP LOCKED`.
+- **Bridge workers are running**: `sync-worker` consumes `outreach.results` (idle until Rust is live), `transition-worker` consumes `outreach.transitions` (idle until Flink is live). Both run as long-lived Compose services with the inherited HTTP healthcheck disabled.
+- **Queue schema** (for handler authors): `queue.id`, `lead_id`, `node_id`, `campaign_id`, `channel`, `status` (see `TaskStatus` in `app/core/events.py`), `scheduled_at`, `locked_at`, `sent_at`, `failure_reason`, `retry_count`. No `executed_at`. The 2026-05-15 outage referenced this missing column — see [[postmortem-queue-sequence-crash-may-2026]] and [[database]].
+- **`rate_limited` status** is expected from the Rust worker but is **not yet a valid `TaskStatus` enum value**. Until added, Rust collapses it to `failed` with a retriable `error`. Tracked in [[sota-event-schemas]] §6.

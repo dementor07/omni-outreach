@@ -124,3 +124,39 @@ Not wiki pages — operational context for navigating the vault.
 - `raw/Clippings/` — saved articles, transcripts, references (immutable)
 - `raw/external-projects/outreach-automation/` — predecessor-project source-of-truth: README, SESSION_CONTEXT, CODEMAPS. Used for parity comparisons; not modified.
 - `raw/external-projects/outreach-dashboard/` — predecessor-project dashboard docs.
+
+
+---
+
+## 2026-05-17 — Index supplement
+
+This supplement covers pages added or substantially revised after the previous index revision. The tables above remain valid; pages listed here are additions/replacements.
+
+### Architecture additions
+
+| Page | Summary |
+| --- | --- |
+| [[auth]] | JWT contract, `get_current_user` returns `str` (the `sub` claim), pbkdf2_sha256 password hashing, the `user["id"]` bug class, frontend localStorage + SSE token workaround, open gaps. |
+| [[database]] | SOTA Grid view: topics vs tables, log-primary architecture, Redpanda/DragonflyDB/Flink/Postgres roles. |
+| [[sota-migration-blueprint]] | Brain/Muscle/Spine/Lungs migration plan from procedural Postgres to streaming-native. |
+| [[sota-brain-muscle-boundary]] | Where Python ends and Rust begins — split of concerns. |
+| [[sota-event-schemas]] | Canonical wire contracts for `outreach.commands / results / transitions / telemetry`. Mirrors `app/core/events.py`. Reconciled with live code 2026-05-17. |
+| [[sota-rust-worker-protocol]] | Rust execution engine consumer protocol — topics, ack semantics, retry/DLQ. |
+| [[sota-flink-state-machine]] | Flink keyed-process state for lead journeys, timers, transition emission. |
+
+### Architecture freshness updates (May 2026 status sections appended)
+
+- [[system-overview]] — added "What's actually running on the VPS" table: Redpanda live, Rust/Flink/DragonflyDB not yet deployed; bridge workers live but idle.
+- [[sequence-engine]] — added: Python sequencer still authoritative, transition field-name drift documented, links to postmortem.
+- [[dispatcher]] — added: Python dispatcher still authoritative, `rate_limited` status gap, queue schema reality (no `executed_at`).
+- [[worker]] — bridge workers (`sync-worker`, `transition-worker`) documented; VPS healthcheck note added.
+
+### Operations (new section — runbooks)
+
+| Page | Summary |
+| --- | --- |
+| [[deploy-pipeline]] | GitHub Actions → /deploy webhook → nginx → systemd `deploy-webhook` daemon → docker compose up + alembic upgrade. VPS networking, UFW state, DNS reality, race conditions. |
+| [[chrome-devtools-mcp-loop]] | Post-deploy live-verification loop via chrome-devtools-mcp. Tool surface, AdGuard workaround, the 2026-05-15 catch of two production 500s in one page load. |
+| [[ci-watcher]] | Background `until` loop on `gh run view`; deploy-progress check via SSH `pgrep docker compose up`; CLI cheat sheet; anti-patterns. |
+
+> The Operations heading further down this index is the older vault-meta list (CLAUDE.md, log.md, raw/, etc.). Those are vault meta, not runbooks; the table above is the live operational reference.

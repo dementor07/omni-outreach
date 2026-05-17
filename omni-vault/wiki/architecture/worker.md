@@ -36,3 +36,13 @@ Every worker follows the **Dead Letter Queue (DLQ)** pattern:
 1. **Retriable Failure**: Re-publish to topic with backoff.
 2. **Fatal Failure**: Publish to `outreach.dead_letter` for human intervention.
 3. **Success**: Publish to `outreach.results`.
+
+
+### D. Bridge Workers (Strangler)
+- `app.services.stream_sync`: consumes `outreach.results` and mirrors Rust execution receipts back into Postgres `queue`/`leads` for UI parity. It initializes its own asyncpg pool when run as `python -m app.services.stream_sync`.
+- `app.services.transition_worker`: consumes `outreach.transitions` and calls `queue_next_nodes()` so Flink timer events can re-enter the Python graph walker during the migration. It also initializes its own asyncpg pool as a standalone service.
+
+These workers are the compatibility layer between the SOTA Redpanda/Flink/Rust path and the legacy Postgres-backed UI.
+
+### 2026-05-16 VPS Worker Note
+`sync-worker` and `transition-worker` are running as long-lived Compose services on the VPS. Their inherited backend HTTP healthcheck is disabled in Compose because these worker commands do not serve the backend health endpoint; readiness is verified from container logs and consumer group startup.
