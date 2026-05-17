@@ -1,3 +1,4 @@
+import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -8,17 +9,49 @@ _pool: asyncpg.Pool | None = None
 redis_client: aioredis.Redis | None = None
 
 
+def _json_encode(value):
+    """Encode for jsonb. Accept pre-serialized JSON strings unchanged so legacy
+    callsites that still do their own json.dumps() before INSERT don't get
+    double-stringified."""
+    if isinstance(value, str):
+        # Trust that the caller already produced valid JSON. If it's not valid
+        # JSON, asyncpg's COPY will surface the syntax error from Postgres.
+        return value
+    return json.dumps(value)
+
+
+async def _setup_connection(conn: asyncpg.Connection) -> None:
+    """Register codecs so jsonb columns arrive as dict/list, not str."""
+    await conn.set_type_codec(
+        "jsonb",
+        encoder=_json_encode,
+        decoder=json.loads,
+        schema="pg_catalog",
+    )
+    await conn.set_type_codec(
+        "json",
+        encoder=_json_encode,
+        decoder=json.loads,
+        schema="pg_catalog",
+    )
+
+
 async def init_pool(dsn: str) -> None:
     global _pool
-    _pool = await asyncpg.create_pool(dsn, min_size=2, max_size=10, ssl=False)
+    _pool = await asyncpg.create_pool(
+        dsn, min_size=2, max_size=10, ssl=False, init=_setup_connection
+    )
+
 
 async def init_redis(url: str = "redis://redis:6379") -> None:
     global redis_client
     redis_client = aioredis.from_url(url, decode_responses=True)
 
+
 async def close_pool() -> None:
     if _pool:
         await _pool.close()
+
 
 async def close_redis() -> None:
     if redis_client:

@@ -119,10 +119,26 @@ export default function Campaigns() {
   const queueListQuery = useQueueList({ campaignId: id, limit: 50 })
 
   useEffect(() => {
-    if (graphQuery.data) {
-      setNodes(graphQuery.data.nodes as any[])
-      setEdges(graphQuery.data.edges as any[])
-    }
+    if (!graphQuery.data) return
+    // Backend stores nodes as { id, node_type, position_x, position_y, data }.
+    // xyflow expects { id, type, position: {x, y}, data }. Map both directions.
+    const apiNodes = (graphQuery.data.nodes as unknown as Array<Record<string, unknown>>) || []
+    const apiEdges = (graphQuery.data.edges as unknown as Array<Record<string, unknown>>) || []
+    setNodes(apiNodes.map((n) => ({
+      id: String(n.id),
+      type: (n.node_type as string) || (n.type as string) || 'action_email',
+      position: { x: Number(n.position_x ?? 0), y: Number(n.position_y ?? 0) },
+      data: (n.data as Record<string, unknown>) || {},
+    })) as Node[])
+    setEdges(apiEdges.map((e) => ({
+      id: String(e.id ?? `${e.source_node_id}-${e.target_node_id}`),
+      source: String(e.source_node_id ?? e.source),
+      target: String(e.target_node_id ?? e.target),
+      sourceHandle: (e.source_handle as string) ?? null,
+      targetHandle: (e.target_handle as string) ?? null,
+      type: 'custom',
+      animated: true,
+    })) as Edge[])
   }, [graphQuery.data, setNodes, setEdges])
 
   const onConnect = useCallback((params: Connection) => {
@@ -161,7 +177,22 @@ export default function Campaigns() {
   }
 
   const handleSaveSequence = async () => {
-    await saveGraph.mutateAsync({ campaign_id: id!, nodes: nodes as any, edges: edges as any })
+    // Map xyflow shape -> backend shape before posting.
+    const apiNodes = nodes.map((n) => ({
+      id: n.id,
+      node_type: (n.type as string),
+      position_x: n.position?.x ?? 0,
+      position_y: n.position?.y ?? 0,
+      data: (n.data as Record<string, unknown>) ?? {},
+    }))
+    const apiEdges = edges.map((e) => ({
+      id: e.id,
+      source_node_id: e.source,
+      target_node_id: e.target,
+      source_handle: e.sourceHandle ?? 'default',
+      target_handle: e.targetHandle ?? 'default',
+    }))
+    await saveGraph.mutateAsync({ campaign_id: id!, nodes: apiNodes as any, edges: apiEdges as any })
     toast.success('Sequence saved')
   }
 

@@ -290,7 +290,7 @@ export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate
                         >
                           Config
                         </Button>
-                      ) : step.type.startsWith('action_') ? (
+                      ) : (step.type ?? '').startsWith('action_') ? (
                         <Button
                           variant="secondary"
                           size="sm"

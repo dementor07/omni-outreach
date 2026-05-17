@@ -21,7 +21,9 @@ interface ConfigSidebarProps {
 
 export function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: ConfigSidebarProps) {
   const node = nodes.find(n => n.id === nodeId)
-  const nodeType = node?.type as NodeType
+  // Fall back to data.node_type if xyflow .type wasn't set (e.g. graph rows
+  // loaded straight from the backend before the load mapper landed).
+  const nodeType = (node?.type ?? ((node?.data as Record<string, unknown> | undefined)?.node_type as string | undefined) ?? '') as NodeType
   const toast = useToast()
   const { id: campaignId } = useParams()
   const navigate = useNavigate()
@@ -98,7 +100,7 @@ export function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: Co
   const isVoice = nodeType === 'action_voice'
   const isDelay = nodeType === 'delay'
   const isTagNode = nodeType === 'action_add_tag' || nodeType === 'action_remove_tag' || nodeType === 'condition_tag_exists'
-  const needsTemplate = nodeType.startsWith('action_') && nodeType !== 'action_linkedin_invite' && nodeType !== 'action_voice' && !isTagNode
+  const needsTemplate = (nodeType as string).startsWith('action_') && nodeType !== 'action_linkedin_invite' && nodeType !== 'action_voice' && !isTagNode
 
   return (
     <div className="h-full flex flex-col">

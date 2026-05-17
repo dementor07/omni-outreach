@@ -93,7 +93,10 @@ export default function Approvals() {
               a={a}
               status={status}
               onResolve={(resolution: string) => resolveM.mutate({ id: a.id, resolution })}
-              onSaveDraft={(body: string) => editM.mutate({ id: a.id, payload: { ...(a.payload || {}), body } })}
+              onSaveDraft={(body: string) => {
+                const existing = (typeof a.payload === 'object' && a.payload) ? a.payload : {}
+                editM.mutate({ id: a.id, payload: { ...existing, body } })
+              }}
               loading={resolveM.isPending}
               saving={editM.isPending}
             />

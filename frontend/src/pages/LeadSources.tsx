@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { PlusCircle, Play, Loader2, CheckCircle2, AlertCircle, Database, ChevronDown, ChevronUp, Trash2, Clock, Plus, Globe } from 'lucide-react'
 import { clsx } from 'clsx'
@@ -327,7 +328,9 @@ function CreateConfigModal({ open, campaignId, sources, onClose, onSubmit, isLoa
 export default function LeadSources() {
   const queryClient = useQueryClient()
   const toast = useToast()
-  const [selectedCampaignId, setSelectedCampaignId] = useState('')
+  const [searchParams] = useSearchParams()
+  const initialCampaignId = searchParams.get('campaign_id') || ''
+  const [selectedCampaignId, setSelectedCampaignId] = useState(initialCampaignId)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [runningConfigId, setRunningConfigId] = useState<string | null>(null)
 
@@ -386,10 +389,15 @@ export default function LeadSources() {
   })
 
   useEffect(() => {
-    if (campaigns && campaigns.length > 0 && !selectedCampaignId) {
+    if (!campaigns || campaigns.length === 0) return
+    // Prefer the ?campaign_id= query param if present and valid; else pick first.
+    const fromQuery = campaigns.find(c => c.id === initialCampaignId)
+    if (fromQuery && selectedCampaignId !== fromQuery.id) {
+      setSelectedCampaignId(fromQuery.id)
+    } else if (!selectedCampaignId) {
       setSelectedCampaignId(campaigns[0].id)
     }
-  }, [campaigns, selectedCampaignId])
+  }, [campaigns, selectedCampaignId, initialCampaignId])
 
   return (
     <div className="space-y-6 pb-12">
