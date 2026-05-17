@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Users, Activity, MessageSquare, X as XIcon, Plus, ArrowUpRight, MoreHorizontal, ChevronRight, Megaphone } from 'lucide-react'
+import { Users, Activity, MessageSquare, X as XIcon, Plus, ArrowUpRight, MoreHorizontal, ChevronRight, Megaphone, Upload, UserPlus } from 'lucide-react'
 import { useToast } from '../components/Toast'
 import { clsx } from 'clsx'
 import { api } from '../api/client'
@@ -11,6 +11,7 @@ import Badge from '../components/Badge'
 import Button from '../components/Button'
 import EmptyState from '../components/EmptyState'
 import DataTable from '../components/DataTable'
+import Modal from '../components/Modal'
 import { FilterBar, SearchInput, Select } from '../components/FilterBar'
 import Avatar from '../components/Avatar'
 import ChannelIcon from '../components/ChannelIcon'
@@ -32,6 +33,30 @@ export default function Leads() {
   const [status, setStatus] = useState('')
   const [exporting, setExporting] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [addForm, setAddForm] = useState({
+    first_name: '', last_name: '', linkedin_url: '', email: '', phone: '', company: '', headline: '',
+  })
+
+  async function handleAddManual() {
+    if (!campaignId) { toast.error('Pick a campaign first'); return }
+    const has = addForm.linkedin_url || addForm.email || addForm.phone
+    if (!has) { toast.error('Need at least one of LinkedIn URL, email, or phone'); return }
+    setAdding(true)
+    try {
+      await api.post('/leads', addForm, { params: { campaign_id: campaignId } })
+      toast.success('Lead added')
+      setAddOpen(false)
+      setAddForm({ first_name: '', last_name: '', linkedin_url: '', email: '', phone: '', company: '', headline: '' })
+      leadsQ.refetch()
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to add lead'
+      toast.error(msg)
+    } finally {
+      setAdding(false)
+    }
+  }
 
   async function handleExport() {
     if (!campaignId) { toast.error('Pick a campaign first'); return }
@@ -113,8 +138,11 @@ export default function Leads() {
             <Button variant="secondary" size="md" icon={ArrowUpRight} onClick={handleExport} disabled={exporting || !campaignId}>
               {exporting ? 'Exporting…' : 'Export CSV'}
             </Button>
-            <Button variant="primary" size="md" icon={Plus} onClick={() => fileInputRef.current?.click()} disabled={importing || !campaignId}>
-              {importing ? 'Importing…' : 'Add leads'}
+            <Button variant="secondary" size="md" icon={Upload} onClick={() => fileInputRef.current?.click()} disabled={importing || !campaignId}>
+              {importing ? 'Importing…' : 'Import CSV'}
+            </Button>
+            <Button variant="primary" size="md" icon={UserPlus} onClick={() => setAddOpen(true)} disabled={!campaignId}>
+              Add lead
             </Button>
           </>
         }
@@ -151,7 +179,7 @@ export default function Leads() {
             icon={Users}
             title="No leads in this campaign"
             description="Import a CSV, connect a lead source, or add prospects manually."
-            action={<Button variant="primary" size="sm" icon={Plus} onClick={() => fileInputRef.current?.click()} disabled={importing}>Add leads</Button>}
+            action={<Button variant="primary" size="sm" icon={UserPlus} onClick={() => setAddOpen(true)}>Add lead</Button>}
           />
         ) : (
           <DataTable
@@ -190,7 +218,59 @@ export default function Leads() {
           />
         )}
       </Card>
+
+      <Modal title="Add lead manually" open={addOpen} onClose={() => !adding && setAddOpen(false)} width="md">
+        <div className="space-y-3">
+          <p className="text-[12px] text-slate-500 dark:text-slate-400">
+            Provide at least one of: LinkedIn URL, email, or phone. Name fields personalize the sequence.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="First name">
+              <input type="text" value={addForm.first_name} onChange={(e) => setAddForm({ ...addForm, first_name: e.target.value })} className={inputCls} placeholder="Jane" />
+            </Field>
+            <Field label="Last name">
+              <input type="text" value={addForm.last_name} onChange={(e) => setAddForm({ ...addForm, last_name: e.target.value })} className={inputCls} placeholder="Doe" />
+            </Field>
+          </div>
+          <Field label="LinkedIn URL">
+            <input type="url" value={addForm.linkedin_url} onChange={(e) => setAddForm({ ...addForm, linkedin_url: e.target.value })} className={inputCls} placeholder="https://www.linkedin.com/in/jane-doe" />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Email">
+              <input type="email" value={addForm.email} onChange={(e) => setAddForm({ ...addForm, email: e.target.value })} className={inputCls} placeholder="jane@acme.com" />
+            </Field>
+            <Field label="Phone">
+              <input type="tel" value={addForm.phone} onChange={(e) => setAddForm({ ...addForm, phone: e.target.value })} className={inputCls} placeholder="+1 555 0100" />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Company">
+              <input type="text" value={addForm.company} onChange={(e) => setAddForm({ ...addForm, company: e.target.value })} className={inputCls} placeholder="Acme Co." />
+            </Field>
+            <Field label="Headline">
+              <input type="text" value={addForm.headline} onChange={(e) => setAddForm({ ...addForm, headline: e.target.value })} className={inputCls} placeholder="VP of Sales" />
+            </Field>
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <Button variant="ghost" size="md" onClick={() => setAddOpen(false)} disabled={adding}>Cancel</Button>
+            <Button variant="primary" size="md" icon={UserPlus} onClick={handleAddManual} disabled={adding}>
+              {adding ? 'Adding…' : 'Add lead'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
+  )
+}
+
+const inputCls = 'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-900 placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200 dark:border-slate-700 dark:bg-slate-900 dark:text-white'
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">{label}</span>
+      {children}
+    </label>
   )
 }
 
