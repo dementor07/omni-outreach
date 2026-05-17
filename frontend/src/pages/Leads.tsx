@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Users, Activity, MessageSquare, X as XIcon, Plus, ArrowUpRight, MoreHorizontal, ChevronRight, Megaphone } from 'lucide-react'
+import { useToast } from '../components/Toast'
 import { clsx } from 'clsx'
 import { api } from '../api/client'
 import PageHeader from '../components/PageHeader'
@@ -23,10 +24,55 @@ interface Lead {
 interface Campaign { id: string; name: string }
 
 export default function Leads() {
+  const toast = useToast()
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const campaignsQ = useQuery<Campaign[]>({ queryKey: ['campaigns'], queryFn: () => api.get('/campaigns').then(r => r.data) })
   const [campaignId, setCampaignId] = useState('')
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
+  const [exporting, setExporting] = useState(false)
+  const [importing, setImporting] = useState(false)
+
+  async function handleExport() {
+    if (!campaignId) { toast.error('Pick a campaign first'); return }
+    setExporting(true)
+    try {
+      const res = await api.get(`/leads/export`, { params: { campaign_id: campaignId }, responseType: 'blob' })
+      const url = URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `leads_${campaignId}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+      toast.success('Export started')
+    } catch {
+      toast.error('Export failed')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!campaignId) { toast.error('Pick a campaign first'); return }
+    setImporting(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      await api.post('/leads/csv-upload', form, {
+        params: { campaign_id: campaignId },
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      toast.success('Leads imported')
+      leadsQ.refetch()
+    } catch {
+      toast.error('Import failed')
+    } finally {
+      setImporting(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
 
   useEffect(() => {
     if (!campaignId && campaignsQ.data?.length) setCampaignId(campaignsQ.data[0].id)
@@ -55,8 +101,21 @@ export default function Leads() {
         description="Every prospect across the selected campaign, with current pipeline state."
         actions={
           <>
-            <Button variant="secondary" size="md" icon={ArrowUpRight}>Export CSV</Button>
-            <Button variant="primary" size="md" icon={Plus}>Add leads</Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              aria-label="Upload leads CSV"
+              title="Upload leads CSV"
+              className="hidden"
+              onChange={handleImportFile}
+            />
+            <Button variant="secondary" size="md" icon={ArrowUpRight} onClick={handleExport} disabled={exporting || !campaignId}>
+              {exporting ? 'Exporting…' : 'Export CSV'}
+            </Button>
+            <Button variant="primary" size="md" icon={Plus} onClick={() => fileInputRef.current?.click()} disabled={importing || !campaignId}>
+              {importing ? 'Importing…' : 'Add leads'}
+            </Button>
           </>
         }
       />
@@ -92,7 +151,7 @@ export default function Leads() {
             icon={Users}
             title="No leads in this campaign"
             description="Import a CSV, connect a lead source, or add prospects manually."
-            action={<Button variant="primary" size="sm" icon={Plus}>Add leads</Button>}
+            action={<Button variant="primary" size="sm" icon={Plus} onClick={() => fileInputRef.current?.click()} disabled={importing}>Add leads</Button>}
           />
         ) : (
           <DataTable

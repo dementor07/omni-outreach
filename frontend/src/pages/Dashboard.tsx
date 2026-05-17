@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { Users, Send, CheckCircle2, Activity, Megaphone, ListTodo, AlertCircle, RefreshCw, Plus, MoreHorizontal, TrendingUp, BarChart3 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { api } from '../api/client'
@@ -25,7 +26,8 @@ interface ConsolidatedData {
 }
 
 export default function Dashboard() {
-  const { data: dashboard, isLoading, refetch } = useQuery<ConsolidatedData>({ 
+  const navigate = useNavigate()
+  const { data: dashboard, isLoading, refetch } = useQuery<ConsolidatedData>({
     queryKey: ['dashboard-consolidated'], 
     queryFn: () => api.get('/overview/consolidated').then(r => r.data) 
   })
@@ -56,7 +58,7 @@ export default function Dashboard() {
         actions={
           <>
             <Button variant="secondary" size="md" icon={RefreshCw} onClick={refreshAll}>Refresh</Button>
-            <Button variant="primary" size="md" icon={Plus} onClick={() => {}}>New campaign</Button>
+            <Button variant="primary" size="md" icon={Plus} onClick={() => navigate('/campaigns?new=1')}>New campaign</Button>
           </>
         }
       />
@@ -124,7 +126,7 @@ export default function Dashboard() {
           {campaignsQ.isLoading ? (
             <div className="space-y-2">{[0,1,2].map(i => <div key={i} className="h-20 skeleton rounded-xl" />)}</div>
           ) : campaigns.length === 0 ? (
-            <EmptyState icon={Megaphone} title="No campaigns" description="Create one to start the pipeline." action={<Button variant="primary" size="sm" icon={Plus}>Create campaign</Button>} />
+            <EmptyState icon={Megaphone} title="No campaigns" description="Create one to start the pipeline." action={<Button variant="primary" size="sm" icon={Plus} onClick={() => navigate('/campaigns?new=1')}>Create campaign</Button>} />
           ) : (
             <div className="space-y-2">{campaigns.slice(0, 5).map(c => <CampaignMiniRow key={c.id} c={c} />)}</div>
           )}

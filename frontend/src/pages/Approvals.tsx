@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useQuery, useMutation as useRQMutation } from '@tanstack/react-query'
-import { Clock, CheckCircle2, X, Check, Edit2, Megaphone, RefreshCw, UserCheck } from 'lucide-react'
+import { Clock, CheckCircle2, X, Check, Edit2, Megaphone, RefreshCw, UserCheck, Save } from 'lucide-react'
 import { api } from '../api/client'
+import { useToast } from '../components/Toast'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
@@ -15,11 +16,12 @@ interface Approval { id: string; first_name?: string; last_name?: string; headli
 interface Campaign { id: string; name: string }
 
 export default function Approvals() {
+  const toast = useToast()
   const [status, setStatus] = useState('pending')
   const [campaignId, setCampaignId] = useState('')
 
   const campaignsQ = useQuery<Campaign[]>({ queryKey: ['campaigns'], queryFn: () => api.get('/campaigns').then(r => r.data) })
-  const approvalsQ = useQuery<Approval[]>({
+  const approvalsQ = useQuery<{ approvals: Approval[] }>({
     queryKey: ['approvals', status, campaignId],
     queryFn: () => {
       const params = new URLSearchParams()
@@ -34,9 +36,17 @@ export default function Approvals() {
     mutationFn: ({ id, resolution }: { id: string; resolution: string }) =>
       api.post(`/approvals/${id}/resolve`, { resolution }),
     onSuccess: () => approvalsQ.refetch(),
+    onError: () => toast.error('Failed to resolve approval'),
   })
 
-  const approvals = approvalsQ.data || []
+  const editM = useRQMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: { body?: string } }) =>
+      api.patch(`/approvals/${id}`, { payload }),
+    onSuccess: () => { toast.success('Draft updated'); approvalsQ.refetch() },
+    onError: () => toast.error('Failed to update draft'),
+  })
+
+  const approvals = approvalsQ.data?.approvals || []
 
   return (
     <div className="space-y-6">
@@ -83,7 +93,9 @@ export default function Approvals() {
               a={a}
               status={status}
               onResolve={(resolution: string) => resolveM.mutate({ id: a.id, resolution })}
+              onSaveDraft={(body: string) => editM.mutate({ id: a.id, payload: { ...(a.payload || {}), body } })}
               loading={resolveM.isPending}
+              saving={editM.isPending}
             />
           ))}
         </div>
@@ -92,8 +104,10 @@ export default function Approvals() {
   )
 }
 
-function ApprovalCard({ a, status, onResolve, loading }: { a: Approval; status: string; onResolve: (res: string) => void; loading: boolean }) {
+function ApprovalCard({ a, status, onResolve, onSaveDraft, loading, saving }: { a: Approval; status: string; onResolve: (res: string) => void; onSaveDraft: (body: string) => void; loading: boolean; saving: boolean }) {
   const payloadStr = a.payload && typeof a.payload === 'object' && (a.payload.body || a.payload.message || a.payload.text)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState<string>(payloadStr || '')
   return (
     <Card padding="md">
       <div className="flex items-start gap-3">
@@ -115,16 +129,33 @@ function ApprovalCard({ a, status, onResolve, loading }: { a: Approval; status: 
             <Badge label={status} asStatus dot />
           </div>
           {a.title && <p className="mt-3 text-[13px] font-medium text-slate-700 dark:text-slate-200">{a.title}</p>}
-          {payloadStr && (
-            <div className="mt-2 whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-[13px] leading-relaxed text-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
-              {payloadStr}
-            </div>
+          {(payloadStr || editing) && (
+            editing ? (
+              <textarea
+                value={draft}
+                onChange={e => setDraft(e.target.value)}
+                rows={5}
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white p-3 text-[13px] leading-relaxed text-slate-700 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200"
+                aria-label="Edit approval draft"
+              />
+            ) : (
+              <div className="mt-2 whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-[13px] leading-relaxed text-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
+                {payloadStr}
+              </div>
+            )
           )}
           {status === 'pending' && (
-            <div className="mt-3 flex items-center gap-2">
-              <Button variant="primary" size="sm" icon={Check} onClick={() => onResolve('approve')} disabled={loading}>Approve</Button>
-              <Button variant="secondary" size="sm" icon={X} onClick={() => onResolve('reject')} disabled={loading}>Reject</Button>
-              <Button variant="ghost" size="sm" icon={Edit2}>Edit draft</Button>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Button variant="primary" size="sm" icon={Check} onClick={() => onResolve('approve')} disabled={loading || editing}>Approve</Button>
+              <Button variant="secondary" size="sm" icon={X} onClick={() => onResolve('reject')} disabled={loading || editing}>Reject</Button>
+              {editing ? (
+                <>
+                  <Button variant="primary" size="sm" icon={Save} onClick={() => { onSaveDraft(draft); setEditing(false) }} disabled={saving}>Save</Button>
+                  <Button variant="ghost" size="sm" icon={X} onClick={() => { setDraft(payloadStr || ''); setEditing(false) }}>Cancel</Button>
+                </>
+              ) : (
+                <Button variant="ghost" size="sm" icon={Edit2} onClick={() => setEditing(true)}>Edit draft</Button>
+              )}
             </div>
           )}
           {status !== 'pending' && a.resolved_at && (

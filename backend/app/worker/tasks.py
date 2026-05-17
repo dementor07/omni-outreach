@@ -29,6 +29,7 @@ async def optimize_splits(ctx: dict) -> None:
 
 async def cron_reply_intent_timeout(ctx: dict) -> None:
     from app.services.sequencer import check_reply_intent_timeouts
+
     await check_reply_intent_timeouts()
 
 
@@ -70,6 +71,7 @@ async def cron_lead_gen(ctx: dict) -> None:
 async def startup(ctx: dict) -> None:
     from app.config import settings
     from app.db import init_pool, init_redis
+
     dsn = settings.get_asyncpg_dsn()
     await init_pool(dsn)
     await init_redis(settings.get_redis_url())
@@ -78,6 +80,7 @@ async def startup(ctx: dict) -> None:
 
 async def shutdown(ctx: dict) -> None:
     from app.db import close_pool, close_redis
+
     await close_pool()
     await close_redis()
 
@@ -91,5 +94,5 @@ class WorkerSettings:
         cron(optimize_splits, minute=set(range(0, 60, 10))),
         cron(cron_reply_intent_timeout, minute={0, 30}),
     ]
-    max_jobs = 1
+    max_jobs = 4
     job_timeout = 300

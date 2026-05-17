@@ -3,6 +3,7 @@
 `human_approval` nodes park a lead and open a row here. The user reviews and
 either approves (lead advances on handle 'approve') or rejects (handle 'reject').
 """
+
 from __future__ import annotations
 
 import logging
@@ -46,20 +47,18 @@ async def list_approvals(
         FROM approvals a
         JOIN leads l ON l.id = a.lead_id
         JOIN campaigns c ON c.id = a.campaign_id
-        WHERE {' AND '.join(conditions)}
+        WHERE {" AND ".join(conditions)}
         ORDER BY a.created_at DESC
         LIMIT ${len(params)}
         """,
         *params,
     )
-    return rows
+    return {"approvals": rows}
 
 
 @router.get("/count")
 async def approvals_count(user_id: str = Depends(get_current_user)):
-    row = await fetch_one(
-        "SELECT COUNT(*) AS pending FROM approvals WHERE status = 'pending'"
-    )
+    row = await fetch_one("SELECT COUNT(*) AS pending FROM approvals WHERE status = 'pending'")
     return {"pending": (row or {}).get("pending", 0)}
 
 
@@ -88,6 +87,7 @@ async def update_approval(
         await execute("UPDATE approvals SET title=$1 WHERE id=$2", body.title, approval_id)
     if body.payload is not None:
         import json as _json
+
         await execute("UPDATE approvals SET payload=$1 WHERE id=$2", _json.dumps(body.payload), approval_id)
 
     return {"status": "updated"}
@@ -120,10 +120,15 @@ async def resolve_approval(
         SET status=$2, resolution=$3, resolved_by=$4, resolved_at=NOW()
         WHERE id=$1
         """,
-        approval_id, new_status, body.note, user_id,
+        approval_id,
+        new_status,
+        body.note,
+        user_id,
     )
     log.info(f"[approvals] {approval_id} resolved: {new_status} by {user_id}")
     await sequencer.resume_from_approval(
-        str(approval["lead_id"]), approval_id, body.resolution,
+        str(approval["lead_id"]),
+        approval_id,
+        body.resolution,
     )
     return {"status": new_status}

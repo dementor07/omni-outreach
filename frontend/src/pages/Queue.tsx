@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { useToast } from '../components/Toast'
 import { Clock, Lock, Send, AlertCircle, RefreshCw, RotateCcw } from 'lucide-react'
 import { api } from '../api/client'
 import PageHeader from '../components/PageHeader'
@@ -33,6 +34,7 @@ interface QueueTask {
 interface Campaign { id: string; name: string }
 
 export default function Queue() {
+  const toast = useToast()
   const [campaignId, setCampaignId] = useState('')
   const [status, setStatus] = useState('')
   const [channel, setChannel] = useState('')
@@ -45,6 +47,26 @@ export default function Queue() {
   if (status) params.set('status', status)
   params.set('limit', '200')
   const queueQ = useQuery<{ tasks: QueueTask[] }>({ queryKey: ['queue', campaignId, status], queryFn: () => api.get(`/queue?${params.toString()}`).then(r => r.data) })
+
+  const refetchAll = () => { queueQ.refetch(); statsQ.refetch() }
+
+  const retryOne = useMutation({
+    mutationFn: (id: string) => api.post(`/queue/${id}/retry`).then(r => r.data),
+    onSuccess: () => { toast.success('Task re-queued'); refetchAll() },
+    onError: () => toast.error('Retry failed'),
+  })
+
+  const retryAll = useMutation({
+    mutationFn: () => {
+      const p = new URLSearchParams()
+      if (campaignId) p.set('campaign_id', campaignId)
+      if (channel) p.set('channel', channel)
+      const qs = p.toString()
+      return api.post(`/queue/bulk-retry${qs ? `?${qs}` : ''}`).then(r => r.data)
+    },
+    onSuccess: () => { toast.success('Failed tasks re-queued'); refetchAll() },
+    onError: () => toast.error('Bulk retry failed'),
+  })
 
   const tasks = (queueQ.data?.tasks || []).filter(t => !channel || t.channel === channel)
   const qStats = statsQ.data?.stats || []
@@ -71,7 +93,17 @@ export default function Queue() {
         actions={
           <>
             <Button variant="secondary" size="md" icon={RefreshCw} onClick={() => { queueQ.refetch(); statsQ.refetch() }}>Refresh</Button>
-            {failed > 0 && <Button variant="danger" size="md" icon={RotateCcw}>Retry {failed.toLocaleString()} failures</Button>}
+            {failed > 0 && (
+              <Button
+                variant="danger"
+                size="md"
+                icon={RotateCcw}
+                onClick={() => retryAll.mutate()}
+                disabled={retryAll.isPending}
+              >
+                Retry {failed.toLocaleString()} failures
+              </Button>
+            )}
           </>
         }
       />
@@ -138,7 +170,17 @@ export default function Queue() {
                 </span>
               )},
               { key: 'actions', header: '', align: 'right' as const, render: (row: QueueTask) =>
-                (row.status === 'failed' || row.status === 'skipped') ? <Button variant="ghost" size="sm" icon={RotateCcw}>Retry</Button> : null
+                (row.status === 'failed' || row.status === 'skipped') ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={RotateCcw}
+                    onClick={() => retryOne.mutate(row.id)}
+                    disabled={retryOne.isPending}
+                  >
+                    Retry
+                  </Button>
+                ) : null
               },
             ]}
             rows={tasks}

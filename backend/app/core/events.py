@@ -13,6 +13,8 @@ class TaskStatus(StrEnum):
     FAILED = "failed"
     SKIPPED = "skipped"
     PENDING_APPROVAL = "pending_approval"
+    RATE_LIMITED = "rate_limited"
+
 
 class ChannelType(StrEnum):
     LINKEDIN_INVITE = "linkedin_invite"
@@ -32,11 +34,13 @@ class ChannelType(StrEnum):
     HOT_LEAD_ALERT = "hot_lead_alert"
     DATA_TRANSFORM = "data_transform"
 
+
 class EventType(StrEnum):
-    COMMAND_TASK = "command_task"          # Python -> Bus -> Execution (Rust/Python)
-    RESULT_TASK = "result_task"            # Execution -> Bus -> Orchestration (Flink/Python)
+    COMMAND_TASK = "command_task"  # Python -> Bus -> Execution (Rust/Python)
+    RESULT_TASK = "result_task"  # Execution -> Bus -> Orchestration (Flink/Python)
     STATE_TRANSITION = "state_transition"  # Orchestration -> Bus -> Telemetry/UI
     TELEMETRY_SIGNAL = "telemetry_signal"  # Real-time metrics
+
 
 class LeadContext(BaseModel):
     id: UUID4
@@ -49,8 +53,10 @@ class LeadContext(BaseModel):
     chat_id: str | None = None
     extra_data: dict[str, Any] = Field(default_factory=dict)
 
+
 class ActionCommand(BaseModel):
     """The 'Work Order' for the Execution Plane (Rust/Python)"""
+
     command_id: UUID4
     task_id: UUID4  # Legacy queue ID for now
     channel: ChannelType
@@ -59,8 +65,10 @@ class ActionCommand(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     occurred_at: datetime = Field(default_factory=datetime.utcnow)
 
+
 class ExecutionResult(BaseModel):
     """The 'Receipt' from the Execution Plane"""
+
     command_id: UUID4
     status: TaskStatus
     error: str | None = None
@@ -68,12 +76,19 @@ class ExecutionResult(BaseModel):
     telemetry: dict[str, Any] = Field(default_factory=dict)
     occurred_at: datetime = Field(default_factory=datetime.utcnow)
 
+
 class StateTransition(BaseModel):
-    """The signal that a Lead has moved in the DAG"""
+    """The signal that a Lead has moved in the DAG.
+
+    Wire shape matches the ``transition_worker`` consumer (Flink emits this
+    envelope directly): ``source_node_id`` is the node the lead just left
+    and ``handle`` is the outgoing edge label.
+    """
+
     lead_id: UUID4
     campaign_id: UUID4
-    from_node: UUID4 | None = None
-    to_node: UUID4
-    event_type: str
+    source_node_id: UUID4
+    handle: str = "default"
+    event_type: str = "transition"
     metadata: dict[str, Any] = Field(default_factory=dict)
     occurred_at: datetime = Field(default_factory=datetime.utcnow)

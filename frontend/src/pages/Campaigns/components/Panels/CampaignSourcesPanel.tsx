@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Database, ChevronRight, Clock, Play, Plus } from 'lucide-react'
 import { api } from '../../../../api/client'
@@ -10,6 +10,7 @@ import { CampaignConfig, CampaignRun } from '../../types'
 
 export function CampaignSourcesPanel({ campaignId }: { campaignId: string }) {
   const toast = useToast()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [runningId, setRunningId] = useState<string | null>(null)
 
@@ -63,7 +64,7 @@ export function CampaignSourcesPanel({ campaignId }: { campaignId: string }) {
       ) : configs.length === 0 ? (
         <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 p-8 text-center dark:border-slate-800 dark:bg-slate-900/50">
           <p className="text-sm text-slate-500 mb-4">No lead sources configured for this campaign yet.</p>
-          <Button variant="secondary" size="sm" icon={Plus} onClick={() => {}}>
+          <Button variant="secondary" size="sm" icon={Plus} onClick={() => navigate(`/lead-sources?campaign_id=${campaignId}`)}>
             Configure source
           </Button>
         </div>
