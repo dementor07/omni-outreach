@@ -18,6 +18,7 @@ export type NodeType =
   | 'action_remove_tag'
   | 'action_enrich'
   | 'action_data_transform'
+  | 'action_ai_compose'
   | 'condition_replied'
   | 'condition_linkedin_distance'
   | 'condition_tag_exists'

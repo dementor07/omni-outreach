@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -6,6 +7,46 @@ from pydantic import BaseModel
 
 from app.auth import get_current_user
 from app.db import execute, fetch_all, fetch_one
+
+# Lead fields the renderer can substitute (mirrors renderer.render + lead columns).
+# Any {{var}} outside this set must be declared via an earlier action_data_transform
+# or action_ai_compose node (which writes to extra_data).
+_LEAD_FIELDS = frozenset({
+    "id", "first_name", "last_name", "firstname", "lastname", "email", "phone",
+    "headline", "company", "company_short_name", "linkedin_url", "location",
+    "source", "current_step", "ai_draft",
+})
+
+_VAR_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
+
+
+def _collect_vars(value) -> set[str]:
+    """Walk a node.data structure and return every {{var}} referenced in any string field."""
+    found: set[str] = set()
+    if isinstance(value, str):
+        found.update(_VAR_RE.findall(value))
+    elif isinstance(value, dict):
+        for v in value.values():
+            found |= _collect_vars(v)
+    elif isinstance(value, list):
+        for v in value:
+            found |= _collect_vars(v)
+    return found
+
+
+def _declared_variables(nodes: list["NodeCreate"]) -> set[str]:
+    """Variables a node will write into lead.extra_data — usable downstream."""
+    declared: set[str] = set()
+    for n in nodes:
+        d = n.data or {}
+        if n.node_type == "action_data_transform":
+            name = str(d.get("variable_name", "")).strip()
+            if name:
+                declared.add(name)
+        elif n.node_type == "action_ai_compose":
+            name = str(d.get("target_variable", "ai_draft")).strip() or "ai_draft"
+            declared.add(name)
+    return declared
 
 router = APIRouter()
 
@@ -25,6 +66,8 @@ NodeType = Literal[
     "action_add_tag",
     "action_remove_tag",
     "action_enrich",
+    "action_data_transform",
+    "action_ai_compose",
     "condition_replied",
     "condition_linkedin_distance",
     "condition_tag_exists",
@@ -42,12 +85,14 @@ NodeType = Literal[
     "end",
 ]
 
+
 class NodeCreate(BaseModel):
-    id: str | None = None # React Flow ID
+    id: str | None = None  # React Flow ID
     node_type: NodeType
     position_x: float
     position_y: float
     data: dict = {}
+
 
 class EdgeCreate(BaseModel):
     id: str | None = None
@@ -56,10 +101,12 @@ class EdgeCreate(BaseModel):
     source_handle: str = "default"
     target_handle: str = "default"
 
+
 class SequenceGraph(BaseModel):
     campaign_id: str
     nodes: list[NodeCreate]
     edges: list[EdgeCreate]
+
 
 @router.get("/{campaign_id}")
 async def get_graph(campaign_id: str, user_id: str = Depends(get_current_user)):
@@ -73,12 +120,36 @@ async def get_graph(campaign_id: str, user_id: str = Depends(get_current_user)):
     )
     return {"nodes": nodes, "edges": edges}
 
+
 @router.post("/save")
 async def save_graph(body: SequenceGraph, user_id: str = Depends(get_current_user)):
     # Verify campaign exists
     campaign = await fetch_one("SELECT id FROM campaigns WHERE id=$1", body.campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
+
+    # Variable validation: every {{var}} referenced by a node must resolve to either
+    # a known lead field or a variable declared by an earlier action_data_transform /
+    # action_ai_compose node. Order-agnostic check (graph may be non-linear).
+    declared = _declared_variables(body.nodes)
+    allowed = _LEAD_FIELDS | declared
+    unresolved: dict[str, list[str]] = {}
+    for n in body.nodes:
+        refs = _collect_vars(n.data)
+        bad = sorted(v for v in refs if v not in allowed)
+        if bad:
+            unresolved[n.id or n.node_type] = bad
+    if unresolved:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "unresolved_variables",
+                "message": "One or more nodes reference variables that no lead field or upstream node provides.",
+                "unresolved": unresolved,
+                "allowed_lead_fields": sorted(_LEAD_FIELDS),
+                "declared_by_nodes": sorted(declared),
+            },
+        )
 
     # Transactional update: Delete old nodes/edges and insert new ones
     # In a real production app, we'd use a transaction here.
@@ -88,7 +159,7 @@ async def save_graph(body: SequenceGraph, user_id: str = Depends(get_current_use
     await execute("DELETE FROM sequence_nodes WHERE campaign_id=$1", body.campaign_id)
 
     # Insert Nodes
-    node_id_map = {} # Map temporary React Flow IDs to actual DB IDs if needed
+    node_id_map = {}  # Map temporary React Flow IDs to actual DB IDs if needed
     for node in body.nodes:
         inserted = await fetch_one(
             """
@@ -96,7 +167,11 @@ async def save_graph(body: SequenceGraph, user_id: str = Depends(get_current_use
             VALUES ($1, $2, $3, $4, $5)
             RETURNING id
             """,
-            body.campaign_id, node.node_type, node.position_x, node.position_y, json.dumps(node.data)
+            body.campaign_id,
+            node.node_type,
+            node.position_x,
+            node.position_y,
+            json.dumps(node.data),
         )
         if node.id:
             node_id_map[node.id] = inserted["id"]
@@ -112,10 +187,15 @@ async def save_graph(body: SequenceGraph, user_id: str = Depends(get_current_use
             INSERT INTO sequence_edges (campaign_id, source_node_id, target_node_id, source_handle, target_handle)
             VALUES ($1, $2, $3, $4, $5)
             """,
-            body.campaign_id, source_id, target_id, edge.source_handle, edge.target_handle
+            body.campaign_id,
+            source_id,
+            target_id,
+            edge.source_handle,
+            edge.target_handle,
         )
 
     return {"status": "success"}
+
 
 @router.get("/{campaign_id}/telemetry")
 async def get_telemetry(campaign_id: str, user_id: str = Depends(get_current_user)):

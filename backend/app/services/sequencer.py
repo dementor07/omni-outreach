@@ -11,11 +11,10 @@ from app.services.bus import bus
 
 log = logging.getLogger(__name__)
 
+
 async def schedule_new_lead(lead_id: str) -> None:
     """Entry point: Inject a freshly scraped lead into the DAG from trigger_start."""
-    lead = await fetch_one(
-        "SELECT id, campaign_id FROM leads WHERE id=$1", lead_id
-    )
+    lead = await fetch_one("SELECT id, campaign_id FROM leads WHERE id=$1", lead_id)
     if not lead:
         return
 
@@ -33,9 +32,7 @@ async def schedule_new_lead(lead_id: str) -> None:
 
 async def schedule_sequence(lead_id: str) -> None:
     """Entry point: Resume the sequence for a lead after invite acceptance."""
-    lead = await fetch_one(
-        "SELECT id, campaign_id, accepted_at FROM leads WHERE id=$1", lead_id
-    )
+    lead = await fetch_one("SELECT id, campaign_id, accepted_at FROM leads WHERE id=$1", lead_id)
     if not lead or not lead["accepted_at"]:
         return
 
@@ -49,6 +46,7 @@ async def schedule_sequence(lead_id: str) -> None:
 
     await queue_next_nodes(lead_id, start_node["id"])
 
+
 async def queue_next_nodes(
     lead_id: str,
     source_node_id: str,
@@ -57,22 +55,26 @@ async def queue_next_nodes(
 ) -> None:
     """Finds target nodes from source_node and handles them (queue or recursive evaluate)."""
     lead = await fetch_one("SELECT * FROM leads WHERE id=$1", lead_id)
-    if not lead: return
+    if not lead:
+        return
 
     edges = await fetch_all(
         "SELECT target_node_id FROM sequence_edges WHERE source_node_id=$1 AND source_handle=$2",
-        source_node_id, handle,
+        source_node_id,
+        handle,
     )
 
     for edge in edges:
         target_id = edge["target_node_id"]
         node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", target_id)
-        if not node: continue
+        if not node:
+            continue
 
         node_type = node["node_type"]
 
         if node_type.startswith("action_"):
             channel_str = node_type.replace("action_", "")
+            task_id = uuid.uuid4()
 
             # Map to ChannelType enum
             try:
@@ -84,7 +86,7 @@ async def queue_next_nodes(
             # Create the SOTA ActionCommand
             command = ActionCommand(
                 command_id=uuid.uuid4(),
-                task_id=uuid.uuid4(),  # Temporary until we retire the queue table completely
+                task_id=task_id,  # Legacy queue mirror id until the queue table is retired.
                 channel=channel,
                 lead=LeadContext(
                     id=lead["id"],
@@ -95,29 +97,35 @@ async def queue_next_nodes(
                     last_name=lead.get("last_name"),
                     company=lead.get("company"),
                     chat_id=lead.get("chat_id"),
-                    extra_data=dict(lead.get("extra_data") or {})
+                    extra_data=dict(lead.get("extra_data") or {}),
                 ),
                 payload=(node["data"] or {}),
-                metadata={
-                    "node_id": str(target_id),
-                    "accumulated_delay_seconds": accumulated_delay.total_seconds()
-                }
+                metadata={"node_id": str(target_id), "accumulated_delay_seconds": accumulated_delay.total_seconds()},
             )
 
-            # Publish to the stream
-            await bus.publish_command(command)
+            # Brain/Muscle authority gate (see config.execution_mode).
+            from app.config import settings as _settings
 
-            # Legacy mirror (optional, but keeps old UI working for now)
-            scheduled_at = datetime.now(UTC) + accumulated_delay
-            await execute(
-                """
-                INSERT INTO queue (campaign_id, lead_id, node_id, channel, status, scheduled_at)
-                VALUES ($1, $2, $3, $4, 'queued', $5)
-                ON CONFLICT DO NOTHING
-                """,
-                lead["campaign_id"], lead_id, target_id, channel_str, scheduled_at,
-            )
-            log.info(f"[sequencer] Streamed and Queued {channel_str} for lead {lead_id}")
+            mode = (_settings.execution_mode or "shadow").lower()
+            if mode in ("shadow", "muscle"):
+                await bus.publish_command(command)
+
+            if mode in ("shadow", "legacy"):
+                scheduled_at = datetime.now(UTC) + accumulated_delay
+                await execute(
+                    """
+                    INSERT INTO queue (id, campaign_id, lead_id, node_id, channel, status, scheduled_at)
+                    VALUES ($1, $2, $3, $4, $5, 'queued', $6)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    task_id,
+                    lead["campaign_id"],
+                    lead_id,
+                    target_id,
+                    channel_str,
+                    scheduled_at,
+                )
+            log.info(f"[sequencer] dispatched {channel_str} for lead {lead_id} (mode={mode})")
 
         elif node_type == "delay":
             # SOTA: Delays are handled by Flink's timer service.
@@ -138,6 +146,7 @@ async def queue_next_nodes(
                     await queue_next_nodes(lead_id, target_id, "false", accumulated_delay)
             elif node_type == "condition_ai_screen":
                 from app.services.screener import screen_lead
+
                 prompt = (node["data"] or {}).get("screening_prompt", "")
                 verdict = await screen_lead(lead.get("headline", ""), prompt)
                 branch = "true" if verdict == "ACCEPT" else "false"
@@ -162,7 +171,8 @@ async def queue_next_nodes(
                     # re-enter via evaluate_conditions() once a reply arrives.
                     await execute(
                         "UPDATE leads SET current_node_id=$1 WHERE id=$2",
-                        target_id, lead_id,
+                        target_id,
+                        lead_id,
                     )
                     log.info(f"[sequencer] Reply-intent parking lead {lead_id} at {target_id}")
                 else:
@@ -171,16 +181,15 @@ async def queue_next_nodes(
                     await queue_next_nodes(lead_id, target_id, branch, accumulated_delay)
 
         elif node_type == "split":
-            weights = (node.get("data") or {}).get("weights", {
-                "true": {"alpha": 1, "beta": 1},
-                "false": {"alpha": 1, "beta": 1},
-            })
-            sample_true = random.betavariate(
-                weights["true"]["alpha"], weights["true"]["beta"]
+            weights = (node.get("data") or {}).get(
+                "weights",
+                {
+                    "true": {"alpha": 1, "beta": 1},
+                    "false": {"alpha": 1, "beta": 1},
+                },
             )
-            sample_false = random.betavariate(
-                weights["false"]["alpha"], weights["false"]["beta"]
-            )
+            sample_true = random.betavariate(weights["true"]["alpha"], weights["true"]["beta"])
+            sample_false = random.betavariate(weights["false"]["alpha"], weights["false"]["beta"])
             chosen_arm = "true" if sample_true >= sample_false else "false"
             await execute(
                 "UPDATE leads SET path_history = path_history || $1::jsonb WHERE id=$2",
@@ -200,7 +209,8 @@ async def queue_next_nodes(
             # Open a new approvals row and park. Resume on POST /approvals/{id}/resolve.
             existing = await fetch_one(
                 "SELECT id FROM approvals WHERE lead_id=$1 AND node_id=$2 AND status='pending'",
-                lead_id, target_id,
+                lead_id,
+                target_id,
             )
             if not existing:
                 title = (node["data"] or {}).get("title") or "Approval required"
@@ -210,18 +220,27 @@ async def queue_next_nodes(
                     INSERT INTO approvals (campaign_id, lead_id, node_id, title, payload)
                     VALUES ($1, $2, $3, $4, $5)
                     """,
-                    lead["campaign_id"], lead_id, target_id, title, json.dumps(payload),
+                    lead["campaign_id"],
+                    lead_id,
+                    target_id,
+                    title,
+                    json.dumps(payload),
                 )
                 log.info(f"[sequencer] Opened approval for lead {lead_id} at node {target_id}")
                 # Notify operators so the approval is not silent
                 await notifier.dispatch_alert(
                     title=f"Approval required: {title}",
                     body=f"Lead {lead_id} is parked at approval node and requires manual review.",
-                    context={"lead_id": str(lead_id), "node_id": str(target_id), "campaign_id": str(lead['campaign_id'])},
+                    context={
+                        "lead_id": str(lead_id),
+                        "node_id": str(target_id),
+                        "campaign_id": str(lead["campaign_id"]),
+                    },
                 )
             await execute(
                 "UPDATE leads SET current_node_id=$1 WHERE id=$2",
-                target_id, lead_id,
+                target_id,
+                lead_id,
             )
 
         elif node_type.startswith("event_"):
@@ -234,6 +253,7 @@ async def queue_next_nodes(
                 await queue_next_nodes(lead_id, target_id, "true", accumulated_delay)
             else:
                 await execute("UPDATE leads SET current_node_id=$1 WHERE id=$2", target_id, lead_id)
+
 
 async def evaluate_conditions(lead_id: str) -> None:
     """Called when lead state changes (e.g. reply received, invite accepted)."""
@@ -293,6 +313,7 @@ async def resume_from_approval(lead_id: str, approval_id: str, resolution: str) 
     await queue_next_nodes(lead_id, lead["current_node_id"], handle)
     await execute("UPDATE leads SET current_node_id=NULL WHERE id=$1", lead_id)
 
+
 async def check_reply_intent_timeouts() -> None:
     """Finds leads parked at condition_reply_intent longer than timeout_days and routes them."""
     log.info("[sequencer] Checking for condition_reply_intent timeouts...")
@@ -317,6 +338,8 @@ async def check_reply_intent_timeouts() -> None:
 
         elapsed = (now - last_contact).days
         if elapsed >= int(timeout_days):
-            log.info(f"[sequencer] Lead {row['id']} timed out at reply intent node (elapsed: {elapsed}d, timeout: {timeout_days}d). Routing to 'timeout' handle.")
+            log.info(
+                f"[sequencer] Lead {row['id']} timed out at reply intent node (elapsed: {elapsed}d, timeout: {timeout_days}d). Routing to 'timeout' handle."
+            )
             await queue_next_nodes(str(row["id"]), str(row["current_node_id"]), "timeout")
             await execute("UPDATE leads SET current_node_id=NULL WHERE id=$1", row["id"])

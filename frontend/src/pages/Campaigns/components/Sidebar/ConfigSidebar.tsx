@@ -328,6 +328,81 @@ export function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: Co
           </div>
         )}
 
+        {nodeType === 'action_ai_compose' && (
+          <div className="space-y-3">
+            <div>
+              <label className={labelCls}>Instruction</label>
+              <textarea
+                value={(node.data as Record<string, unknown>).instruction as string || ''}
+                onChange={(e) => onUpdate({ instruction: e.target.value })}
+                className={inputClassName + ' min-h-[100px]'}
+                placeholder="Write a 2-sentence opener referencing the lead's headline. Mention {{company}} only if useful."
+                rows={4}
+              />
+              <p className="mt-1 text-[10px] text-slate-400">Claude composes a per-lead message from this instruction + the lead's facts.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Channel hint</label>
+                <select
+                  aria-label="AI compose channel"
+                  value={(node.data as Record<string, unknown>).channel as string || 'email'}
+                  onChange={(e) => onUpdate({ channel: e.target.value })}
+                  className={inputClassName}
+                >
+                  <option value="email">Email</option>
+                  <option value="linkedin_dm">LinkedIn DM</option>
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="sms">SMS</option>
+                  <option value="instagram">Instagram</option>
+                  <option value="telegram">Telegram</option>
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>Tone</label>
+                <select
+                  aria-label="AI compose tone"
+                  value={(node.data as Record<string, unknown>).tone as string || 'professional'}
+                  onChange={(e) => onUpdate({ tone: e.target.value })}
+                  className={inputClassName}
+                >
+                  <option value="professional">Professional</option>
+                  <option value="casual">Casual</option>
+                  <option value="direct">Direct</option>
+                  <option value="warm">Warm</option>
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Max words</label>
+                <input
+                  type="number"
+                  min={20}
+                  max={400}
+                  aria-label="AI compose max words"
+                  placeholder="120"
+                  value={(node.data as Record<string, unknown>).max_words as number || 120}
+                  onChange={(e) => onUpdate({ max_words: Math.max(20, Math.min(400, Number(e.target.value) || 120)) })}
+                  className={inputClassName}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Target variable</label>
+                <input
+                  type="text"
+                  aria-label="AI compose target variable"
+                  placeholder="ai_draft"
+                  value={(node.data as Record<string, unknown>).target_variable as string || 'ai_draft'}
+                  onChange={(e) => onUpdate({ target_variable: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_') })}
+                  className={inputClassName}
+                />
+                <p className="mt-1 text-[10px] text-slate-400">Use {`{{${(node.data as Record<string, unknown>).target_variable as string || 'ai_draft'}}}`} downstream.</p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {nodeType === 'action_sms' && (
           <div>
             <label className={labelCls}>SMS Body</label>

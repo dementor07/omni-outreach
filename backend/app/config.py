@@ -21,6 +21,12 @@ class Settings(BaseSettings):
 
     # SOTA Event Bus
     kafka_brokers: str = "redpanda:9092"
+    event_bus_mode: str = "streaming"
+    # Execution authority. Decides which plane actually side-effects on outbound commands.
+    #   "legacy"  — Python queue only; bus emission skipped entirely
+    #   "shadow"  — Bus + Python queue (Python authoritative, Rust observer)  ← default
+    #   "muscle"  — Bus only; queue insert skipped (Rust authoritative)
+    execution_mode: str = "shadow"
     deploy_webhook_secret: str = ""
 
     # Optional lead gen integrations
@@ -44,12 +50,14 @@ class Settings(BaseSettings):
     def get_asyncpg_dsn(self) -> str:
         """Returns a plain asyncpg DSN (no driver prefix)."""
         import urllib.parse
+
         if self.database_url:
             return self.database_url.replace("postgresql+asyncpg://", "postgresql://")
         return f"postgresql://outreach:{urllib.parse.quote(self.db_password, safe='')}@db/outreach"
 
     def get_redis_url(self) -> str:
         import urllib.parse
+
         if self.redis_password:
             return f"redis://:{urllib.parse.quote(self.redis_password, safe='')}@redis:6379"
         return "redis://redis:6379"

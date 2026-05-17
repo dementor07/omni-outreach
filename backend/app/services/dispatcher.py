@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from app.config import settings
 from app.core.events import TaskStatus
 from app.db import execute, fetch_all, fetch_one
-from app.services import email, linkedin, renderer, sequencer, voice
+from app.services import email, linkedin, renderer, screener, sequencer, voice
 
 log = logging.getLogger(__name__)
 
@@ -85,6 +85,10 @@ async def _log_event(
 async def _mark_sent(queue_id: str) -> None:
     await execute(
         "UPDATE queue SET status='sent', sent_at=NOW(), locked_by=NULL WHERE id=$1",
+        queue_id,
+    )
+    await execute(
+        "UPDATE processed_commands SET status='sent', processed_at=NOW() WHERE command_id=$1",
         queue_id,
     )
 
@@ -661,10 +665,8 @@ class DataTransformHandler(BaseHandler):
         if not var_name:
             raise RuntimeError("No variable_name")
 
-        from app.services.screener import get_llm_response
-
         prompt = renderer.render(node_data.get("prompt", ""), lead)
-        value = await get_llm_response(f"Extract: {prompt}")
+        value = await screener.get_llm_response(f"Extract: {prompt}")
 
         if value:
             import json as _json
@@ -682,7 +684,86 @@ class DataTransformHandler(BaseHandler):
 registry.register("data_transform", DataTransformHandler())
 
 
+class AIComposeHandler(BaseHandler):
+    """Generate a per-lead message via LLM and persist it as a draft on the lead.
+
+    Node data:
+      - instruction (required): operator's prompt
+      - channel (required): downstream channel hint ("email", "linkedin_dm", …)
+      - tone (optional, default "professional")
+      - max_words (optional, default 120)
+      - target_variable (optional, default "ai_draft"): extra_data key to write
+
+    Downstream messaging nodes can reference {{ai_draft}} (or the chosen target_variable)
+    in their template body to use the generated text.
+    """
+
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", task["node_id"])
+        node_data = node.get("data") or {}
+        instruction = renderer.render(str(node_data.get("instruction", "")).strip(), lead)
+        if not instruction:
+            raise RuntimeError("action_ai_compose requires `instruction`")
+
+        channel_hint = str(node_data.get("channel", "email")).strip() or "email"
+        tone = str(node_data.get("tone", "professional")).strip() or "professional"
+        try:
+            max_words = int(node_data.get("max_words", 120))
+        except (TypeError, ValueError):
+            max_words = 120
+        target_variable = str(node_data.get("target_variable", "ai_draft")).strip() or "ai_draft"
+
+        body = await screener.generate_message(
+            instruction=instruction,
+            lead=lead,
+            channel=channel_hint,
+            tone=tone,
+            max_words=max_words,
+        )
+
+        import json as _json
+
+        extra = dict(lead.get("extra_data") or {})
+        extra[target_variable] = body
+        await execute(
+            "UPDATE leads SET extra_data=$1 WHERE id=$2",
+            _json.dumps(extra),
+            lead["id"],
+        )
+
+        await _log_event(
+            lead["id"],
+            lead["campaign_id"],
+            "ai_drafted",
+            "ai_compose",
+            {"variable": target_variable, "channel": channel_hint, "chars": len(body)},
+        )
+        await _mark_sent(task["id"])
+        await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
+        return True
+
+
+registry.register("ai_compose", AIComposeHandler())
+
+
 async def _process_task(task: dict, worker_id: str) -> None:
+    # Idempotency claim — task["id"] doubles as the dedupe key. If a prior worker
+    # already executed this task but crashed before _mark_sent flipped the row,
+    # the claim fails and we skip the side-effect. The queue-table status is
+    # then advanced to 'sent' so the next run_once doesn't re-lock it.
+    claim = await fetch_one(
+        "INSERT INTO processed_commands (command_id, channel, task_id, lead_id, status) "
+        "VALUES ($1, $2, $1, $3, 'claimed') ON CONFLICT (command_id) DO NOTHING "
+        "RETURNING command_id",
+        task["id"],
+        task["channel"],
+        task["lead_id"],
+    )
+    if claim is None:
+        log.warning(f"[dispatcher] task={task['id']} already processed; advancing queue status")
+        await _mark_sent(task["id"])
+        return
+
     campaign = await fetch_one("SELECT * FROM campaigns WHERE id=$1", task["campaign_id"])
     lead = await fetch_one("SELECT * FROM leads WHERE id=$1", task["lead_id"])
 

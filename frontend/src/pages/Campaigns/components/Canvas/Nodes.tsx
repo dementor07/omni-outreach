@@ -387,6 +387,7 @@ export const nodeTypes = {
   action_webhook: ActionNode,
   action_enrich: ActionNode,
   action_data_transform: ActionNode,
+  action_ai_compose: ActionNode,
   action_hot_lead_alert: ActionNode,
   control_parallel_fork: ParallelForkNode,
   human_approval: HumanApprovalNode,

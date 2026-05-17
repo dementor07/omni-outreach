@@ -33,6 +33,7 @@ class ChannelType(StrEnum):
     ENRICH = "enrich"
     HOT_LEAD_ALERT = "hot_lead_alert"
     DATA_TRANSFORM = "data_transform"
+    AI_COMPOSE = "ai_compose"
 
 
 class EventType(StrEnum):
