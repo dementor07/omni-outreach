@@ -7,8 +7,8 @@ import { api } from '../../../../api/client'
 import { NodeType } from '../../../../hooks/useSequenceSteps'
 import { NODE_PALETTE } from '../../constants'
 
-export const EventNode = ({ data, selected }: NodeProps) => {
-  const nodeType = data.node_type as NodeType
+export const EventNode = ({ type, data, selected }: NodeProps) => {
+  const nodeType = (type ?? (data?.node_type as string)) as NodeType
   const cfg = NODE_PALETTE.find(p => p.type === nodeType)
   
   return (
@@ -52,8 +52,8 @@ function preview(s: unknown, max = 60): string {
   return t.length > max ? t.slice(0, max - 1) + '…' : t
 }
 
-export const ActionNode = ({ data, selected }: NodeProps) => {
-  const nodeType = data.node_type as NodeType
+export const ActionNode = ({ type, data, selected }: NodeProps) => {
+  const nodeType = (type ?? (data?.node_type as string)) as NodeType
   const cfg = NODE_PALETTE.find(p => p.type === nodeType)
   const category = cfg?.category ?? 'messaging'
   const d = data as Record<string, unknown>
@@ -280,8 +280,8 @@ export const TriggerNode = ({ selected, data }: NodeProps) => {
   )
 }
 
-export const ConditionNode = ({ data, selected }: NodeProps) => {
-  const nodeType = data.node_type as NodeType
+export const ConditionNode = ({ type, data, selected }: NodeProps) => {
+  const nodeType = (type ?? (data?.node_type as string)) as NodeType
   const cfg = NODE_PALETTE.find(p => p.type === nodeType)
 
   return (
