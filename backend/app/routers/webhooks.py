@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 import app.db as db
 from app.config import settings as app_settings
-from app.services.reply_classifier import classify_reply, classify_reply_async, get_suggested_action
+from app.services.reply_classifier import classify_reply_async, get_suggested_action
 
 router = APIRouter()
 log = logging.getLogger(__name__)

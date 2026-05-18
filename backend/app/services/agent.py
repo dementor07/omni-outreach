@@ -19,7 +19,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from app.db import execute, fetch_one
+from app.db import execute
 from app.services.agent_tools import registry as tool_registry
 from app.services.agent_tools import serialize_trace_entry, trace_dump
 
@@ -47,8 +47,9 @@ async def run_agent(
 
     outcome_handle is one of: 'success' | 'gave_up' | 'budget_exceeded' | 'escalated'.
     """
-    from app.config import settings
     import anthropic
+
+    from app.config import settings
 
     run_id = str(uuid.uuid4())
     started_at = datetime.now(UTC)
