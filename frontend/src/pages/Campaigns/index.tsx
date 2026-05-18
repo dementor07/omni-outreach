@@ -459,7 +459,7 @@ export default function Campaigns() {
                         <NodeSelector onAdd={addNode} />
 
                         {isFullScreen && (
-                          <Panel position="top-left" className="flex items-center gap-3 rounded-xl border border-slate-200/80 bg-white/90 p-2.5 shadow-lg backdrop-blur-md dark:border-slate-800/80 dark:bg-slate-950/90 pointer-events-auto ml-64">
+                          <Panel position="top-left" className="flex items-center gap-3 rounded-xl border border-slate-200/80 bg-white/90 p-2.5 shadow-lg backdrop-blur-md dark:border-slate-800/80 dark:bg-slate-950/90 pointer-events-auto ml-[340px]">
                             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-500 text-white shadow-md shadow-rose-500/20">
                               <GitBranch size={16} />
                             </div>
