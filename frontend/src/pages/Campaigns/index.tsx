@@ -130,12 +130,20 @@ export default function Campaigns() {
       position: { x: Number(n.position_x ?? 0), y: Number(n.position_y ?? 0) },
       data: (n.data as Record<string, unknown>) || {},
     })) as Node[])
+    // xyflow Handle resolution: source/target handles without an explicit `id`
+    // render as id=null. Backend stores "default" as the sentinel — translate
+    // that back to null before handing to xyflow, otherwise every default-edge
+    // looks orphaned and gets silently dropped at render time.
+    const handleOrNull = (h: unknown): string | null => {
+      const v = (h as string | null | undefined) ?? null
+      return v === 'default' ? null : v
+    }
     setEdges(apiEdges.map((e) => ({
       id: String(e.id ?? `${e.source_node_id}-${e.target_node_id}`),
       source: String(e.source_node_id ?? e.source),
       target: String(e.target_node_id ?? e.target),
-      sourceHandle: (e.source_handle as string) ?? null,
-      targetHandle: (e.target_handle as string) ?? null,
+      sourceHandle: handleOrNull(e.source_handle),
+      targetHandle: handleOrNull(e.target_handle),
       type: 'custom',
       animated: true,
     })) as Edge[])
