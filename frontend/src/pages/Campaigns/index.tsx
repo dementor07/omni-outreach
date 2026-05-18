@@ -426,11 +426,10 @@ export default function Campaigns() {
 
           {activeTab === 'sequence' && (() => {
             const sequenceEl = (
-              <div className={`relative flex h-full flex-col overflow-hidden rounded-2xl border ${
-                isFullScreen 
-                  ? 'fixed inset-0 z-[9999] m-0 rounded-none border-none h-screen w-screen p-0 bg-white dark:bg-slate-950' 
-                  : 'border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/50'
-              }`}>
+              <div className={isFullScreen 
+                ? 'fixed inset-0 z-[9999] flex h-screen w-screen flex-col overflow-hidden m-0 rounded-none border-none p-0 bg-white dark:bg-slate-950' 
+                : 'relative flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/50'
+              }>
                 {campaignQuery.data?.sequence_mode === 'canvas' ? (
                   <div className="flex flex-1 overflow-hidden">
                     <div className="relative flex-1">
