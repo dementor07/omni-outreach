@@ -76,6 +76,7 @@ NodeType = Literal[
     "condition_lead_source",
     "condition_has_field",
     "condition_field_equals",
+    "condition_lead_quota_reached",
     "condition_reply_intent",
     "human_approval",
     "action_hot_lead_alert",

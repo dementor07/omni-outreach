@@ -225,15 +225,39 @@ export const TriggerNode = ({ selected, data }: NodeProps) => {
   const live = Boolean((data as any)?.live)
   const sourcesRecent = ((data as any)?.sources_recent || {}) as Record<string, number>
   const liveTotal = Object.values(sourcesRecent).reduce((a, b) => a + (b || 0), 0)
-  const configsQuery = useQuery<Array<{ id: string; source_type: string; source_display_name: string; cron_schedule: string | null }>>({
+  const configsQuery = useQuery<Array<{ id: string; source_type: string; source_display_name: string; cron_schedule: string | null; last_run_at: string | null }>>({
     queryKey: ['lead-gen-configs', campaignId],
     queryFn: () => api.get(`/lead-gen/configs/${campaignId}`).then(r => r.data),
     enabled: !!campaignId,
     staleTime: 30_000,
   })
+  const recentRunsQuery = useQuery<Array<{ id: string; config_id: string; status: string; leads_added: number; finished_at: string | null; error: string | null }>>({
+    queryKey: ['lead-gen-recent-runs', campaignId],
+    queryFn: () => api.get(`/lead-gen/runs?campaign_id=${campaignId}&limit=25`).then(r => r.data),
+    enabled: !!campaignId,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  })
   const configs = configsQuery.data || []
   const sourceCount = configs.length
   const scheduledCount = configs.filter(c => c.cron_schedule).length
+
+  // Compute the latest run per config (runs come newest-first).
+  const latestByConfig = new Map<string, { status: string; leads_added: number; finished_at: string | null; error: string | null }>()
+  for (const r of recentRunsQuery.data || []) {
+    if (!latestByConfig.has(r.config_id)) latestByConfig.set(r.config_id, r)
+  }
+
+  function timeAgo(iso: string | null): string {
+    if (!iso) return '—'
+    const t = new Date(iso).getTime()
+    if (Number.isNaN(t)) return '—'
+    const mins = Math.max(0, Math.round((Date.now() - t) / 60000))
+    if (mins < 60) return `${mins}m`
+    const hrs = Math.round(mins / 60)
+    if (hrs < 24) return `${hrs}h`
+    return `${Math.round(hrs / 24)}d`
+  }
 
   return (
     <div className={`relative min-w-[180px] rounded-xl border-2 bg-slate-900 p-4 shadow-lg transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : 'border-slate-800'}`}>
@@ -263,6 +287,31 @@ export const TriggerNode = ({ selected, data }: NodeProps) => {
             </span>
           )}
         </button>
+      )}
+      {configs.length > 0 && (
+        <div className="mt-2 space-y-1 rounded-lg bg-white/5 px-2.5 py-1.5 ring-1 ring-white/10">
+          <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Lead Gen Configs</p>
+          {configs.slice(0, 5).map(c => {
+            const last = latestByConfig.get(c.id)
+            const status = last?.status
+            const dot =
+              status === 'done' ? 'bg-emerald-400' :
+              status === 'running' ? 'bg-sky-400 animate-pulse' :
+              status === 'failed' ? 'bg-rose-400' :
+              'bg-slate-500'
+            return (
+              <div key={c.id} className="flex items-center justify-between gap-2 text-[10px] text-white/80">
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
+                  <span className="truncate">{c.source_display_name}</span>
+                </span>
+                <span className="font-mono text-white/60 whitespace-nowrap">
+                  {last ? `+${last.leads_added} · ${timeAgo(last.finished_at || c.last_run_at)}` : c.cron_schedule ? 'queued' : 'idle'}
+                </span>
+              </div>
+            )
+          })}
+        </div>
       )}
       {live && liveTotal > 0 && (
         <div className="mt-2 space-y-1 rounded-lg bg-emerald-500/10 px-2.5 py-1.5 ring-1 ring-emerald-500/20">
@@ -667,6 +716,7 @@ export const nodeTypes = {
   condition_lead_source: ConditionNode,
   condition_has_field: ConditionNode,
   condition_field_equals: FieldRouterNode,
+  condition_lead_quota_reached: ConditionNode,
   event_invite_accepted: EventNode,
   event_email_opened: EventNode,
   event_link_clicked: EventNode,

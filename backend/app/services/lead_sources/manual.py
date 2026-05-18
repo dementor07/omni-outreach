@@ -22,5 +22,8 @@ class ManualSource(LeadSource):
         return []
 
     def config_schema(self) -> dict:
-        # Manual leads don't have a schedule-able config.
-        return {}
+        # Manual leads have no schedule-able config, but the API contract
+        # (and the SchemaForm renderer) expects the JSON-Schema-ish shape
+        # so an empty `{}` blows up `Object.entries(schema.properties)`.
+        # Return a well-formed empty schema instead.
+        return {"properties": {}, "required": []}

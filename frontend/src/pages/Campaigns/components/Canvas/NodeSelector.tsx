@@ -12,7 +12,7 @@ const GROUPS: { heading: string; types: NodeType[] }[] = [
   { heading: 'Intelligence', types: ['action_voice', 'action_enrich', 'action_data_transform', 'action_ai_compose'] },
   { heading: 'Agent',        types: ['action_agent'] },
   { heading: 'Actions',      types: ['action_add_tag', 'action_remove_tag', 'action_webhook', 'action_hot_lead_alert'] },
-  { heading: 'Conditions',   types: ['condition_replied', 'condition_linkedin_distance', 'condition_tag_exists', 'condition_ai_screen', 'condition_lead_source', 'condition_has_field', 'condition_field_equals', 'condition_reply_intent'] },
+  { heading: 'Conditions',   types: ['condition_replied', 'condition_linkedin_distance', 'condition_tag_exists', 'condition_ai_screen', 'condition_lead_source', 'condition_has_field', 'condition_field_equals', 'condition_lead_quota_reached', 'condition_reply_intent'] },
   { heading: 'Human',        types: ['human_approval'] },
   { heading: 'Events',       types: ['event_invite_accepted', 'event_email_opened', 'event_link_clicked', 'event_webhook_received'] },
   { heading: 'Control',      types: ['delay', 'wait_until', 'control_parallel_fork', 'control_race', 'split', 'goal', 'end'] },

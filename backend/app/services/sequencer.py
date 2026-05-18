@@ -248,6 +248,48 @@ async def queue_next_nodes(
                 branch = lead_source if lead_source in configured_sources else "default"
                 log.info(f"[sequencer] Source router for lead {lead_id}: source={lead_source} → handle={branch}")
                 await queue_next_nodes(lead_id, target_id, branch, accumulated_delay)
+            elif node_type == "condition_lead_quota_reached":
+                # Branch on whether the campaign's lead-gen credit budget is
+                # exhausted. data.config_id (optional) narrows to a single
+                # lead_gen_config; without it, sum across all configs for this
+                # campaign. Returns 'true' when used >= budget, else 'false'.
+                d = node["data"] or {}
+                cfg_id = d.get("config_id")
+                if cfg_id:
+                    row = await fetch_one(
+                        """
+                        SELECT
+                          COALESCE(lgc.credit_budget, 0) AS budget,
+                          COALESCE((
+                            SELECT SUM(credits_consumed) FROM lead_gen_runs
+                            WHERE config_id = lgc.id AND status='done'
+                          ), 0) AS used
+                        FROM lead_gen_configs lgc WHERE lgc.id=$1
+                        """,
+                        cfg_id,
+                    )
+                else:
+                    row = await fetch_one(
+                        """
+                        SELECT
+                          COALESCE(SUM(lgc.credit_budget), 0) AS budget,
+                          COALESCE((
+                            SELECT SUM(credits_consumed) FROM lead_gen_runs r
+                            WHERE r.campaign_id = $1 AND r.status='done'
+                          ), 0) AS used
+                        FROM lead_gen_configs lgc WHERE lgc.campaign_id = $1
+                        """,
+                        lead["campaign_id"],
+                    )
+                budget = int(row["budget"]) if row else 0
+                used = int(row["used"]) if row else 0
+                exhausted = budget > 0 and used >= budget
+                branch = "true" if exhausted else "false"
+                log.info(
+                    f"[sequencer] quota check campaign={lead['campaign_id']} "
+                    f"config={cfg_id or 'all'} used={used}/{budget} → {branch}"
+                )
+                await queue_next_nodes(lead_id, target_id, branch, accumulated_delay)
             elif node_type == "condition_has_field":
                 d = node["data"] or {}
                 field_name = d.get("field_name") or d.get("field") or "email"

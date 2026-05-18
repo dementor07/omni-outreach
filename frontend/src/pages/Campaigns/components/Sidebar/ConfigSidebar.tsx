@@ -40,6 +40,12 @@ export function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: Co
     queryKey: ['accounts', 'voice'],
     queryFn: async () => (await api.get<VoiceAgent[]>('/accounts/voice')).data,
   })
+  const leadGenConfigsQuery = useQuery<Array<{ id: string; source_type: string; source_display_name: string; label: string | null; credit_budget: number | null }>>({
+    queryKey: ['lead-gen-configs', campaignId],
+    queryFn: async () => (await api.get(`/lead-gen/configs/${campaignId}`)).data,
+    enabled: !!campaignId,
+    staleTime: 30_000,
+  })
 
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
@@ -568,6 +574,35 @@ export function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: Co
                 </label>
               )
             })}
+          </div>
+        )}
+
+        {nodeType === 'condition_lead_quota_reached' && (
+          <div className="space-y-3">
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              Branches <strong>True</strong> when the lead-gen credit budget is exhausted,
+              <strong> False</strong> otherwise. Use it to gate further pulls or surface a
+              "topup needed" alert.
+            </p>
+            <div>
+              <label className={labelCls}>Scope</label>
+              <select
+                aria-label="Lead quota scope"
+                value={(node.data as Record<string, unknown>).config_id as string || ''}
+                onChange={(e) => onUpdate({ config_id: e.target.value || null })}
+                className={inputClassName}
+              >
+                <option value="">All lead-gen configs for this campaign</option>
+                {(leadGenConfigsQuery.data || []).map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.source_display_name} {c.label ? `— ${c.label}` : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[10px] text-slate-400">
+                Leave blank to sum credit budgets across every lead-gen config in this campaign.
+              </p>
+            </div>
           </div>
         )}
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { PlusCircle, Play, Loader2, CheckCircle2, AlertCircle, Database, ChevronDown, ChevronUp, Trash2, Clock, Plus, Globe } from 'lucide-react'
 import { clsx } from 'clsx'
@@ -101,9 +101,14 @@ function SchemaForm({ schema, value, onChange }: SchemaFormProps) {
   const inputCls = "w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 outline-none transition focus:border-brand-400 focus:ring-4 focus:ring-brand-100 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:focus:ring-brand-900/20"
   const labelCls = "mb-2 block text-[11px] font-bold uppercase tracking-widest text-slate-400"
 
+  // Defensive: backends may return an empty schema for sources that have no
+  // configurable fields (e.g. Manual Entry). Render nothing in that case
+  // rather than crashing on Object.entries(undefined).
+  const props = schema?.properties ?? {}
+
   return (
     <div className="space-y-5">
-      {Object.entries(schema.properties).map(([key, field]) => {
+      {Object.entries(props).map(([key, field]) => {
         const current = value[key] ?? field.default ?? ''
         const required = schema.required?.includes(key)
 
@@ -237,8 +242,10 @@ function CreateConfigModal({ open, campaignId, sources, onClose, onSubmit, isLoa
   const [selectedSource, setSelectedSource] = useState(sources[0]?.source_type ?? '')
   const [configValues, setConfigValues] = useState<Record<string, unknown>>({})
   const [label, setLabel] = useState('')
+  const navigate = useNavigate()
 
   const source = sources.find(s => s.source_type === selectedSource)
+  const isManual = selectedSource === 'manual'
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -301,7 +308,17 @@ function CreateConfigModal({ open, campaignId, sources, onClose, onSubmit, isLoa
           />
         </div>
 
-        {source && (
+        {source && isManual && (
+          <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
+            <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-4 text-[12px] text-slate-700 dark:text-slate-300 leading-relaxed">
+              Manual Entry isn't a scheduled scraper — there's nothing to configure here.
+              Use the <strong>Leads</strong> page to add leads one at a time, or upload a CSV.
+              Both paths automatically attach <code>source = "manual"</code> to the new leads.
+            </div>
+          </div>
+        )}
+
+        {source && !isManual && (
           <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
             <label className={labelCls}>Provider Configuration</label>
             <div className="mt-4">
@@ -316,7 +333,18 @@ function CreateConfigModal({ open, campaignId, sources, onClose, onSubmit, isLoa
 
         <div className="flex justify-end gap-3 pt-6 border-t border-slate-100 dark:border-slate-800">
           <Button variant="secondary" size="md" onClick={onClose} disabled={isLoading}>Cancel</Button>
-          <Button type="submit" variant="primary" size="md" isLoading={isLoading} disabled={!selectedSource}>Create Configuration</Button>
+          {isManual ? (
+            <Button
+              type="button"
+              variant="primary"
+              size="md"
+              onClick={() => navigate(`/leads?campaign=${campaignId}`)}
+            >
+              Go to Leads
+            </Button>
+          ) : (
+            <Button type="submit" variant="primary" size="md" isLoading={isLoading} disabled={!selectedSource}>Create Configuration</Button>
+          )}
         </div>
       </form>
     </Modal>
