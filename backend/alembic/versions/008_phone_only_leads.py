@@ -10,6 +10,7 @@ Changes:
   This enables leads with ONLY a name and phone number (e.g. trade show contacts)
   while preserving dedupe logic.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

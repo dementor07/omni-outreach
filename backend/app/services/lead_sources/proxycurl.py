@@ -6,6 +6,7 @@ ProxyCurl API docs: https://nubela.co/proxycurl/docs
 Credits: 1 credit per person profile, 3 per company employee list.
 Free tier: 10 credits/month. Paid: $49/mo (2.5K credits) upward.
 """
+
 from __future__ import annotations
 
 import logging
@@ -117,32 +118,36 @@ class ProxyCurlSource(LeadSource):
                                 last = p.get("last_name", last)
                                 headline = p.get("headline", "")
                                 email = p.get("personal_emails", [None])[0] or p.get("work_email")
-                                all_leads.append(RawLead(
-                                    first_name=first,
-                                    last_name=last,
-                                    linkedin_url=profile_url,
-                                    email=email,
-                                    headline=headline,
-                                    company_linkedin_url=company_url,
-                                    extra={
-                                        "proxycurl_city": p.get("city"),
-                                        "proxycurl_country": p.get("country_full_name"),
-                                        "proxycurl_connections": p.get("connections"),
-                                    },
-                                ))
+                                all_leads.append(
+                                    RawLead(
+                                        first_name=first,
+                                        last_name=last,
+                                        linkedin_url=profile_url,
+                                        email=email,
+                                        headline=headline,
+                                        company_linkedin_url=company_url,
+                                        extra={
+                                            "proxycurl_city": p.get("city"),
+                                            "proxycurl_country": p.get("country_full_name"),
+                                            "proxycurl_connections": p.get("connections"),
+                                        },
+                                    )
+                                )
                                 continue
                             except Exception as e:
                                 log.warning(f"[proxycurl] profile enrich {profile_url}: {e}")
 
                         # Fallback: just the employee stub from the company list
-                        all_leads.append(RawLead(
-                            first_name=first,
-                            last_name=last,
-                            linkedin_url=profile_url or None,
-                            headline=emp.get("title", ""),
-                            company_linkedin_url=company_url,
-                            extra={"proxycurl_summary": emp.get("summary")},
-                        ))
+                        all_leads.append(
+                            RawLead(
+                                first_name=first,
+                                last_name=last,
+                                linkedin_url=profile_url or None,
+                                headline=emp.get("title", ""),
+                                company_linkedin_url=company_url,
+                                extra={"proxycurl_summary": emp.get("summary")},
+                            )
+                        )
 
                 except Exception as e:
                     log.error(f"[proxycurl] {company_url}: {e}")

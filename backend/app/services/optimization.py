@@ -11,6 +11,7 @@ Reward schedule (higher = stronger signal):
   event_type='reply_received'   → +5
   event_type='dm_sent'          → +1
 """
+
 import json
 import logging
 
@@ -65,9 +66,7 @@ async def _update_node_weights(node: dict) -> None:
 
     for lead_row in leads:
         lead_id = str(lead_row["id"])
-        lead = await fetch_one(
-            "SELECT path_history FROM leads WHERE id=$1", lead_id
-        )
+        lead = await fetch_one("SELECT path_history FROM leads WHERE id=$1", lead_id)
         if not lead:
             continue
 
@@ -79,18 +78,14 @@ async def _update_node_weights(node: dict) -> None:
         arm_stats[arm]["total"] += 1
 
         # Sum reward signals for this lead
-        events = await fetch_all(
-            "SELECT event_type FROM events WHERE lead_id=$1", lead_id
-        )
+        events = await fetch_all("SELECT event_type FROM events WHERE lead_id=$1", lead_id)
         reward = sum(REWARD_WEIGHTS.get(e["event_type"], 0) for e in events)
         arm_stats[arm]["reward"] += reward
 
     # Only update if we have enough samples per arm to be meaningful
     for arm_data in arm_stats.values():
         if arm_data["total"] < MIN_SAMPLES:
-            log.debug(
-                f"[optimization] Node {node_id}: insufficient samples, skipping"
-            )
+            log.debug(f"[optimization] Node {node_id}: insufficient samples, skipping")
             return
 
     # Build new Beta params: alpha = reward_sum + 1, beta = (total - wins) + 1

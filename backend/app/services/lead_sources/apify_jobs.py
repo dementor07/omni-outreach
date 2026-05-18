@@ -2,6 +2,7 @@
 Apify LinkedIn Jobs + SERPER decision-maker search.
 This is the original pipeline, extracted into the provider pattern.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -26,6 +27,7 @@ DEFAULT_ROLES = ["CEO", "CTO", "CMO", "VP Sales", "Head of Marketing", "Founder"
 
 
 # ── Apify ─────────────────────────────────────────────────────────────────────
+
 
 async def _run_apify_actor(actor_id: str, input_payload: dict) -> list[dict]:
     headers = {"Authorization": f"Bearer {settings.apify_api_key}"}
@@ -60,6 +62,7 @@ async def _run_apify_actor(actor_id: str, input_payload: dict) -> list[dict]:
 
 # ── Industry filter ───────────────────────────────────────────────────────────
 
+
 def _filter_by_industry(jobs: list[dict], allowed: list[str]) -> list[dict]:
     allowed_lower = {s.lower() for s in allowed}
     seen: set[str] = set()
@@ -76,6 +79,7 @@ def _filter_by_industry(jobs: list[dict], allowed: list[str]) -> list[dict]:
 
 
 # ── SERPER decision-maker lookup ──────────────────────────────────────────────
+
 
 async def _search_decision_makers(
     company_name: str,
@@ -95,11 +99,11 @@ async def _search_decision_makers(
                     r = await client.post(
                         SERPER_URL,
                         headers=headers,
-                        json={"q": f'{role} at {company_name} site:linkedin.com/in', "num": 5},
+                        json={"q": f"{role} at {company_name} site:linkedin.com/in", "num": 5},
                         timeout=30,
                     )
                     if r.status_code == 429:
-                        await asyncio.sleep(2 ** attempt)
+                        await asyncio.sleep(2**attempt)
                         continue
                     r.raise_for_status()
                     for item in r.json().get("organic", []):
@@ -109,16 +113,16 @@ async def _search_decision_makers(
                             seen_urls.add(link)
                             name = title.split(" - ")[0].strip()
                             parts = name.split()
-                            role_clean = clean_role(
-                                " - ".join(title.split(" - ")[1:]), company_name
-                            ) or role
-                            found.append(RawLead(
-                                first_name=parts[0] if parts else "",
-                                last_name=" ".join(parts[1:]) if len(parts) > 1 else "",
-                                linkedin_url=link,
-                                headline=role_clean,
-                                company=company_name,
-                            ))
+                            role_clean = clean_role(" - ".join(title.split(" - ")[1:]), company_name) or role
+                            found.append(
+                                RawLead(
+                                    first_name=parts[0] if parts else "",
+                                    last_name=" ".join(parts[1:]) if len(parts) > 1 else "",
+                                    linkedin_url=link,
+                                    headline=role_clean,
+                                    company=company_name,
+                                )
+                            )
                             if len(found) >= max_per_company:
                                 break
                     break
@@ -131,6 +135,7 @@ async def _search_decision_makers(
 
 
 # ── Provider ──────────────────────────────────────────────────────────────────
+
 
 class ApifyJobsSource(LeadSource):
     source_type = "apify_jobs"

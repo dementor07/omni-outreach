@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
-from app.auth import get_current_user
+from app.auth import decode_access_token, get_current_user
 from app.db import execute, fetch_all, fetch_one
 
 router = APIRouter()
@@ -21,20 +21,29 @@ async def push_notification(user_id: str, notif: dict) -> None:
         """INSERT INTO notifications (user_id, type, title, body, link, meta)
            VALUES ($1, $2, $3, $4, $5, $6)
            RETURNING id, type, title, body, link, is_read, meta, created_at""",
-        user_id, notif["type"], notif["title"],
-        notif.get("body"), notif.get("link"), json.dumps(notif.get("meta", {})),
+        user_id,
+        notif["type"],
+        notif["title"],
+        notif.get("body"),
+        notif.get("link"),
+        json.dumps(notif.get("meta", {})),
     )
     if row and user_id in _subscribers:
-        payload = {**row, "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
-                   "id": str(row["id"])}
+        payload = {
+            **row,
+            "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
+            "id": str(row["id"]),
+        }
         for q in _subscribers[user_id]:
             await q.put(payload)
 
 
 # ── SSE stream ──────────────────────────────────────────────────────────────
 
+
 @router.get("/stream")
-async def notification_stream(user_id: str = Depends(get_current_user)):
+async def notification_stream(token: str = Query(...)):
+    user_id = decode_access_token(token)
     q: asyncio.Queue = asyncio.Queue()
     _subscribers.setdefault(user_id, []).append(q)
 
@@ -52,11 +61,15 @@ async def notification_stream(user_id: str = Depends(get_current_user)):
         finally:
             _subscribers.get(user_id, []).remove(q) if q in _subscribers.get(user_id, []) else None
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ── REST endpoints ──────────────────────────────────────────────────────────
+
 
 @router.get("")
 async def list_notifications(
@@ -67,15 +80,18 @@ async def list_notifications(
     if unread_only:
         rows = await fetch_all(
             "SELECT * FROM notifications WHERE user_id=$1 AND is_read=FALSE ORDER BY created_at DESC LIMIT $2",
-            user_id, limit,
+            user_id,
+            limit,
         )
     else:
         rows = await fetch_all(
             "SELECT * FROM notifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2",
-            user_id, limit,
+            user_id,
+            limit,
         )
     count = await fetch_one(
-        "SELECT COUNT(*) as cnt FROM notifications WHERE user_id=$1 AND is_read=FALSE", user_id,
+        "SELECT COUNT(*) as cnt FROM notifications WHERE user_id=$1 AND is_read=FALSE",
+        user_id,
     )
     return {"notifications": rows, "unread_count": count["cnt"] if count else 0}
 
@@ -84,7 +100,8 @@ async def list_notifications(
 async def mark_read(notification_id: str, user_id: str = Depends(get_current_user)):
     await execute(
         "UPDATE notifications SET is_read=TRUE WHERE id=$1 AND user_id=$2",
-        notification_id, user_id,
+        notification_id,
+        user_id,
     )
     return {"status": "ok"}
 

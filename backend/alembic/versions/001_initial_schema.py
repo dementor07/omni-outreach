@@ -5,6 +5,7 @@ Revises: None
 Create Date: 2026-04-19
 
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -403,13 +404,32 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     tables = [
-        "integration_keys", "email_tracking", "template_library", "blacklists",
-        "activity_log", "notifications", "lead_gen_runs", "lead_gen_configs",
-        "inbound_messages", "events", "queue", "leads", "job_search_runs",
-        "job_search_configs", "templates", "sequence_edges", "sequence_nodes",
-        "campaign_linkedin_accounts", "campaigns", "telegram_accounts",
-        "instagram_accounts", "voice_agents", "email_accounts",
-        "linkedin_accounts", "refresh_tokens", "users",
+        "integration_keys",
+        "email_tracking",
+        "template_library",
+        "blacklists",
+        "activity_log",
+        "notifications",
+        "lead_gen_runs",
+        "lead_gen_configs",
+        "inbound_messages",
+        "events",
+        "queue",
+        "leads",
+        "job_search_runs",
+        "job_search_configs",
+        "templates",
+        "sequence_edges",
+        "sequence_nodes",
+        "campaign_linkedin_accounts",
+        "campaigns",
+        "telegram_accounts",
+        "instagram_accounts",
+        "voice_agents",
+        "email_accounts",
+        "linkedin_accounts",
+        "refresh_tokens",
+        "users",
     ]
     for t in tables:
         op.execute(f"DROP TABLE IF EXISTS {t} CASCADE")

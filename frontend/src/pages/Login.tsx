@@ -82,10 +82,11 @@ export default function Login() {
         <Card padding="lg">
           <form onSubmit={onSubmit} className="space-y-4">
             <div>
-              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+              <label htmlFor="login-email" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                 Email
               </label>
               <input
+                id="login-email"
                 type="email"
                 required
                 value={email}
@@ -95,10 +96,11 @@ export default function Login() {
               />
             </div>
             <div>
-              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+              <label htmlFor="login-password" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                 Password
               </label>
               <input
+                id="login-password"
                 type="password"
                 required
                 value={password}

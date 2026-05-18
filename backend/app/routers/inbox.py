@@ -18,7 +18,10 @@ async def list_inbox(
     user_id: str = Depends(get_current_user),
 ):
     """List inbound reply events with lead details, optionally filtered."""
-    conditions = ["e.event_type IN ('reply_received','email_reply','linkedin_reply','whatsapp_reply','sms_reply','message_received')"]
+    conditions = [
+        "e.event_type IN ('reply_received', 'email_reply', 'linkedin_reply', "
+        "'whatsapp_reply', 'sms_reply', 'message_received')"
+    ]
     params: list = []
     idx = 1
 
@@ -46,7 +49,9 @@ async def list_inbox(
             WHERE {where}
             ORDER BY e.occurred_at DESC
             LIMIT ${idx} OFFSET ${idx + 1}""",
-        *params, page_size, offset,
+        *params,
+        page_size,
+        offset,
     )
     total = await fetch_one(
         f"SELECT COUNT(*) AS cnt FROM events e WHERE {where}",
@@ -61,7 +66,10 @@ async def inbox_stats(user_id: str = Depends(get_current_user)):
     rows = await fetch_all(
         """SELECT channel, COUNT(*) AS cnt
            FROM events
-           WHERE event_type IN ('reply_received','email_reply','linkedin_reply','whatsapp_reply','sms_reply','message_received')
+           WHERE event_type IN (
+               'reply_received', 'email_reply', 'linkedin_reply',
+               'whatsapp_reply', 'sms_reply', 'message_received'
+           )
            GROUP BY channel
            ORDER BY cnt DESC"""
     )

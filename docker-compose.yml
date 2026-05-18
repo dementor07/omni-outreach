@@ -16,8 +16,8 @@ services:
 
   # --- The Memory (State & Cache) ---
   redis:
-    image: redis:7-alpine
-    command: redis-server --requirepass d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
+    command: ["--requirepass", "d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17"]
     volumes:
       - redisdata:/data
     ports:
@@ -73,6 +73,18 @@ services:
         taskmanager.numberOfTaskSlots: 2
       - KAFKA_BROKERS=redpanda:9092
 
+  journey-orchestrator:
+    build:
+      context: ./backend-flink
+    command: sh -lc "flink run -d -m flink-jobmanager:8081 -py /opt/flink/usrlib/orchestrator.py && tail -f /dev/null"
+    environment:
+      - KAFKA_BROKERS=redpanda:9092
+    depends_on:
+      - redpanda
+      - flink-jobmanager
+      - flink-taskmanager
+    restart: unless-stopped
+
   # --- The Brain (Python Control Plane) ---
   backend:
     build:
@@ -81,6 +93,7 @@ services:
     environment:
       DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
       REDIS_URL: redis://:d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17@redis:6379
+      REDIS_PASSWORD: d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17
       KAFKA_BROKERS: redpanda:9092
       DB_PASSWORD: OmniOutreach2026
       SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
@@ -103,10 +116,13 @@ services:
       DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
       KAFKA_BROKERS: redpanda:9092
       REDIS_URL: redis://:d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17@redis:6379
+      REDIS_PASSWORD: d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17
     depends_on:
       - db
       - redpanda
       - redis
+    healthcheck:
+      disable: true
 
   transition-worker:
     build:
@@ -119,16 +135,21 @@ services:
     depends_on:
       - db
       - redpanda
+    healthcheck:
+      disable: true
 
   frontend:
     build:
       context: ./frontend
     ports:
-      - "3000:3000"
+      - "80:80"
+      - "443:443"
     depends_on:
       - backend
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - ./certs:/etc/nginx/certs:ro
 
 volumes:
   pgdata:

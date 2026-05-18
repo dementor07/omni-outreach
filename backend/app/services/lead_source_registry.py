@@ -8,6 +8,7 @@ Usage:
     available = registry.available()   # only sources where is_available == True
     source = registry.get("apollo")    # by source_type
 """
+
 from __future__ import annotations
 
 from .lead_sources.apify_jobs import ApifyJobsSource

@@ -24,7 +24,11 @@ pub struct LeadContext {
     pub email: Option<String>,
     pub linkedin_url: Option<String>,
     pub first_name: Option<String>,
+    pub last_name: Option<String>,
     pub company: Option<String>,
+    pub chat_id: Option<String>,
+    #[serde(default)]
+    pub extra_data: serde_json::Value,
     pub proxy_settings: Option<HashMap<String, String>>,
 }
 
@@ -35,7 +39,8 @@ pub struct ActionCommand {
     pub channel: ChannelType,
     pub lead: LeadContext,
     pub payload: serde_json::Value,
-    pub metadata: HashMap<String, String>,
+    #[serde(default)]
+    pub metadata: HashMap<String, serde_json::Value>,
     pub occurred_at: DateTime<Utc>,
 }
 
@@ -58,6 +63,6 @@ pub struct ExecutionResult {
     pub error: Option<String>,
     pub is_retriable: bool,
     pub telemetry: serde_json::Value,
-    pub metadata: HashMap<String, String>,
+    pub metadata: HashMap<String, serde_json::Value>,
     pub occurred_at: DateTime<Utc>,
 }

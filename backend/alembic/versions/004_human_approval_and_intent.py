@@ -12,6 +12,7 @@ Adds:
 - notification_channels table — destinations (email, slack webhook) for
   `action_hot_lead_alert` and approval notifications.
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -47,10 +48,7 @@ def upgrade() -> None:
         )
         """
     )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_approvals_status_campaign "
-        "ON approvals(status, campaign_id, created_at)"
-    )
+    op.execute("CREATE INDEX IF NOT EXISTS idx_approvals_status_campaign ON approvals(status, campaign_id, created_at)")
 
     # Notification channels — fan-out destinations for hot-lead alerts +
     # approval pings. Stored globally (not per-campaign) for v1.

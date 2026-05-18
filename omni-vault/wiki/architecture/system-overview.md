@@ -2,7 +2,7 @@
 title: System Overview (SOTA)
 category: architecture
 tags: [backend, frontend, infra, streaming, rust, flink, redpanda]
-updated: 2026-05-16
+updated: 2026-05-17
 ---
 
 # System Overview (Omni SOTA)
@@ -71,22 +71,28 @@ We decouple the **Intelligence** of the system from the **Execution** of the sys
 
 ## 6. 2026-05-17 Status — What's actually running on the VPS
 
-The blueprint above describes the target. As of the 2026-05-16 deploy on `srv1575227.hstgr.cloud`, this is what is live:
+The blueprint above is now deployed as the live backend spine on `srv1575227.hstgr.cloud`:
 
 | Layer | State | Notes |
 | --- | --- | --- |
 | Frontend | Live | Rose brand; Campaigns/canvas redesign shipped 2026-05-15. |
-| Backend (Omni API) | Live | FastAPI, asyncpg, alembic head `008`. Double-writes commands to `stream_log` + Redpanda. |
-| Redpanda | Live | Topics `outreach.commands / results / transitions / telemetry / dead_letter` created on VPS. |
-| Rust execution engine | **Not yet deployed** | Commands published but no Rust consumer attached on VPS. Legacy Python `dispatcher.run_once()` still does the work. |
-| Flink journey orchestrator | **Not yet deployed** | `outreach.transitions` has no producer in prod — `transition_worker` is idle. |
-| DragonflyDB | **Not yet deployed** | Telemetry overlay still reads from Postgres. |
+| Backend (Omni API) | Live | FastAPI, asyncpg, migrations through resend-nullability hotfix. Emits command events to Redpanda. |
+| Redpanda | Live | Topics `outreach.commands / results / transitions / telemetry / dead_letter` verified on VPS. |
+| Rust execution engine | Live | Consumes `outreach.commands`, disables auto-commit, publishes `ExecutionResult`, sends schema failures to `outreach.dead_letter`. |
+| Flink journey orchestrator | Live | PyFlink job `8d6bbd6ea228433479472b969a1f3899` running in the Flink session cluster; emits timer transitions to `outreach.transitions`. |
+| DragonflyDB | Live | Replaced Redis container image while keeping service name `redis` for app compatibility; healthcheck passes. |
 | `sync-worker` | Live | Consumes `outreach.results` → updates `queue` + `leads`. Healthcheck disabled (no HTTP). |
-| `transition-worker` | Live but idle | Consumer group is up; awaits Flink producer. |
+| `transition-worker` | Live | Consumer group is up and listening for Flink transition events. |
 
 Naming and brand:
 - Backend is canonically the **Omni API** (`omni-api-naming` ADR).
 - Brand palette is **rose** (`canvas-rose-redesign` ADR).
 - Overview endpoint consolidated; frontend reads `VITE_API_BASE`.
 
-The "SOTA" in this page's title refers to the target architecture. Today, the Python control plane still owns execution; the streaming spine is wired but the Rust muscle and Flink lungs are scaffolded, not running. See [[deploy-pipeline]] for the actual VPS topology and [[sota-event-schemas]] for the wire contracts.
+Validation on 2026-05-17:
+- Public and direct health checks return `api/db/redis = ok`.
+- Rust smoke command flowed `outreach.commands` -> `execution-engine` -> `outreach.results` with metadata preserved.
+- Flink smoke result flowed `outreach.results` -> timer -> `outreach.transitions` with `event_type: transition`.
+- Backend `ruff check app`, `compileall`, and pytest suite pass on the VPS.
+
+Historical failed/canceled Flink jobs may remain visible in the session-cluster history from the deployment smoke tests; the only active orchestrator job at handoff is running.

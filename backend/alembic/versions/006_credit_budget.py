@@ -12,6 +12,7 @@ One credit is defined as one lead fetched from the source (regardless of whether
 it passes the intake gate).  The budget gate in run_lead_gen() blocks new runs
 once SUM(credits_consumed) >= credit_budget for a config.
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -23,18 +24,10 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute(
-        "ALTER TABLE lead_gen_configs ADD COLUMN IF NOT EXISTS credit_budget INT"
-    )
-    op.execute(
-        "ALTER TABLE lead_gen_runs ADD COLUMN IF NOT EXISTS credits_consumed INT NOT NULL DEFAULT 0"
-    )
+    op.execute("ALTER TABLE lead_gen_configs ADD COLUMN IF NOT EXISTS credit_budget INT")
+    op.execute("ALTER TABLE lead_gen_runs ADD COLUMN IF NOT EXISTS credits_consumed INT NOT NULL DEFAULT 0")
 
 
 def downgrade() -> None:
-    op.execute(
-        "ALTER TABLE lead_gen_configs DROP COLUMN IF EXISTS credit_budget"
-    )
-    op.execute(
-        "ALTER TABLE lead_gen_runs DROP COLUMN IF EXISTS credits_consumed"
-    )
+    op.execute("ALTER TABLE lead_gen_configs DROP COLUMN IF EXISTS credit_budget")
+    op.execute("ALTER TABLE lead_gen_runs DROP COLUMN IF EXISTS credits_consumed")

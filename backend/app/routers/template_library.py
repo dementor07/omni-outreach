@@ -1,4 +1,5 @@
 """Reusable template library — CRUD for message templates across channels."""
+
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -72,7 +73,8 @@ async def get_library_template(
 ):
     row = await fetch_one(
         "SELECT * FROM template_library WHERE id=$1 AND (user_id=$2 OR is_public=TRUE)",
-        template_id, user_id,
+        template_id,
+        user_id,
     )
     if not row:
         raise HTTPException(404, "Template not found")
@@ -88,7 +90,13 @@ async def create_library_template(
     row = await fetch_one(
         """INSERT INTO template_library (user_id, name, channel, category, subject, body, variables)
            VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *""",
-        user_id, body.name, body.channel, body.category, body.subject, body.body, variables,
+        user_id,
+        body.name,
+        body.channel,
+        body.category,
+        body.subject,
+        body.body,
+        variables,
     )
     return row
 
@@ -101,7 +109,8 @@ async def update_library_template(
 ):
     existing = await fetch_one(
         "SELECT * FROM template_library WHERE id=$1 AND user_id=$2",
-        template_id, user_id,
+        template_id,
+        user_id,
     )
     if not existing:
         raise HTTPException(404, "Template not found or unauthorized")
@@ -117,7 +126,13 @@ async def update_library_template(
         """UPDATE template_library
            SET name=$1, channel=$2, category=$3, subject=$4, body=$5, variables=$6, updated_at=NOW()
            WHERE id=$7 RETURNING *""",
-        name, channel, category, subject, template_body, variables, template_id,
+        name,
+        channel,
+        category,
+        subject,
+        template_body,
+        variables,
+        template_id,
     )
     return row
 
@@ -129,6 +144,7 @@ async def delete_library_template(
 ):
     await execute(
         "DELETE FROM template_library WHERE id=$1 AND user_id=$2",
-        template_id, user_id,
+        template_id,
+        user_id,
     )
     return {"ok": True}

@@ -29,8 +29,11 @@ async def send_email(
 
     # Run synchronous smtplib in a thread-safe way
     import asyncio
+
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _send_sync, smtp_host, smtp_port, smtp_username, smtp_password, smtp_use_tls, context, msg)
+    await loop.run_in_executor(
+        None, _send_sync, smtp_host, smtp_port, smtp_username, smtp_password, smtp_use_tls, context, msg
+    )
 
     log.info("[email] sent to=%s subject=%s", to_email, subject)
     return {"to": to_email, "subject": subject}

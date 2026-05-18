@@ -18,9 +18,7 @@ async def make_call(
     retell_llm_dynamic_variables: dict | None = None,
 ) -> dict:
     if not phone_number.startswith("+"):
-        raise ValueError(
-            f"phone_number must be E.164 format (e.g. +15551234567), got: {phone_number}"
-        )
+        raise ValueError(f"phone_number must be E.164 format (e.g. +15551234567), got: {phone_number}")
 
     body: dict = {
         "agent_id": retell_agent_id,

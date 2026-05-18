@@ -4,6 +4,7 @@ Uses Fernet symmetric encryption derived from SECRET_KEY.
 Keys are encrypted at rest in the integration_keys table,
 decrypted in-memory only when needed, and masked in API responses.
 """
+
 import base64
 import hashlib
 import logging

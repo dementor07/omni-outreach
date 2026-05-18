@@ -2,6 +2,7 @@
 Lead source provider protocol and shared types.
 All lead source providers must implement LeadSource.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -16,6 +17,7 @@ class RawLead:
     with neither. All other fields are optional enrichment; store whatever the
     source provides and let the intake pipeline fill gaps later via action_enrich.
     """
+
     first_name: str = ""
     last_name: str = ""
     linkedin_url: str | None = None
@@ -45,6 +47,7 @@ class LeadSource(ABC):
       - search(config) → list[RawLead]
       - config_schema() → JSON Schema dict (drives the UI create-config form)
     """
+
     source_type: str
     display_name: str
     description: str

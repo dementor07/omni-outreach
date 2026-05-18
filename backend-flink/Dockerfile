@@ -2,8 +2,11 @@ FROM flink:1.18-scala_2.12
 
 # Install Python and dependencies
 RUN apt-get update -y && \
-    apt-get install -y python3 python3-pip python3-dev && \
+    apt-get install -y python3 python3-pip python3-dev wget && \
     rm -rf /var/lib/apt/lists/*
+
+RUN wget -q -P /opt/flink/lib \
+    https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.1.0-1.18/flink-sql-connector-kafka-3.1.0-1.18.jar
 
 # Install PyFlink
 RUN ln -s /usr/bin/python3 /usr/bin/python && \

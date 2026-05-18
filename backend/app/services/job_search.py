@@ -6,6 +6,7 @@ Lead gen pipeline:
   4. Serper-first decision-maker search; Unipile people search as fallback
   5. Upsert via lead_gen.upsert_lead (blacklist + daily cap + dedupe gates apply)
 """
+
 import asyncio
 import logging
 import re
@@ -27,6 +28,7 @@ UNIPILE_SEARCH_PATH = "/api/v1/linkedin/search"
 
 
 # ── Apify ─────────────────────────────────────────────────────────────────────
+
 
 async def run_apify_actor(actor_id: str, input_payload: dict) -> list[dict]:
     base = "https://api.apify.com/v2"
@@ -63,6 +65,7 @@ async def run_apify_actor(actor_id: str, input_payload: dict) -> list[dict]:
 
 # ── Industry filter ───────────────────────────────────────────────────────────
 
+
 def filter_by_industry(jobs: list[dict], allowed: list[str]) -> list[dict]:
     allowed_lower = {s.lower() for s in allowed}
     seen_companies: set[str] = set()
@@ -80,6 +83,7 @@ def filter_by_industry(jobs: list[dict], allowed: list[str]) -> list[dict]:
 
 
 # ── Company size filter ───────────────────────────────────────────────────────
+
 
 def _parse_employee_range(raw: str) -> tuple[int | None, int | None]:
     """Parse LinkedIn employee-count strings into (min, max).
@@ -129,16 +133,10 @@ def filter_by_size(
 
     kept = []
     for c in companies:
-        raw = (
-            c.get("companySize")
-            or c.get("company_size")
-            or c.get("employeeCount")
-            or c.get("employees")
-            or ""
-        )
+        raw = c.get("companySize") or c.get("company_size") or c.get("employeeCount") or c.get("employees") or ""
         emp_min, emp_max = _parse_employee_range(str(raw))
         if emp_min is None:
-            log.info(f"[size_filter] skip '{c.get('companyName','?')}': size unknown with active bounds")
+            log.info(f"[size_filter] skip '{c.get('companyName', '?')}': size unknown with active bounds")
             continue
         effective_max = emp_max if emp_max is not None else emp_min
         if min_employees is not None and effective_max < min_employees:
@@ -152,6 +150,7 @@ def filter_by_size(
 
 
 # ── SERPER decision-maker search ──────────────────────────────────────────────
+
 
 async def search_decision_makers(
     client: httpx.AsyncClient,
@@ -169,7 +168,7 @@ async def search_decision_makers(
 
         for attempt in range(MAX_RETRIES):
             try:
-                query = f'{role} at {company_name} site:linkedin.com/in'
+                query = f"{role} at {company_name} site:linkedin.com/in"
                 r = await client.post(
                     SERPER_URL,
                     headers=headers,
@@ -177,7 +176,7 @@ async def search_decision_makers(
                     timeout=30,
                 )
                 if r.status_code == 429:
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(2**attempt)
                     continue
                 r.raise_for_status()
 
@@ -188,15 +187,15 @@ async def search_decision_makers(
                         seen_urls.add(link)
                         name = title.split(" - ")[0].strip()
                         parts = name.split()
-                        role_clean = clean_role(
-                            " - ".join(title.split(" - ")[1:]), company_name
-                        ) or role
-                        found.append({
-                            "linkedin_url": link,
-                            "first_name": parts[0] if parts else "",
-                            "last_name": " ".join(parts[1:]) if len(parts) > 1 else "",
-                            "headline": role_clean,
-                        })
+                        role_clean = clean_role(" - ".join(title.split(" - ")[1:]), company_name) or role
+                        found.append(
+                            {
+                                "linkedin_url": link,
+                                "first_name": parts[0] if parts else "",
+                                "last_name": " ".join(parts[1:]) if len(parts) > 1 else "",
+                                "headline": role_clean,
+                            }
+                        )
                         if len(found) >= max_per_company:
                             break
                 break
@@ -252,12 +251,14 @@ async def search_unipile_people(
             continue
         name = item.get("name") or ""
         parts = name.split()
-        found.append({
-            "first_name": parts[0] if parts else "",
-            "last_name": " ".join(parts[1:]) if len(parts) > 1 else "",
-            "headline": headline,
-            "linkedin_url": f"https://www.linkedin.com/in/{public_id}",
-        })
+        found.append(
+            {
+                "first_name": parts[0] if parts else "",
+                "last_name": " ".join(parts[1:]) if len(parts) > 1 else "",
+                "headline": headline,
+                "linkedin_url": f"https://www.linkedin.com/in/{public_id}",
+            }
+        )
     return found
 
 
@@ -278,6 +279,7 @@ async def find_decision_makers(
 
 
 # ── DB upsert (routes through lead_gen gates) ─────────────────────────────────
+
 
 async def upsert_leads(campaign_id: str, company: dict, profiles: list[dict]) -> int:
     """Insert profiles via lead_gen.upsert_lead so blacklist + daily cap + dedupe apply."""
@@ -308,10 +310,9 @@ async def upsert_leads(campaign_id: str, company: dict, profiles: list[dict]) ->
 
 # ── Main pipeline ─────────────────────────────────────────────────────────────
 
+
 async def run_job_search(campaign_id: str, config_id: str) -> str:
-    config = await fetch_one(
-        "SELECT * FROM job_search_configs WHERE id=$1", config_id
-    )
+    config = await fetch_one("SELECT * FROM job_search_configs WHERE id=$1", config_id)
     if not config:
         raise ValueError(f"Config {config_id} not found")
 
@@ -320,7 +321,8 @@ async def run_job_search(campaign_id: str, config_id: str) -> str:
         INSERT INTO job_search_runs (campaign_id, config_id, status)
         VALUES ($1, $2, 'running') RETURNING id
         """,
-        campaign_id, config_id,
+        campaign_id,
+        config_id,
     )
     run_id = str(run["id"])
 
@@ -337,7 +339,8 @@ async def run_job_search(campaign_id: str, config_id: str) -> str:
         )
         await execute(
             "UPDATE job_search_runs SET jobs_scraped=$1 WHERE id=$2",
-            len(jobs_raw), run_id,
+            len(jobs_raw),
+            run_id,
         )
 
         # 2. Industry filter
@@ -353,7 +356,8 @@ async def run_job_search(campaign_id: str, config_id: str) -> str:
         companies = companies[: config["max_companies"]]
         await execute(
             "UPDATE job_search_runs SET companies_filtered=$1 WHERE id=$2",
-            len(companies), run_id,
+            len(companies),
+            run_id,
         )
 
         # 4. Decision-maker search (Serper-first; Unipile fallback)
@@ -388,10 +392,7 @@ async def run_job_search(campaign_id: str, config_id: str) -> str:
                 leads_found += len(profiles)
                 added = await upsert_leads(campaign_id, company, profiles)
                 leads_added += added
-                log.info(
-                    f"[run:{run_id}] {company.get('companyName','?')} "
-                    f"→ {len(profiles)} found, {added} new"
-                )
+                log.info(f"[run:{run_id}] {company.get('companyName', '?')} → {len(profiles)} found, {added} new")
 
         await asyncio.gather(*[process_company(c) for c in companies])
 
@@ -402,7 +403,9 @@ async def run_job_search(campaign_id: str, config_id: str) -> str:
             SET status='done', leads_found=$1, leads_added=$2, finished_at=NOW()
             WHERE id=$3
             """,
-            leads_found, leads_added, run_id,
+            leads_found,
+            leads_added,
+            run_id,
         )
         log.info(f"[run:{run_id}] Done — {leads_added} new leads added")
 
@@ -410,7 +413,8 @@ async def run_job_search(campaign_id: str, config_id: str) -> str:
         log.exception(f"[run:{run_id}] Pipeline failed")
         await execute(
             "UPDATE job_search_runs SET status='failed', error=$1, finished_at=NOW() WHERE id=$2",
-            str(e), run_id,
+            str(e),
+            run_id,
         )
         raise
 

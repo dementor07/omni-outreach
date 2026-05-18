@@ -2,6 +2,7 @@
 Unified lead generation pipeline.
 Replaces the single-pipeline job_search.py with a provider-dispatch model.
 """
+
 from __future__ import annotations
 
 import logging
@@ -52,9 +53,11 @@ async def upsert_lead(campaign_id: str, lead: RawLead, source_type: str) -> bool
     # Hunter is configured; unknown/risky emails are allowed through with a warning.
     if lead.email:
         from app.config import settings as _settings
+
         if getattr(_settings, "hunter_api_key", None):
             try:
                 import httpx as _httpx
+
                 async with _httpx.AsyncClient(timeout=8) as _c:
                     _r = await _c.get(
                         "https://api.hunter.io/v2/email-verifier",
@@ -81,19 +84,16 @@ async def upsert_lead(campaign_id: str, lead: RawLead, source_type: str) -> bool
               AND e.occurred_at >= NOW() - make_interval(days => $2)
             LIMIT 1
             """,
-            lead.linkedin_url, _cooloff_days,
+            lead.linkedin_url,
+            _cooloff_days,
         )
         if _recent:
-            log.info(
-                f"[lead_gen] Skipping {lead.linkedin_url} — in cool-off window ({_cooloff_days}d)"
-            )
+            log.info(f"[lead_gen] Skipping {lead.linkedin_url} — in cool-off window ({_cooloff_days}d)")
             return False
 
     # Daily lead cap — campaigns.daily_lead_cap was previously dead config.
     # Enforce it here at intake so a noisy provider run can't drown the campaign.
-    cap_row = await fetch_one(
-        "SELECT daily_lead_cap FROM campaigns WHERE id=$1", campaign_id
-    )
+    cap_row = await fetch_one("SELECT daily_lead_cap FROM campaigns WHERE id=$1", campaign_id)
     if cap_row and cap_row["daily_lead_cap"]:
         cap = cap_row["daily_lead_cap"]
         count_row = await fetch_one(
@@ -119,14 +119,13 @@ async def upsert_lead(campaign_id: str, lead: RawLead, source_type: str) -> bool
                 lead.linkedin_url,
             )
             if existing:
-                log.info(
-                    f"[lead_gen] Skipping {lead.linkedin_url} — present in another campaign (global dedupe)"
-                )
+                log.info(f"[lead_gen] Skipping {lead.linkedin_url} — present in another campaign (global dedupe)")
                 return False
         else:
             existing = await fetch_one(
                 "SELECT id FROM leads WHERE campaign_id=$1 AND linkedin_url=$2",
-                campaign_id, lead.linkedin_url,
+                campaign_id,
+                lead.linkedin_url,
             )
             if existing:
                 return False
@@ -134,7 +133,8 @@ async def upsert_lead(campaign_id: str, lead: RawLead, source_type: str) -> bool
         # Email-only dedupe (no LinkedIn URL)
         existing = await fetch_one(
             "SELECT id FROM leads WHERE campaign_id=$1 AND email=$2 AND linkedin_url IS NULL",
-            campaign_id, lead.email,
+            campaign_id,
+            lead.email,
         )
         if existing:
             return False
@@ -142,12 +142,14 @@ async def upsert_lead(campaign_id: str, lead: RawLead, source_type: str) -> bool
         # Phone-only dedupe (no LinkedIn URL, no Email)
         existing = await fetch_one(
             "SELECT id FROM leads WHERE campaign_id=$1 AND phone=$2 AND linkedin_url IS NULL AND email IS NULL",
-            campaign_id, lead.phone,
+            campaign_id,
+            lead.phone,
         )
         if existing:
             return False
 
     import json as _json
+
     row = await fetch_one(
         """
         INSERT INTO leads (
@@ -209,9 +211,7 @@ async def run_lead_gen(campaign_id: str, config_id: str, triggered_by: str = "ma
         )
         used = int(used_row["total"] if used_row else 0)
         if used >= credit_budget:
-            raise RuntimeError(
-                f"Credit budget of {credit_budget} exhausted ({used} consumed); run cancelled."
-            )
+            raise RuntimeError(f"Credit budget of {credit_budget} exhausted ({used} consumed); run cancelled.")
 
     run = await fetch_one(
         """
@@ -254,10 +254,7 @@ async def run_lead_gen(campaign_id: str, config_id: str, triggered_by: str = "ma
             leads_found,  # 1 credit per lead fetched from the source
             run_id,
         )
-        log.info(
-            f"[lead_gen:{run_id}] Done — {leads_added}/{leads_found} new leads "
-            f"({leads_found} credits consumed)"
-        )
+        log.info(f"[lead_gen:{run_id}] Done — {leads_added}/{leads_found} new leads ({leads_found} credits consumed)")
 
     except Exception as e:
         log.error(f"[lead_gen:{run_id}] Error: {e}", exc_info=True)

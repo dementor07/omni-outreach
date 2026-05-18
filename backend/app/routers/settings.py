@@ -2,6 +2,7 @@
 
 Provides CRUD for encrypted API keys with masked read, verification per provider.
 """
+
 import logging
 
 import httpx
@@ -28,11 +29,16 @@ PROVIDERS = {
     "hunter": {"label": "Hunter.io", "fields": ["api_key"], "required": ["api_key"]},
     "proxycurl": {"label": "ProxyCurl", "fields": ["api_key"], "required": ["api_key"]},
     "github": {"label": "GitHub", "fields": ["token"], "required": ["token"]},
-    "twilio": {"label": "Twilio SMS", "fields": ["account_sid", "auth_token", "from_number"], "required": ["account_sid", "auth_token", "from_number"]},
+    "twilio": {
+        "label": "Twilio SMS",
+        "fields": ["account_sid", "auth_token", "from_number"],
+        "required": ["account_sid", "auth_token", "from_number"],
+    },
 }
 
 
 # ── Models ───────────────────────────────────────────────────────────────────
+
 
 class IntegrationKeyUpsert(BaseModel):
     provider: str
@@ -46,6 +52,7 @@ class IntegrationKeyDelete(BaseModel):
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
+
 
 @router.get("/integrations/providers")
 async def list_providers(_user: str = Depends(get_current_user)):
@@ -67,14 +74,16 @@ async def list_integration_keys(user_id: str = Depends(get_current_user)):
             masked = mask(plaintext)
         except ValueError:
             masked = "••••(corrupted)"
-        result.append({
-            "id": str(row["id"]),
-            "provider": row["provider"],
-            "field_name": row["field_name"],
-            "masked_value": masked,
-            "is_verified": row["is_verified"],
-            "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else None,
-        })
+        result.append(
+            {
+                "id": str(row["id"]),
+                "provider": row["provider"],
+                "field_name": row["field_name"],
+                "masked_value": masked,
+                "is_verified": row["is_verified"],
+                "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else None,
+            }
+        )
     return result
 
 
@@ -85,7 +94,9 @@ async def upsert_integration_key(body: IntegrationKeyUpsert, user_id: str = Depe
         raise HTTPException(400, f"Unknown provider: {body.provider}")
     valid_fields = PROVIDERS[body.provider]["fields"]
     if body.field_name not in valid_fields:
-        raise HTTPException(400, f"Invalid field '{body.field_name}' for provider '{body.provider}'. Valid: {valid_fields}")
+        raise HTTPException(
+            400, f"Invalid field '{body.field_name}' for provider '{body.provider}'. Valid: {valid_fields}"
+        )
     if not body.value.strip():
         raise HTTPException(400, "Value cannot be empty")
 
@@ -96,9 +107,17 @@ async def upsert_integration_key(body: IntegrationKeyUpsert, user_id: str = Depe
            ON CONFLICT (user_id, provider, field_name) DO UPDATE
            SET encrypted_value = EXCLUDED.encrypted_value, is_verified = FALSE, updated_at = NOW()
            RETURNING id, provider, field_name, updated_at""",
-        user_id, body.provider, body.field_name, encrypted,
+        user_id,
+        body.provider,
+        body.field_name,
+        encrypted,
     )
-    return {**row, "id": str(row["id"]), "masked_value": mask(body.value.strip()), "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else None}
+    return {
+        **row,
+        "id": str(row["id"]),
+        "masked_value": mask(body.value.strip()),
+        "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else None,
+    }
 
 
 @router.delete("/integrations")
@@ -106,7 +125,9 @@ async def delete_integration_key(body: IntegrationKeyDelete, user_id: str = Depe
     """Remove an integration key."""
     await execute(
         "DELETE FROM integration_keys WHERE user_id=$1 AND provider=$2 AND field_name=$3",
-        user_id, body.provider, body.field_name,
+        user_id,
+        body.provider,
+        body.field_name,
     )
     return {"status": "deleted"}
 
@@ -133,7 +154,10 @@ async def verify_integration(provider: str, user_id: str = Depends(get_current_u
     for field_name in keys:
         await execute(
             "UPDATE integration_keys SET is_verified=$1 WHERE user_id=$2 AND provider=$3 AND field_name=$4",
-            ok, user_id, provider, field_name,
+            ok,
+            user_id,
+            provider,
+            field_name,
         )
 
     return {"provider": provider, "verified": ok, "detail": detail}
@@ -141,11 +165,13 @@ async def verify_integration(provider: str, user_id: str = Depends(get_current_u
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
+
 async def _get_provider_keys(user_id: str, provider: str) -> dict[str, str]:
     """Retrieve and decrypt all keys for a provider."""
     rows = await fetch_all(
         "SELECT field_name, encrypted_value FROM integration_keys WHERE user_id=$1 AND provider=$2",
-        user_id, provider,
+        user_id,
+        provider,
     )
     result = {}
     for row in rows:
@@ -159,9 +185,12 @@ async def _get_provider_keys(user_id: str, provider: str) -> dict[str, str]:
 async def get_integration_key(user_id: str, provider: str, field_name: str) -> str | None:
     """Get a single decrypted key. Falls back to env var via config if not in DB."""
     from app.config import settings as cfg
+
     row = await fetch_one(
         "SELECT encrypted_value FROM integration_keys WHERE user_id=$1 AND provider=$2 AND field_name=$3",
-        user_id, provider, field_name,
+        user_id,
+        provider,
+        field_name,
     )
     if row:
         try:
@@ -212,8 +241,16 @@ async def _verify_provider(provider: str, keys: dict[str, str]) -> tuple[bool, s
         if provider == "anthropic":
             r = await client.post(
                 "https://api.anthropic.com/v1/messages",
-                headers={"x-api-key": keys["api_key"], "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                json={"model": "claude-3-5-haiku-20241022", "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}]},
+                headers={
+                    "x-api-key": keys["api_key"],
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-3-5-haiku-20241022",
+                    "max_tokens": 1,
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
             )
             return r.status_code == 200, f"HTTP {r.status_code}"
 
@@ -291,9 +328,7 @@ class NotificationChannelUpdate(BaseModel):
 
 @router.get("/notification-channels")
 async def list_notification_channels(user_id: str = Depends(get_current_user)):
-    rows = await fetch_all(
-        f"SELECT {_CHANNEL_COLS} FROM notification_channels ORDER BY created_at DESC"
-    )
+    rows = await fetch_all(f"SELECT {_CHANNEL_COLS} FROM notification_channels ORDER BY created_at DESC")
     return rows
 
 
@@ -315,7 +350,9 @@ async def create_notification_channel(
         VALUES ($1, $2, $3)
         RETURNING {_CHANNEL_COLS}
         """,
-        body.channel_type, body.name, body.config,
+        body.channel_type,
+        body.name,
+        body.config,
     )
     return row
 
@@ -348,7 +385,5 @@ async def update_notification_channel(
 
 
 @router.delete("/notification-channels/{channel_id}", status_code=204)
-async def delete_notification_channel(
-    channel_id: str, user_id: str = Depends(get_current_user)
-):
+async def delete_notification_channel(channel_id: str, user_id: str = Depends(get_current_user)):
     await execute("DELETE FROM notification_channels WHERE id=$1", channel_id)

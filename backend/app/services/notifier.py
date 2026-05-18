@@ -8,6 +8,7 @@ Channels supported:
 - slack   (incoming webhook URL)
 - email   (via existing Resend config — falls back to noop if unset)
 """
+
 from __future__ import annotations
 
 import logging

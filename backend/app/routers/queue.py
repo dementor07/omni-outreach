@@ -60,9 +60,7 @@ async def retry_task(task_id: str, user_id: str = Depends(get_current_user)):
 
 @router.post("/bulk-retry")
 async def bulk_retry_tasks(
-    campaign_id: str | None = None,
-    channel: str | None = None,
-    user_id: str = Depends(get_current_user)
+    campaign_id: str | None = None, channel: str | None = None, user_id: str = Depends(get_current_user)
 ):
     """Reset multiple failed tasks to 'queued' state."""
     conditions = ["status='failed'"]
@@ -78,7 +76,6 @@ async def bulk_retry_tasks(
     where = "WHERE " + " AND ".join(conditions)
 
     await execute(
-        f"UPDATE queue SET status='queued', failure_reason=NULL, retry_count=0, scheduled_at=NOW() {where}",
-        *params
+        f"UPDATE queue SET status='queued', failure_reason=NULL, retry_count=0, scheduled_at=NOW() {where}", *params
     )
     return {"status": "bulk_queued"}

@@ -15,5 +15,6 @@ async def migrate():
     """)
     print("Migration complete.")
 
+
 if __name__ == "__main__":
     asyncio.run(migrate())

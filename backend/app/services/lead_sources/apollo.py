@@ -5,6 +5,7 @@ Optional integration — requires APOLLO_API_KEY in settings.
 Apollo API docs: https://apolloio.github.io/apollo-api-docs/
 Rate limits: 10 req/s, credits per call (varies by tier).
 """
+
 from __future__ import annotations
 
 import logging
@@ -24,8 +25,7 @@ class ApolloSource(LeadSource):
     source_type = "apollo"
     display_name = "Apollo.io"
     description = (
-        "Search Apollo's database of 250M+ contacts. "
-        "Filter by job title, company size, industry, location, and more."
+        "Search Apollo's database of 250M+ contacts. Filter by job title, company size, industry, location, and more."
     )
 
     @property
@@ -132,38 +132,46 @@ class ApolloSource(LeadSource):
                         # Extract first available phone number
                         phones = person.get("phone_numbers") or []
                         phone = next(
-                            (p.get("sanitized_number") or p.get("raw_number")
-                             for p in phones if p.get("sanitized_number") or p.get("raw_number")),
+                            (
+                                p.get("sanitized_number") or p.get("raw_number")
+                                for p in phones
+                                if p.get("sanitized_number") or p.get("raw_number")
+                            ),
                             None,
                         )
 
                         # Build location string from city/state/country
-                        location_parts = filter(None, [
-                            person.get("city"),
-                            person.get("state"),
-                            person.get("country"),
-                        ])
+                        location_parts = filter(
+                            None,
+                            [
+                                person.get("city"),
+                                person.get("state"),
+                                person.get("country"),
+                            ],
+                        )
                         location = ", ".join(location_parts) or None
 
-                        all_leads.append(RawLead(
-                            first_name=person.get("first_name", ""),
-                            last_name=person.get("last_name", ""),
-                            linkedin_url=linkedin_url or None,
-                            email=person.get("email"),
-                            phone=phone,
-                            location=location,
-                            headline=person.get("title", ""),
-                            company=org.get("name", "") or person.get("organization_name", ""),
-                            company_linkedin_url=org.get("linkedin_url"),
-                            extra={
-                                "apollo_id": person.get("id"),
-                                "seniority": person.get("seniority"),
-                                "departments": person.get("departments", []),
-                                "org_website": org.get("website_url"),
-                                "org_employees": org.get("num_employees"),
-                                "org_industry": org.get("industry"),
-                            },
-                        ))
+                        all_leads.append(
+                            RawLead(
+                                first_name=person.get("first_name", ""),
+                                last_name=person.get("last_name", ""),
+                                linkedin_url=linkedin_url or None,
+                                email=person.get("email"),
+                                phone=phone,
+                                location=location,
+                                headline=person.get("title", ""),
+                                company=org.get("name", "") or person.get("organization_name", ""),
+                                company_linkedin_url=org.get("linkedin_url"),
+                                extra={
+                                    "apollo_id": person.get("id"),
+                                    "seniority": person.get("seniority"),
+                                    "departments": person.get("departments", []),
+                                    "org_website": org.get("website_url"),
+                                    "org_employees": org.get("num_employees"),
+                                    "org_industry": org.get("industry"),
+                                },
+                            )
+                        )
 
                     log.info(f"[apollo] page {page} → {len(people)} results")
                     if len(people) < per_page:
@@ -222,8 +230,11 @@ class ApolloSource(LeadSource):
 
         phones = person.get("phone_numbers") or []
         phone = next(
-            (p.get("sanitized_number") or p.get("raw_number")
-             for p in phones if p.get("sanitized_number") or p.get("raw_number")),
+            (
+                p.get("sanitized_number") or p.get("raw_number")
+                for p in phones
+                if p.get("sanitized_number") or p.get("raw_number")
+            ),
             None,
         )
         location_parts = filter(None, [person.get("city"), person.get("state"), person.get("country")])

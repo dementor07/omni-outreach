@@ -24,12 +24,16 @@ def create_access_token(user_id: str) -> str:
     return jwt.encode({"sub": user_id, "exp": expire}, settings.secret_key, algorithm=settings.jwt_algorithm)
 
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer)) -> str:
+def decode_access_token(token: str) -> str:
     try:
-        payload = jwt.decode(credentials.credentials, settings.secret_key, algorithms=[settings.jwt_algorithm])
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.jwt_algorithm])
         user_id = payload.get("sub")
         if not user_id:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
         return user_id
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer)) -> str:
+    return decode_access_token(credentials.credentials)

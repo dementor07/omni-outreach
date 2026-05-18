@@ -28,6 +28,7 @@ def event_loop():
 @pytest.fixture(scope="session")
 def app() -> FastAPI:
     from app.main import app as _app
+
     return _app
 
 

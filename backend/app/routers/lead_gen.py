@@ -2,6 +2,7 @@
 Lead generation API router.
 Supersedes /job-search/ with a multi-source provider model.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -18,6 +19,7 @@ router = APIRouter()
 
 # ── Sources ───────────────────────────────────────────────────────────────────
 
+
 @router.get("/sources")
 async def list_sources(user_id: str = Depends(get_current_user)):
     """Return all registered lead sources with availability status."""
@@ -25,6 +27,7 @@ async def list_sources(user_id: str = Depends(get_current_user)):
 
 
 # ── Configs ───────────────────────────────────────────────────────────────────
+
 
 class ConfigCreate(BaseModel):
     campaign_id: str
@@ -103,6 +106,7 @@ async def update_config(
     if body.cron_schedule:
         try:
             from croniter import croniter
+
             if not croniter.is_valid(body.cron_schedule):
                 raise ValueError("invalid cron expression")
         except ImportError:
@@ -125,9 +129,7 @@ async def update_config(
         sets.append("cron_schedule=NULL")
 
     if not sets:
-        existing_full = await fetch_one(
-            f"SELECT {_CONFIG_COLS} FROM lead_gen_configs WHERE id=$1", config_id
-        )
+        existing_full = await fetch_one(f"SELECT {_CONFIG_COLS} FROM lead_gen_configs WHERE id=$1", config_id)
         return existing_full
 
     params.append(config_id)
@@ -140,7 +142,10 @@ async def update_config(
 
 # ── Runs ──────────────────────────────────────────────────────────────────────
 
-_RUN_COLS = "id, campaign_id, config_id, source_type, status, leads_found, leads_added, credits_consumed, started_at, finished_at, error, triggered_by"
+_RUN_COLS = (
+    "id, campaign_id, config_id, source_type, status, leads_found, leads_added, "
+    "credits_consumed, started_at, finished_at, error, triggered_by"
+)
 
 
 class TriggerRequest(BaseModel):

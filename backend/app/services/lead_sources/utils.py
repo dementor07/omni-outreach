@@ -1,4 +1,5 @@
 """Shared helpers for lead-source providers."""
+
 from __future__ import annotations
 
 import re

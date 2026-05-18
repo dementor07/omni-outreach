@@ -4,6 +4,16 @@ Append-only. Format: `## [YYYY-MM-DD] operation | description`
 
 ---
 
+## [2026-05-17] sota-backend | Brain/Muscle/Spine/Lungs stack deployed on VPS
+
+Deployed the agreed SOTA backend stack to `srv1575227.hstgr.cloud`: FastAPI control plane, Rust execution engine, Redpanda event spine, Flink journey orchestrator, DragonflyDB memory layer, Postgres sink, nginx edge.
+
+Verified on the VPS:
+- `execution-engine` consumes `outreach.commands`, publishes `outreach.results`, preserves metadata, manually commits offsets, and dead-letters schema failures.
+- `journey-orchestrator` is submitted to the Flink session cluster and emits timer transitions into `outreach.transitions`.
+- DragonflyDB replaced the Redis image while keeping the `redis` service name for compatibility.
+- Public health and direct backend health are green; backend ruff, compileall, and pytest pass.
+
 ## [2026-04-12] init | Vault created
 
 Initialized omni-vault structure. Created CLAUDE.md schema, index.md, log.md. Seeded architecture and product pages from live codebase + session context.
@@ -1092,3 +1102,62 @@ Open follow-up: reconcile [[sota-event-schemas]] with the live `ActionCommand` e
 - Created the Redpanda topics `outreach.commands`, `outreach.results`, `outreach.transitions`, `outreach.telemetry`, and `outreach.dead_letter`; restarted the Rust execution engine after topics existed.
 - Restored public frontend bindings on `80/443`, mounted the existing VPS certs into nginx, and passed `REDIS_PASSWORD` into backend and bridge workers. Disabled inherited backend healthchecks on the long-running worker services because they do not expose `/api/health`.
 - Live checks passed on the VPS: `https://srv1575227.hstgr.cloud/api/health` returned API/DB/Redis ok, frontend returned HTTP 200, `ruff check app` passed, `python -m compileall -q app` passed, and mounted backend tests against `outreach_test` passed (`4 passed`, one passlib deprecation warning).
+
+## 2026-05-17 - VPS Claude Changes Checked
+- Checked the live VPS after Claude's commits. HEAD is `446bd5f` with additional dirty deployment/runtime files still present. Core services are up; backend and frontend were recently rebuilt/restarted.
+- Live checks passed: `/api/health` returned API/DB/Redis ok, frontend returned HTTP 200, backend reached healthy, sync-worker and transition-worker joined their Redpanda consumer groups, `ruff check app` passed, `python -m compileall -q app` passed, and backend tests passed remotely (`4 passed`, one passlib deprecation warning).
+- Found Retell voice prompt/flow endpoints throwing 500 because the Retell API key was empty and code sent `Authorization: Bearer `. Patched `backend/app/routers/accounts.py` to return `503 Retell API is not configured` instead of raising a transport exception, then rebuilt/restarted backend and workers on the VPS.
+- Production DB reports `alembic_version=010`; the latest lead social handle migration is applied.
+
+## 2026-05-17 - Live UI Interaction Sweep
+- Drove the deployed VPS UI with Playwright against `https://srv1575227.hstgr.cloud`: registered disposable users, logged in through the UI, visited Dashboard, Campaigns, Leads, Queue, Settings, Lead Sources, Job Search, Activity, Blacklist, Analytics, Templates, Inbox, Approvals, and opened an existing campaign across Leads/Queue/Sequence/Sources/Settings tabs.
+- Fixed live UI findings: notification SSE streams now authenticate with the query-token path used by `EventSource`; frontend CSP now permits the Google Fonts stylesheet/font hosts already referenced by the app; login labels now have `htmlFor`/`id` associations.
+- Ran a deeper action flow: created a disposable campaign, opened tabs, saved sequence, created an email account, created a job-search config, and deleted the disposable campaign. That exposed production DB drift on `email_accounts.resend_api_key`; added and applied Alembic migration `011` to make the legacy column nullable/defaulted when present.
+- Post-fix UI action flow passed with no console/page/network findings. Disposable users/email accounts/campaigns were cleaned up. Final VPS checks passed: health ok, frontend HTTP 200, backend healthy, workers up, `ruff check app`, `compileall`, and backend pytest (`4 passed`, one passlib deprecation warning).
+
+
+## [2026-05-17] verify | Claude post-Codex live audit and frontend compatibility sweep
+
+Codex completed the SOTA backend push (Rust execution engine, PyFlink journey-orchestrator, DragonflyDB replacement, Redpanda topics) — all live on `srv1575227.hstgr.cloud` and validated via Rust+Flink smoke tests. Active Flink job `8d6bbd6ea228433479472b969a1f3899` running. Backend-overhaul files (`docker-compose.yml`, `backend-flink/Dockerfile`, `backend-flink/orchestrator.py`, `backend-rust/src/main.rs`, `backend-rust/src/models.rs`, `backend-rust/src/handlers/email.rs`) remain dirty on both local and VPS — treated as committed operational state per user instruction. See [[system-overview]] for the current layer-by-layer status.
+
+This session's Claude-side work, separate from Codex's backend push, landed in commits `6ce0282`, `31e24d4`, `446bd5f`:
+
+Backend (control plane only, not the Rust/Flink overhaul):
+- Migration 009: `stream_log` table + `leads.last_contacted_at` so the `EventBus._log_event` / `stream_sync` paths stop writing into nothing.
+- Migration 010: `leads.instagram_username` + `leads.telegram_username`. `lead_gen.upsert_lead` already wrote both; without the columns every CSV upload row failed with a schema error.
+- `TaskStatus.RATE_LIMITED` added to the Pydantic enum; `stream_sync` re-queues rate-limited results with a 5-minute delay instead of treating them as hard failures.
+- `StateTransition` Pydantic model field names aligned with `transition_worker` consumer reality (`source_node_id`/`handle`).
+- `dispatcher.emit_result`: replaced the silent `pass` with a `stream_log` insert so legacy-path receipts are visible to analytics.
+- `approvals` GET wrapped as `{approvals: rows}` for shape parity with the other list endpoints (matching frontend updated).
+- `/leads/{lead_id}` and `/leads/{lead_id}` DELETE now use the `:uuid` FastAPI path converter so `GET /leads/export` and `POST /leads/csv-upload` don't get matched against the catchall (was 500'ing with `invalid UUID 'export'`).
+- `db.py`: registered asyncpg `jsonb`/`json` codecs so `payload`/`data`/`meta` columns arrive as `dict`/`list` instead of raw JSON strings. `_json_encode` passes pre-stringified inputs through so the dozen-plus existing `json.dumps(...)`-before-INSERT callsites don't double-encode.
+- arq worker `max_jobs` 1 → 4 per [[audit-2026-05-16]].
+
+Frontend button wiring (every dead button found in the [[parity-gap-analysis-may-2026]] follow-up):
+- Queue: bulk-retry + per-row retry → `POST /queue/bulk-retry` and `POST /queue/{id}/retry`. Verified live on the VPS: FAILED 2 → 0 with refetch.
+- Leads: Export CSV (blob download from `/leads/export`) and Add leads (hidden file input → `/leads/csv-upload`) with loading guards and a campaign-required pre-check. Verified live: CSV returned 200 with the migrated columns including `last_contacted_at`.
+- Dashboard: New campaign navigates to `/campaigns?new=1`; the Campaigns page reads that param and auto-opens the create modal.
+- Approvals: list reader updated to `{approvals: rows}`; Edit draft now opens an inline textarea wired to `PATCH /approvals/{id}` with save/cancel. The jsonb-as-string codec gap surfaced through this flow first, which is why the `db.py` codec fix landed in the same commit.
+- CampaignSourcesPanel: Configure source navigates to `/lead-sources?campaign_id=...`; LeadSources page reads that param so the right campaign is pre-selected on arrival.
+
+Canvas (the load-bearing UI):
+- `Campaigns/index.tsx`: load `useEffect` now maps backend `{id, node_type, position_x, position_y, data}` → xyflow `{id, type, position:{x,y}, data}`, and the save path maps the reverse. Without this, every node loaded with `type=undefined` and `ConfigSidebar` crashed on `nodeType.startsWith(...)`. Verified live: AI Voice Call + Email nodes round-trip across reload with positions preserved in `sequence_nodes`.
+- `ConfigSidebar`: `nodeType` falls back to `data.node_type` so a stale-shape graph degrades gracefully instead of triggering the ErrorBoundary.
+- `SequentialBuilder`: guarded `step.type` with `?? ''` before `startsWith`.
+
+Responsive:
+- `Layout` refactored: sidebar is desktop-only at `md+`; mobile (<768px) gets a slide-out drawer with backdrop, body-scroll lock, and auto-close on route change. Verified live at 375×812: drawer opens via topbar toggle, route click closes it.
+
+Deploy:
+- Direct-on-VPS path used per user preference: `git stash → git pull --ff-only → docker compose up -d --build backend frontend → alembic upgrade head → stash pop`. Alembic now at head `011` (`011_email_accounts_resend_nullable.py` is Codex's; `009` and `010` are this session's).
+- Repo dirty tree still includes ~60 pre-existing files from older sessions plus Codex's overhaul files — left untouched per user instruction.
+
+Verified buttons end-to-end via chrome-devtools-mcp authenticated session:
+- Dashboard New campaign → `/campaigns?new=1` ✓
+- Queue bulk retry: `POST /queue/bulk-retry` → 200, FAILED → 0 ✓
+- Queue per-row retry: `POST /queue/{id}/retry` → 200, row re-queued ✓
+- Leads Export CSV: `GET /leads/export` → 200, CSV downloaded with migrated schema ✓
+- Approvals Edit draft: `PATCH /approvals/{id}` → 200, payload persisted ✓
+- Sources Configure: navigates with `?campaign_id=...`, LeadSources preselects correctly ✓
+- Canvas round-trip: add Email node, save (`POST /sequences/save` → 200), reload, nodes present in DB with `node_type` + `position_x/y` ✓
+- Mobile drawer at 375px: open / backdrop / close-on-nav ✓

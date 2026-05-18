@@ -26,9 +26,9 @@ async def overview_stats(user_id: str = Depends(get_current_user)):
     )
     return {
         "total_leads": int(row["total_leads"] or 0),
-        "invited":     int(row["invited"]     or 0),
-        "accepted":    int(row["accepted"]    or 0),
-        "sent":        int(row["sent"]        or 0),
+        "invited": int(row["invited"] or 0),
+        "accepted": int(row["accepted"] or 0),
+        "sent": int(row["sent"] or 0),
     }
 
 
@@ -70,6 +70,8 @@ async def response_rates(user_id: str = Depends(get_current_user)):
         """
     )
     return [dict(r) for r in rows]
+
+
 @router.get("/consolidated")
 async def overview_consolidated(user_id: str = Depends(get_current_user)):
     """
@@ -129,11 +131,11 @@ async def overview_consolidated(user_id: str = Depends(get_current_user)):
     return {
         "stats": {
             "total_leads": int(stats_row["total_leads"] or 0),
-            "invited":     int(stats_row["invited"]     or 0),
-            "accepted":    int(stats_row["accepted"]    or 0),
-            "sent":        int(stats_row["sent"]        or 0),
+            "invited": int(stats_row["invited"] or 0),
+            "accepted": int(stats_row["accepted"] or 0),
+            "sent": int(stats_row["sent"] or 0),
         },
         "daily_activity": [dict(r) for r in activity_rows],
         "response_rates": [dict(r) for r in rate_rows],
-        "queue_stats":    [dict(r) for r in queue_rows],
+        "queue_stats": [dict(r) for r in queue_rows],
     }

@@ -2,6 +2,7 @@
 Manual Lead source provider.
 Represents leads added by hand or via CSV upload.
 """
+
 from __future__ import annotations
 
 from .base import LeadSource, RawLead

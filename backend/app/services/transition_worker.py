@@ -5,9 +5,11 @@ import logging
 from aiokafka import AIOKafkaConsumer
 
 from app.config import settings
+from app.db import close_pool, init_pool
 from app.services.sequencer import queue_next_nodes
 
 log = logging.getLogger(__name__)
+
 
 async def run_transition_worker():
     """
@@ -18,7 +20,7 @@ async def run_transition_worker():
         "outreach.transitions",
         bootstrap_servers=settings.kafka_brokers,
         group_id="omni-brain-transition",
-        auto_offset_reset="latest"
+        auto_offset_reset="latest",
     )
 
     await consumer.start()
@@ -46,6 +48,15 @@ async def run_transition_worker():
     finally:
         await consumer.stop()
 
+
+async def main():
+    await init_pool(settings.get_asyncpg_dsn())
+    try:
+        await run_transition_worker()
+    finally:
+        await close_pool()
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(run_transition_worker())
+    asyncio.run(main())

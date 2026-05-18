@@ -16,6 +16,7 @@ Changes:
     * unique on (campaign_id, email) where linkedin_url is null and email is not null
   This preserves dedupe correctness for both LinkedIn and email-only leads.
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -28,19 +29,13 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # Add extra_data column for source-specific enrichment metadata
-    op.execute(
-        "ALTER TABLE leads ADD COLUMN IF NOT EXISTS extra_data JSONB DEFAULT '{}'"
-    )
+    op.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS extra_data JSONB DEFAULT '{}'")
 
     # Make linkedin_url nullable to support email-only leads
-    op.execute(
-        "ALTER TABLE leads ALTER COLUMN linkedin_url DROP NOT NULL"
-    )
+    op.execute("ALTER TABLE leads ALTER COLUMN linkedin_url DROP NOT NULL")
 
     # Drop the old unique constraint and replace with partial indexes
-    op.execute(
-        "ALTER TABLE leads DROP CONSTRAINT IF EXISTS leads_campaign_id_linkedin_url_key"
-    )
+    op.execute("ALTER TABLE leads DROP CONSTRAINT IF EXISTS leads_campaign_id_linkedin_url_key")
     op.execute(
         """
         CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_unique_linkedin
@@ -60,11 +55,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS idx_leads_unique_email")
     op.execute("DROP INDEX IF EXISTS idx_leads_unique_linkedin")
-    op.execute(
-        "ALTER TABLE leads ALTER COLUMN linkedin_url SET NOT NULL"
-    )
-    op.execute(
-        "ALTER TABLE leads DROP COLUMN IF EXISTS extra_data"
-    )
+    op.execute("ALTER TABLE leads ALTER COLUMN linkedin_url SET NOT NULL")
+    op.execute("ALTER TABLE leads DROP COLUMN IF EXISTS extra_data")
     # Note: downgrade does not restore the old UNIQUE constraint since rows
     # with NULL linkedin_url may exist by this point.

@@ -28,7 +28,8 @@ async def register(request: Request, body: RegisterRequest):
         raise HTTPException(status_code=409, detail="Email already registered")
     user = await fetch_one(
         "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email",
-        body.email, hash_password(body.password),
+        body.email,
+        hash_password(body.password),
     )
     return user
 

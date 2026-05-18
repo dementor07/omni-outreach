@@ -11,4 +11,5 @@ async def main():
 
 if __name__ == "__main__":
     import arq
+
     arq.run_worker(WorkerSettings)

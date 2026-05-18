@@ -60,7 +60,10 @@ async def create_config(body: ConfigCreate, user_id: str = Depends(get_current_u
         VALUES ($1, $2, $3, $4)
         RETURNING {_CONFIG_COLS}
         """,
-        body.campaign_id, body.keywords, body.location, body.roles,
+        body.campaign_id,
+        body.keywords,
+        body.location,
+        body.roles,
     )
     return row
 
@@ -93,9 +96,7 @@ async def list_runs(
 
 @router.get("/runs/{run_id}")
 async def get_run(run_id: str, user_id: str = Depends(get_current_user)):
-    row = await fetch_one(
-        f"SELECT {_RUN_COLS} FROM job_search_runs WHERE id=$1", run_id
-    )
+    row = await fetch_one(f"SELECT {_RUN_COLS} FROM job_search_runs WHERE id=$1", run_id)
     if not row:
         raise HTTPException(status_code=404, detail="Run not found")
     return row

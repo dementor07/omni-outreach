@@ -1,6 +1,6 @@
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.auth import get_current_user
 from app.config import settings
@@ -10,6 +10,7 @@ router = APIRouter()
 
 
 # ── LinkedIn accounts ─────────────────────────────────────────────────────────
+
 
 class LinkedInAccountCreate(BaseModel):
     unipile_id: str
@@ -27,7 +28,10 @@ async def list_linkedin_accounts(user_id: str = Depends(get_current_user)):
 async def create_linkedin_account(body: LinkedInAccountCreate, user_id: str = Depends(get_current_user)):
     return await fetch_one(
         "INSERT INTO linkedin_accounts (unipile_id, name, email, daily_invite_cap) VALUES ($1,$2,$3,$4) RETURNING *",
-        body.unipile_id, body.name, body.email, body.daily_invite_cap,
+        body.unipile_id,
+        body.name,
+        body.email,
+        body.daily_invite_cap,
     )
 
 
@@ -57,6 +61,7 @@ async def test_linkedin_account(account_id: str, user_id: str = Depends(get_curr
 
 # ── Email accounts ────────────────────────────────────────────────────────────
 
+
 class EmailAccountCreate(BaseModel):
     from_name: str
     from_email: str
@@ -70,13 +75,15 @@ class EmailAccountCreate(BaseModel):
 @router.get("/email")
 async def list_email_accounts(user_id: str = Depends(get_current_user)):
     return await fetch_all(
-        "SELECT id, from_name, from_email, smtp_host, smtp_port, smtp_use_tls, is_active, created_at FROM email_accounts ORDER BY from_name"
+        "SELECT id, from_name, from_email, smtp_host, smtp_port, smtp_use_tls, is_active, created_at "
+        "FROM email_accounts ORDER BY from_name"
     )
 
 
 @router.post("/email", status_code=201)
 async def create_email_account(body: EmailAccountCreate, user_id: str = Depends(get_current_user)):
     from app.services.encryption import encrypt
+
     encrypted_password = encrypt(body.smtp_password)
     return await fetch_one(
         """
@@ -85,8 +92,13 @@ async def create_email_account(body: EmailAccountCreate, user_id: str = Depends(
         VALUES ($1,$2,$3,$4,$5,$6,$7)
         RETURNING id, from_name, from_email, smtp_host, smtp_port, smtp_use_tls, is_active, created_at
         """,
-        body.from_name, body.from_email,
-        body.smtp_host, body.smtp_port, body.smtp_username, encrypted_password, body.smtp_use_tls,
+        body.from_name,
+        body.from_email,
+        body.smtp_host,
+        body.smtp_port,
+        body.smtp_username,
+        encrypted_password,
+        body.smtp_use_tls,
     )
 
 
@@ -97,18 +109,24 @@ async def delete_email_account(account_id: str, user_id: str = Depends(get_curre
 
 # ── Voice agents ──────────────────────────────────────────────────────────────
 
-
-from pydantic import ConfigDict
-
 RETELL_API_KEY = settings.retell_api_key
+
+
+def _retell_headers() -> dict[str, str]:
+    if not RETELL_API_KEY:
+        raise HTTPException(status_code=503, detail="Retell API is not configured")
+    return {"Authorization": f"Bearer {RETELL_API_KEY}"}
+
 
 class VoiceAgentCreate(BaseModel):
     retell_agent_id: str
     name: str
 
+
 class UpdatePromptRequest(BaseModel):
     begin_message: str
     general_prompt: str
+
 
 class VoiceAgentPrompt(BaseModel):
     llm_id: str
@@ -116,22 +134,25 @@ class VoiceAgentPrompt(BaseModel):
     general_prompt: str
     model: str
 
+
 class FlowUpdate(BaseModel):
     model_config = ConfigDict(extra="allow")
     global_prompt: str | None = None
     nodes: list | None = None
     start_node_id: str | None = None
 
+
 async def _get_retell_agent(retell_agent_id: str) -> dict:
     """GET https://api.retellai.com/get-agent/{retell_agent_id}"""
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
             f"https://api.retellai.com/get-agent/{retell_agent_id}",
-            headers={"Authorization": f"Bearer {RETELL_API_KEY}"},
+            headers=_retell_headers(),
         )
         if not resp.is_success:
             raise HTTPException(status_code=502, detail=f"Retell error: {resp.text}")
         return resp.json()
+
 
 @router.get("/voice")
 async def list_voice_agents(user_id: str = Depends(get_current_user)):
@@ -142,7 +163,8 @@ async def list_voice_agents(user_id: str = Depends(get_current_user)):
 async def create_voice_agent(body: VoiceAgentCreate, user_id: str = Depends(get_current_user)):
     return await fetch_one(
         "INSERT INTO voice_agents (retell_agent_id, name) VALUES ($1,$2) RETURNING *",
-        body.retell_agent_id, body.name,
+        body.retell_agent_id,
+        body.name,
     )
 
 
@@ -153,7 +175,7 @@ async def list_retell_flows(user_id: str = Depends(get_current_user)):
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
                 "https://api.retellai.com/list-conversation-flows",
-                headers={"Authorization": f"Bearer {RETELL_API_KEY}"},
+                headers=_retell_headers(),
             )
         if resp.is_success:
             return resp.json()
@@ -184,7 +206,7 @@ async def get_voice_agent_prompt(agent_id: str, user_id: str = Depends(get_curre
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
             f"https://api.retellai.com/get-retell-llm/{llm_id}",
-            headers={"Authorization": f"Bearer {RETELL_API_KEY}"},
+            headers=_retell_headers(),
         )
         if not resp.is_success:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)
@@ -213,7 +235,7 @@ async def update_voice_agent_prompt(agent_id: str, body: UpdatePromptRequest, us
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.patch(
             f"https://api.retellai.com/update-retell-llm/{llm_id}",
-            headers={"Authorization": f"Bearer {RETELL_API_KEY}"},
+            headers=_retell_headers(),
             json={"begin_message": body.begin_message, "general_prompt": body.general_prompt},
         )
         if not resp.is_success:
@@ -237,7 +259,7 @@ async def get_voice_agent_flow(agent_id: str, user_id: str = Depends(get_current
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
             f"https://api.retellai.com/get-conversation-flow/{flow_id}",
-            headers={"Authorization": f"Bearer {RETELL_API_KEY}"},
+            headers=_retell_headers(),
         )
         if not resp.is_success:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)
@@ -261,11 +283,10 @@ async def update_voice_agent_flow(agent_id: str, body: dict, user_id: str = Depe
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.patch(
             f"https://api.retellai.com/update-conversation-flow/{flow_id}",
-            headers={"Authorization": f"Bearer {RETELL_API_KEY}"},
+            headers=_retell_headers(),
             json=payload,
         )
         if not resp.is_success:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)
 
         return {"success": True}
-

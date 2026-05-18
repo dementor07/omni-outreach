@@ -106,9 +106,7 @@ async def campaign_conversions(
         """,
         campaign_id,
     )
-    total_leads = await fetch_one(
-        "SELECT COUNT(*) AS cnt FROM leads WHERE campaign_id=$1", campaign_id
-    )
+    total_leads = await fetch_one("SELECT COUNT(*) AS cnt FROM leads WHERE campaign_id=$1", campaign_id)
     total = total_leads["cnt"] or 1
     return {
         "total_leads": total,

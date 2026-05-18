@@ -1,4 +1,3 @@
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -44,7 +43,9 @@ async def list_blacklist(
     offset = (page - 1) * page_size
     rows = await fetch_all(
         f"SELECT * FROM blacklists WHERE {where} ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}",
-        *params, page_size, offset,
+        *params,
+        page_size,
+        offset,
     )
     total = await fetch_one(f"SELECT COUNT(*) AS cnt FROM blacklists WHERE {where}", *params)
     return {"entries": rows, "total": total["cnt"], "page": page, "page_size": page_size}
@@ -57,13 +58,16 @@ async def add_blacklist_entry(
 ):
     existing = await fetch_one(
         "SELECT id FROM blacklists WHERE entry_type=$1 AND value=$2",
-        entry.entry_type, entry.value.strip().lower(),
+        entry.entry_type,
+        entry.value.strip().lower(),
     )
     if existing:
         raise HTTPException(400, "Entry already blacklisted")
     row = await fetch_one(
         "INSERT INTO blacklists (entry_type, value, reason) VALUES ($1, $2, $3) RETURNING *",
-        entry.entry_type, entry.value.strip().lower(), entry.reason,
+        entry.entry_type,
+        entry.value.strip().lower(),
+        entry.reason,
     )
     return row
 
@@ -78,14 +82,17 @@ async def add_blacklist_bulk(
     for entry in payload.entries:
         existing = await fetch_one(
             "SELECT id FROM blacklists WHERE entry_type=$1 AND value=$2",
-            entry.entry_type, entry.value.strip().lower(),
+            entry.entry_type,
+            entry.value.strip().lower(),
         )
         if existing:
             skipped += 1
             continue
         await execute(
             "INSERT INTO blacklists (entry_type, value, reason) VALUES ($1, $2, $3)",
-            entry.entry_type, entry.value.strip().lower(), entry.reason,
+            entry.entry_type,
+            entry.value.strip().lower(),
+            entry.reason,
         )
         added += 1
     return {"added": added, "skipped": skipped}
@@ -104,7 +111,8 @@ async def is_blacklisted(value: str, entry_type: str = "email") -> bool:
     """Check if a value is blacklisted. Also checks domain for emails."""
     row = await fetch_one(
         "SELECT id FROM blacklists WHERE entry_type=$1 AND value=$2",
-        entry_type, value.strip().lower(),
+        entry_type,
+        value.strip().lower(),
     )
     if row:
         return True

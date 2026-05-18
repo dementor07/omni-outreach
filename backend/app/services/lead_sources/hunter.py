@@ -6,6 +6,7 @@ Hunter API docs: https://hunter.io/api-documentation/v2
 Free tier: 50 searches/month. Paid: $34/mo (2K/mo) upward.
 Rate limit: 3 req/s (free), higher on paid.
 """
+
 from __future__ import annotations
 
 import logging
@@ -65,9 +66,19 @@ class HunterSource(LeadSource):
                     "items": {
                         "type": "string",
                         "enum": [
-                            "executive", "it", "finance", "management",
-                            "sales", "legal", "support", "hr", "marketing",
-                            "communication", "education", "design", "health",
+                            "executive",
+                            "it",
+                            "finance",
+                            "management",
+                            "sales",
+                            "legal",
+                            "support",
+                            "hr",
+                            "marketing",
+                            "communication",
+                            "education",
+                            "design",
+                            "health",
                             "operations",
                         ],
                     },
@@ -121,22 +132,24 @@ class HunterSource(LeadSource):
                         if role_keywords and not any(k in position.lower() for k in role_keywords):
                             continue
 
-                        all_leads.append(RawLead(
-                            first_name=first,
-                            last_name=last,
-                            linkedin_url=linkedin or None,
-                            email=email,
-                            headline=position,
-                            company=org_name,
-                            extra={
-                                "hunter_confidence": contact.get("confidence"),
-                                "hunter_type": contact.get("type"),
-                                "hunter_seniority": contact.get("seniority"),
-                                "hunter_department": contact.get("department"),
-                                "twitter": twitter,
-                                "domain": domain,
-                            },
-                        ))
+                        all_leads.append(
+                            RawLead(
+                                first_name=first,
+                                last_name=last,
+                                linkedin_url=linkedin or None,
+                                email=email,
+                                headline=position,
+                                company=org_name,
+                                extra={
+                                    "hunter_confidence": contact.get("confidence"),
+                                    "hunter_type": contact.get("type"),
+                                    "hunter_seniority": contact.get("seniority"),
+                                    "hunter_department": contact.get("department"),
+                                    "twitter": twitter,
+                                    "domain": domain,
+                                },
+                            )
+                        )
 
                     log.info(f"[hunter] {domain} → {len(emails)} contacts")
                 except Exception as e:

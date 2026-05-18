@@ -1,10 +1,15 @@
-import os
-import json
 import logging
-from pyflink.common import WatermarkStrategy, Types, SerializationSchema, DeserializationSchema
+import json
+import os
+
+from pyflink.common import WatermarkStrategy, Types
+from pyflink.common.serialization import SimpleStringSchema
 from pyflink.datastream import StreamExecutionEnvironment, KeyedProcessFunction, RuntimeContext
 from pyflink.datastream.connectors.kafka import KafkaSource, KafkaSink, KafkaRecordSerializationSchema, DeliveryGuarantee
 from pyflink.datastream.state import ValueStateDescriptor
+
+
+log = logging.getLogger(__name__)
 
 class JourneyProcessFunction(KeyedProcessFunction):
     def __init__(self):
@@ -19,6 +24,7 @@ class JourneyProcessFunction(KeyedProcessFunction):
         try:
             data = json.loads(value)
             lead_id = data.get("lead_id")
+            campaign_id = data.get("metadata", {}).get("campaign_id") or data.get("campaign_id")
             status = data.get("status")
             
             if status == "sent":
@@ -34,13 +40,14 @@ class JourneyProcessFunction(KeyedProcessFunction):
                 
                 state_obj = {
                     "lead_id": lead_id,
+                    "campaign_id": campaign_id,
                     "source_node_id": source_node_id,
                     "status": "waiting"
                 }
                 self.state.update(json.dumps(state_obj))
                 
         except Exception as e:
-            print(f"ERROR: {e}")
+            log.exception("Failed to process execution result: %s", e)
 
     def on_timer(self, timestamp, ctx: KeyedProcessFunction.OnTimerContext):
         """When the 'Wait' is over, emit a Transition Signal"""
@@ -53,8 +60,10 @@ class JourneyProcessFunction(KeyedProcessFunction):
         # This will be picked up by the Python Transition Worker
         transition_event = {
             "lead_id": state_obj["lead_id"],
+            "campaign_id": state_obj.get("campaign_id"),
             "source_node_id": state_obj["source_node_id"],
-            "handle": "default"
+            "handle": "default",
+            "event_type": "transition"
         }
         
         # Yield result to the Sink
@@ -70,7 +79,7 @@ def run_orchestrator():
         .set_bootstrap_servers(brokers) \
         .set_topics("outreach.results") \
         .set_group_id("flink-orchestrator") \
-        .set_value_only_deserializer(DeserializationSchema.utf8()) \
+        .set_value_only_deserializer(SimpleStringSchema()) \
         .build()
 
     # 2. Sink: outreach.transitions
@@ -79,7 +88,7 @@ def run_orchestrator():
         .set_record_serializer(
             KafkaRecordSerializationSchema.builder()
                 .set_topic("outreach.transitions")
-                .set_value_serialization_schema(SerializationSchema.utf8())
+                .set_value_serialization_schema(SimpleStringSchema())
                 .build()
         ) \
         .set_delivery_guarantee(DeliveryGuarantee.AT_LEAST_ONCE) \
@@ -89,7 +98,7 @@ def run_orchestrator():
     ds = env.from_source(source, WatermarkStrategy.no_watermarks(), "Results Source")
     
     ds.key_by(lambda x: json.loads(x).get('lead_id', 'unknown')) \
-      .process(JourneyProcessFunction()) \
+      .process(JourneyProcessFunction(), output_type=Types.STRING()) \
       .sink_to(sink)
 
     env.execute("Omni SOTA Orchestrator")

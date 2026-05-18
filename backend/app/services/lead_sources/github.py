@@ -8,6 +8,7 @@ Cross-references public email from profiles.
 
 GitHub REST docs: https://docs.github.com/en/rest
 """
+
 from __future__ import annotations
 
 import logging
@@ -120,9 +121,7 @@ class GitHubSource(LeadSource):
                     for member in members[:max_per_org]:
                         login = member.get("login", "")
                         try:
-                            ur = await client.get(
-                                f"{GITHUB_API}/users/{login}", headers=headers
-                            )
+                            ur = await client.get(f"{GITHUB_API}/users/{login}", headers=headers)
                             ur.raise_for_status()
                             user = ur.json()
                         except Exception:
@@ -143,22 +142,24 @@ class GitHubSource(LeadSource):
                         if "linkedin.com/in/" in blog:
                             linkedin_url = blog
 
-                        all_leads.append(RawLead(
-                            first_name=parts[0] if parts else login,
-                            last_name=parts[1] if len(parts) > 1 else "",
-                            linkedin_url=linkedin_url,
-                            email=email or None,
-                            headline=user.get("bio", ""),
-                            company=company or org,
-                            extra={
-                                "github_login": login,
-                                "github_url": user.get("html_url"),
-                                "github_followers": user.get("followers", 0),
-                                "github_public_repos": user.get("public_repos", 0),
-                                "github_org": org,
-                                "location": user.get("location"),
-                            },
-                        ))
+                        all_leads.append(
+                            RawLead(
+                                first_name=parts[0] if parts else login,
+                                last_name=parts[1] if len(parts) > 1 else "",
+                                linkedin_url=linkedin_url,
+                                email=email or None,
+                                headline=user.get("bio", ""),
+                                company=company or org,
+                                extra={
+                                    "github_login": login,
+                                    "github_url": user.get("html_url"),
+                                    "github_followers": user.get("followers", 0),
+                                    "github_public_repos": user.get("public_repos", 0),
+                                    "github_org": org,
+                                    "location": user.get("location"),
+                                },
+                            )
+                        )
 
                 except Exception as e:
                     log.error(f"[github] org {org}: {e}")
