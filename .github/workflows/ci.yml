@@ -70,7 +70,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build backend image
-        run: docker build -t omni-outreach-backend ./backend
+        # The backend Dockerfile references paths like `backend/app` and
+        # `scripts/`, so the build context must be the repo root — matching
+        # docker-compose.yml which uses `context: .` + `dockerfile: ./backend/Dockerfile`.
+        run: docker build -t omni-outreach-backend -f backend/Dockerfile .
       - name: Build frontend image
         run: docker build -t omni-outreach-frontend ./frontend
       - name: Build rust muscle image
