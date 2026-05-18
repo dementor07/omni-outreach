@@ -248,6 +248,39 @@ async def queue_next_nodes(
                 branch = lead_source if lead_source in configured_sources else "default"
                 log.info(f"[sequencer] Source router for lead {lead_id}: source={lead_source} → handle={branch}")
                 await queue_next_nodes(lead_id, target_id, branch, accumulated_delay)
+            elif node_type == "condition_lead_quality_score":
+                # Threshold a numeric score stored either as a lead column or
+                # an extra_data key. data.field (default 'quality_score'),
+                # data.threshold (default 50), data.op (>=, >, ==, <, <=).
+                d = node["data"] or {}
+                field = str(d.get("field") or "quality_score")
+                try:
+                    threshold = float(d.get("threshold", 50))
+                except (TypeError, ValueError):
+                    threshold = 50.0
+                op_str = str(d.get("op", ">=")).strip()
+                raw = lead.get(field)
+                if raw is None and isinstance(lead.get("extra_data"), dict):
+                    raw = lead["extra_data"].get(field)
+                try:
+                    score = float(raw) if raw is not None and raw != "" else None
+                except (TypeError, ValueError):
+                    score = None
+                if score is None:
+                    branch = "missing"
+                else:
+                    cmp_map = {
+                        ">=": score >= threshold,
+                        ">": score > threshold,
+                        "==": score == threshold,
+                        "<": score < threshold,
+                        "<=": score <= threshold,
+                    }
+                    branch = "true" if cmp_map.get(op_str, score >= threshold) else "false"
+                log.info(
+                    f"[sequencer] quality_score lead {lead_id}: {field}={score} {op_str} {threshold} → {branch}"
+                )
+                await queue_next_nodes(lead_id, target_id, branch, accumulated_delay)
             elif node_type == "condition_lead_quota_reached":
                 # Branch on whether the campaign's lead-gen credit budget is
                 # exhausted. data.config_id (optional) narrows to a single
@@ -469,8 +502,13 @@ async def queue_next_nodes(
             )
 
         elif node_type.startswith("event_"):
-            # All events park the lead until the webhook triggers evaluation
-            if node_type == "event_invite_accepted" and lead.get("accepted_at"):
+            # event_leads_imported is special: it fires once per batch that
+            # lands in this campaign. The lead arriving at this node IS the
+            # signal — we don't park, we advance immediately. Downstream
+            # nodes can then act on the freshly-imported lead.
+            if node_type == "event_leads_imported":
+                await queue_next_nodes(lead_id, target_id, "default", accumulated_delay)
+            elif node_type == "event_invite_accepted" and lead.get("accepted_at"):
                 await queue_next_nodes(lead_id, target_id, "true", accumulated_delay)
             elif node_type == "event_email_opened" and lead.get("email_opened_at"):
                 await queue_next_nodes(lead_id, target_id, "true", accumulated_delay)

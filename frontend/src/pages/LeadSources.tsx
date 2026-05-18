@@ -246,6 +246,35 @@ function CreateConfigModal({ open, campaignId, sources, onClose, onSubmit, isLoa
 
   const source = sources.find(s => s.source_type === selectedSource)
   const isManual = selectedSource === 'manual'
+  const isSheets = selectedSource === 'google_sheets'
+
+  // Google OAuth status (only fetched when the operator picks the Sheets source).
+  const googleStatusQuery = useQuery<{ connected: boolean; google_email?: string }>({
+    queryKey: ['oauth', 'google', 'status'],
+    queryFn: () => api.get('/oauth/google/status').then(r => r.data),
+    enabled: isSheets,
+    refetchInterval: isSheets && !configValues.connected_user_id ? 4000 : false,
+  })
+  const [connecting, setConnecting] = useState(false)
+
+  // Once connected, stamp connected_user_id into the config so the backend
+  // knows whose tokens to refresh. The sentinel 'me' is resolved server-side
+  // from the JWT when the lead_gen_config is created.
+  useEffect(() => {
+    if (!isSheets || !googleStatusQuery.data?.connected) return
+    if (configValues.connected_user_id) return
+    setConfigValues(prev => ({ ...prev, connected_user_id: 'me' }))
+  }, [isSheets, googleStatusQuery.data?.connected, configValues.connected_user_id])
+
+  async function connectGoogle() {
+    setConnecting(true)
+    try {
+      const r = await api.post<{ authorize_url: string }>('/oauth/google/start', {})
+      window.open(r.data.authorize_url, '_blank', 'noopener,noreferrer')
+    } finally {
+      setConnecting(false)
+    }
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -321,6 +350,31 @@ function CreateConfigModal({ open, campaignId, sources, onClose, onSubmit, isLoa
         {source && !isManual && (
           <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
             <label className={labelCls}>Provider Configuration</label>
+            {isSheets && (
+              <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-900/50">
+                {googleStatusQuery.data?.connected ? (
+                  <div className="flex items-center gap-2 text-[12px] text-emerald-700 dark:text-emerald-300">
+                    <CheckCircle2 size={14} />
+                    <span>Connected as <strong>{googleStatusQuery.data.google_email || 'your Google account'}</strong></span>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                      Connect your Google account so Omni can read the Sheet. Read-only — Omni cannot edit your sheets.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      isLoading={connecting}
+                      onClick={connectGoogle}
+                    >
+                      Connect Google
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="mt-4">
               <SchemaForm
                 schema={source.config_schema}

@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import os
 
-from app.db import execute, fetch_one
+from app.db import execute, fetch_all, fetch_one
 from app.services import sequencer
 from app.services.lead_source_registry import registry
 from app.services.lead_sources.base import RawLead
@@ -255,6 +255,38 @@ async def run_lead_gen(campaign_id: str, config_id: str, triggered_by: str = "ma
             run_id,
         )
         log.info(f"[lead_gen:{run_id}] Done — {leads_added}/{leads_found} new leads ({leads_found} credits consumed)")
+
+        # Fan out the canvas-side event_leads_imported listener: if the
+        # campaign has one or more such nodes, route every newly imported
+        # lead through them. This is the entry point for "screen-after-import"
+        # mini-flows. We look up the freshly-imported leads (created in the
+        # last 60s, source matches) and queue each through every listener.
+        if leads_added > 0:
+            try:
+                listeners = await fetch_all(
+                    "SELECT id FROM sequence_nodes WHERE campaign_id=$1 AND node_type='event_leads_imported'",
+                    campaign_id,
+                )
+                if listeners:
+                    fresh = await fetch_all(
+                        """
+                        SELECT id FROM leads
+                        WHERE campaign_id=$1 AND source=$2
+                          AND created_at >= NOW() - INTERVAL '60 seconds'
+                        """,
+                        campaign_id, source_type,
+                    )
+                    for lead_row in fresh:
+                        for listener in listeners:
+                            await sequencer.queue_next_nodes(
+                                str(lead_row["id"]), str(listener["id"]), "default",
+                            )
+                    log.info(
+                        f"[lead_gen:{run_id}] Fanned out leads_imported event "
+                        f"({len(fresh)} leads × {len(listeners)} listeners)"
+                    )
+            except Exception as e:  # noqa: BLE001
+                log.warning(f"[lead_gen:{run_id}] leads_imported fan-out failed: {e}")
 
     except Exception as e:
         log.error(f"[lead_gen:{run_id}] Error: {e}", exc_info=True)

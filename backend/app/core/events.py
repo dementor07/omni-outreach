@@ -34,6 +34,8 @@ class ChannelType(StrEnum):
     HOT_LEAD_ALERT = "hot_lead_alert"
     DATA_TRANSFORM = "data_transform"
     AI_COMPOSE = "ai_compose"
+    LEAD_GEN_PULL = "lead_gen_pull"
+    CSV_IMPORT = "csv_import"
 
 
 class EventType(StrEnum):

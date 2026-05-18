@@ -92,6 +92,26 @@ async def _log_event(
     )
 
 
+async def _resolve_template(node_id: str) -> dict | None:
+    """Prefer a shared template referenced by node.data.template_id, fall back
+    to the per-node template row. Returns a dict with at least body + subject."""
+    node = await fetch_one("SELECT data FROM sequence_nodes WHERE id=$1", node_id)
+    template_id = None
+    if node and isinstance(node.get("data"), dict):
+        template_id = (node["data"] or {}).get("template_id")
+    if template_id:
+        shared = await fetch_one(
+            "SELECT subject, body FROM templates WHERE id=$1",
+            template_id,
+        )
+        if shared:
+            return shared
+    return await fetch_one(
+        "SELECT subject, body FROM templates WHERE node_id=$1 LIMIT 1",
+        node_id,
+    )
+
+
 async def _mark_sent(queue_id: str) -> None:
     await execute(
         "UPDATE queue SET status='sent', sent_at=NOW(), locked_by=NULL WHERE id=$1",
@@ -274,7 +294,7 @@ class LinkedInDMHandler(BaseHandler):
         if not account:
             raise RuntimeError("LinkedIn account not found")
 
-        template = await fetch_one("SELECT body FROM templates WHERE node_id=$1 LIMIT 1", task["node_id"])
+        template = await _resolve_template(task["node_id"])
         if not template:
             raise RuntimeError("No template found for node")
 
@@ -328,7 +348,7 @@ class LinkedInInMailHandler(BaseHandler):
         if not account:
             raise RuntimeError("LinkedIn account not found")
 
-        template = await fetch_one("SELECT subject, body FROM templates WHERE node_id=$1 LIMIT 1", task["node_id"])
+        template = await _resolve_template(task["node_id"])
         if not template:
             raise RuntimeError("No template found for node")
 
@@ -355,7 +375,7 @@ registry.register("linkedin_inmail", LinkedInInMailHandler())
 class WhatsAppHandler(BaseHandler):
     async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
         account = await fetch_one("SELECT * FROM linkedin_accounts WHERE id=$1", lead["linkedin_account_id"])
-        template = await fetch_one("SELECT body FROM templates WHERE node_id=$1", task["node_id"])
+        template = await _resolve_template(task["node_id"])
         message = renderer.render(template["body"], lead)
 
         if not lead.get("phone"):
@@ -385,7 +405,7 @@ class InstagramHandler(BaseHandler):
         if not account:
             raise RuntimeError("Instagram account not found")
 
-        template = await fetch_one("SELECT body FROM templates WHERE node_id=$1 LIMIT 1", task["node_id"])
+        template = await _resolve_template(task["node_id"])
         message = renderer.render(template["body"], lead)
 
         if not lead.get("instagram_username"):
@@ -430,7 +450,7 @@ class TelegramHandler(BaseHandler):
         if not account:
             raise RuntimeError("Telegram account not found")
 
-        template = await fetch_one("SELECT body FROM templates WHERE node_id=$1 LIMIT 1", task["node_id"])
+        template = await _resolve_template(task["node_id"])
         message = renderer.render(template["body"], lead)
 
         identifier = lead.get("telegram_username") or lead.get("phone")
@@ -470,7 +490,7 @@ class EmailHandler(BaseHandler):
         if not acct:
             raise RuntimeError("Email account not found")
 
-        template = await fetch_one("SELECT subject, body FROM templates WHERE node_id=$1", task["node_id"])
+        template = await _resolve_template(task["node_id"])
         if not template:
             raise RuntimeError("No template found")
 
@@ -546,7 +566,7 @@ class SMSHandler(BaseHandler):
         if not phone:
             raise RuntimeError("No phone")
 
-        template = await fetch_one("SELECT body FROM templates WHERE node_id=$1", task["node_id"])
+        template = await _resolve_template(task["node_id"])
         message = renderer.render(template["body"], lead)
 
         import httpx
@@ -784,6 +804,208 @@ class AIComposeHandler(BaseHandler):
 
 
 registry.register("ai_compose", AIComposeHandler())
+
+
+class LeadGenPullHandler(BaseHandler):
+    """Fire a lead-gen pull from inside the canvas, with per-campaign cooldown.
+
+    Node data:
+      - config_id (required): which lead_gen_config to run
+      - cooldown_minutes (optional, default 60): minimum wait between pulls
+        from this *node* (debounce key = campaign_id + node_id).
+
+    Side effects:
+      - Inserts a lead_gen_pull_runs row when it actually fires.
+      - Branches downstream via source_handle:
+          * 'fired'    — pull triggered, leads added
+          * 'empty'    — pull triggered, zero leads added
+          * 'cooldown' — within debounce window, did nothing
+          * 'on_error' — handled by the standard _fail_task fallback
+    """
+
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        from app.services import lead_gen
+
+        node_id = task.get("node_id")
+        node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", node_id)
+        d = (node.get("data") or {}) if node else {}
+        config_id = d.get("config_id")
+        try:
+            cooldown_minutes = int(d.get("cooldown_minutes", 60))
+        except (TypeError, ValueError):
+            cooldown_minutes = 60
+        cooldown_seconds = max(0, cooldown_minutes * 60)
+
+        if not config_id:
+            raise RuntimeError("action_lead_gen_pull requires `config_id`")
+
+        # Debounce window check.
+        recent = await fetch_one(
+            """
+            SELECT id, fired_at FROM lead_gen_pull_runs
+            WHERE campaign_id=$1 AND node_id=$2
+              AND fired_at >= NOW() - ($3 || ' seconds')::interval
+            ORDER BY fired_at DESC LIMIT 1
+            """,
+            campaign["id"],
+            node_id,
+            str(cooldown_seconds),
+        )
+        if recent:
+            log.info(
+                f"[dispatcher] lead_gen_pull node={node_id} within cooldown "
+                f"({cooldown_minutes}m); skipping. last_fired={recent['fired_at']}"
+            )
+            await _log_event(
+                lead["id"], campaign["id"], "lead_gen_pull_skipped_cooldown", "lead_gen_pull",
+                {"node_id": str(node_id), "cooldown_minutes": cooldown_minutes},
+            )
+            await _mark_sent(task["id"])
+            await sequencer.queue_next_nodes(str(lead["id"]), str(node_id), "cooldown")
+            return True
+
+        # Fire the pull. lead_gen.run_lead_gen handles credit-budget gating internally.
+        try:
+            await lead_gen.run_lead_gen(
+                campaign_id=str(campaign["id"]),
+                config_id=str(config_id),
+                triggered_by="canvas",
+            )
+        except RuntimeError as e:
+            # Most likely credit-budget exhausted — log + route on_error so the
+            # operator can branch to an alert. Don't blow up the sequence.
+            log.warning(f"[dispatcher] lead_gen_pull node={node_id}: {e}")
+            await _log_event(
+                lead["id"], campaign["id"], "lead_gen_pull_blocked", "lead_gen_pull",
+                {"reason": str(e)[:200]},
+            )
+            await execute(
+                "UPDATE queue SET status='failed', failure_reason=$1 WHERE id=$2",
+                str(e)[:500], task["id"],
+            )
+            await sequencer.queue_next_nodes(str(lead["id"]), str(node_id), "on_error")
+            return True
+
+        # Look up the most recent run for this config to inspect leads_added.
+        run = await fetch_one(
+            "SELECT id, leads_added FROM lead_gen_runs WHERE config_id=$1 "
+            "ORDER BY started_at DESC LIMIT 1",
+            config_id,
+        )
+        leads_added = int(run["leads_added"]) if run and run.get("leads_added") is not None else 0
+        await execute(
+            """
+            INSERT INTO lead_gen_pull_runs
+              (campaign_id, node_id, config_id, lead_gen_run_id, triggered_by_lead_id, cooldown_seconds, fired_at)
+            VALUES ($1, $2, $3, $4, $5, $6, NOW())
+            """,
+            campaign["id"],
+            node_id,
+            config_id,
+            run["id"] if run else None,
+            lead["id"],
+            cooldown_seconds,
+        )
+        await _log_event(
+            lead["id"], campaign["id"], "lead_gen_pull_fired", "lead_gen_pull",
+            {"config_id": str(config_id), "leads_added": leads_added},
+        )
+        await _mark_sent(task["id"])
+        await sequencer.queue_next_nodes(
+            str(lead["id"]), str(node_id),
+            "fired" if leads_added > 0 else "empty",
+        )
+        return True
+
+
+registry.register("lead_gen_pull", LeadGenPullHandler())
+
+
+class CsvImportHandler(BaseHandler):
+    """Trigger a CSV import as a node. data.csv_url is the source.
+
+    This is per-campaign, debounced like lead_gen_pull. It pulls the CSV with
+    plain HTTP (no auth) and feeds it through the existing manual lead source
+    upsert path. Useful for sales teams that drop a fresh CSV in a public
+    bucket on a daily cron — the canvas can then pick it up automatically.
+    """
+
+    async def execute(self, task: dict, lead: dict, campaign: dict) -> bool:
+        import csv as _csv
+        import io as _io
+
+        import httpx as _httpx
+
+        from app.services import lead_gen as _lead_gen
+        from app.services.lead_sources.base import RawLead as _RawLead
+
+        node_id = task.get("node_id")
+        node = await fetch_one("SELECT * FROM sequence_nodes WHERE id=$1", node_id)
+        d = (node.get("data") or {}) if node else {}
+        csv_url = str(d.get("csv_url", "")).strip()
+        try:
+            cooldown_minutes = int(d.get("cooldown_minutes", 60))
+        except (TypeError, ValueError):
+            cooldown_minutes = 60
+        cooldown_seconds = max(0, cooldown_minutes * 60)
+        if not csv_url:
+            raise RuntimeError("action_csv_import requires `csv_url`")
+
+        recent = await fetch_one(
+            "SELECT fired_at FROM lead_gen_pull_runs "
+            "WHERE campaign_id=$1 AND node_id=$2 AND fired_at >= NOW() - ($3 || ' seconds')::interval "
+            "ORDER BY fired_at DESC LIMIT 1",
+            campaign["id"], node_id, str(cooldown_seconds),
+        )
+        if recent:
+            log.info(f"[dispatcher] csv_import node={node_id} cooldown skip")
+            await _mark_sent(task["id"])
+            await sequencer.queue_next_nodes(str(lead["id"]), str(node_id), "cooldown")
+            return True
+
+        async with _httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            r = await client.get(csv_url)
+        if r.status_code >= 400:
+            raise RuntimeError(f"CSV fetch HTTP {r.status_code}")
+
+        reader = _csv.DictReader(_io.StringIO(r.text))
+        added = 0
+        for row in reader:
+            email = (row.get("email") or row.get("Email") or "").strip()
+            li = (row.get("linkedin_url") or row.get("LinkedIn") or row.get("linkedin") or "").strip()
+            if not email and not li:
+                continue
+            raw = _RawLead(
+                first_name=(row.get("first_name") or row.get("First Name") or "").strip(),
+                last_name=(row.get("last_name") or row.get("Last Name") or "").strip(),
+                email=email or None,
+                linkedin_url=li or None,
+                phone=(row.get("phone") or "").strip() or None,
+                company=(row.get("company") or row.get("Company") or "").strip(),
+                headline=(row.get("headline") or row.get("Title") or "").strip(),
+            )
+            inserted = await _lead_gen.upsert_lead(str(campaign["id"]), raw, "csv_import")
+            if inserted:
+                added += 1
+
+        await execute(
+            "INSERT INTO lead_gen_pull_runs (campaign_id, node_id, cooldown_seconds, fired_at) "
+            "VALUES ($1, $2, $3, NOW())",
+            campaign["id"], node_id, cooldown_seconds,
+        )
+        await _log_event(
+            lead["id"], campaign["id"], "csv_import_done", "csv_import",
+            {"csv_url": csv_url[:200], "added": added},
+        )
+        await _mark_sent(task["id"])
+        await sequencer.queue_next_nodes(
+            str(lead["id"]), str(node_id),
+            "fired" if added > 0 else "empty",
+        )
+        return True
+
+
+registry.register("csv_import", CsvImportHandler())
 
 
 async def _process_task(task: dict, worker_id: str) -> None:

@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     redis_password: str = "changeme"
     redis_url: str = ""  # If set, takes precedence over redis_password-derived URL.
 
+    # Google OAuth (Sheets lead source) — set in .env; empty disables the source.
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    google_oauth_redirect_uri: str = "https://srv1575227.hstgr.cloud/api/oauth/google/callback"
+
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24  # 24h
 

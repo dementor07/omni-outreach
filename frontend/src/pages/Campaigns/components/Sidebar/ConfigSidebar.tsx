@@ -577,6 +577,131 @@ export function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: Co
           </div>
         )}
 
+        {nodeType === 'action_lead_gen_pull' && (
+          <div className="space-y-3">
+            <div>
+              <label className={labelCls}>Lead-gen config to run</label>
+              <select
+                aria-label="Lead-gen config"
+                value={(node.data as Record<string, unknown>).config_id as string || ''}
+                onChange={(e) => onUpdate({ config_id: e.target.value })}
+                className={inputClassName}
+              >
+                <option value="">Select a config…</option>
+                {(leadGenConfigsQuery.data || []).map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.source_display_name}{c.label ? ` — ${c.label}` : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[10px] text-slate-400">
+                Manage configs in <a href="/lead-sources" className="underline">Lead Sources</a>.
+              </p>
+            </div>
+            <div>
+              <label className={labelCls}>Cooldown (minutes)</label>
+              <input
+                type="number"
+                min={1}
+                max={1440}
+                aria-label="Cooldown minutes"
+                value={(node.data as Record<string, unknown>).cooldown_minutes as number || 60}
+                onChange={(e) => onUpdate({ cooldown_minutes: Math.max(1, Math.min(1440, Number(e.target.value) || 60)) })}
+                className={inputClassName}
+              />
+              <p className="mt-1 text-[10px] text-slate-400">
+                Only fire once per this many minutes per campaign+node. Default 60 minutes — protects against burning credits when many leads hit this node at once.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {nodeType === 'action_csv_import' && (
+          <div className="space-y-3">
+            <div>
+              <label className={labelCls}>CSV URL</label>
+              <input
+                type="url"
+                value={(node.data as Record<string, unknown>).csv_url as string || ''}
+                onChange={(e) => onUpdate({ csv_url: e.target.value })}
+                className={inputClassName}
+                placeholder="https://example.com/leads.csv"
+              />
+              <p className="mt-1 text-[10px] text-slate-400">
+                Plain HTTP GET — no auth. Expected columns (any case): email, linkedin_url, first_name, last_name, phone, company, headline.
+              </p>
+            </div>
+            <div>
+              <label className={labelCls}>Cooldown (minutes)</label>
+              <input
+                type="number"
+                min={1}
+                max={1440}
+                aria-label="CSV cooldown minutes"
+                value={(node.data as Record<string, unknown>).cooldown_minutes as number || 60}
+                onChange={(e) => onUpdate({ cooldown_minutes: Math.max(1, Math.min(1440, Number(e.target.value) || 60)) })}
+                className={inputClassName}
+              />
+            </div>
+          </div>
+        )}
+
+        {nodeType === 'condition_lead_quality_score' && (
+          <div className="space-y-3">
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              Compares a numeric field on the lead (or in <code>extra_data</code>) against a threshold.
+              Branches: <strong>True</strong> / <strong>False</strong> / <strong>missing</strong> when the field is absent.
+            </p>
+            <div>
+              <label className={labelCls}>Field name</label>
+              <input
+                type="text"
+                value={(node.data as Record<string, unknown>).field as string || 'quality_score'}
+                onChange={(e) => onUpdate({ field: e.target.value })}
+                className={inputClassName}
+                placeholder="quality_score"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Operator</label>
+                <select
+                  aria-label="Comparison operator"
+                  value={(node.data as Record<string, unknown>).op as string || '>='}
+                  onChange={(e) => onUpdate({ op: e.target.value })}
+                  className={inputClassName}
+                >
+                  <option value=">=">≥</option>
+                  <option value=">">{'>'}</option>
+                  <option value="==">=</option>
+                  <option value="<">{'<'}</option>
+                  <option value="<=">≤</option>
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>Threshold</label>
+                <input
+                  type="number"
+                  aria-label="Quality score threshold"
+                  placeholder="50"
+                  value={(node.data as Record<string, unknown>).threshold as number ?? 50}
+                  onChange={(e) => onUpdate({ threshold: Number(e.target.value) })}
+                  className={inputClassName}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {nodeType === 'event_leads_imported' && (
+          <div className="space-y-3">
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              Fires when a lead-gen pull or CSV import lands a fresh batch. Use this as the
+              start of a "screen + enrich" mini-flow that runs on every newly imported lead.
+            </p>
+          </div>
+        )}
+
         {nodeType === 'condition_lead_quota_reached' && (
           <div className="space-y-3">
             <p className="text-[11px] text-slate-500 leading-relaxed">

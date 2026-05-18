@@ -20,11 +20,13 @@ from app.routers import (
     auth,
     blacklist,
     campaigns,
+    fragments,
     inbox,
     job_search,
     lead_gen,
     leads,
     notifications,
+    oauth,
     overview,
     queue,
     sequences,
@@ -107,6 +109,8 @@ app.include_router(template_library.router, prefix="/template-library", tags=["t
 app.include_router(inbox.router, prefix="/inbox", tags=["inbox"])
 app.include_router(approvals.router, prefix="/approvals", tags=["approvals"])
 app.include_router(agents.router, prefix="/agents", tags=["agents"])
+app.include_router(oauth.router, prefix="/oauth", tags=["oauth"])
+app.include_router(fragments.router, prefix="/fragments", tags=["fragments"])
 
 
 @app.get("/health")

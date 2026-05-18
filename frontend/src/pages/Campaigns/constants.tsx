@@ -14,6 +14,7 @@ export type NodeCategory =
   | 'flow'
   | 'agent'
   | 'note'
+  | 'lead_gen'
 
 export const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNode; color: string; bg: string; border: string; category?: NodeCategory }[] = [
   { type: 'action_linkedin_invite',       label: 'Send Invite',       icon: <Linkedin size={15} />,       color: 'text-sky-600',     bg: 'bg-sky-50',     border: 'border-sky-200',     category: 'linkedin' },
@@ -44,6 +45,10 @@ export const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNod
   { type: 'condition_has_field',           label: 'If Has Field',      icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
   { type: 'condition_field_equals',        label: 'Field Router',      icon: <Route size={15} />,          color: 'text-cyan-600',    bg: 'bg-cyan-50',    border: 'border-cyan-200' },
   { type: 'condition_lead_quota_reached',  label: 'Lead Quota Reached', icon: <Database size={15} />,       color: 'text-orange-600',  bg: 'bg-orange-50',  border: 'border-orange-200' },
+  { type: 'condition_lead_quality_score',  label: 'Quality Score Gate', icon: <Database size={15} />,       color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' },
+  { type: 'action_lead_gen_pull',          label: 'Pull Leads',         icon: <Database size={15} />,       color: 'text-orange-700',  bg: 'bg-orange-50',  border: 'border-orange-300',  category: 'lead_gen' },
+  { type: 'action_csv_import',             label: 'CSV Import',         icon: <Database size={15} />,       color: 'text-orange-600',  bg: 'bg-orange-50',  border: 'border-orange-200',  category: 'lead_gen' },
+  { type: 'event_leads_imported',          label: 'Leads Imported',     icon: <Bell size={15} />,           color: 'text-orange-500',  bg: 'bg-orange-50',  border: 'border-orange-200' },
   { type: 'condition_reply_intent',        label: 'Reply Intent',      icon: <Brain size={15} />,          color: 'text-violet-600',  bg: 'bg-violet-50',  border: 'border-violet-200' },
   { type: 'human_approval',                label: 'Human Approval',    icon: <UserCheck size={15} />,      color: 'text-teal-600',    bg: 'bg-teal-50',    border: 'border-teal-200' },
   { type: 'event_invite_accepted',         label: 'Invite Accepted',   icon: <Bell size={15} />,           color: 'text-violet-500',  bg: 'bg-violet-50',  border: 'border-violet-200' },

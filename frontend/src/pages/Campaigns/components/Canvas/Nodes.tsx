@@ -45,6 +45,7 @@ const CATEGORY_EYEBROW: Record<string, string> = {
   flow: 'Control',
   agent: 'Agent',
   note: 'Note',
+  lead_gen: 'Lead Gen',
 }
 
 // Trim a string for compact preview display in the card body.
@@ -664,6 +665,48 @@ export const StickyNoteNode = ({ data, selected }: NodeProps) => {
   )
 }
 
+const LEAD_GEN_PULL_HANDLES: { id: string; label: string; color: string; dot: string }[] = [
+  { id: 'fired',    label: 'Fired',    color: 'text-emerald-500', dot: '!bg-emerald-400' },
+  { id: 'empty',    label: 'Empty',    color: 'text-amber-500',   dot: '!bg-amber-400' },
+  { id: 'cooldown', label: 'Cooldown', color: 'text-slate-500',   dot: '!bg-slate-400' },
+  { id: 'on_error', label: 'Error',    color: 'text-rose-500',    dot: '!bg-rose-400' },
+]
+
+export const LeadGenPullNode = ({ data, selected }: NodeProps) => {
+  const d = data as Record<string, unknown>
+  const configId = (d.config_id as string) || ''
+  const cooldown = (d.cooldown_minutes as number) ?? 60
+  const csvUrl = preview(d.csv_url, 50)
+  const isCsv = !!d.csv_url || !configId
+  return (
+    <div className={`relative min-w-[260px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : 'border-orange-300'}`}>
+      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
+      <div className="flex items-center gap-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-50 text-orange-700">
+          <Database size={14} />
+        </div>
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-orange-500/70">Lead Gen · {isCsv ? 'CSV Import' : 'Pull'}</p>
+          <p className="text-xs font-bold text-slate-900">{cooldown}m cooldown</p>
+        </div>
+      </div>
+      <div className="mt-2 rounded-md bg-orange-50/70 px-2 py-1.5 text-[11px] italic text-orange-900">
+        {isCsv
+          ? (csvUrl ? <span className="font-mono not-italic">{csvUrl}</span> : <span className="text-slate-400 not-italic">No CSV URL set</span>)
+          : (configId ? <span className="not-italic">Config {configId.slice(0, 8)}…</span> : <span className="text-slate-400 not-italic">No config selected</span>)}
+      </div>
+      <div className="mt-3 grid grid-cols-4 gap-x-2 gap-y-2 border-t border-slate-50 pt-3">
+        {LEAD_GEN_PULL_HANDLES.map(h => (
+          <div key={h.id} className="flex flex-col items-center">
+            <span className={`text-[9px] font-black uppercase ${h.color}`}>{h.label}</span>
+            <Handle type="source" id={h.id} position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className={`!mt-1 !h-2 !w-2 !border-none ${h.dot}`} />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export const WebhookEventNode = ({ data, selected }: NodeProps) => {
   const d = data as Record<string, unknown>
   const slug = (d.slug as string) || ''
@@ -717,6 +760,10 @@ export const nodeTypes = {
   condition_has_field: ConditionNode,
   condition_field_equals: FieldRouterNode,
   condition_lead_quota_reached: ConditionNode,
+  condition_lead_quality_score: ConditionNode,
+  action_lead_gen_pull: LeadGenPullNode,
+  action_csv_import: LeadGenPullNode,
+  event_leads_imported: EventNode,
   event_invite_accepted: EventNode,
   event_email_opened: EventNode,
   event_link_clicked: EventNode,

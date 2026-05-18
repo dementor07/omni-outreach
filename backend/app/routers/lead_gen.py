@@ -49,6 +49,12 @@ async def create_config(body: ConfigCreate, user_id: str = Depends(get_current_u
     if not source:
         raise HTTPException(status_code=400, detail=f"Unknown source_type: {body.source_type}")
 
+    # Resolve the 'me' sentinel that the frontend sends to mean "the user
+    # who just OAuth-connected". This keeps the user_id out of localStorage.
+    config = dict(body.config or {})
+    if config.get("connected_user_id") == "me":
+        config["connected_user_id"] = user_id
+
     row = await fetch_one(
         f"""
         INSERT INTO lead_gen_configs (campaign_id, source_type, config, label)
@@ -57,7 +63,7 @@ async def create_config(body: ConfigCreate, user_id: str = Depends(get_current_u
         """,
         body.campaign_id,
         body.source_type,
-        body.config,
+        config,
         body.label,
     )
     return row
