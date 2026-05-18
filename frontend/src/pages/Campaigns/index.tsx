@@ -424,8 +424,10 @@ export default function Campaigns() {
           )}
 
           {activeTab === 'sequence' && (
-            <div className={`relative flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/50 ${
-              isFullScreen ? '!fixed !inset-0 !z-[999] !m-0 !rounded-none !border-none !h-screen !w-screen !p-6 bg-slate-50 dark:bg-slate-900' : ''
+            <div className={`relative flex h-full flex-col overflow-hidden rounded-2xl border ${
+              isFullScreen 
+                ? 'fixed inset-0 z-[999] m-0 rounded-none border-none h-screen w-screen p-0 bg-white dark:bg-slate-950' 
+                : 'border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/50'
             }`}>
               {campaignQuery.data?.sequence_mode === 'canvas' ? (
                 <div className="flex flex-1 overflow-hidden">
@@ -454,6 +456,26 @@ export default function Campaigns() {
                         pannable
                       />
                       <NodeSelector onAdd={addNode} />
+
+                      {isFullScreen && (
+                        <Panel position="top-left" className="flex items-center gap-3 rounded-xl border border-slate-200/80 bg-white/90 p-2.5 shadow-lg backdrop-blur-md dark:border-slate-800/80 dark:bg-slate-950/90 pointer-events-auto">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-500 text-white shadow-md shadow-rose-500/20">
+                            <GitBranch size={16} />
+                          </div>
+                          <div>
+                            <h2 className="text-xs font-bold text-slate-900 dark:text-white leading-none">
+                              {campaignQuery.data?.name || 'Campaign Sequence'}
+                            </h2>
+                            <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mt-0.5">
+                              Canvas Designer
+                            </p>
+                          </div>
+                          <span className="h-5 w-px bg-slate-200 dark:bg-slate-800" />
+                          <div className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-600 dark:bg-rose-950/30 dark:text-rose-400">
+                            Distraction-Free Mode
+                          </div>
+                        </Panel>
+                      )}
 
                       <Panel position="top-right" className="flex items-center gap-2">
                         <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white/90 p-0.5 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-900/90">
@@ -510,7 +532,26 @@ export default function Campaigns() {
                   )}
                 </div>
               ) : (
-                <div className="flex-1 overflow-auto bg-white p-8 dark:bg-slate-900 relative">
+                <div className={`flex-1 overflow-auto bg-white dark:bg-slate-950 relative ${isFullScreen ? 'pt-24 px-8 pb-8' : 'p-8'}`}>
+                  {isFullScreen && (
+                    <div className="absolute left-8 top-8 z-30 flex items-center gap-3 rounded-xl border border-slate-200/80 bg-white/90 p-2.5 shadow-lg backdrop-blur-md dark:border-slate-800/80 dark:bg-slate-950/90">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-500 text-white shadow-md shadow-rose-500/20">
+                        <GitBranch size={16} />
+                      </div>
+                      <div>
+                        <h2 className="text-xs font-bold text-slate-900 dark:text-white leading-none">
+                          {campaignQuery.data?.name || 'Campaign Sequence'}
+                        </h2>
+                        <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mt-0.5">
+                          Sequential Designer
+                        </p>
+                      </div>
+                      <span className="h-5 w-px bg-slate-200 dark:bg-slate-800" />
+                      <div className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-600 dark:bg-rose-950/30 dark:text-rose-400">
+                        Distraction-Free Mode
+                      </div>
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={() => setIsFullScreen(!isFullScreen)}
