@@ -1,4 +1,5 @@
 import React, { FormEvent, useEffect, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -423,153 +424,156 @@ export default function Campaigns() {
             </Card>
           )}
 
-          {activeTab === 'sequence' && (
-            <div className={`relative flex h-full flex-col overflow-hidden rounded-2xl border ${
-              isFullScreen 
-                ? 'fixed inset-0 z-[999] m-0 rounded-none border-none h-screen w-screen p-0 bg-white dark:bg-slate-950' 
-                : 'border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/50'
-            }`}>
-              {campaignQuery.data?.sequence_mode === 'canvas' ? (
-                <div className="flex flex-1 overflow-hidden">
-                  <div className="relative flex-1">
-                    <ReactFlow
+          {activeTab === 'sequence' && (() => {
+            const sequenceEl = (
+              <div className={`relative flex h-full flex-col overflow-hidden rounded-2xl border ${
+                isFullScreen 
+                  ? 'fixed inset-0 z-[9999] m-0 rounded-none border-none h-screen w-screen p-0 bg-white dark:bg-slate-950' 
+                  : 'border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/50'
+              }`}>
+                {campaignQuery.data?.sequence_mode === 'canvas' ? (
+                  <div className="flex flex-1 overflow-hidden">
+                    <div className="relative flex-1">
+                      <ReactFlow
+                        nodes={nodes}
+                        edges={edges}
+                        onNodesChange={onNodesChange}
+                        onEdgesChange={onEdgesChange}
+                        onConnect={onConnect}
+                        onNodeClick={onNodeClick}
+                        nodeTypes={nodeTypes}
+                        edgeTypes={edgeTypes}
+                        defaultEdgeOptions={{ type: 'custom' }}
+                        connectionLineType={ConnectionLineType.Bezier}
+                        fitView
+                      >
+                        <Background color="#e2e8f0" gap={24} size={1.4} />
+                        <Controls className="!overflow-hidden !rounded-xl !border !border-slate-200 !bg-white !shadow-md dark:!border-slate-700 dark:!bg-slate-900" />
+                        <MiniMap
+                          className="!overflow-hidden !rounded-xl !border !border-slate-200 !bg-white !shadow-md dark:!border-slate-700 dark:!bg-slate-900"
+                          nodeStrokeWidth={3}
+                          nodeColor="#fb7185"
+                          maskColor="rgba(15, 23, 42, 0.04)"
+                          zoomable
+                          pannable
+                        />
+                        <NodeSelector onAdd={addNode} />
+
+                        {isFullScreen && (
+                          <Panel position="top-left" className="flex items-center gap-3 rounded-xl border border-slate-200/80 bg-white/90 p-2.5 shadow-lg backdrop-blur-md dark:border-slate-800/80 dark:bg-slate-950/90 pointer-events-auto">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-500 text-white shadow-md shadow-rose-500/20">
+                              <GitBranch size={16} />
+                            </div>
+                            <div>
+                              <h2 className="text-xs font-bold text-slate-900 dark:text-white leading-none">
+                                {campaignQuery.data?.name || 'Campaign Sequence'}
+                              </h2>
+                              <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mt-0.5">
+                                Canvas Designer
+                              </p>
+                            </div>
+                            <span className="h-5 w-px bg-slate-200 dark:bg-slate-800" />
+                            <div className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-600 dark:bg-rose-950/30 dark:text-rose-400">
+                              Distraction-Free Mode
+                            </div>
+                          </Panel>
+                        )}
+
+                        <Panel position="top-right" className="flex items-center gap-2">
+                          <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white/90 p-0.5 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-900/90">
+                            <button
+                              type="button"
+                              onClick={() => setIsFullScreen(!isFullScreen)}
+                              title={isFullScreen ? "Exit Full Screen" : "Full Screen"}
+                              className="rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+                            >
+                              {isFullScreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                            </button>
+                            <span className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-0.5" />
+                            <button
+                              type="button"
+                              onClick={() => { const h = undo(); if (h) { setNodes(h.nodes); setEdges(h.edges); } }}
+                              disabled={!canUndo}
+                              title="Undo"
+                              className="rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900 disabled:opacity-30 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+                            >
+                              <Undo2 size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { const h = redo(); if (h) { setNodes(h.nodes); setEdges(h.edges); } }}
+                              disabled={!canRedo}
+                              title="Redo"
+                              className="rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900 disabled:opacity-30 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+                            >
+                              <Redo2 size={14} />
+                            </button>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            icon={Save}
+                            onClick={handleSaveSequence}
+                            isLoading={saveGraph.isPending}
+                          >
+                            {saveGraph.isPending ? 'Saving' : 'Save sequence'}
+                          </Button>
+                        </Panel>
+                      </ReactFlow>
+                    </div>
+                    {selectedNodeId && (
+                      <div className="z-20 w-96 border-l border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+                        <ConfigSidebar
+                          nodeId={selectedNodeId}
+                          nodes={nodes}
+                          onClose={() => setSelectedNodeId(null)}
+                          onUpdate={(data) => updateNodeData(selectedNodeId!, data)}
+                          onDelete={() => deleteNode(selectedNodeId!)}
+                        />
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className={`flex-1 overflow-auto bg-white dark:bg-slate-950 relative ${isFullScreen ? 'pt-24 px-8 pb-8' : 'p-8'}`}>
+                    {isFullScreen && (
+                      <div className="absolute left-8 top-8 z-30 flex items-center gap-3 rounded-xl border border-slate-200/80 bg-white/90 p-2.5 shadow-lg backdrop-blur-md dark:border-slate-800/80 dark:bg-slate-950/90">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-500 text-white shadow-md shadow-rose-500/20">
+                          <GitBranch size={16} />
+                        </div>
+                        <div>
+                          <h2 className="text-xs font-bold text-slate-900 dark:text-white leading-none">
+                            {campaignQuery.data?.name || 'Campaign Sequence'}
+                          </h2>
+                          <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mt-0.5">
+                            Sequential Designer
+                          </p>
+                        </div>
+                        <span className="h-5 w-px bg-slate-200 dark:bg-slate-800" />
+                        <div className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-600 dark:bg-rose-950/30 dark:text-rose-400">
+                          Distraction-Free Mode
+                        </div>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setIsFullScreen(!isFullScreen)}
+                      className="absolute right-8 top-8 z-30 flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white shadow-sm transition-all hover:bg-slate-50 active:scale-95 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"
+                      title={isFullScreen ? "Exit Full Screen" : "Full Screen"}
+                    >
+                      {isFullScreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                    </button>
+                    <SequentialBuilder
                       nodes={nodes}
                       edges={edges}
-                      onNodesChange={onNodesChange}
-                      onEdgesChange={onEdgesChange}
-                      onConnect={onConnect}
-                      onNodeClick={onNodeClick}
-                      nodeTypes={nodeTypes}
-                      edgeTypes={edgeTypes}
-                      defaultEdgeOptions={{ type: 'custom' }}
-                      connectionLineType={ConnectionLineType.Bezier}
-                      fitView
-                    >
-                      <Background color="#e2e8f0" gap={24} size={1.4} />
-                      <Controls className="!overflow-hidden !rounded-xl !border !border-slate-200 !bg-white !shadow-md dark:!border-slate-700 dark:!bg-slate-900" />
-                      <MiniMap
-                        className="!overflow-hidden !rounded-xl !border !border-slate-200 !bg-white !shadow-md dark:!border-slate-700 dark:!bg-slate-900"
-                        nodeStrokeWidth={3}
-                        nodeColor="#fb7185"
-                        maskColor="rgba(15, 23, 42, 0.04)"
-                        zoomable
-                        pannable
-                      />
-                      <NodeSelector onAdd={addNode} />
-
-                      {isFullScreen && (
-                        <Panel position="top-left" className="flex items-center gap-3 rounded-xl border border-slate-200/80 bg-white/90 p-2.5 shadow-lg backdrop-blur-md dark:border-slate-800/80 dark:bg-slate-950/90 pointer-events-auto">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-500 text-white shadow-md shadow-rose-500/20">
-                            <GitBranch size={16} />
-                          </div>
-                          <div>
-                            <h2 className="text-xs font-bold text-slate-900 dark:text-white leading-none">
-                              {campaignQuery.data?.name || 'Campaign Sequence'}
-                            </h2>
-                            <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mt-0.5">
-                              Canvas Designer
-                            </p>
-                          </div>
-                          <span className="h-5 w-px bg-slate-200 dark:bg-slate-800" />
-                          <div className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-600 dark:bg-rose-950/30 dark:text-rose-400">
-                            Distraction-Free Mode
-                          </div>
-                        </Panel>
-                      )}
-
-                      <Panel position="top-right" className="flex items-center gap-2">
-                        <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white/90 p-0.5 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-900/90">
-                          <button
-                            type="button"
-                            onClick={() => setIsFullScreen(!isFullScreen)}
-                            title={isFullScreen ? "Exit Full Screen" : "Full Screen"}
-                            className="rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
-                          >
-                            {isFullScreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                          </button>
-                          <span className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-0.5" />
-                          <button
-                            type="button"
-                            onClick={() => { const h = undo(); if (h) { setNodes(h.nodes); setEdges(h.edges); } }}
-                            disabled={!canUndo}
-                            title="Undo"
-                            className="rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900 disabled:opacity-30 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
-                          >
-                            <Undo2 size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => { const h = redo(); if (h) { setNodes(h.nodes); setEdges(h.edges); } }}
-                            disabled={!canRedo}
-                            title="Redo"
-                            className="rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900 disabled:opacity-30 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
-                          >
-                            <Redo2 size={14} />
-                          </button>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="primary"
-                          icon={Save}
-                          onClick={handleSaveSequence}
-                          isLoading={saveGraph.isPending}
-                        >
-                          {saveGraph.isPending ? 'Saving' : 'Save sequence'}
-                        </Button>
-                      </Panel>
-                    </ReactFlow>
+                      onSave={handleSaveSequence}
+                      onEditTemplate={(nodeId) => setSelectedNodeId(nodeId)}
+                    />
                   </div>
-                  {selectedNodeId && (
-                    <div className="z-20 w-96 border-l border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
-                      <ConfigSidebar
-                        nodeId={selectedNodeId}
-                        nodes={nodes}
-                        onClose={() => setSelectedNodeId(null)}
-                        onUpdate={(data) => updateNodeData(selectedNodeId!, data)}
-                        onDelete={() => deleteNode(selectedNodeId!)}
-                      />
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className={`flex-1 overflow-auto bg-white dark:bg-slate-950 relative ${isFullScreen ? 'pt-24 px-8 pb-8' : 'p-8'}`}>
-                  {isFullScreen && (
-                    <div className="absolute left-8 top-8 z-30 flex items-center gap-3 rounded-xl border border-slate-200/80 bg-white/90 p-2.5 shadow-lg backdrop-blur-md dark:border-slate-800/80 dark:bg-slate-950/90">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-500 text-white shadow-md shadow-rose-500/20">
-                        <GitBranch size={16} />
-                      </div>
-                      <div>
-                        <h2 className="text-xs font-bold text-slate-900 dark:text-white leading-none">
-                          {campaignQuery.data?.name || 'Campaign Sequence'}
-                        </h2>
-                        <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mt-0.5">
-                          Sequential Designer
-                        </p>
-                      </div>
-                      <span className="h-5 w-px bg-slate-200 dark:bg-slate-800" />
-                      <div className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-600 dark:bg-rose-950/30 dark:text-rose-400">
-                        Distraction-Free Mode
-                      </div>
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setIsFullScreen(!isFullScreen)}
-                    className="absolute right-8 top-8 z-30 flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white shadow-sm transition-all hover:bg-slate-50 active:scale-95 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"
-                    title={isFullScreen ? "Exit Full Screen" : "Full Screen"}
-                  >
-                    {isFullScreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-                  </button>
-                  <SequentialBuilder
-                    nodes={nodes}
-                    edges={edges}
-                    onSave={handleSaveSequence}
-                    onEditTemplate={(nodeId) => setSelectedNodeId(nodeId)}
-                  />
-                </div>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            );
+            return isFullScreen ? createPortal(sequenceEl, document.body) : sequenceEl;
+          })()}
 
           {activeTab === 'sources' && (
             <Card padding="lg" className="h-full overflow-auto">
