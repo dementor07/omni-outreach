@@ -14,6 +14,7 @@ from app.logging_config import get_logger, setup_logging
 from app.routers import (
     accounts,
     activity,
+    agents,
     analytics,
     approvals,
     auth,
@@ -33,6 +34,7 @@ from app.routers import (
     webhooks,
 )
 from app.routers import settings as settings_router
+from app.services.bus import bus
 
 setup_logging()
 logger = get_logger(__name__)
@@ -59,6 +61,7 @@ async def lifespan(app: FastAPI):
     logger.info("Database and Redis connections established")
     yield
     logger.info("Shutting down — closing connections")
+    await bus.close()
     await close_pool()
     await close_redis()
 
@@ -103,11 +106,13 @@ app.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
 app.include_router(template_library.router, prefix="/template-library", tags=["template-library"])
 app.include_router(inbox.router, prefix="/inbox", tags=["inbox"])
 app.include_router(approvals.router, prefix="/approvals", tags=["approvals"])
+app.include_router(agents.router, prefix="/agents", tags=["agents"])
 
 
 @app.get("/health")
 async def health():
     from app.db import fetch_one, redis_client
+
     checks = {"api": "ok"}
     try:
         row = await fetch_one("SELECT 1 AS ok")

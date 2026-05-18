@@ -2,7 +2,7 @@ import React from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Handle, Position, NodeProps, Node } from '@xyflow/react'
-import { Linkedin, Mail, MessageSquare, Instagram, Send, Phone, Clock, Zap, Tag, MinusCircle, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle, Brain, Route, Database, Flame, UserCheck, Radio, Settings2 } from 'lucide-react'
+import { Clock, Zap, Tag, GitBranch, Bell, Shuffle, Brain, Database, UserCheck, Radio, Settings2, Bot, Trophy, StickyNote, Webhook } from 'lucide-react'
 import { api } from '../../../../api/client'
 import { NodeType } from '../../../../hooks/useSequenceSteps'
 import { NODE_PALETTE } from '../../constants'
@@ -43,6 +43,8 @@ const CATEGORY_EYEBROW: Record<string, string> = {
   voice: 'AI Voice',
   enrich: 'Enrichment',
   flow: 'Control',
+  agent: 'Agent',
+  note: 'Note',
 }
 
 // Trim a string for compact preview display in the card body.
@@ -497,6 +499,143 @@ export const ParallelForkNode = ({ selected }: NodeProps) => (
   </div>
 )
 
+export const FieldRouterNode = ({ data, selected }: NodeProps) => {
+  const d = data as Record<string, unknown>
+  const fieldName = (d.field_name as string) || (d.field as string) || 'industry'
+  const values = Array.isArray(d.values) ? (d.values as string[]).filter(Boolean) : []
+  const handles = values.slice(0, 6)
+  return (
+    <div className={`relative min-w-[240px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : 'border-cyan-200'}`}>
+      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
+      <div className="flex items-center gap-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-50 text-cyan-600">
+          <GitBranch size={14} />
+        </div>
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Field Router</p>
+          <p className="text-xs font-bold text-slate-900">If <code className="font-mono text-cyan-700">{fieldName}</code> equals…</p>
+        </div>
+      </div>
+      <div className="mt-4 grid grid-cols-3 gap-x-2 gap-y-2 border-t border-slate-50 pt-3">
+        {handles.length === 0 && (
+          <div className="col-span-3 text-center text-[10px] italic text-slate-400">No values set — configure in sidebar.</div>
+        )}
+        {handles.map(v => (
+          <div key={v} className="flex flex-col items-center">
+            <span className="truncate max-w-[80px] text-[9px] font-black uppercase text-cyan-600">{v}</span>
+            <Handle type="source" id={v} position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-cyan-400" />
+          </div>
+        ))}
+        <div className="flex flex-col items-center">
+          <span className="text-[9px] font-black uppercase text-slate-400">Default</span>
+          <Handle type="source" id="default" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-slate-400" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const AGENT_HANDLES: { id: string; label: string; color: string; dot: string }[] = [
+  { id: 'success',         label: 'Success',     color: 'text-emerald-500', dot: '!bg-emerald-400' },
+  { id: 'escalated',       label: 'Escalated',   color: 'text-fuchsia-500', dot: '!bg-fuchsia-400' },
+  { id: 'gave_up',         label: 'Gave up',     color: 'text-slate-500',   dot: '!bg-slate-400' },
+  { id: 'budget_exceeded', label: 'Over budget', color: 'text-rose-500',    dot: '!bg-rose-400' },
+]
+
+export const AgentNode = ({ data, selected }: NodeProps) => {
+  const d = data as Record<string, unknown>
+  const goal = preview(d.goal, 90)
+  const tools = Array.isArray(d.tools) ? (d.tools as string[]) : []
+  const maxTurns = (d.max_turns as number) ?? 10
+  return (
+    <div className={`relative min-w-[280px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : 'border-violet-300'}`}>
+      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
+      <div className="flex items-center gap-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-50 text-violet-700">
+          <Bot size={15} />
+        </div>
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-violet-500/70">Agent · Goal-Driven</p>
+          <p className="text-xs font-bold text-slate-900">{tools.length} tool{tools.length === 1 ? '' : 's'} · {maxTurns} turns</p>
+        </div>
+      </div>
+      <div className="mt-2 rounded-md bg-violet-50/70 px-2 py-1.5 text-[11px] italic text-violet-900">
+        {goal || <span className="text-slate-400 not-italic">No goal set</span>}
+      </div>
+      <div className="mt-3 grid grid-cols-4 gap-x-2 gap-y-2 border-t border-slate-50 pt-3">
+        {AGENT_HANDLES.map(h => (
+          <div key={h.id} className="flex flex-col items-center">
+            <span className={`text-[9px] font-black uppercase ${h.color}`}>{h.label}</span>
+            <Handle type="source" id={h.id} position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className={`!mt-1 !h-2 !w-2 !border-none ${h.dot}`} />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export const RaceNode = ({ data, selected }: NodeProps) => {
+  const d = data as Record<string, unknown>
+  const branches = Math.max(2, Math.min(5, (d.branch_count as number) || 2))
+  return (
+    <div className={`relative min-w-[240px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : 'border-amber-300'}`}>
+      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
+      <div className="flex items-center gap-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 text-amber-700">
+          <Trophy size={14} />
+        </div>
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Control · Race</p>
+          <p className="text-xs font-bold text-slate-900">Winner cancels siblings</p>
+        </div>
+      </div>
+      <div className="mt-4 grid grid-cols-5 gap-1 border-t border-slate-50 pt-3">
+        {Array.from({ length: branches }, (_, i) => i + 1).map(i => (
+          <div key={i} className="flex flex-col items-center">
+            <span className="text-[8px] font-black text-amber-600">B{i}</span>
+            <Handle type="source" id={`branch_${i}`} position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-amber-400" />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export const StickyNoteNode = ({ data, selected }: NodeProps) => {
+  const d = data as Record<string, unknown>
+  const text = (d.text as string) || 'Sticky note — describe what this section does.'
+  return (
+    <div className={`relative min-w-[200px] max-w-[260px] rounded-xl border-2 bg-yellow-50 p-3 shadow-sm transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : 'border-yellow-300'}`}>
+      <div className="flex items-center gap-2 mb-1.5">
+        <StickyNote size={12} className="text-yellow-700" />
+        <span className="text-[9px] font-bold uppercase tracking-widest text-yellow-700/80">Note</span>
+      </div>
+      <p className="whitespace-pre-wrap text-[11px] text-yellow-900 leading-snug">{text}</p>
+    </div>
+  )
+}
+
+export const WebhookEventNode = ({ data, selected }: NodeProps) => {
+  const d = data as Record<string, unknown>
+  const slug = (d.slug as string) || ''
+  return (
+    <div className={`relative min-w-[220px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : 'border-amber-300'}`}>
+      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
+      <div className="flex items-center gap-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
+          <Webhook size={14} />
+        </div>
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-amber-500/70">Listener · Webhook</p>
+          <p className="text-xs font-bold text-slate-900">{slug || 'Waiting for wake call'}</p>
+        </div>
+      </div>
+      <p className="mt-2 text-[10px] italic text-slate-500">POST /webhooks/events/wake with lead_id + node_id to advance.</p>
+      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-none !bg-amber-400" />
+    </div>
+  )
+}
+
 export const nodeTypes = {
   trigger_start: TriggerNode,
   action_linkedin_invite: ActionNode,
@@ -515,8 +654,10 @@ export const nodeTypes = {
   action_enrich: ActionNode,
   action_data_transform: ActionNode,
   action_ai_compose: ActionNode,
+  action_agent: AgentNode,
   action_hot_lead_alert: ActionNode,
   control_parallel_fork: ParallelForkNode,
+  control_race: RaceNode,
   human_approval: HumanApprovalNode,
   condition_reply_intent: ReplyIntentNode,
   condition_replied: ConditionNode,
@@ -525,12 +666,15 @@ export const nodeTypes = {
   condition_ai_screen: ConditionNode,
   condition_lead_source: ConditionNode,
   condition_has_field: ConditionNode,
+  condition_field_equals: FieldRouterNode,
   event_invite_accepted: EventNode,
   event_email_opened: EventNode,
   event_link_clicked: EventNode,
+  event_webhook_received: WebhookEventNode,
   delay: DelayNode,
   wait_until: WaitUntilNode,
   split: SplitNode,
   goal: GoalNode,
+  sticky_note: StickyNoteNode,
   end: EndNode,
 }

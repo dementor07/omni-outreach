@@ -47,6 +47,37 @@ async def schedule_sequence(lead_id: str) -> None:
     await queue_next_nodes(lead_id, start_node["id"])
 
 
+async def claim_race_winner_if_applicable(lead_id: str, source_node_id: str) -> None:
+    """If ``source_node_id``'s upstream is a control_race node, record the winner.
+
+    Called by the dispatcher right before _mark_sent so the first delivery that
+    succeeds in a racing branch crowns that branch and cancels its siblings.
+    Safe to call for every action — it no-ops if no race is upstream.
+    """
+    parents = await fetch_all(
+        """
+        SELECT se.source_node_id AS race_id, se.source_handle AS branch, sn.node_type
+        FROM sequence_edges se
+        JOIN sequence_nodes sn ON sn.id = se.source_node_id
+        WHERE se.target_node_id = $1 AND sn.node_type = 'control_race'
+        """,
+        source_node_id,
+    )
+    for p in parents:
+        await execute(
+            """
+            INSERT INTO race_winners (lead_id, race_node_id, winning_branch)
+            VALUES ($1, $2, $3) ON CONFLICT DO NOTHING
+            """,
+            lead_id,
+            p["race_id"],
+            p["branch"],
+        )
+        log.info(
+            f"[sequencer] race {p['race_id']} crowned branch '{p['branch']}' for lead {lead_id}"
+        )
+
+
 async def queue_next_nodes(
     lead_id: str,
     source_node_id: str,
@@ -56,6 +87,19 @@ async def queue_next_nodes(
     """Finds target nodes from source_node and handles them (queue or recursive evaluate)."""
     lead = await fetch_one("SELECT * FROM leads WHERE id=$1", lead_id)
     if not lead:
+        return
+
+    # control_race short-circuit: if this lead has already crowned a winner for
+    # this race node, drop edges from losing branches so cancellations propagate.
+    winner_row = await fetch_one(
+        "SELECT winning_branch FROM race_winners WHERE lead_id=$1 AND race_node_id=$2",
+        lead_id,
+        source_node_id,
+    )
+    if winner_row and handle != winner_row["winning_branch"]:
+        log.info(
+            f"[sequencer] race {source_node_id}: lead {lead_id} losing branch '{handle}' cancelled"
+        )
         return
 
     edges = await fetch_all(
@@ -71,6 +115,40 @@ async def queue_next_nodes(
             continue
 
         node_type = node["node_type"]
+
+        # Loop iteration cap (Gap 8). If node.data.max_iterations is set, count
+        # how many times this lead has previously visited this node in
+        # path_history and refuse to re-enter past the cap.
+        max_iter = (node["data"] or {}).get("max_iterations")
+        if max_iter is not None:
+            try:
+                cap = int(max_iter)
+            except (TypeError, ValueError):
+                cap = 0
+            if cap > 0:
+                visits_row = await fetch_one(
+                    """
+                    SELECT COALESCE((
+                        SELECT COUNT(*) FROM jsonb_array_elements(COALESCE(path_history, '[]'::jsonb)) e
+                        WHERE e->>'visited_node_id' = $2
+                    ), 0) AS n
+                    FROM leads WHERE id=$1
+                    """,
+                    lead_id,
+                    str(target_id),
+                )
+                visits = int(visits_row["n"]) if visits_row else 0
+                if visits >= cap:
+                    log.info(
+                        f"[sequencer] iteration cap reached for lead {lead_id} at node {target_id} ({visits}/{cap}); skipping"
+                    )
+                    continue
+                await execute(
+                    "UPDATE leads SET path_history = path_history || $1::jsonb, "
+                    "iteration_count = iteration_count + 1 WHERE id=$2",
+                    json.dumps([{"visited_node_id": str(target_id), "at": datetime.now(UTC).isoformat()}]),
+                    lead_id,
+                )
 
         if node_type.startswith("action_"):
             channel_str = node_type.replace("action_", "")
@@ -177,6 +255,23 @@ async def queue_next_nodes(
                 branch = "true" if has_value else "false"
                 log.info(f"[sequencer] Field check for lead {lead_id}: field={field_name} present={has_value}")
                 await queue_next_nodes(lead_id, target_id, branch, accumulated_delay)
+            elif node_type == "condition_field_equals":
+                # Multi-output router. Operator picks a lead field + a list of expected
+                # values; each value becomes a named handle. Anything else goes to 'default'.
+                d = node["data"] or {}
+                field_name = str(d.get("field_name") or d.get("field") or "industry")
+                expected = d.get("values") or []
+                if not isinstance(expected, list):
+                    expected = []
+                raw = lead.get(field_name)
+                if raw is None and isinstance(lead.get("extra_data"), dict):
+                    raw = lead["extra_data"].get(field_name)
+                actual = str(raw).strip() if raw is not None else ""
+                branch = actual if actual in [str(v) for v in expected] else "default"
+                log.info(
+                    f"[sequencer] field_equals lead {lead_id}: {field_name}={actual!r} → handle={branch}"
+                )
+                await queue_next_nodes(lead_id, target_id, branch, accumulated_delay)
             elif node_type == "condition_reply_intent":
                 category = (lead.get("last_reply_category") or "").strip()
                 if not category:
@@ -194,22 +289,28 @@ async def queue_next_nodes(
                     await queue_next_nodes(lead_id, target_id, branch, accumulated_delay)
 
         elif node_type == "split":
-            weights = (node.get("data") or {}).get(
-                "weights",
-                {
-                    "true": {"alpha": 1, "beta": 1},
-                    "false": {"alpha": 1, "beta": 1},
-                },
-            )
-            sample_true = random.betavariate(weights["true"]["alpha"], weights["true"]["beta"])
-            sample_false = random.betavariate(weights["false"]["alpha"], weights["false"]["beta"])
-            chosen_arm = "true" if sample_true >= sample_false else "false"
+            # N-arm Thompson Sampling bandit. Arms are operator-named in data.arms
+            # (list of strings). Per-arm beta priors live in data.weights[name].
+            # Legacy 2-arm campaigns with weights.true/weights.false still work.
+            d = node.get("data") or {}
+            arms = d.get("arms") or list((d.get("weights") or {}).keys()) or ["true", "false"]
+            weights = d.get("weights") or {}
+            samples: dict[str, float] = {}
+            for arm in arms:
+                w = weights.get(arm) or {"alpha": 1, "beta": 1}
+                try:
+                    samples[arm] = random.betavariate(float(w.get("alpha", 1)), float(w.get("beta", 1)))
+                except (TypeError, ValueError):
+                    samples[arm] = random.random()
+            chosen_arm = max(samples, key=samples.get)
             await execute(
                 "UPDATE leads SET path_history = path_history || $1::jsonb WHERE id=$2",
                 json.dumps([{"split_node_id": str(target_id), "arm": chosen_arm}]),
                 lead_id,
             )
-            log.info(f"[sequencer] Split node {target_id}: chose arm '{chosen_arm}' for lead {lead_id}")
+            log.info(
+                f"[sequencer] Split node {target_id}: arms={arms} → chose '{chosen_arm}' for lead {lead_id}"
+            )
             await queue_next_nodes(lead_id, target_id, chosen_arm, accumulated_delay)
 
         elif node_type == "control_parallel_fork":
@@ -217,6 +318,75 @@ async def queue_next_nodes(
             log.info(f"[sequencer] Parallel fork {target_id} for lead {lead_id}")
             for i in range(1, 6):
                 await queue_next_nodes(lead_id, target_id, f"branch_{i}", accumulated_delay)
+
+        elif node_type == "control_race":
+            # Like parallel_fork, but the first branch to advance (= produce a
+            # downstream action receipt) wins and the others get cancelled by
+            # the race_winners short-circuit at the top of queue_next_nodes.
+            d = node.get("data") or {}
+            try:
+                branch_count = max(2, min(5, int(d.get("branch_count", 2))))
+            except (TypeError, ValueError):
+                branch_count = 2
+            log.info(
+                f"[sequencer] Race {target_id} (branches={branch_count}) for lead {lead_id}"
+            )
+            for i in range(1, branch_count + 1):
+                await queue_next_nodes(lead_id, target_id, f"branch_{i}", accumulated_delay)
+
+        elif node_type == "action_agent":
+            # Hand-rolled Option C agent. Runs synchronously inside the sequencer
+            # because tool calls already block on network; the loop is bounded by
+            # max_turns + max_tokens so this can't spin away.
+            from app.services.agent import run_agent
+
+            d = node["data"] or {}
+            goal = str(d.get("goal", "")).strip()
+            toolset = d.get("tools") or []
+            if not isinstance(toolset, list):
+                toolset = []
+            try:
+                max_turns = int(d.get("max_turns", 10))
+            except (TypeError, ValueError):
+                max_turns = 10
+            try:
+                max_tokens = int(d.get("max_tokens", 10000))
+            except (TypeError, ValueError):
+                max_tokens = 10000
+
+            if not goal or not toolset:
+                log.warning(
+                    f"[sequencer] action_agent {target_id} missing goal or toolset; routing to gave_up"
+                )
+                await queue_next_nodes(lead_id, target_id, "gave_up", accumulated_delay)
+            else:
+                _run_id, outcome = await run_agent(
+                    lead_id=str(lead_id),
+                    campaign_id=str(lead["campaign_id"]),
+                    node_id=str(target_id),
+                    goal=goal,
+                    toolset=toolset,
+                    max_turns=max_turns,
+                    max_tokens=max_tokens,
+                    default_email_account_id=d.get("default_email_account_id"),
+                )
+                log.info(
+                    f"[sequencer] action_agent {target_id} lead={lead_id} outcome={outcome}"
+                )
+                await queue_next_nodes(lead_id, target_id, outcome, accumulated_delay)
+
+        elif node_type == "event_webhook_received":
+            # Park the lead until an external webhook hits /webhooks/events/wake
+            # with this lead_id and node_id. No-op until then.
+            await execute("UPDATE leads SET current_node_id=$1 WHERE id=$2", target_id, lead_id)
+            log.info(
+                f"[sequencer] Parking lead {lead_id} at event_webhook_received {target_id}"
+            )
+
+        elif node_type == "sticky_note":
+            # Pure documentation node — no edges, no side effects. If something
+            # somehow routes through here, just continue to default.
+            await queue_next_nodes(lead_id, target_id, "default", accumulated_delay)
 
         elif node_type == "human_approval":
             # Open a new approvals row and park. Resume on POST /approvals/{id}/resolve.

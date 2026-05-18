@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 import app.db as db
 from app.config import settings as app_settings
-from app.services.reply_classifier import classify_reply, get_suggested_action
+from app.services.reply_classifier import classify_reply, classify_reply_async, get_suggested_action
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -22,12 +22,13 @@ class ClassifyRequest(BaseModel):
 @router.post("/classify-reply")
 async def classify_reply_endpoint(req: ClassifyRequest):
     """Classify an inbound reply message. Returns category, confidence, and suggested action."""
-    category, confidence = classify_reply(req.subject, req.body)
+    category, confidence = await classify_reply_async(req.subject, req.body)
     return {
         "category": category.value,
         "confidence": round(confidence, 2),
         "suggested_action": get_suggested_action(category),
     }
+
 
 @router.post("/unipile")
 async def unipile_webhook(request: Request):
@@ -55,10 +56,7 @@ async def unipile_webhook(request: Request):
         raise HTTPException(status_code=503, detail="Redis connection unavailable")
 
     try:
-        await db.redis_client.xadd(
-            "omni_inbound_events",
-            {"source": "unipile", "payload": json.dumps(payload)}
-        )
+        await db.redis_client.xadd("omni_inbound_events", {"source": "unipile", "payload": json.dumps(payload)})
         return {"status": "queued"}
     except Exception:
         log.exception("Failed to queue webhook payload")
@@ -92,17 +90,11 @@ async def generic_inbound_event(request: Request):
     # Resolve lead
     lead_id = payload.get("lead_id")
     if not lead_id and payload.get("lead_email"):
-        row = await db.fetch_one(
-            "SELECT id FROM leads WHERE email=$1 LIMIT 1",
-            payload["lead_email"]
-        )
+        row = await db.fetch_one("SELECT id FROM leads WHERE email=$1 LIMIT 1", payload["lead_email"])
         lead_id = str(row["id"]) if row else None
 
     if not lead_id and payload.get("lead_linkedin_url"):
-        row = await db.fetch_one(
-            "SELECT id FROM leads WHERE linkedin_url=$1 LIMIT 1",
-            payload["lead_linkedin_url"]
-        )
+        row = await db.fetch_one("SELECT id FROM leads WHERE linkedin_url=$1 LIMIT 1", payload["lead_linkedin_url"])
         lead_id = str(row["id"]) if row else None
 
     if not lead_id:
@@ -114,7 +106,10 @@ async def generic_inbound_event(request: Request):
         INSERT INTO events (lead_id, event_type, channel, meta)
         VALUES ($1, $2, $3, $4)
         """,
-        lead_id, event_type, channel, json.dumps(meta),
+        lead_id,
+        event_type,
+        channel,
+        json.dumps(meta),
     )
 
     # Update lead timestamps based on event type
@@ -126,7 +121,7 @@ async def generic_inbound_event(request: Request):
     elif event_type == "reply":
         reply_text = meta.get("body") or meta.get("text") or ""
         reply_subject = meta.get("subject") or ""
-        category, confidence = classify_reply(reply_subject, reply_text)
+        category, confidence = await classify_reply_async(reply_subject, reply_text)
         await db.execute(
             """
             UPDATE leads
@@ -137,7 +132,10 @@ async def generic_inbound_event(request: Request):
                 last_reply_at = NOW()
             WHERE id = $1
             """,
-            lead_id, reply_text[:4000], category.value, round(confidence, 2),
+            lead_id,
+            reply_text[:4000],
+            category.value,
+            round(confidence, 2),
         )
     elif event_type == "bounce":
         await db.execute(
@@ -176,6 +174,45 @@ async def generic_inbound_event(request: Request):
             log.warning("Failed to queue sequence event to Redis")
 
     return {"status": "processed", "lead_id": lead_id, "event_type": event_type}
+
+
+@router.post("/events/wake")
+async def wake_lead_at_node(request: Request):
+    """Resume a lead parked at an event_webhook_received node (Gap 6).
+
+    Query/body parameters (both supported):
+      - lead_id (required)
+      - node_id (required) — the event_webhook_received node
+      - handle (optional, default 'default')
+
+    External systems (CRMs, calendars, payment processors) call this URL with a
+    static shared-secret bearer token to advance specific leads.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    expected = app_settings.deploy_webhook_secret or app_settings.secret_key
+    if not auth_header.startswith("Bearer ") or auth_header.replace("Bearer ", "") != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001 — empty/non-JSON body falls back to query
+        payload = {}
+    lead_id = payload.get("lead_id") or request.query_params.get("lead_id")
+    node_id = payload.get("node_id") or request.query_params.get("node_id")
+    handle = payload.get("handle") or request.query_params.get("handle") or "default"
+    if not lead_id or not node_id:
+        raise HTTPException(status_code=400, detail="lead_id and node_id are required")
+
+    lead = await db.fetch_one("SELECT id, current_node_id FROM leads WHERE id=$1", lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="lead not found")
+
+    from app.services import sequencer
+
+    if str(lead.get("current_node_id")) == str(node_id):
+        await db.execute("UPDATE leads SET current_node_id=NULL WHERE id=$1", lead_id)
+    await sequencer.queue_next_nodes(str(lead_id), str(node_id), str(handle))
+    return {"status": "advanced", "lead_id": str(lead_id), "node_id": str(node_id), "handle": handle}
 
 
 @router.post("/deploy")

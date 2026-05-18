@@ -44,15 +44,25 @@ _DELIVERY_CHANNELS = frozenset(
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-def _in_active_hours(campaign: dict) -> bool:
-    tz = ZoneInfo(campaign.get("timezone") or "UTC")
+def _resolve_tz(lead: dict | None, campaign: dict) -> ZoneInfo:
+    """Prefer the lead's timezone if set (Gap 7), otherwise fall back to campaign."""
+    lead_tz = lead.get("timezone") if lead else None
+    tz_name = lead_tz or campaign.get("timezone") or "UTC"
+    try:
+        return ZoneInfo(tz_name)
+    except Exception:  # noqa: BLE001 — bad data should not break the dispatcher
+        return ZoneInfo("UTC")
+
+
+def _in_active_hours(campaign: dict, lead: dict | None = None) -> bool:
+    tz = _resolve_tz(lead, campaign)
     local_now = datetime.now(UTC).astimezone(tz)
     h = local_now.hour
     return campaign["active_hours_start"] <= h < campaign["active_hours_end"]
 
 
-def _next_window_start(campaign: dict) -> datetime:
-    tz = ZoneInfo(campaign.get("timezone") or "UTC")
+def _next_window_start(campaign: dict, lead: dict | None = None) -> datetime:
+    tz = _resolve_tz(lead, campaign)
     local_now = datetime.now(UTC).astimezone(tz)
     start_h = campaign["active_hours_start"]
     if local_now.hour < start_h:
@@ -91,6 +101,15 @@ async def _mark_sent(queue_id: str) -> None:
         "UPDATE processed_commands SET status='sent', processed_at=NOW() WHERE command_id=$1",
         queue_id,
     )
+    # Crown a race winner if the node lives downstream of a control_race.
+    row = await fetch_one("SELECT lead_id, node_id FROM queue WHERE id=$1", queue_id)
+    if row and row.get("node_id"):
+        try:
+            await sequencer.claim_race_winner_if_applicable(
+                str(row["lead_id"]), str(row["node_id"])
+            )
+        except Exception as e:  # noqa: BLE001 — race plumbing must never break dispatch
+            log.warning(f"[dispatcher] claim_race_winner failed: {e}")
 
 
 async def _fail_task(queue_id: str, reason: str, current_retry: int) -> None:
@@ -109,13 +128,34 @@ async def _fail_task(queue_id: str, reason: str, current_retry: int) -> None:
             reason,
             queue_id,
         )
-    else:
-        await execute(
-            """UPDATE queue SET status='failed', failure_reason=$1,
-               dead_letter_reason=$1, locked_by=NULL WHERE id=$2""",
-            reason,
-            queue_id,
+        return
+
+    # Retries exhausted — mark failed AND look for an on_error edge so the
+    # operator can pivot the lead to a fallback branch (Gap 2).
+    await execute(
+        """UPDATE queue SET status='failed', failure_reason=$1,
+           dead_letter_reason=$1, locked_by=NULL WHERE id=$2""",
+        reason,
+        queue_id,
+    )
+    row = await fetch_one("SELECT lead_id, node_id FROM queue WHERE id=$1", queue_id)
+    if not row or not row.get("node_id"):
+        return
+    has_on_error = await fetch_one(
+        "SELECT 1 FROM sequence_edges WHERE source_node_id=$1 AND source_handle='on_error' LIMIT 1",
+        row["node_id"],
+    )
+    if has_on_error:
+        log.info(
+            f"[dispatcher] task={queue_id} exhausted retries; routing lead "
+            f"{row['lead_id']} via on_error from node {row['node_id']}"
         )
+        try:
+            await sequencer.queue_next_nodes(
+                str(row["lead_id"]), str(row["node_id"]), "on_error"
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"[dispatcher] on_error routing failed: {e}")
 
 
 # ── SOTA Registry ─────────────────────────────────────────────────────────────
@@ -771,8 +811,8 @@ async def _process_task(task: dict, worker_id: str) -> None:
         await _fail_task(task["id"], "campaign or lead not found", task["retry_count"])
         return
 
-    if not _in_active_hours(campaign):
-        next_start = _next_window_start(campaign)
+    if not _in_active_hours(campaign, lead):
+        next_start = _next_window_start(campaign, lead)
         await execute(
             "UPDATE queue SET status='queued', locked_by=NULL, locked_at=NULL, scheduled_at=$1 WHERE id=$2",
             next_start,
@@ -819,6 +859,41 @@ async def _process_task(task: dict, worker_id: str) -> None:
                 # other "soft skip" paths (e.g. invalid IG recipient) behave.
                 await sequencer.queue_next_nodes(str(lead["id"]), str(task["node_id"]))
                 return
+
+        # Cross-lead ABM gate (Gap 5): if any other lead at this company was
+        # already contacted within company_lock_hours, skip this delivery.
+        if ch in _DELIVERY_CHANNELS and lead.get("company_id"):
+            lock_hours_raw = campaign.get("company_lock_hours")
+            try:
+                lock_hours = int(lock_hours_raw) if lock_hours_raw is not None else 0
+            except (TypeError, ValueError):
+                lock_hours = 0
+            if lock_hours > 0:
+                recent = await fetch_one(
+                    """
+                    SELECT 1 FROM queue q
+                    JOIN leads l ON l.id = q.lead_id
+                    WHERE l.company_id = $1 AND l.id <> $2
+                      AND q.status = 'sent'
+                      AND q.sent_at >= NOW() - ($3 || ' hours')::interval
+                    LIMIT 1
+                    """,
+                    lead["company_id"],
+                    lead["id"],
+                    str(lock_hours),
+                )
+                if recent:
+                    log.info(
+                        f"[dispatcher] task={task['id']} held: another contact at "
+                        f"company {lead['company_id']} reached within {lock_hours}h"
+                    )
+                    await execute(
+                        "UPDATE queue SET status='queued', locked_by=NULL, locked_at=NULL, "
+                        "scheduled_at=NOW() + ($1 || ' hours')::interval WHERE id=$2",
+                        str(lock_hours),
+                        task["id"],
+                    )
+                    return
 
         # SOTA Registry Dispatch
         success = await registry.handle(task, lead, campaign)

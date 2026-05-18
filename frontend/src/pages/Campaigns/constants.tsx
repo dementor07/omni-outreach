@@ -1,5 +1,5 @@
 import React from 'react'
-import { Linkedin, Mail, MessageSquare, Instagram, Send, Phone, Clock, Zap, Tag, MinusCircle, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle, Brain, Route, Database, Flame, UserCheck } from 'lucide-react'
+import { Linkedin, Mail, MessageSquare, Instagram, Send, Phone, Clock, Zap, Tag, MinusCircle, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle, Brain, Route, Database, Flame, UserCheck, Bot, StickyNote, Trophy } from 'lucide-react'
 import { NodeType } from '../../hooks/useSequenceSteps'
 
 export type NodeCategory =
@@ -12,6 +12,8 @@ export type NodeCategory =
   | 'voice'
   | 'enrich'
   | 'flow'
+  | 'agent'
+  | 'note'
 
 export const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNode; color: string; bg: string; border: string; category?: NodeCategory }[] = [
   { type: 'action_linkedin_invite',       label: 'Send Invite',       icon: <Linkedin size={15} />,       color: 'text-sky-600',     bg: 'bg-sky-50',     border: 'border-sky-200',     category: 'linkedin' },
@@ -29,6 +31,8 @@ export const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNod
   { type: 'action_data_transform',         label: 'Set Variable / AI', icon: <Brain size={15} />,          color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200', category: 'intelligence' },
   { type: 'action_ai_compose',             label: 'AI Compose',        icon: <Brain size={15} />,          color: 'text-fuchsia-600', bg: 'bg-fuchsia-50', border: 'border-fuchsia-200', category: 'intelligence' },
   { type: 'control_parallel_fork',         label: 'Parallel Fork',     icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200',   category: 'flow' },
+  { type: 'control_race',                  label: 'Race (winner-take-all)', icon: <Trophy size={15} />,    color: 'text-amber-700',   bg: 'bg-amber-50',   border: 'border-amber-300',   category: 'flow' },
+  { type: 'action_agent',                  label: 'Agent (goal-driven)',    icon: <Bot size={15} />,       color: 'text-violet-700',  bg: 'bg-violet-50',  border: 'border-violet-300',  category: 'agent' },
   { type: 'action_hot_lead_alert',         label: 'Hot Lead Alert',    icon: <Flame size={15} />,          color: 'text-rose-600',    bg: 'bg-rose-50',    border: 'border-rose-200',    category: 'alert' },
   { type: 'action_add_tag',                label: 'Add Tag',           icon: <Tag size={15} />,            color: 'text-slate-600',   bg: 'bg-slate-50',   border: 'border-slate-200',   category: 'tag' },
   { type: 'action_remove_tag',             label: 'Remove Tag',        icon: <MinusCircle size={15} />,     color: 'text-slate-500',   bg: 'bg-slate-50',   border: 'border-slate-200',   category: 'tag' },
@@ -38,11 +42,14 @@ export const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNod
   { type: 'condition_ai_screen',           label: 'AI Screen',         icon: <Brain size={15} />,          color: 'text-violet-600',  bg: 'bg-violet-50',  border: 'border-violet-200' },
   { type: 'condition_lead_source',         label: 'Source Router',     icon: <Route size={15} />,          color: 'text-cyan-600',    bg: 'bg-cyan-50',    border: 'border-cyan-200' },
   { type: 'condition_has_field',           label: 'If Has Field',      icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
+  { type: 'condition_field_equals',        label: 'Field Router',      icon: <Route size={15} />,          color: 'text-cyan-600',    bg: 'bg-cyan-50',    border: 'border-cyan-200' },
   { type: 'condition_reply_intent',        label: 'Reply Intent',      icon: <Brain size={15} />,          color: 'text-violet-600',  bg: 'bg-violet-50',  border: 'border-violet-200' },
   { type: 'human_approval',                label: 'Human Approval',    icon: <UserCheck size={15} />,      color: 'text-teal-600',    bg: 'bg-teal-50',    border: 'border-teal-200' },
   { type: 'event_invite_accepted',         label: 'Invite Accepted',   icon: <Bell size={15} />,           color: 'text-violet-500',  bg: 'bg-violet-50',  border: 'border-violet-200' },
   { type: 'event_email_opened',            label: 'Email Opened',      icon: <Bell size={15} />,           color: 'text-violet-500',  bg: 'bg-violet-50',  border: 'border-violet-200' },
   { type: 'event_link_clicked',            label: 'Link Clicked',      icon: <Bell size={15} />,           color: 'text-violet-500',  bg: 'bg-violet-50',  border: 'border-violet-200' },
+  { type: 'event_webhook_received',        label: 'Webhook Trigger',   icon: <Webhook size={15} />,        color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-300' },
+  { type: 'sticky_note',                   label: 'Sticky Note',       icon: <StickyNote size={15} />,     color: 'text-yellow-600',  bg: 'bg-yellow-50',  border: 'border-yellow-300',  category: 'note' },
   { type: 'delay',                         label: 'Wait',              icon: <Clock size={15} />,          color: 'text-slate-400',   bg: 'bg-slate-50',   border: 'border-slate-200' },
   { type: 'wait_until',                    label: 'Wait Until',        icon: <Clock size={15} />,          color: 'text-orange-500',  bg: 'bg-orange-50',  border: 'border-orange-200' },
   { type: 'split',                         label: 'A/B Split',         icon: <Shuffle size={15} />,        color: 'text-purple-600',  bg: 'bg-purple-50',  border: 'border-purple-200' },

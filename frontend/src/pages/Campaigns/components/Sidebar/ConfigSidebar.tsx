@@ -571,6 +571,180 @@ export function ConfigSidebar({ nodeId, nodes, onClose, onUpdate, onDelete }: Co
           </div>
         )}
 
+        {nodeType === 'condition_field_equals' && (
+          <div className="space-y-3">
+            <div>
+              <label className={labelCls}>Lead Field</label>
+              <input
+                type="text"
+                value={((node.data as Record<string, unknown>).field_name as string) || ((node.data as Record<string, unknown>).field as string) || ''}
+                onChange={(e) => onUpdate({ field_name: e.target.value })}
+                className={inputClassName}
+                placeholder="e.g. industry, company_size, source"
+              />
+              <p className="mt-1 text-[10px] text-slate-400">Any lead column, or an extra_data key set by an upstream action_data_transform.</p>
+            </div>
+            <div>
+              <label className={labelCls}>Expected values (one per line)</label>
+              <textarea
+                value={((node.data as Record<string, unknown>).values as string[] || []).join('\n')}
+                onChange={(e) => onUpdate({ values: e.target.value.split('\n').map(s => s.trim()).filter(Boolean) })}
+                className={inputClassName + ' min-h-[100px] font-mono text-xs'}
+                placeholder={'Finance\nHealthcare\nRetail'}
+                rows={5}
+              />
+              <p className="mt-1 text-[10px] text-slate-400">Each value becomes a named output handle. Anything else routes to <code>default</code>.</p>
+            </div>
+          </div>
+        )}
+
+        {nodeType === 'action_agent' && (
+          <div className="space-y-3">
+            <div>
+              <label className={labelCls}>Goal</label>
+              <textarea
+                value={(node.data as Record<string, unknown>).goal as string || ''}
+                onChange={(e) => onUpdate({ goal: e.target.value })}
+                className={inputClassName + ' min-h-[100px]'}
+                placeholder="Book a 15-minute discovery call. Their company is {{company}}; tailor the pitch."
+                rows={4}
+              />
+              <p className="mt-1 text-[10px] text-slate-400">Plain-English description. The agent picks tools to pursue this goal.</p>
+            </div>
+            <div>
+              <label className={labelCls}>Tools enabled</label>
+              <p className="mb-2 text-[10px] text-slate-400">Subset of agent tools the model may invoke.</p>
+              {['send_linkedin_dm', 'send_email', 'mark_hot', 'add_tag', 'end_sequence'].map(t => {
+                const tools: string[] = ((node.data as Record<string, unknown>).tools as string[]) || []
+                const checked = tools.includes(t)
+                return (
+                  <label key={t} className="flex items-center gap-3 rounded-xl px-3 py-1.5 hover:bg-slate-50 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => onUpdate({ tools: checked ? tools.filter(x => x !== t) : [...tools, t] })}
+                      className="h-4 w-4 rounded border-slate-300 text-violet-500 focus:ring-violet-500"
+                    />
+                    <span className="text-sm font-mono text-slate-700">{t}</span>
+                  </label>
+                )
+              })}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Max turns</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  aria-label="Agent max turns"
+                  value={(node.data as Record<string, unknown>).max_turns as number || 10}
+                  onChange={(e) => onUpdate({ max_turns: Math.max(1, Math.min(50, Number(e.target.value) || 10)) })}
+                  className={inputClassName}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Max tokens</label>
+                <input
+                  type="number"
+                  min={500}
+                  max={200000}
+                  aria-label="Agent max tokens"
+                  value={(node.data as Record<string, unknown>).max_tokens as number || 10000}
+                  onChange={(e) => onUpdate({ max_tokens: Math.max(500, Math.min(200000, Number(e.target.value) || 10000)) })}
+                  className={inputClassName}
+                />
+              </div>
+            </div>
+            <div>
+              <label className={labelCls}>Default email account (for send_email)</label>
+              <select
+                aria-label="Agent default email account"
+                value={(node.data as Record<string, unknown>).default_email_account_id as string || ''}
+                onChange={(e) => onUpdate({ default_email_account_id: e.target.value })}
+                className={inputClassName}
+              >
+                <option value="">None — agent may not send email</option>
+                {(emailAccountsQuery.data || []).map(a => <option key={a.id} value={a.id}>{a.from_name}</option>)}
+              </select>
+            </div>
+          </div>
+        )}
+
+        {nodeType === 'control_race' && (
+          <div>
+            <label className={labelCls}>Number of branches</label>
+            <input
+              type="number"
+              min={2}
+              max={5}
+              aria-label="Race branch count"
+              value={(node.data as Record<string, unknown>).branch_count as number || 2}
+              onChange={(e) => onUpdate({ branch_count: Math.max(2, Math.min(5, Number(e.target.value) || 2)) })}
+              className={inputClassName}
+            />
+            <p className="mt-1 text-[10px] text-slate-400">Each branch fires simultaneously. The first to dispatch a successful action wins; the others get cancelled.</p>
+          </div>
+        )}
+
+        {nodeType === 'event_webhook_received' && (
+          <div className="space-y-3">
+            <div>
+              <label className={labelCls}>Slug (display only)</label>
+              <input
+                type="text"
+                value={(node.data as Record<string, unknown>).slug as string || ''}
+                onChange={(e) => onUpdate({ slug: e.target.value })}
+                className={inputClassName}
+                placeholder="webinar-registered"
+              />
+              <p className="mt-1 text-[10px] text-slate-400">External systems wake leads parked here by calling <code>POST /webhooks/events/wake</code> with this node's id and the lead id.</p>
+            </div>
+          </div>
+        )}
+
+        {nodeType === 'sticky_note' && (
+          <div>
+            <label className={labelCls}>Note text</label>
+            <textarea
+              value={(node.data as Record<string, unknown>).text as string || ''}
+              onChange={(e) => onUpdate({ text: e.target.value })}
+              className={inputClassName + ' min-h-[120px]'}
+              placeholder="Annotate the canvas — sticky notes have no edges and no side effects."
+              rows={6}
+            />
+          </div>
+        )}
+
+        {nodeType === 'split' && (
+          <div className="space-y-3">
+            <div>
+              <label className={labelCls}>Arms (one per line)</label>
+              <textarea
+                value={(() => {
+                  const arms = (node.data as Record<string, unknown>).arms as string[] | undefined
+                  if (Array.isArray(arms) && arms.length) return arms.join('\n')
+                  return 'arm_a\narm_b'
+                })()}
+                onChange={(e) => {
+                  const arms = e.target.value.split('\n').map(s => s.trim()).filter(Boolean)
+                  const existing = ((node.data as Record<string, unknown>).weights as Record<string, unknown>) || {}
+                  const weights: Record<string, { alpha: number; beta: number }> = {}
+                  for (const a of arms) {
+                    const w = existing[a] as { alpha?: number; beta?: number } | undefined
+                    weights[a] = { alpha: w?.alpha ?? 1, beta: w?.beta ?? 1 }
+                  }
+                  onUpdate({ arms, weights })
+                }}
+                className={inputClassName + ' min-h-[100px] font-mono text-xs'}
+                rows={5}
+                placeholder={'control\nvariant_a\nvariant_b'}
+              />
+              <p className="mt-1 text-[10px] text-slate-400">Each arm becomes a labeled output handle. Thompson Sampling picks per lead. Defaults to 2 arms.</p>
+            </div>
+          </div>
+        )}
+
         {isEmail && (
           <div>
             <label className={labelCls}>Sending Account</label>

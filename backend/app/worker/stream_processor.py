@@ -6,13 +6,14 @@ from redis.exceptions import ResponseError
 
 from app.db import execute, fetch_one
 from app.services import sequencer
-from app.services.reply_classifier import classify_reply
+from app.services.reply_classifier import classify_reply_async
 
 log = logging.getLogger(__name__)
 
 STREAM_NAME = "omni_inbound_events"
 GROUP_NAME = "event_router_group"
 CONSUMER_NAME = "worker_1"
+
 
 async def _process_unipile_payload(payload: dict) -> None:
     event_type = payload.get("event")
@@ -39,9 +40,9 @@ async def _process_unipile_payload(payload: dict) -> None:
     log.info(f"[stream_processor] Received reply for lead {lead['id']} on channel {body.get('channel')}")
 
     # Classify the reply text so condition_reply_intent has something to branch on
-    reply_text = (body.get("text") or body.get("body") or "")
+    reply_text = body.get("text") or body.get("body") or ""
     reply_subject = body.get("subject") or ""
-    category, confidence = classify_reply(reply_subject, reply_text)
+    category, confidence = await classify_reply_async(reply_subject, reply_text)
 
     # Update lead state — mirror the generic /webhooks/events/inbound path so both
     # routes populate last_reply_* and condition_reply_intent works regardless of
@@ -57,7 +58,10 @@ async def _process_unipile_payload(payload: dict) -> None:
             last_reply_at = NOW()
         WHERE id = $1
         """,
-        lead["id"], reply_text[:4000], category.value, round(confidence, 2),
+        lead["id"],
+        reply_text[:4000],
+        category.value,
+        round(confidence, 2),
     )
 
     # Log inbound message
@@ -66,8 +70,11 @@ async def _process_unipile_payload(payload: dict) -> None:
         INSERT INTO inbound_messages (lead_id, campaign_id, channel, body, raw)
         VALUES ($1, $2, $3, $4, $5)
         """,
-        lead["id"], lead["campaign_id"], body.get("channel"),
-        reply_text, payload
+        lead["id"],
+        lead["campaign_id"],
+        body.get("channel"),
+        reply_text,
+        payload,
     )
 
     # Evaluate sequence logic — picks up condition_reply_intent / condition_replied parks
@@ -77,6 +84,7 @@ async def _process_unipile_payload(payload: dict) -> None:
 async def process_stream_events(ctx: dict) -> None:
     """Cron job to consume events from the Redis stream."""
     from app.config import settings
+
     redis = aioredis.from_url(settings.get_redis_url(), decode_responses=True)
 
     # Ensure consumer group exists
@@ -90,9 +98,7 @@ async def process_stream_events(ctx: dict) -> None:
     try:
         # > means messages never delivered to other consumers in this group
         # block=0 means don't block
-        streams = await redis.xreadgroup(
-            GROUP_NAME, CONSUMER_NAME, {STREAM_NAME: ">"}, count=50, block=0
-        )
+        streams = await redis.xreadgroup(GROUP_NAME, CONSUMER_NAME, {STREAM_NAME: ">"}, count=50, block=0)
 
         if not streams:
             return

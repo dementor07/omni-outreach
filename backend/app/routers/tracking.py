@@ -3,6 +3,7 @@
 Endpoints are PUBLIC (no auth) — they're embedded in sent emails.
 URLs are HMAC-signed so forged event IDs are rejected.
 """
+
 import hashlib
 import hmac
 import json
@@ -19,18 +20,12 @@ router = APIRouter()
 log = logging.getLogger(__name__)
 
 # 1x1 transparent GIF
-PIXEL = bytes.fromhex(
-    "47494638396101000100800100ffffff"
-    "00000021f90401000001002c00000000"
-    "0100010000020244013b"
-)
+PIXEL = bytes.fromhex("47494638396101000100800100ffffff00000021f90401000001002c000000000100010000020244013b")
 
 
 def _sign(event_id: str) -> str:
     """Generate HMAC-SHA256 signature for an event_id."""
-    return hmac.new(
-        settings.secret_key.encode(), event_id.encode(), hashlib.sha256
-    ).hexdigest()[:16]
+    return hmac.new(settings.secret_key.encode(), event_id.encode(), hashlib.sha256).hexdigest()[:16]
 
 
 def _verify_sig(event_id: str, sig: str) -> bool:
@@ -59,6 +54,28 @@ async def _record_event(event_id: str, event_type: str, request: Request):
         event_type,
         meta,
     )
+
+    # Plumb the engagement timestamps onto the lead row so condition_*/event_*
+    # nodes that read lead.email_opened_at / link_clicked_at can branch
+    # correctly. Without this update the events table has the data but the
+    # sequencer never sees it.
+    if event_type == "email_opened":
+        await execute(
+            "UPDATE leads SET email_opened_at = COALESCE(email_opened_at, NOW()) WHERE id=$1",
+            row["lead_id"],
+        )
+    elif event_type == "email_clicked":
+        await execute(
+            "UPDATE leads SET link_clicked_at = COALESCE(link_clicked_at, NOW()) WHERE id=$1",
+            row["lead_id"],
+        )
+
+    # Nudge the sequencer in case the lead is parked at an event_* node.
+    try:
+        from app.services import sequencer
+        await sequencer.evaluate_conditions(str(row["lead_id"]))
+    except Exception as e:  # noqa: BLE001 — engagement plumbing must never break the pixel response
+        log.warning(f"[tracking] evaluate_conditions failed for lead {row['lead_id']}: {e}")
 
 
 @router.get("/pixel/{event_id}.gif")
