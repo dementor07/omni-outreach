@@ -2,25 +2,36 @@ import React from 'react'
 import { Linkedin, Mail, MessageSquare, Instagram, Send, Phone, Clock, Zap, Tag, MinusCircle, GitBranch, Bell, StopCircle, Shuffle, Webhook, MessageCircle, Brain, Route, Database, Flame, UserCheck } from 'lucide-react'
 import { NodeType } from '../../hooks/useSequenceSteps'
 
-export const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNode; color: string; bg: string; border: string }[] = [
-  { type: 'action_linkedin_invite',       label: 'Send Invite',       icon: <Linkedin size={15} />,       color: 'text-sky-600',     bg: 'bg-sky-50',     border: 'border-sky-200' },
-  { type: 'action_linkedin_dm',            label: 'LinkedIn DM',       icon: <Linkedin size={15} />,       color: 'text-sky-500',     bg: 'bg-sky-50',     border: 'border-sky-200' },
-  { type: 'action_linkedin_inmail',        label: 'InMail',            icon: <Linkedin size={15} />,       color: 'text-indigo-500',  bg: 'bg-indigo-50',  border: 'border-indigo-200' },
-  { type: 'action_linkedin_profile_view',  label: 'View Profile',      icon: <Linkedin size={15} />,       color: 'text-slate-500',   bg: 'bg-slate-50',   border: 'border-slate-200' },
-  { type: 'action_email',                  label: 'Email',             icon: <Mail size={15} />,           color: 'text-slate-600',   bg: 'bg-slate-50',   border: 'border-slate-200' },
-  { type: 'action_whatsapp',               label: 'WhatsApp',          icon: <MessageSquare size={15} />,  color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' },
-  { type: 'action_sms',                    label: 'SMS',               icon: <MessageCircle size={15} />,  color: 'text-teal-600',    bg: 'bg-teal-50',    border: 'border-teal-200' },
-  { type: 'action_instagram',              label: 'Instagram',         icon: <Instagram size={15} />,      color: 'text-pink-500',    bg: 'bg-pink-50',    border: 'border-pink-200' },
-  { type: 'action_telegram',               label: 'Telegram',          icon: <Send size={15} />,           color: 'text-blue-500',    bg: 'bg-blue-50',    border: 'border-blue-200' },
-  { type: 'action_voice',                  label: 'AI Voice Call',     icon: <Phone size={15} />,          color: 'text-indigo-600',  bg: 'bg-indigo-50',  border: 'border-indigo-200' },
-  { type: 'action_webhook',                label: 'Webhook / CRM',     icon: <Webhook size={15} />,        color: 'text-orange-600',  bg: 'bg-orange-50',  border: 'border-orange-200' },
-  { type: 'action_enrich',                 label: 'Enrich Lead',       icon: <Database size={15} />,       color: 'text-indigo-600',  bg: 'bg-indigo-50',  border: 'border-indigo-200' },
-  { type: 'action_data_transform',         label: 'Set Variable / AI', icon: <Brain size={15} />,          color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' },
-  { type: 'action_ai_compose',             label: 'AI Compose',        icon: <Brain size={15} />,          color: 'text-fuchsia-600', bg: 'bg-fuchsia-50', border: 'border-fuchsia-200' },
-  { type: 'control_parallel_fork',         label: 'Parallel Fork',     icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
-  { type: 'action_hot_lead_alert',         label: 'Hot Lead Alert',    icon: <Flame size={15} />,          color: 'text-rose-600',    bg: 'bg-rose-50',    border: 'border-rose-200' },
-  { type: 'action_add_tag',                label: 'Add Tag',           icon: <Tag size={15} />,            color: 'text-slate-600',   bg: 'bg-slate-50',   border: 'border-slate-200' },
-  { type: 'action_remove_tag',             label: 'Remove Tag',        icon: <MinusCircle size={15} />,     color: 'text-slate-500',   bg: 'bg-slate-50',   border: 'border-slate-200' },
+export type NodeCategory =
+  | 'linkedin'
+  | 'messaging'
+  | 'intelligence'
+  | 'tag'
+  | 'webhook'
+  | 'alert'
+  | 'voice'
+  | 'enrich'
+  | 'flow'
+
+export const NODE_PALETTE: { type: NodeType; label: string; icon: React.ReactNode; color: string; bg: string; border: string; category?: NodeCategory }[] = [
+  { type: 'action_linkedin_invite',       label: 'Send Invite',       icon: <Linkedin size={15} />,       color: 'text-sky-600',     bg: 'bg-sky-50',     border: 'border-sky-200',     category: 'linkedin' },
+  { type: 'action_linkedin_dm',            label: 'LinkedIn DM',       icon: <Linkedin size={15} />,       color: 'text-sky-500',     bg: 'bg-sky-50',     border: 'border-sky-200',     category: 'linkedin' },
+  { type: 'action_linkedin_inmail',        label: 'InMail',            icon: <Linkedin size={15} />,       color: 'text-indigo-500',  bg: 'bg-indigo-50',  border: 'border-indigo-200',  category: 'linkedin' },
+  { type: 'action_linkedin_profile_view',  label: 'View Profile',      icon: <Linkedin size={15} />,       color: 'text-slate-500',   bg: 'bg-slate-50',   border: 'border-slate-200',   category: 'linkedin' },
+  { type: 'action_email',                  label: 'Email',             icon: <Mail size={15} />,           color: 'text-slate-600',   bg: 'bg-slate-50',   border: 'border-slate-200',   category: 'messaging' },
+  { type: 'action_whatsapp',               label: 'WhatsApp',          icon: <MessageSquare size={15} />,  color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200', category: 'messaging' },
+  { type: 'action_sms',                    label: 'SMS',               icon: <MessageCircle size={15} />,  color: 'text-teal-600',    bg: 'bg-teal-50',    border: 'border-teal-200',    category: 'messaging' },
+  { type: 'action_instagram',              label: 'Instagram',         icon: <Instagram size={15} />,      color: 'text-pink-500',    bg: 'bg-pink-50',    border: 'border-pink-200',    category: 'messaging' },
+  { type: 'action_telegram',               label: 'Telegram',          icon: <Send size={15} />,           color: 'text-blue-500',    bg: 'bg-blue-50',    border: 'border-blue-200',    category: 'messaging' },
+  { type: 'action_voice',                  label: 'AI Voice Call',     icon: <Phone size={15} />,          color: 'text-indigo-600',  bg: 'bg-indigo-50',  border: 'border-indigo-200',  category: 'voice' },
+  { type: 'action_webhook',                label: 'Webhook / CRM',     icon: <Webhook size={15} />,        color: 'text-orange-600',  bg: 'bg-orange-50',  border: 'border-orange-200',  category: 'webhook' },
+  { type: 'action_enrich',                 label: 'Enrich Lead',       icon: <Database size={15} />,       color: 'text-indigo-600',  bg: 'bg-indigo-50',  border: 'border-indigo-200',  category: 'enrich' },
+  { type: 'action_data_transform',         label: 'Set Variable / AI', icon: <Brain size={15} />,          color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200', category: 'intelligence' },
+  { type: 'action_ai_compose',             label: 'AI Compose',        icon: <Brain size={15} />,          color: 'text-fuchsia-600', bg: 'bg-fuchsia-50', border: 'border-fuchsia-200', category: 'intelligence' },
+  { type: 'control_parallel_fork',         label: 'Parallel Fork',     icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200',   category: 'flow' },
+  { type: 'action_hot_lead_alert',         label: 'Hot Lead Alert',    icon: <Flame size={15} />,          color: 'text-rose-600',    bg: 'bg-rose-50',    border: 'border-rose-200',    category: 'alert' },
+  { type: 'action_add_tag',                label: 'Add Tag',           icon: <Tag size={15} />,            color: 'text-slate-600',   bg: 'bg-slate-50',   border: 'border-slate-200',   category: 'tag' },
+  { type: 'action_remove_tag',             label: 'Remove Tag',        icon: <MinusCircle size={15} />,     color: 'text-slate-500',   bg: 'bg-slate-50',   border: 'border-slate-200',   category: 'tag' },
   { type: 'condition_replied',             label: 'If Replied',        icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
   { type: 'condition_linkedin_distance',   label: 'If 1st Degree',     icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
   { type: 'condition_tag_exists',          label: 'If Has Tag',        icon: <GitBranch size={15} />,      color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },

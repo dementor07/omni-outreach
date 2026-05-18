@@ -31,57 +31,184 @@ export const EventNode = ({ data, selected }: NodeProps) => {
   )
 }
 
-export const ActionNode = ({ data, id, selected }: NodeProps) => {
+// Category labels (uppercase eyebrow) — distinct per node family so AI Compose
+// doesn't read as "Engagement". Maps category -> the small eyebrow text.
+const CATEGORY_EYEBROW: Record<string, string> = {
+  linkedin: 'LinkedIn',
+  messaging: 'Messaging',
+  intelligence: 'Intelligence',
+  tag: 'Tagging',
+  webhook: 'Integration',
+  alert: 'Alert',
+  voice: 'AI Voice',
+  enrich: 'Enrichment',
+  flow: 'Control',
+}
+
+// Trim a string for compact preview display in the card body.
+function preview(s: unknown, max = 60): string {
+  if (typeof s !== 'string') return ''
+  const t = s.trim().replace(/\s+/g, ' ')
+  return t.length > max ? t.slice(0, max - 1) + '…' : t
+}
+
+export const ActionNode = ({ data, selected }: NodeProps) => {
   const nodeType = data.node_type as NodeType
   const cfg = NODE_PALETTE.find(p => p.type === nodeType)
-  const mode = (data as any).mode || 'simple'
-  const configured = !!(data.email_account_id || data.voice_agent_id || nodeType === 'action_linkedin_invite' || (data.template && (data.template as any).body) || data.variable_name)
-  const isEnrich = nodeType === 'action_enrich'
-  
+  const category = cfg?.category ?? 'messaging'
+  const d = data as Record<string, unknown>
+
+  // Per-category "ready" check + body content
+  let bodyPreview: React.ReactNode = null
+  let configured = false
+
+  if (category === 'intelligence' && nodeType === 'action_ai_compose') {
+    const instruction = preview(d.instruction, 90)
+    const targetVar = (d.target_variable as string) || 'ai_draft'
+    const channel = (d.channel as string) || 'email'
+    configured = !!instruction
+    bodyPreview = (
+      <div className="mt-2 space-y-1.5">
+        <div className="rounded-md bg-fuchsia-50/70 px-2 py-1.5 text-[11px] italic text-fuchsia-900 dark:bg-fuchsia-900/20 dark:text-fuchsia-200">
+          {instruction || <span className="text-slate-400 not-italic">No instruction set</span>}
+        </div>
+        <div className="flex items-center justify-between text-[10px]">
+          <span className="text-slate-500">→ <code className="font-mono text-fuchsia-700">{`{{${targetVar}}}`}</code></span>
+          <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">{channel}</span>
+        </div>
+      </div>
+    )
+  } else if (category === 'intelligence' && nodeType === 'action_data_transform') {
+    const varName = (d.variable_name as string) || ''
+    const prompt = preview(d.prompt, 80)
+    configured = !!varName && !!prompt
+    bodyPreview = (
+      <div className="mt-2 space-y-1.5">
+        <div className="rounded-md bg-emerald-50/70 px-2 py-1.5 text-[11px] italic text-emerald-900 dark:bg-emerald-900/20 dark:text-emerald-200">
+          {prompt || <span className="text-slate-400 not-italic">No prompt set</span>}
+        </div>
+        <div className="text-[10px] text-slate-500">→ <code className="font-mono text-emerald-700">{`{{${varName || 'variable_name'}}}`}</code></div>
+      </div>
+    )
+  } else if (category === 'enrich') {
+    const source = (d.enrich_source as string) || ''
+    configured = !!source
+    bodyPreview = (
+      <div className="mt-2 text-[11px] text-slate-600 dark:text-slate-400">
+        Source: <span className="font-semibold text-slate-900 dark:text-white">{source || 'not set'}</span>
+      </div>
+    )
+  } else if (category === 'tag') {
+    const tag = (d.tag as string) || ''
+    configured = !!tag
+    bodyPreview = (
+      <div className="mt-2">
+        {tag ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+            <Tag size={10} />{tag}
+          </span>
+        ) : <span className="text-[11px] italic text-slate-400">No tag set</span>}
+      </div>
+    )
+  } else if (category === 'alert') {
+    const title = preview(d.title, 50) || 'Hot Lead Alert'
+    const channels = (d.channel_ids as string[] | undefined) || []
+    configured = true
+    bodyPreview = (
+      <div className="mt-2 space-y-1.5">
+        <div className="flex items-start gap-1.5 text-[11px] text-rose-900 dark:text-rose-200">
+          <Bell size={11} className="mt-0.5 shrink-0" />
+          <span className="font-semibold">{title}</span>
+        </div>
+        <div className="text-[10px] text-slate-500">{channels.length ? `→ ${channels.length} channel${channels.length === 1 ? '' : 's'}` : '→ all active channels'}</div>
+      </div>
+    )
+  } else if (category === 'webhook') {
+    const url = preview(d.url, 50)
+    const method = (d.method as string) || 'POST'
+    configured = !!url
+    bodyPreview = (
+      <div className="mt-2 flex items-center gap-1.5 text-[10px]">
+        <span className="rounded bg-slate-900 px-1.5 py-0.5 font-mono text-white">{method}</span>
+        <span className="truncate font-mono text-slate-600 dark:text-slate-400">{url || 'no url'}</span>
+      </div>
+    )
+  } else if (category === 'voice') {
+    const agent = (d.voice_agent_id as string) || ''
+    const mode = (d.mode as string) || 'simple'
+    configured = !!agent
+    bodyPreview = (
+      <div className="mt-2 space-y-1.5">
+        <div className="flex items-center justify-between text-[10px]">
+          <span className="text-slate-500">{agent ? 'Agent linked' : 'No agent'}</span>
+          <span className={`rounded px-1.5 py-0.5 font-mono uppercase tracking-wide ${mode === 'flow' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>{mode}</span>
+        </div>
+      </div>
+    )
+  } else if (category === 'linkedin' || category === 'messaging') {
+    // Delivery channels — show subject/body preview from the linked template
+    const tpl = (d.template as Record<string, unknown> | undefined) || {}
+    const body = preview((tpl.body as string) ?? d.body, 80)
+    const subject = preview((tpl.subject as string) ?? d.subject, 40)
+    const acctLinked = !!(d.email_account_id || d.linkedin_account_id || nodeType === 'action_linkedin_invite')
+    configured = !!body && acctLinked
+    bodyPreview = (
+      <div className="mt-2 space-y-1">
+        {subject && <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{subject}</div>}
+        <div className={`rounded-md px-2 py-1.5 text-[11px] italic ${body ? 'bg-slate-50 text-slate-700 dark:bg-slate-800/50 dark:text-slate-300' : 'text-slate-400'}`}>
+          {body || 'No message body'}
+        </div>
+      </div>
+    )
+  }
+
+  // Simple/Flow toggle: ONLY meaningful for voice (Retell nested-flow vs simple-llm).
+  // For every other action node it was visual noise.
+  const showFlowToggle = nodeType === 'action_voice'
+  const flowMode = showFlowToggle ? ((d.mode as string) || 'simple') : null
+
   return (
-    <div className={`relative min-w-[220px] rounded-xl border-2 bg-white p-4 shadow-sm transition-all ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : cfg?.border ?? 'border-slate-200'}`}>
+    <div className={`relative min-w-[240px] rounded-xl border-2 bg-white p-3.5 shadow-sm transition-all dark:bg-slate-900 ${selected ? 'border-brand-500 ring-4 ring-brand-500/10' : cfg?.border ?? 'border-slate-200'}`}>
       <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-none !bg-slate-300" />
-      
-      <div className="flex items-center justify-between mb-3">
-        <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${cfg?.bg ?? 'bg-slate-50'} ${cfg?.color ?? 'text-slate-500'}`}>
-          {cfg?.icon}
-        </div>
-        <div className="flex rounded-lg bg-slate-50 p-0.5 ring-1 ring-slate-900/5 scale-90 origin-right">
-          <div className={`px-2 py-0.5 text-[8px] font-black uppercase tracking-widest rounded-md transition-all ${mode !== 'flow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}>Simple</div>
-          <div className={`px-2 py-0.5 text-[8px] font-black uppercase tracking-widest rounded-md transition-all ${mode === 'flow' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-400'}`}>Flow</div>
-        </div>
-      </div>
 
-      <div>
-        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{isEnrich ? 'Intelligence' : 'Engagement'}</p>
-        <p className="text-xs font-bold text-slate-900">{cfg?.label ?? nodeType}</p>
-      </div>
-
-      {mode === 'flow' && (
-        <div className="mt-3 flex items-center gap-1.5 rounded-lg border border-dashed border-slate-300 bg-slate-50/50 p-2 dark:border-slate-700 dark:bg-slate-800/50">
-          <Zap size={10} className="text-slate-500 dark:text-slate-400" />
-          <span className="text-[9px] font-bold uppercase tracking-tight text-slate-600 dark:text-slate-300">Nested Architecture</span>
-        </div>
-      )}
-
-      {isEnrich ? (
-        <div className="mt-4 grid grid-cols-2 divide-x divide-slate-50 border-t border-slate-50 pt-3">
-          <div className="flex flex-col items-center">
-            <span className="text-[9px] font-black uppercase text-emerald-500">Found</span>
-            <Handle type="source" id="found" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-emerald-400" />
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${cfg?.bg ?? 'bg-slate-50'} ${cfg?.color ?? 'text-slate-500'}`}>
+            {cfg?.icon}
           </div>
-          <div className="flex flex-col items-center">
-            <span className="text-[9px] font-black uppercase text-rose-400">Empty</span>
-            <Handle type="source" id="not_found" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!mt-1 !h-2 !w-2 !border-none !bg-rose-400" />
+          <div>
+            <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">{CATEGORY_EYEBROW[category] ?? 'Action'}</p>
+            <p className="text-[13px] font-bold text-slate-900 dark:text-white">{cfg?.label ?? nodeType}</p>
+          </div>
+        </div>
+        {showFlowToggle && (
+          <div className="flex rounded-lg bg-slate-50 p-0.5 ring-1 ring-slate-900/5 dark:bg-slate-800 dark:ring-white/10">
+            <div className={`px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest rounded transition-all ${flowMode !== 'flow' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-400'}`}>Simple</div>
+            <div className={`px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest rounded transition-all ${flowMode === 'flow' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-400'}`}>Flow</div>
+          </div>
+        )}
+      </div>
+
+      {bodyPreview}
+
+      {category === 'enrich' ? (
+        <div className="mt-3 grid grid-cols-2 divide-x divide-slate-50 border-t border-slate-50 pt-2 dark:divide-slate-800 dark:border-slate-800">
+          <div className="flex flex-col items-center gap-1">
+            <span className="text-[9px] font-black uppercase tracking-wide text-emerald-500">Found</span>
+            <Handle type="source" id="found" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!h-2 !w-2 !border-none !bg-emerald-400" />
+          </div>
+          <div className="flex flex-col items-center gap-1">
+            <span className="text-[9px] font-black uppercase tracking-wide text-rose-400">Empty</span>
+            <Handle type="source" id="not_found" position={Position.Bottom} style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }} className="!h-2 !w-2 !border-none !bg-rose-400" />
           </div>
         </div>
       ) : (
         <>
-          <div className="mt-3 flex items-center justify-between border-t border-slate-50 pt-3">
+          <div className="mt-2.5 flex items-center justify-between border-t border-slate-50 pt-2 dark:border-slate-800">
             <span className={`text-[10px] font-medium ${configured ? 'text-emerald-500' : 'text-slate-300'}`}>
               {configured ? 'Ready' : 'Draft'}
             </span>
-            <Settings2 size={12} className="text-slate-300" />
+            <Settings2 size={11} className="text-slate-300" />
           </div>
           <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-none !bg-slate-300" />
         </>
