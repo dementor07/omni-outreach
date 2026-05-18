@@ -151,30 +151,90 @@ async def save_graph(body: SequenceGraph, user_id: str = Depends(get_current_use
             },
         )
 
-    # Transactional update: Delete old nodes/edges and insert new ones
-    # In a real production app, we'd use a transaction here.
-    # For now, we'll execute sequentially.
+    # UPSERT semantics. We can't wipe-and-replace sequence_nodes because
+    # queue.node_id has a FK back to it — any in-flight task would block
+    # the DELETE (ForeignKeyViolation) and lock operators out of saving
+    # their own graph. Instead:
+    #   1. Each posted node carries its own client-stable UUID in node.id.
+    #   2. If a row exists with that id, UPDATE in place. Otherwise INSERT.
+    #   3. Then DELETE only nodes whose ids no longer appear in the payload.
+    # Edges have no inbound FK so we still wipe+reinsert them.
 
-    await execute("DELETE FROM sequence_edges WHERE campaign_id=$1", body.campaign_id)
-    await execute("DELETE FROM sequence_nodes WHERE campaign_id=$1", body.campaign_id)
+    import uuid as _uuid
 
-    # Insert Nodes
-    node_id_map = {}  # Map temporary React Flow IDs to actual DB IDs if needed
+    def _is_uuid(s: str | None) -> bool:
+        if not s:
+            return False
+        try:
+            _uuid.UUID(str(s))
+            return True
+        except (ValueError, AttributeError, TypeError):
+            return False
+
+    node_id_map: dict[str, str] = {}
+    posted_ids: set[str] = set()
+
     for node in body.nodes:
-        inserted = await fetch_one(
-            """
-            INSERT INTO sequence_nodes (campaign_id, node_type, position_x, position_y, data)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id
-            """,
-            body.campaign_id,
-            node.node_type,
-            node.position_x,
-            node.position_y,
-            json.dumps(node.data),
-        )
+        if _is_uuid(node.id):
+            # UPSERT keyed on the client-supplied UUID. Postgres ON CONFLICT
+            # path keeps queue/sequence_edges FK references intact.
+            row = await fetch_one(
+                """
+                INSERT INTO sequence_nodes (id, campaign_id, node_type, position_x, position_y, data)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (id) DO UPDATE
+                  SET node_type   = EXCLUDED.node_type,
+                      position_x  = EXCLUDED.position_x,
+                      position_y  = EXCLUDED.position_y,
+                      data        = EXCLUDED.data
+                RETURNING id
+                """,
+                node.id,
+                body.campaign_id,
+                node.node_type,
+                node.position_x,
+                node.position_y,
+                json.dumps(node.data),
+            )
+        else:
+            row = await fetch_one(
+                """
+                INSERT INTO sequence_nodes (campaign_id, node_type, position_x, position_y, data)
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING id
+                """,
+                body.campaign_id,
+                node.node_type,
+                node.position_x,
+                node.position_y,
+                json.dumps(node.data),
+            )
+        new_id = str(row["id"])
+        posted_ids.add(new_id)
         if node.id:
-            node_id_map[node.id] = inserted["id"]
+            node_id_map[node.id] = new_id
+
+    # Edges are FK-free downstream; safe to wipe+reinsert. Do this BEFORE
+    # deleting orphaned nodes so we don't trip the FK on sequence_edges.
+    await execute("DELETE FROM sequence_edges WHERE campaign_id=$1", body.campaign_id)
+
+    # Drop nodes the operator removed from the canvas. If a removed node
+    # still has queue rows pointing at it, we can't delete it — null the
+    # queue ref instead (the task is effectively orphaned and will be
+    # skipped by the dispatcher next run).
+    existing = await fetch_all(
+        "SELECT id FROM sequence_nodes WHERE campaign_id=$1", body.campaign_id
+    )
+    stale = [str(r["id"]) for r in existing if str(r["id"]) not in posted_ids]
+    if stale:
+        await execute(
+            "UPDATE queue SET node_id = NULL WHERE node_id = ANY($1::uuid[])",
+            stale,
+        )
+        await execute(
+            "DELETE FROM sequence_nodes WHERE id = ANY($1::uuid[])",
+            stale,
+        )
 
     # Insert Edges
     for edge in body.edges:
