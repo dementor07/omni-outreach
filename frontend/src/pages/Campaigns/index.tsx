@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, Save, Undo2, Redo2, Copy, Trash2, Rocket, Play, Pause, Download, ChevronRight,
-  Users, ListTodo, GitBranch, Database, Settings
+  Users, ListTodo, GitBranch, Database, Settings, Maximize2, Minimize2
 } from 'lucide-react'
 
 // Layout & UI Components
@@ -95,6 +95,7 @@ export default function Campaigns() {
   const [createOpen, setCreateOpen] = useState(false)
   const [form, setForm] = useState<CampaignPayload>(defaultCampaignForm)
   const [importOpen, setImportOpen] = useState(false)
+  const [isFullScreen, setIsFullScreen] = useState(false)
 
   // Auto-open the create modal when arriving with ?new=1 (e.g., from Dashboard).
   useEffect(() => {
@@ -423,7 +424,9 @@ export default function Campaigns() {
           )}
 
           {activeTab === 'sequence' && (
-            <div className="relative flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/50">
+            <div className={`relative flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/50 ${
+              isFullScreen ? '!fixed !inset-0 !z-[999] !m-0 !rounded-none !border-none !h-screen !w-screen !p-6 bg-slate-50 dark:bg-slate-900' : ''
+            }`}>
               {campaignQuery.data?.sequence_mode === 'canvas' ? (
                 <div className="flex flex-1 overflow-hidden">
                   <div className="relative flex-1">
@@ -454,6 +457,15 @@ export default function Campaigns() {
 
                       <Panel position="top-right" className="flex items-center gap-2">
                         <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white/90 p-0.5 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-900/90">
+                          <button
+                            type="button"
+                            onClick={() => setIsFullScreen(!isFullScreen)}
+                            title={isFullScreen ? "Exit Full Screen" : "Full Screen"}
+                            className="rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+                          >
+                            {isFullScreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                          </button>
+                          <span className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-0.5" />
                           <button
                             type="button"
                             onClick={() => { const h = undo(); if (h) { setNodes(h.nodes); setEdges(h.edges); } }}
@@ -498,7 +510,15 @@ export default function Campaigns() {
                   )}
                 </div>
               ) : (
-                <div className="flex-1 overflow-auto bg-white p-8 dark:bg-slate-900">
+                <div className="flex-1 overflow-auto bg-white p-8 dark:bg-slate-900 relative">
+                  <button
+                    type="button"
+                    onClick={() => setIsFullScreen(!isFullScreen)}
+                    className="absolute right-8 top-8 z-30 flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white shadow-sm transition-all hover:bg-slate-50 active:scale-95 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"
+                    title={isFullScreen ? "Exit Full Screen" : "Full Screen"}
+                  >
+                    {isFullScreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                  </button>
                   <SequentialBuilder
                     nodes={nodes}
                     edges={edges}
