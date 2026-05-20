@@ -1,9 +1,10 @@
 -- Omni Real-time Analytics Engine (Flink SQL)
 --
--- Drives the live dashboard. Reads ExecutionResult envelopes off Redpanda,
--- aggregates them in 1-day tumbling windows, and writes the counters into
--- Dragonfly (Redis-compatible) so the FastAPI overview endpoints can serve
--- the dashboard in O(1) without scanning Postgres.
+-- Reads ExecutionResult envelopes off Redpanda, runs tumbling windows over
+-- them, and sinks the rolled-up counters into Postgres (table flink_metrics_*).
+-- The /analytics router reads those tables directly — no Dragonfly hop needed
+-- because Postgres is already in the read path and Flink SQL has a first-class
+-- JDBC connector (Bahir's Redis bridge isn't a SQL DynamicTableFactory).
 
 -- 1. Source: outreach.results
 CREATE TABLE execution_results (
@@ -37,7 +38,7 @@ SELECT
 FROM execution_results
 GROUP BY TUMBLE(occurred_at, INTERVAL '1' DAY), status;
 
--- 3. Per-channel hourly throughput (used by the channel mix widget).
+-- 3. Per-channel hourly throughput (channel mix widget).
 CREATE VIEW hourly_channel_mix AS
 SELECT
     DATE_FORMAT(TUMBLE_START(occurred_at, INTERVAL '1' HOUR), 'yyyy-MM-dd HH') AS window_hour,
@@ -47,38 +48,43 @@ SELECT
 FROM execution_results
 GROUP BY TUMBLE(occurred_at, INTERVAL '1' HOUR), channel, status;
 
--- 4. Dragonfly sink (HSET key = "omni:metrics:daily", field = "<day>:<status>").
-CREATE TABLE dashboard_daily (
+-- 4. Postgres sinks. Tables created by alembic migration 016.
+--    Upsert mode (PRIMARY KEY) means re-emitted windows overwrite.
+CREATE TABLE flink_metrics_daily (
     window_day    STRING,
     status        STRING,
     total_events  BIGINT,
     PRIMARY KEY (window_day, status) NOT ENFORCED
 ) WITH (
-    'connector'     = 'redis',
-    'redis-mode'    = 'single',
-    'host'          = 'redis',
-    'port'          = '6379',
-    'command'       = 'HSET',
-    'additional-key'= 'omni:metrics:daily'
+    'connector'          = 'jdbc',
+    'url'                = 'jdbc:postgresql://db:5432/outreach',
+    'table-name'         = 'flink_metrics_daily',
+    'username'           = 'outreach',
+    'password'           = 'OmniOutreach2026',
+    'driver'             = 'org.postgresql.Driver',
+    'sink.buffer-flush.max-rows' = '50',
+    'sink.buffer-flush.interval' = '2s'
 );
 
-CREATE TABLE dashboard_channel_mix (
+CREATE TABLE flink_metrics_channel_mix (
     window_hour   STRING,
     channel       STRING,
     status        STRING,
     total_events  BIGINT,
     PRIMARY KEY (window_hour, channel, status) NOT ENFORCED
 ) WITH (
-    'connector'     = 'redis',
-    'redis-mode'    = 'single',
-    'host'          = 'redis',
-    'port'          = '6379',
-    'command'       = 'HSET',
-    'additional-key'= 'omni:metrics:channel_mix'
+    'connector'          = 'jdbc',
+    'url'                = 'jdbc:postgresql://db:5432/outreach',
+    'table-name'         = 'flink_metrics_channel_mix',
+    'username'           = 'outreach',
+    'password'           = 'OmniOutreach2026',
+    'driver'             = 'org.postgresql.Driver',
+    'sink.buffer-flush.max-rows' = '50',
+    'sink.buffer-flush.interval' = '2s'
 );
 
-INSERT INTO dashboard_daily
+INSERT INTO flink_metrics_daily
 SELECT window_day, status, total_events FROM daily_performance;
 
-INSERT INTO dashboard_channel_mix
+INSERT INTO flink_metrics_channel_mix
 SELECT window_hour, channel, status, total_events FROM hourly_channel_mix;
