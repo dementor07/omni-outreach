@@ -33,6 +33,22 @@ async def cron_reply_intent_timeout(ctx: dict) -> None:
     await check_reply_intent_timeouts()
 
 
+async def cron_sweep_credentials(ctx: dict) -> None:
+    """Hard-delete released / expired credential_refs.
+
+    The muscle redeems each ref once and POSTs /release on success, so most
+    rows live for seconds. This sweep just cleans up the long tail (handlers
+    that crashed before release + rows past their 10-minute TTL)."""
+    from app.routers.internal import sweep_expired_credentials
+
+    try:
+        deleted = await sweep_expired_credentials()
+        if deleted:
+            log.info("[worker] credential sweep: deleted %s expired rows", deleted)
+    except Exception as e:  # noqa: BLE001
+        log.warning("[worker] credential sweep failed: %s", e)
+
+
 async def cron_lead_gen(ctx: dict) -> None:
     """Fires any enabled lead_gen_configs whose cron_schedule is due."""
     try:
@@ -93,6 +109,9 @@ class WorkerSettings:
         # Maintenance only. Delivery and Progression are now handled by Rust/Flink.
         cron(optimize_splits, minute=set(range(0, 60, 10))),
         cron(cron_reply_intent_timeout, minute={0, 30}),
+        # Sweep expired credential_refs every 5 minutes. TTL is 10 min so this
+        # keeps the table tiny in steady state.
+        cron(cron_sweep_credentials, minute=set(range(0, 60, 5))),
     ]
     max_jobs = 4
     job_timeout = 300

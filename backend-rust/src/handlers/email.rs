@@ -1,85 +1,99 @@
-use crate::models::{ActionCommand, ExecutionResult, TaskStatus};
+//! SMTP email handler. Payload carries the rendered subject + body + sender
+//! identity. The SMTP password is redeemed via the credential ref so it
+//! never lives in the Kafka message.
+
+use crate::credentials;
+use crate::handlers::common;
+use crate::models::{ActionCommand, ExecutionResult};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{Message, SmtpTransport, Transport};
-use tracing::{info, error};
-
-fn failed(command: &ActionCommand, error: impl Into<String>, retriable: bool) -> ExecutionResult {
-    ExecutionResult {
-        command_id: command.command_id,
-        task_id: command.task_id,
-        lead_id: command.lead.id,
-        status: TaskStatus::Failed,
-        error: Some(error.into()),
-        is_retriable: retriable,
-        telemetry: serde_json::json!({}),
-        metadata: std::collections::HashMap::new(),
-        occurred_at: chrono::Utc::now(),
-    }
-}
+use serde_json::json;
+use tracing::{error, info};
 
 pub async fn handle_email(command: &ActionCommand) -> ExecutionResult {
-    let payload = &command.payload;
-    
-    // Extract SMTP settings from payload
-    let smtp_host = payload["smtp_host"].as_str().unwrap_or("");
-    let smtp_port = payload["smtp_port"].as_u64().unwrap_or(587) as u16;
-    let username = payload["smtp_username"].as_str().unwrap_or("");
-    let password = payload["smtp_password"].as_str().unwrap_or("");
-    let from = payload["from"].as_str().unwrap_or("");
+    let smtp_host = common::s(command, "smtp_host");
+    let smtp_port = command.payload["smtp_port"].as_u64().unwrap_or(587) as u16;
+    let smtp_username = common::s(command, "smtp_username");
+    let from = common::s(command, "from");
     let to = command.lead.email.clone().unwrap_or_default();
-    let subject = payload["subject"].as_str().unwrap_or("No Subject");
-    let body = payload["body"].as_str().unwrap_or("");
+    let subject = common::s(command, "subject");
+    let body = common::s(command, "body");
+    let smtp_use_tls = command.payload["smtp_use_tls"].as_bool().unwrap_or(true);
 
-    if smtp_host.is_empty() || username.is_empty() || password.is_empty() || from.is_empty() || to.is_empty() {
-        return failed(command, "email command missing smtp/from/to fields", false);
+    if smtp_host.is_empty() || smtp_username.is_empty() || from.is_empty() || to.is_empty() {
+        return common::fail(command, "email command missing smtp/from/to fields", false);
+    }
+    if body.is_empty() {
+        return common::fail(command, "email body is empty", false);
     }
 
-    let creds = Credentials::new(username.to_string(), password.to_string());
-
-    // 1. Build the SMTP Transport
-    let mailer = match SmtpTransport::relay(smtp_host) {
-        Ok(builder) => builder.credentials(creds).port(smtp_port).build(),
-        Err(e) => return failed(command, format!("SMTP relay config failed: {}", e), false),
+    let cred_ref = match command.credential_ref.as_ref() {
+        Some(r) => r.clone(),
+        None => return common::fail(command, "email command missing credential_ref", false),
+    };
+    let smtp_password = match credentials::redeem_field(&cred_ref, "smtp_password").await {
+        Ok(Some(p)) => p,
+        Ok(None) => return common::fail(command, "credential bundle missing smtp_password", false),
+        Err(e) => return common::fail(command, e, true),
     };
 
-    // 2. Build the Message
+    let creds = Credentials::new(smtp_username.clone(), smtp_password);
+
+    let mailer_builder = if smtp_use_tls {
+        SmtpTransport::starttls_relay(&smtp_host)
+    } else {
+        SmtpTransport::relay(&smtp_host)
+    };
+    let mailer = match mailer_builder {
+        Ok(b) => b.credentials(creds).port(smtp_port).build(),
+        Err(e) => return common::fail(command, format!("SMTP relay config failed: {e}"), false),
+    };
+
     let from_addr = match from.parse() {
-        Ok(addr) => addr,
-        Err(e) => return failed(command, format!("Invalid from address: {}", e), false),
+        Ok(a) => a,
+        Err(e) => return common::fail(command, format!("invalid from address: {e}"), false),
     };
     let to_addr = match to.parse() {
-        Ok(addr) => addr,
-        Err(e) => return failed(command, format!("Invalid recipient address: {}", e), false),
+        Ok(a) => a,
+        Err(e) => return common::fail(command, format!("invalid recipient: {e}"), false),
     };
     let email_msg = match Message::builder()
         .from(from_addr)
         .to(to_addr)
-        .subject(subject)
-        .body(body.to_string())
+        .subject(&subject)
+        .header(lettre::message::header::ContentType::TEXT_HTML)
+        .body(body.clone())
     {
-        Ok(msg) => msg,
-        Err(e) => return failed(command, format!("Email message build failed: {}", e), false),
+        Ok(m) => m,
+        Err(e) => return common::fail(command, format!("message build: {e}"), false),
     };
 
-    // 3. Send and Map Result
-    match mailer.send(&email_msg) {
-        Ok(_) => {
-            info!("Email sent successfully to {}", command.lead.id);
-            ExecutionResult {
-                command_id: command.command_id,
-                task_id: command.task_id,
-                lead_id: command.lead.id,
-                status: TaskStatus::Sent,
-                error: None,
-                is_retriable: false,
-                telemetry: serde_json::json!({"provider": "smtp"}),
-                metadata: std::collections::HashMap::new(),
-                occurred_at: chrono::Utc::now(),
-            }
+    // SmtpTransport is blocking; run on a worker thread so we don't block the runtime.
+    let to_for_log = to.clone();
+    let send_outcome = tokio::task::spawn_blocking(move || mailer.send(&email_msg)).await;
+    credentials::release(&cred_ref).await;
+
+    match send_outcome {
+        Ok(Ok(_)) => {
+            info!("[email] sent to {} for lead {}", to_for_log, command.lead.id);
+            common::ok(
+                command,
+                json!({"provider": "smtp", "host": smtp_host, "to": to_for_log}),
+                Some("email_sent"),
+                json!({}),
+            )
         }
-        Err(e) => {
-            error!("Email failed: {}", e);
-            failed(command, e.to_string(), true)
+        Ok(Err(e)) => {
+            error!("[email] smtp send failed: {e}");
+            // Distinguish permanent (4xx-style invalid recipient) from transient.
+            let s = e.to_string().to_lowercase();
+            let retriable = !(s.contains("invalid")
+                || s.contains("rejected")
+                || s.contains("does not exist")
+                || s.contains("user unknown")
+                || s.contains("mailbox unavailable"));
+            common::fail(command, e.to_string(), retriable)
         }
+        Err(join_err) => common::fail(command, format!("smtp join error: {join_err}"), true),
     }
 }

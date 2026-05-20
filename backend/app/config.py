@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     #   "shadow"  — Bus + Python queue (Python authoritative, Rust observer)  ← default
     #   "muscle"  — Bus only; queue insert skipped (Rust authoritative)
     execution_mode: str = "shadow"
+    # Per-channel muscle cutover. Comma-separated channel names that are
+    # authoritatively executed by the Rust muscle (Python queue insert skipped).
+    # Channels NOT in this list still flow through the legacy dispatcher.
+    # Example: "email,linkedin_invite,linkedin_dm"
+    channel_muscle_mode: str = ""
+    # Symmetric secret for the muscle ↔ control-plane internal API. Issued to
+    # the Rust container as MUSCLE_SHARED_SECRET. Never exposed to end users.
+    muscle_shared_secret: str = ""
     deploy_webhook_secret: str = ""
 
     # Optional lead gen integrations

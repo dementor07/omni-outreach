@@ -1,0 +1,333 @@
+//! Unipile-backed handlers — LinkedIn (DM, InMail, profile view),
+//! WhatsApp, Instagram, Telegram. They share the same auth scheme
+//! (X-API-KEY) and chat shape (multipart POST to /api/v1/chats or
+//! /api/v1/chats/{id}/messages).
+//!
+//! Payload fields populated by the sequencer:
+//!   - `unipile_base`        — e.g. "https://api6.unipile.com:13670"
+//!   - `unipile_account_id`  — the Unipile account UUID for the sender
+//!   - `provider_id`         — LinkedIn provider id (optional; we'll resolve from linkedin_url)
+//!   - `chat_id`             — existing chat id when this is a follow-up message
+//!   - `body`                — rendered message body
+//!   - `subject`             — InMail only
+//!   - `public_id`           — for profile view / resolve
+//!   - `attendee_identifier` — WhatsApp ("+1555@s.whatsapp.net") / Telegram username
+//!
+//! Secrets (Unipile API key) live in the credential bundle keyed by `credential_ref`.
+
+use crate::credentials;
+use crate::handlers::common;
+use crate::models::{ActionCommand, ExecutionResult};
+use crate::proxy::ProxyManager;
+use reqwest::multipart;
+use serde_json::{json, Value};
+use tracing::{info, warn};
+
+const UNIPILE_FALLBACK_BASE: &str = "https://api.unipile.com";
+
+/// Returns (api_key, base_url).
+async fn unipile_creds(command: &ActionCommand) -> Result<(String, String), String> {
+    let cred_ref = command
+        .credential_ref
+        .as_ref()
+        .ok_or_else(|| "unipile command missing credential_ref".to_string())?;
+    let bundle = credentials::redeem(cred_ref).await?;
+    let api_key = bundle
+        .get("api_key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "credential bundle missing api_key".to_string())?
+        .to_string();
+    let base = bundle
+        .get("base_url")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            command.payload["unipile_base"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| UNIPILE_FALLBACK_BASE.to_string())
+        });
+    Ok((api_key, base.trim_end_matches('/').to_string()))
+}
+
+fn public_id_from_linkedin_url(url: &str) -> String {
+    url.trim().trim_end_matches('/').split("/in/").last().unwrap_or("").to_string()
+}
+
+/// LinkedIn invite. Posts to /api/v1/users/invite. Sets `invited_at` on the lead.
+pub async fn handle_linkedin_invite(command: &ActionCommand) -> ExecutionResult {
+    let (api_key, base) = match unipile_creds(command).await {
+        Ok(v) => v,
+        Err(e) => return common::fail(command, e, true),
+    };
+    let unipile_account_id = common::s(command, "unipile_account_id");
+    if unipile_account_id.is_empty() {
+        return common::fail(command, "unipile_account_id missing in payload", false);
+    }
+
+    // Resolve provider_id — prefer payload, else look it up via /users/{public_id}.
+    let mut provider_id = common::s(command, "provider_id");
+    let client = ProxyManager::create_client(command.lead.proxy_settings.clone())
+        .unwrap_or_else(|_| reqwest::Client::new());
+    if provider_id.is_empty() {
+        let public_id = command.lead.linkedin_url.as_deref().map(public_id_from_linkedin_url).unwrap_or_default();
+        if public_id.is_empty() {
+            return common::fail(command, "neither provider_id nor linkedin_url available", false);
+        }
+        match client
+            .get(format!("{}/api/v1/users/{}", base, public_id))
+            .header("X-API-KEY", &api_key)
+            .query(&[("account_id", &unipile_account_id)])
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => {
+                let body: Value = r.json().await.unwrap_or(json!({}));
+                provider_id = body
+                    .get("provider_id")
+                    .or_else(|| body.get("id"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+            }
+            Ok(r) => return common::fail(command, format!("profile resolve HTTP {}", r.status()), true),
+            Err(e) => return common::fail(command, format!("profile resolve network: {e}"), true),
+        }
+        if provider_id.is_empty() {
+            return common::fail(command, "could not resolve provider_id from profile", false);
+        }
+    }
+
+    let resp = client
+        .post(format!("{}/api/v1/users/invite", base))
+        .header("X-API-KEY", &api_key)
+        .header("content-type", "application/json")
+        .json(&json!({"account_id": unipile_account_id, "provider_id": provider_id}))
+        .send()
+        .await;
+    credentials::release(command.credential_ref.as_deref().unwrap_or("")).await;
+
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            info!("[unipile] invite sent for lead {}", command.lead.id);
+            common::ok(
+                command,
+                json!({"provider": "unipile", "channel": "linkedin_invite", "provider_id": provider_id}),
+                Some("invite_sent"),
+                json!({"invited_at": "now", "provider_id": provider_id}),
+            )
+        }
+        Ok(r) => {
+            let status = r.status();
+            let body = r.text().await.unwrap_or_default();
+            let retriable = status.is_server_error() || status.as_u16() == 429;
+            common::fail(command, format!("unipile invite HTTP {status}: {}", body.chars().take(200).collect::<String>()), retriable)
+        }
+        Err(e) => common::fail(command, format!("unipile invite network: {e}"), true),
+    }
+}
+
+/// Profile view — fetches /api/v1/users/{public_id}. Side effect on LinkedIn
+/// is the view itself. Records network_distance back to the lead.
+pub async fn handle_linkedin_profile_view(command: &ActionCommand) -> ExecutionResult {
+    let (api_key, base) = match unipile_creds(command).await {
+        Ok(v) => v,
+        Err(e) => return common::fail(command, e, true),
+    };
+    let unipile_account_id = common::s(command, "unipile_account_id");
+    let public_id = command.lead.linkedin_url.as_deref().map(public_id_from_linkedin_url).unwrap_or_default();
+    if public_id.is_empty() || unipile_account_id.is_empty() {
+        return common::fail(command, "public_id or unipile_account_id missing", false);
+    }
+
+    let client = ProxyManager::create_client(command.lead.proxy_settings.clone())
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let resp = client
+        .get(format!("{}/api/v1/users/{}", base, public_id))
+        .header("X-API-KEY", &api_key)
+        .query(&[("account_id", &unipile_account_id)])
+        .send()
+        .await;
+    credentials::release(command.credential_ref.as_deref().unwrap_or("")).await;
+
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            let body: Value = r.json().await.unwrap_or(json!({}));
+            let distance = body.get("network_distance").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            common::ok(
+                command,
+                json!({"provider": "unipile", "channel": "linkedin_profile_view", "distance": distance}),
+                Some("profile_viewed"),
+                json!({"profile_viewed_at": "now", "linkedin_distance": distance}),
+            )
+        }
+        Ok(r) => common::fail(command, format!("profile view HTTP {}", r.status()), r.status().is_server_error()),
+        Err(e) => common::fail(command, format!("profile view network: {e}"), true),
+    }
+}
+
+/// Shared chat-send for LinkedIn DM / WhatsApp / Instagram / Telegram.
+/// `chat_kind` controls which mutation column we set ({chat_id, ig_chat_id, tg_chat_id}).
+async fn send_chat(command: &ActionCommand, event_type: &str, chat_id_col: &str) -> ExecutionResult {
+    let (api_key, base) = match unipile_creds(command).await {
+        Ok(v) => v,
+        Err(e) => return common::fail(command, e, true),
+    };
+    let unipile_account_id = common::s(command, "unipile_account_id");
+    let body_text = common::s(command, "body");
+    if unipile_account_id.is_empty() || body_text.is_empty() {
+        return common::fail(command, "unipile_account_id or body missing", false);
+    }
+
+    let existing_chat_id = command.payload["chat_id"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let client = ProxyManager::create_client(command.lead.proxy_settings.clone())
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let (resp, opened_chat_id): (Result<reqwest::Response, reqwest::Error>, Option<String>) = if let Some(chat_id) = existing_chat_id {
+        let provider_id = common::s(command, "provider_id");
+        let form = multipart::Form::new()
+            .text("account_id", unipile_account_id.clone())
+            .text("attendee_id", provider_id)
+            .text("text", body_text.clone());
+        (
+            client
+                .post(format!("{}/api/v1/chats/{}/messages", base, chat_id))
+                .header("X-API-KEY", &api_key)
+                .multipart(form)
+                .send()
+                .await,
+            None,
+        )
+    } else {
+        // Start a new chat. attendees_ids is the LinkedIn provider_id, WhatsApp
+        // JID, IG provider_id, or Telegram username — sequencer resolves it.
+        let attendee = command.payload["attendee_identifier"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .or_else(|| command.payload["provider_id"].as_str())
+            .unwrap_or("")
+            .to_string();
+        if attendee.is_empty() {
+            return common::fail(command, "no attendee identifier available", false);
+        }
+        let form = multipart::Form::new()
+            .text("account_id", unipile_account_id.clone())
+            .text("attendees_ids", attendee)
+            .text("text", body_text.clone());
+        let r = client
+            .post(format!("{}/api/v1/chats", base))
+            .header("X-API-KEY", &api_key)
+            .multipart(form)
+            .send()
+            .await;
+        (r, Some(String::new()))
+    };
+    credentials::release(command.credential_ref.as_deref().unwrap_or("")).await;
+
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            let body: Value = r.json().await.unwrap_or(json!({}));
+            let new_chat_id = body
+                .get("chat_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let mut mutations = json!({});
+            if opened_chat_id.is_some() && !new_chat_id.is_empty() {
+                mutations[chat_id_col] = json!(new_chat_id);
+            }
+            // event_type-specific column flips (mirrors Python dispatcher)
+            match event_type {
+                "dm_sent" if chat_id_col == "chat_id" => {} // no extra flag
+                "inmail_sent" => mutations["inmail_sent_at"] = json!("now"),
+                _ => {}
+            }
+            common::ok(
+                command,
+                json!({"provider": "unipile", "event": event_type, "chat_id": new_chat_id}),
+                Some(event_type),
+                mutations,
+            )
+        }
+        Ok(r) => {
+            let status = r.status();
+            let body = r.text().await.unwrap_or_default();
+            // Unipile 422 invalid_recipient → soft-skip the lead, not a retry.
+            if status.as_u16() == 422 && body.contains("invalid_recipient") {
+                warn!("[unipile] invalid recipient for lead {}: {}", command.lead.id, body.chars().take(160).collect::<String>());
+                return common::skipped(command, "invalid_recipient");
+            }
+            let retriable = status.is_server_error() || status.as_u16() == 429;
+            common::fail(command, format!("unipile chat HTTP {status}: {}", body.chars().take(200).collect::<String>()), retriable)
+        }
+        Err(e) => common::fail(command, format!("unipile chat network: {e}"), true),
+    }
+}
+
+pub async fn handle_linkedin_dm(command: &ActionCommand) -> ExecutionResult {
+    send_chat(command, "dm_sent", "chat_id").await
+}
+
+pub async fn handle_linkedin_inmail(command: &ActionCommand) -> ExecutionResult {
+    // Unipile InMail uses /api/v1/users/{provider_id}/inmail. We emit
+    // "inmail_sent" telemetry but reuse the chat plumbing for simplicity —
+    // sequencer pre-renders subject into payload.subject.
+    let (api_key, base) = match unipile_creds(command).await {
+        Ok(v) => v,
+        Err(e) => return common::fail(command, e, true),
+    };
+    let unipile_account_id = common::s(command, "unipile_account_id");
+    let provider_id = common::s(command, "provider_id");
+    let subject = common::s(command, "subject");
+    let body_text = common::s(command, "body");
+    if unipile_account_id.is_empty() || provider_id.is_empty() {
+        return common::fail(command, "unipile_account_id or provider_id missing", false);
+    }
+
+    let client = ProxyManager::create_client(command.lead.proxy_settings.clone())
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let form = multipart::Form::new()
+        .text("account_id", unipile_account_id)
+        .text("recipient_id", provider_id.clone())
+        .text("subject", subject)
+        .text("text", body_text);
+    let resp = client
+        .post(format!("{}/api/v1/inmails", base))
+        .header("X-API-KEY", &api_key)
+        .multipart(form)
+        .send()
+        .await;
+    credentials::release(command.credential_ref.as_deref().unwrap_or("")).await;
+
+    match resp {
+        Ok(r) if r.status().is_success() => common::ok(
+            command,
+            json!({"provider": "unipile", "event": "inmail_sent", "provider_id": provider_id}),
+            Some("inmail_sent"),
+            json!({"inmail_sent_at": "now"}),
+        ),
+        Ok(r) => {
+            let status = r.status();
+            let body = r.text().await.unwrap_or_default();
+            common::fail(command, format!("inmail HTTP {status}: {}", body.chars().take(200).collect::<String>()), status.is_server_error())
+        }
+        Err(e) => common::fail(command, format!("inmail network: {e}"), true),
+    }
+}
+
+pub async fn handle_whatsapp(command: &ActionCommand) -> ExecutionResult {
+    send_chat(command, "dm_sent", "chat_id").await
+}
+
+pub async fn handle_instagram(command: &ActionCommand) -> ExecutionResult {
+    send_chat(command, "dm_sent", "ig_chat_id").await
+}
+
+pub async fn handle_telegram(command: &ActionCommand) -> ExecutionResult {
+    send_chat(command, "dm_sent", "tg_chat_id").await
+}

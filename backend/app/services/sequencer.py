@@ -161,7 +161,38 @@ async def queue_next_nodes(
                 log.error(f"[sequencer] Unknown channel type: {channel_str}")
                 continue
 
-            # Create the SOTA ActionCommand
+            from app.config import settings as _settings
+            from app.services.command_resolver import resolve_command_payload
+
+            mode = (_settings.execution_mode or "shadow").lower()
+            channel_allowlist = {
+                c.strip().lower()
+                for c in (_settings.channel_muscle_mode or "").split(",")
+                if c.strip()
+            }
+            # Per-channel cutover: when the channel is in the allowlist AND
+            # execution_mode is at least "shadow", this channel goes through
+            # the muscle exclusively (queue insert skipped). Channels outside
+            # the allowlist keep flowing through the legacy dispatcher.
+            channel_muscled = channel_str in channel_allowlist and mode in ("shadow", "muscle")
+            effective_mode = "muscle" if channel_muscled else mode
+
+            # Pre-resolve fat payload (templates, sender account, proxy, …)
+            # and mint a credential ref for any secrets the muscle needs.
+            try:
+                campaign_row = await fetch_one(
+                    "SELECT * FROM campaigns WHERE id=$1", lead["campaign_id"]
+                )
+                fat_payload, credential_ref = await resolve_command_payload(
+                    channel, node, lead, campaign_row or {}
+                )
+            except Exception as e:  # noqa: BLE001 — fall back to thin payload on failure
+                log.warning(
+                    f"[sequencer] payload resolve failed for {channel_str}: {e}; falling back to thin payload"
+                )
+                fat_payload = dict(node.get("data") or {})
+                credential_ref = None
+
             command = ActionCommand(
                 command_id=uuid.uuid4(),
                 task_id=task_id,  # Legacy queue mirror id until the queue table is retired.
@@ -177,18 +208,19 @@ async def queue_next_nodes(
                     chat_id=lead.get("chat_id"),
                     extra_data=dict(lead.get("extra_data") or {}),
                 ),
-                payload=(node["data"] or {}),
-                metadata={"node_id": str(target_id), "accumulated_delay_seconds": accumulated_delay.total_seconds()},
+                payload=fat_payload,
+                metadata={
+                    "node_id": str(target_id),
+                    "accumulated_delay_seconds": accumulated_delay.total_seconds(),
+                    "credential_ref": credential_ref,
+                },
             )
 
-            # Brain/Muscle authority gate (see config.execution_mode).
-            from app.config import settings as _settings
-
-            mode = (_settings.execution_mode or "shadow").lower()
-            if mode in ("shadow", "muscle"):
+            if effective_mode in ("shadow", "muscle"):
                 await bus.publish_command(command)
 
-            if mode in ("shadow", "legacy"):
+            # Skip queue insert when the channel is muscled OR mode is "muscle".
+            if effective_mode in ("shadow", "legacy") and not channel_muscled:
                 scheduled_at = datetime.now(UTC) + accumulated_delay
                 await execute(
                     """
@@ -203,7 +235,10 @@ async def queue_next_nodes(
                     channel_str,
                     scheduled_at,
                 )
-            log.info(f"[sequencer] dispatched {channel_str} for lead {lead_id} (mode={mode})")
+            log.info(
+                f"[sequencer] dispatched {channel_str} for lead {lead_id} "
+                f"(mode={mode} effective={effective_mode} muscled={channel_muscled})"
+            )
 
         elif node_type == "delay":
             # Compute deterministic wait from node.data. Supports both legacy
