@@ -95,16 +95,18 @@ services:
   flink-sql-runner:
     build:
       context: ./backend-flink
-    # Wait for the JobManager REST API to actually answer before submitting,
-    # then keep the container alive so `compose logs` still works.
-    command: sh -lc "until curl -fsS http://flink-jobmanager:8081/overview >/dev/null 2>&1; do echo waiting for jobmanager; sleep 3; done && sleep 5 && /opt/flink/bin/sql-client.sh -f /opt/flink/usrlib/analytics.sql -m flink-jobmanager:8081 && tail -f /dev/null"
+    # Point this sql-client at the real JobManager. The `-m` flag is advisory
+    # in 1.18 — actual job submission resolves via flink-conf.yaml, so we
+    # write the right `jobmanager.rpc.address` + `rest.address` into the
+    # container's conf before starting the client.
+    command: sh -lc "until curl -fsS http://flink-jobmanager:8081/overview >/dev/null 2>&1; do echo waiting for jobmanager; sleep 3; done && sleep 5 && sed -i 's|^jobmanager.rpc.address:.*|jobmanager.rpc.address: flink-jobmanager|; s|^rest.address:.*|rest.address: flink-jobmanager|' /opt/flink/conf/flink-conf.yaml && grep -E 'jobmanager.rpc.address|rest.address' /opt/flink/conf/flink-conf.yaml && /opt/flink/bin/sql-client.sh -f /opt/flink/usrlib/analytics.sql && tail -f /dev/null"
     environment:
       - KAFKA_BROKERS=redpanda:9092
     depends_on:
       - flink-jobmanager
       - flink-taskmanager
       - redpanda
-      - redis
+      - db
     restart: on-failure
 
   # --- The Brain (Python Control Plane) ---
