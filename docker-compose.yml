@@ -95,7 +95,9 @@ services:
   flink-sql-runner:
     build:
       context: ./backend-flink
-    command: sh -lc "sleep 10 && /opt/flink/bin/sql-client.sh -f /opt/flink/usrlib/analytics.sql -m flink-jobmanager:8081 && tail -f /dev/null"
+    # Wait for the JobManager REST API to actually answer before submitting,
+    # then keep the container alive so `compose logs` still works.
+    command: sh -lc "until curl -fsS http://flink-jobmanager:8081/overview >/dev/null 2>&1; do echo waiting for jobmanager; sleep 3; done && sleep 5 && /opt/flink/bin/sql-client.sh -f /opt/flink/usrlib/analytics.sql -m flink-jobmanager:8081 && tail -f /dev/null"
     environment:
       - KAFKA_BROKERS=redpanda:9092
     depends_on:
