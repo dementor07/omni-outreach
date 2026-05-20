@@ -71,10 +71,13 @@ services:
       - flink-jobmanager
     command: taskmanager
     environment:
+      # Slot budget: orchestrator DataStream pipeline (2 slots) + daily SQL
+      # window (1) + channel-mix SQL window (1) = 4. Headroom for one extra
+      # SQL job before we need a second TaskManager.
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: flink-jobmanager
-        taskmanager.numberOfTaskSlots: 2
+        taskmanager.numberOfTaskSlots: 6
       - KAFKA_BROKERS=redpanda:9092
 
   journey-orchestrator:
