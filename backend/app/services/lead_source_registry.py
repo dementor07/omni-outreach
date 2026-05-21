@@ -18,6 +18,8 @@ from .lead_sources.github import GitHubSource
 from .lead_sources.google_sheets import GoogleSheetsSource
 from .lead_sources.hunter import HunterSource
 from .lead_sources.manual import ManualSource
+from .lead_sources.naukri import NaukriSource
+from .lead_sources.producthunt import ProductHuntSource
 from .lead_sources.proxycurl import ProxyCurlSource
 
 
@@ -46,4 +48,6 @@ registry.register(HunterSource())
 registry.register(ProxyCurlSource())
 registry.register(GitHubSource())
 registry.register(GoogleSheetsSource())
+registry.register(NaukriSource())
+registry.register(ProductHuntSource())
 registry.register(ManualSource())

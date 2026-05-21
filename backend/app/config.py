@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     apollo_api_key: str = ""
     hunter_api_key: str = ""
     proxycurl_api_key: str = ""
+    producthunt_token: str = ""  # ProductHunt developer token (free)
     github_token: str = ""  # optional, raises rate limit from 60→5000 req/hr
 
     # SMS (Twilio) — optional
