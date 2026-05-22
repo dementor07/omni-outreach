@@ -117,6 +117,11 @@ services:
     build:
       context: .
       dockerfile: ./backend/Dockerfile
+    # .env carries the optional lead-source API keys (APOLLO_API_KEY,
+    # HUNTER_API_KEY, PRODUCTHUNT_TOKEN, …). `environment:` below overrides
+    # what we want pinned in compose (DB, Redis, etc.).
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
       REDIS_URL: redis://:d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17@redis:6379
@@ -144,6 +149,8 @@ services:
       context: .
       dockerfile: ./backend/Dockerfile
     command: python -m app.services.stream_sync
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
       KAFKA_BROKERS: redpanda:9092
@@ -161,6 +168,8 @@ services:
       context: .
       dockerfile: ./backend/Dockerfile
     command: python -m app.services.transition_worker
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
       KAFKA_BROKERS: redpanda:9092
