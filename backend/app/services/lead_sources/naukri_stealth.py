@@ -132,6 +132,16 @@ class NaukriStealthSource(LeadSource):
                     except Exception as e:  # noqa: BLE001
                         log.error("[naukri_stealth] page %s navigation failed: %s", page, e)
                         break
+                    # Naukri sits behind Akamai EdgeSuite — datacenter IPs
+                    # get a hard "Access Denied" response before any DOM
+                    # renders. Detect and bail loudly so the operator knows
+                    # to attach a residential proxy.
+                    if "Access Denied" in (driver.page_source or "") or "errors.edgesuite.net" in (driver.page_source or ""):
+                        log.error(
+                            "[naukri_stealth] Akamai blocked this datacenter IP. "
+                            "Attach a residential proxy or use the naukri (Apify) source instead."
+                        )
+                        break
                     leads_on_page = self._parse_dom(driver)
                     log.info("[naukri_stealth] page %s → %s tuples", page, len(leads_on_page))
                     if not leads_on_page:

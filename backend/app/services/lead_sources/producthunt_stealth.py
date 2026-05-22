@@ -89,10 +89,28 @@ class ProductHuntStealthSource(LeadSource):
         headless = bool(config.get("headless", True))
 
         def _run() -> list[RawLead]:
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            from selenium.common.exceptions import TimeoutException
+
             with build_driver(headless=headless) as driver:
                 log.info("[ph_stealth] GET %s", archive_url)
+                driver.set_page_load_timeout(45)
                 driver.get(archive_url)
-                # Bounded scroll until the card count stops growing.
+                # PH hydrates client-side. Wait for at least one product card
+                # before we start scrolling, otherwise scroll_until_stable
+                # exits early with zero cards.
+                try:
+                    WebDriverWait(driver, 25).until(
+                        EC.presence_of_element_located(
+                            (By.CSS_SELECTOR, "section[data-test^='post-item-']")
+                        )
+                    )
+                except TimeoutException:
+                    log.warning("[ph_stealth] no cards hydrated within 25s — likely bot-walled")
+                    return []
+
                 final_count = scroll_until_stable(
                     driver,
                     "section[data-test^='post-item-']",
