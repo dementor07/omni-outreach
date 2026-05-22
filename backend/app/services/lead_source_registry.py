@@ -19,7 +19,9 @@ from .lead_sources.google_sheets import GoogleSheetsSource
 from .lead_sources.hunter import HunterSource
 from .lead_sources.manual import ManualSource
 from .lead_sources.naukri import NaukriSource
+from .lead_sources.naukri_stealth import NaukriStealthSource
 from .lead_sources.producthunt import ProductHuntSource
+from .lead_sources.producthunt_stealth import ProductHuntStealthSource
 from .lead_sources.proxycurl import ProxyCurlSource
 
 
@@ -49,5 +51,7 @@ registry.register(ProxyCurlSource())
 registry.register(GitHubSource())
 registry.register(GoogleSheetsSource())
 registry.register(NaukriSource())
+registry.register(NaukriStealthSource())
 registry.register(ProductHuntSource())
+registry.register(ProductHuntStealthSource())
 registry.register(ManualSource())

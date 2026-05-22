@@ -162,21 +162,42 @@ def _source_specs() -> list[SourceSpec]:
             cron_schedule="45 */3 * * *",
             credit_budget=150,
         ),
+        # Naukri — both lanes. The Apify path is ToS-friendly (Apify holds
+        # the risk via residential proxies + their ToS); the stealth path is
+        # zero-cost but uses undetected-chromedriver to bypass the captcha
+        # wall — only enable when legal context allows.
         SourceSpec(
             source_type="naukri",
-            label="Naukri — India marketing decision-makers",
+            label="Naukri (Apify) — India marketing decision-makers",
             config={
                 "keywords": "Marketing Director Head Growth Agency",
                 "location": "India",
                 "experience_years_min": 7,
-                "max_pages": 4,
+                "max_results": 100,
             },
             cron_schedule="50 */4 * * *",
             credit_budget=None,
         ),
         SourceSpec(
+            source_type="naukri_stealth",
+            label="Naukri (Stealth) — India marketing decision-makers",
+            config={
+                "keywords": "Marketing Director Head Growth Agency",
+                "location": "India",
+                "experience_years_min": 7,
+                "max_pages": 2,
+                "headless": True,
+            },
+            # Slightly offset from the Apify lane so they don't both spike
+            # at the same minute. Less frequent — stealth runs are heavier.
+            cron_schedule="5 */6 * * *",
+            credit_budget=None,
+        ),
+        # ProductHunt — same split. Official GraphQL API (token-keyed) and
+        # the stealth scraper (no token, scrape leaderboard).
+        SourceSpec(
             source_type="producthunt",
-            label="ProductHunt — marketing tool makers",
+            label="ProductHunt (API) — marketing tool makers",
             config={
                 "topic": "marketing",
                 "per_page": 20,
@@ -184,6 +205,18 @@ def _source_specs() -> list[SourceSpec]:
                 "min_votes": 100,
             },
             cron_schedule="20 */6 * * *",
+            credit_budget=None,
+        ),
+        SourceSpec(
+            source_type="producthunt_stealth",
+            label="ProductHunt (Stealth) — marketing leaderboard",
+            config={
+                "archive_url": "https://www.producthunt.com/leaderboard/all",
+                "max_products": 80,
+                "max_scrolls": 20,
+                "headless": True,
+            },
+            cron_schedule="40 */8 * * *",
             credit_budget=None,
         ),
     ]
@@ -288,11 +321,23 @@ def _dag_spec(config_ids: dict[str, str]) -> tuple[list[NodeSpec], list[tuple[st
 
     edges: list[tuple[str, str, str]] = []
 
-    # Per-source vertical lane: pull → tag → screen → enrich → final tag
+    # Per-source vertical lane: pull → tag → screen → enrich → final tag.
+    # 8 sources today — 4 API-keyed + 2 Naukri (Apify + stealth) + 2 PH
+    # (API + stealth). Lanes laid out left-to-right, centred on start node.
     lane_x_step = 320.0
     y_root = 120.0
-    for i, source in enumerate(["apollo", "hunter", "proxycurl", "apify_jobs", "naukri", "producthunt"]):
-        col_x = (i - 2.5) * lane_x_step  # centre lanes around start
+    lane_sources = [
+        "apollo",
+        "hunter",
+        "proxycurl",
+        "apify_jobs",
+        "naukri",
+        "naukri_stealth",
+        "producthunt",
+        "producthunt_stealth",
+    ]
+    for i, source in enumerate(lane_sources):
+        col_x = (i - (len(lane_sources) - 1) / 2.0) * lane_x_step
 
         pull = NodeSpec(
             key=f"pull_{source}",

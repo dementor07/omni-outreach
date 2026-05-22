@@ -19,6 +19,9 @@ slowapi>=0.1.9
 cryptography>=43.0
 croniter>=2.0
 beautifulsoup4>=4.12
+# Stealth scraping (Naukri / ProductHunt fallback paths)
+selenium>=4.20
+undetected-chromedriver>=3.5
 # Dev / test
 ruff>=0.11
 pytest>=8.0,<9.0
