@@ -28,13 +28,21 @@ RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Point undetected-chromedriver at the system chromium binary so it doesn't
-# try to launch a missing /opt/google/chrome/chrome.
+# try to launch a missing /opt/google/chrome/chrome. uc also writes a patched
+# driver binary into $HOME/.local — the non-root `app` user gets HOME=/home/app
+# (created below) instead of the systemd default /nonexistent.
 ENV CHROME_BIN=/usr/bin/chromium \
     CHROMIUM_PATH=/usr/bin/chromium \
-    STEALTH_USER_DATA_DIR=/tmp/chrome_profile
+    STEALTH_USER_DATA_DIR=/tmp/chrome_profile \
+    HOME=/home/app \
+    XDG_CACHE_HOME=/home/app/.cache
 
-# Non-root user
-RUN addgroup --system app && adduser --system --ingroup app app
+# Non-root user with a real home so undetected-chromedriver can cache its
+# patched driver under $HOME/.local/share/undetected_chromedriver.
+RUN addgroup --system app && \
+    adduser --system --ingroup app --home /home/app app && \
+    mkdir -p /home/app/.cache /home/app/.local/share && \
+    chown -R app:app /home/app
 
 WORKDIR /app
 
