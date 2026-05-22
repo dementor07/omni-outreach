@@ -149,14 +149,37 @@ class ProductHuntStealthSource(LeadSource):
             if len(out) >= limit:
                 break
             try:
-                # The clickable card is typically <div> 4-5 ancestors up.
-                # Use JS to find the closest data-test^="thread-" container.
+                # The vote button's data-test is "thread-<id>-vote-button".
+                # Each card's product link points at /posts/<slug>?... where
+                # the slug is unique per card. To get THIS button's product
+                # link (not someone else's), climb until the ancestor's own
+                # subtree contains exactly one /posts/ link.
+                post_link_href = driver.execute_script(
+                    "let el = arguments[0];"
+                    "while (el && el.parentElement) {"
+                    "  el = el.parentElement;"
+                    "  if (!el.querySelectorAll) continue;"
+                    "  const links = el.querySelectorAll('a[href*=\"/posts/\"]');"
+                    "  if (links.length === 1) return links[0].getAttribute('href');"
+                    "  if (links.length > 1) return null;"  # too broad — skip
+                    "}"
+                    "return null;",
+                    btn,
+                )
+                if not post_link_href:
+                    continue
+                # Re-find the same container we'll read from. Same JS again
+                # so we can extract tagline/tags relative to it.
                 container = driver.execute_script(
                     "let el = arguments[0];"
                     "while (el && el.parentElement) {"
                     "  el = el.parentElement;"
-                    "  if (el.querySelector && el.querySelector('a[href*=\"/posts/\"]')) return el;"
-                    "} return null;",
+                    "  if (!el.querySelectorAll) continue;"
+                    "  const links = el.querySelectorAll('a[href*=\"/posts/\"]');"
+                    "  if (links.length === 1) return el;"
+                    "  if (links.length > 1) return null;"
+                    "}"
+                    "return null;",
                     btn,
                 )
                 if container is None:
