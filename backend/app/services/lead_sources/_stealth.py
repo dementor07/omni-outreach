@@ -62,6 +62,33 @@ def _make_options(user_data_dir: str, headless: bool):
     return options
 
 
+def _detect_chromium_major() -> int | None:
+    """Return the system Chromium major version, or None if not installed.
+
+    uc.Chrome needs version_main to match the installed browser so it
+    downloads the right chromedriver build. Without this, uc will pull the
+    latest stable driver (currently 149) which can't connect to the apt-shipped
+    Chromium (148) and fails with SessionNotCreatedException.
+    """
+    import subprocess
+
+    binary = os.environ.get("CHROME_BIN", "/usr/bin/chromium")
+    try:
+        out = subprocess.check_output([binary, "--version"], stderr=subprocess.STDOUT, timeout=5)
+    except (subprocess.SubprocessError, FileNotFoundError, OSError) as e:
+        log.warning("[stealth] cannot detect Chromium version: %s", e)
+        return None
+    # e.g. "Chromium 148.0.7778.178 built on Debian GNU/Linux 13 (trixie)"
+    parts = out.decode("utf-8", "replace").split()
+    for token in parts:
+        if token[:1].isdigit() and "." in token:
+            try:
+                return int(token.split(".", 1)[0])
+            except ValueError:
+                continue
+    return None
+
+
 @contextmanager
 def build_driver(
     *,
@@ -78,9 +105,16 @@ def build_driver(
     import undetected_chromedriver as uc  # local import
 
     options = _make_options(user_data_dir, headless)
+    # Force the chromedriver download to match the installed Chromium so we
+    # don't hit "ChromeDriver only supports Chrome version 149 / browser is
+    # 148" mismatches on apt-shipped images.
+    version_main = _detect_chromium_major()
+    if version_main:
+        log.info("[stealth] pinning uc to Chromium major %s", version_main)
+
     driver = None
     try:
-        driver = uc.Chrome(options=options)
+        driver = uc.Chrome(options=options, version_main=version_main)
         yield driver
     finally:
         if driver is not None:
