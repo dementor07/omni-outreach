@@ -19,7 +19,11 @@ slowapi>=0.1.9
 cryptography>=43.0
 croniter>=2.0
 beautifulsoup4>=4.12
-# Stealth scraping (Naukri / ProductHunt fallback paths)
+# Stealth scraping (Naukri / ProductHunt fallback paths).
+# setuptools is pinned because Python 3.12 removed distutils from stdlib and
+# undetected-chromedriver 3.5.x still imports it; setuptools ships a vendored
+# distutils that gets shimmed back in.
+setuptools>=68
 selenium>=4.20
 undetected-chromedriver>=3.5
 # Dev / test
