@@ -54,9 +54,13 @@ class ProductHuntStealthSource(LeadSource):
             "properties": {
                 "archive_url": {
                     "type": "string",
-                    "title": "Archive URL",
-                    "default": "https://www.producthunt.com/leaderboard/all",
-                    "description": "Starting URL. Use category leaderboards to focus on a topic (e.g. .../leaderboard/marketing).",
+                    "title": "Starting URL",
+                    "default": "https://www.producthunt.com/",
+                    "description": (
+                        "Starting URL. The PH homepage actually hydrates products "
+                        "under headless Chromium; /leaderboard and /all return "
+                        "stub HTML. Use /?period=last_week etc. to bias the window."
+                    ),
                 },
                 "max_products": {
                     "type": "integer",
@@ -83,7 +87,7 @@ class ProductHuntStealthSource(LeadSource):
     async def search(self, config: dict) -> list[RawLead]:
         from ._stealth import build_driver, in_thread, scroll_until_stable
 
-        archive_url = (config.get("archive_url") or "https://www.producthunt.com/leaderboard/all").strip()
+        archive_url = (config.get("archive_url") or "https://www.producthunt.com/").strip()
         max_products = int(config.get("max_products", 100))
         max_scrolls = int(config.get("max_scrolls", 30))
         headless = bool(config.get("headless", True))
@@ -101,24 +105,26 @@ class ProductHuntStealthSource(LeadSource):
                 # PH hydrates client-side. Wait for at least one product card
                 # before we start scrolling, otherwise scroll_until_stable
                 # exits early with zero cards.
+                # PH homepage cards have data-test="thread-<id>-vote-button".
+                # Wait for the first one to hydrate before scrolling.
                 try:
                     WebDriverWait(driver, 25).until(
                         EC.presence_of_element_located(
-                            (By.CSS_SELECTOR, "section[data-test^='post-item-']")
+                            (By.CSS_SELECTOR, "button[data-test*='vote-button']")
                         )
                     )
                 except TimeoutException:
-                    log.warning("[ph_stealth] no cards hydrated within 25s — likely bot-walled")
+                    log.warning("[ph_stealth] no vote buttons hydrated within 25s — likely bot-walled")
                     return []
 
                 final_count = scroll_until_stable(
                     driver,
-                    "section[data-test^='post-item-']",
+                    "button[data-test*='vote-button']",
                     pause_seconds=2.0,
                     max_empty_scrolls=3,
                     max_scrolls=max_scrolls,
                 )
-                log.info("[ph_stealth] loaded %s cards on archive page", final_count)
+                log.info("[ph_stealth] loaded %s vote-button anchors", final_count)
                 return self._extract_cards(driver, max_products)
 
         leads = await in_thread(_run)
@@ -126,54 +132,84 @@ class ProductHuntStealthSource(LeadSource):
         return leads
 
     def _extract_cards(self, driver, limit: int) -> list[RawLead]:
+        """Walk every vote-button and lift the product name + URL from its
+        nearest ancestor card.
+
+        PH 2026 DOM: each card has a button with ``data-test="thread-<id>-
+        vote-button"`` and contains an ``<a href="/posts/<slug>">`` wrapping
+        the product name. Tags + tagline are siblings of that anchor.
+        """
         from selenium.webdriver.common.by import By
-        from selenium.common.exceptions import StaleElementReferenceException, NoSuchElementException
+        from selenium.common.exceptions import StaleElementReferenceException
 
         out: list[RawLead] = []
-        cards = driver.find_elements(By.CSS_SELECTOR, "section[data-test^='post-item-']")
-        for card in cards:
+        seen_slugs: set[str] = set()
+        vote_buttons = driver.find_elements(By.CSS_SELECTOR, "button[data-test*='vote-button']")
+        for btn in vote_buttons:
             if len(out) >= limit:
                 break
             try:
-                # Product name + post URL
-                name_el = card.find_element(By.CSS_SELECTOR, "span[data-test^='post-name-'] a")
-                product_name = (name_el.text or "").strip()
-                product_url = name_el.get_attribute("href") or ""
+                # The clickable card is typically <div> 4-5 ancestors up.
+                # Use JS to find the closest data-test^="thread-" container.
+                container = driver.execute_script(
+                    "let el = arguments[0];"
+                    "while (el && el.parentElement) {"
+                    "  el = el.parentElement;"
+                    "  if (el.querySelector && el.querySelector('a[href*=\"/posts/\"]')) return el;"
+                    "} return null;",
+                    btn,
+                )
+                if container is None:
+                    continue
+
+                # Product link → product name + URL.
+                try:
+                    post_link = container.find_element(By.CSS_SELECTOR, "a[href*='/posts/']")
+                except Exception:  # noqa: BLE001
+                    continue
+                product_url = post_link.get_attribute("href") or ""
                 if product_url.startswith("/"):
                     product_url = "https://www.producthunt.com" + product_url
+                product_name = (post_link.text or "").strip() or self._safe_text(
+                    container, "[class*=name], strong"
+                )
+                slug = product_url.rstrip("/").split("/posts/")[-1] if "/posts/" in product_url else product_url
+                if slug in seen_slugs:
+                    continue
+                seen_slugs.add(slug)
 
-                # Tagline / description
+                # Tagline.
+                tagline = self._safe_text(container, "a[href*='/posts/'] + *, [class*=text-secondary]")
+                # Vote count.
+                raw_vote = (btn.text or "").strip()
                 try:
-                    description = card.find_element(By.CSS_SELECTOR, "span.text-16.text-secondary").text.strip()
-                except NoSuchElementException:
-                    description = ""
+                    votes = int("".join(ch for ch in raw_vote if ch.isdigit()) or "0")
+                except ValueError:
+                    votes = 0
 
-                # Tags
+                # Topics if present.
                 try:
                     tags = [
                         (t.text or "").strip()
-                        for t in card.find_elements(By.CSS_SELECTOR, "a[href^='/topics/']")
+                        for t in container.find_elements(By.CSS_SELECTOR, "a[href^='/topics/']")
+                        if (t.text or "").strip()
                     ]
                 except Exception:  # noqa: BLE001
                     tags = []
 
-                # Vote count
-                try:
-                    vote_btn = card.find_element(By.CSS_SELECTOR, "button[data-test='vote-button']")
-                    raw = (vote_btn.text or "").strip()
-                    votes = int("".join(ch for ch in raw if ch.isdigit()) or "0")
-                except Exception:  # noqa: BLE001
-                    votes = 0
+                if not product_name and not product_url:
+                    continue
 
                 out.append(
                     RawLead(
                         first_name="",
                         last_name="",
                         company=product_name,
-                        headline=description,
+                        headline=tagline,
                         job_url=product_url,
                         extra={
                             "producthunt_post_url": product_url,
+                            "producthunt_slug": slug,
                             "producthunt_tags": tags,
                             "producthunt_votes": votes,
                             "needs_person_enrichment": True,
@@ -187,3 +223,13 @@ class ProductHuntStealthSource(LeadSource):
                 log.warning("[ph_stealth] card extract failed: %s", e)
                 continue
         return out
+
+    @staticmethod
+    def _safe_text(node, css: str) -> str:
+        from selenium.webdriver.common.by import By
+
+        try:
+            el = node.find_element(By.CSS_SELECTOR, css)
+        except Exception:  # noqa: BLE001
+            return ""
+        return (el.text or "").strip()
