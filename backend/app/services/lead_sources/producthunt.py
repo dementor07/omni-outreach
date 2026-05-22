@@ -5,6 +5,13 @@ Pulls makers from ProductHunt via the public GraphQL API
 a ``makers`` collection — the founders / engineers / marketers who shipped
 the product. We extract those people as leads.
 
+Auth (PH accepts two forms; we try whichever is configured):
+  - OAuth client_credentials: POST API_KEY + API_SECRET to /v2/oauth/token
+    and bearer the returned ``access_token``. Preferred — refreshable.
+  - Personal Developer Token: paste the long-lived token from
+    /v2/oauth/applications directly into ``PRODUCTHUNT_TOKEN``. Simpler,
+    but tied to the issuing user and harder to rotate at scale.
+
 A maker's public profile reliably surfaces:
   - name, username, profile URL (producthunt.com/@username)
   - headline (bio)
@@ -33,6 +40,42 @@ from .base import LeadSource, RawLead
 log = logging.getLogger(__name__)
 
 PH_API = "https://api.producthunt.com/v2/api/graphql"
+PH_OAUTH_URL = "https://api.producthunt.com/v2/oauth/token"
+
+
+async def _resolve_access_token() -> str | None:
+    """Return a usable bearer token for the GraphQL API, or None.
+
+    Preference order:
+      1. client_credentials exchange against API_KEY/API_SECRET if both are set.
+      2. Raw ``PRODUCTHUNT_TOKEN`` if non-empty.
+    """
+    api_key = (getattr(settings, "producthunt_api_key", "") or "").strip()
+    api_secret = (getattr(settings, "producthunt_api_secret", "") or "").strip()
+    if api_key and api_secret:
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.post(
+                    PH_OAUTH_URL,
+                    json={
+                        "client_id": api_key,
+                        "client_secret": api_secret,
+                        "grant_type": "client_credentials",
+                    },
+                )
+            if r.status_code == 200:
+                token = (r.json() or {}).get("access_token")
+                if token:
+                    log.info("[producthunt] minted oauth client_credentials token")
+                    return token
+            log.warning(
+                "[producthunt] client_credentials exchange failed HTTP %s: %s",
+                r.status_code, r.text[:200],
+            )
+        except Exception as e:  # noqa: BLE001
+            log.error("[producthunt] oauth exchange error: %s", e)
+    direct = (getattr(settings, "producthunt_token", "") or "").strip()
+    return direct or None
 
 # GraphQL query — pull recent posts in a topic with their makers expanded.
 # Topics are slugs like "marketing", "saas", "advertising", "growth-hacking".
@@ -93,7 +136,13 @@ class ProductHuntSource(LeadSource):
 
     @property
     def is_available(self) -> bool:
-        return bool(getattr(settings, "producthunt_token", "") or "")
+        # Either auth path is enough — direct dev token, or client_credentials.
+        direct = bool(getattr(settings, "producthunt_token", "") or "")
+        oauth = bool(
+            (getattr(settings, "producthunt_api_key", "") or "")
+            and (getattr(settings, "producthunt_api_secret", "") or "")
+        )
+        return direct or oauth
 
     def config_schema(self) -> dict:
         return {
@@ -133,9 +182,9 @@ class ProductHuntSource(LeadSource):
         }
 
     async def search(self, config: dict) -> list[RawLead]:
-        token: str = getattr(settings, "producthunt_token", "") or ""
+        token = await _resolve_access_token()
         if not token:
-            log.warning("[producthunt] PRODUCTHUNT_TOKEN not configured")
+            log.warning("[producthunt] no usable PH credentials configured")
             return []
 
         topic: str = (config.get("topic") or "marketing").strip()
