@@ -41,9 +41,10 @@ class Settings(BaseSettings):
     apollo_api_key: str = ""
     hunter_api_key: str = ""
     proxycurl_api_key: str = ""
-    producthunt_token: str = ""  # ProductHunt Developer Token (personal, user-context)
-    producthunt_api_key: str = ""  # ProductHunt OAuth API Key (from /v2/oauth/applications)
-    producthunt_api_secret: str = ""  # ProductHunt OAuth API Secret (paired with api_key)
+    producthunt_token: str = ""  # ProductHunt Developer Token (legacy; unused since PH retired user-token bearer auth)
+    producthunt_api_key: str = ""  # ProductHunt OAuth Client ID (from /v2/oauth/applications)
+    producthunt_api_secret: str = ""  # ProductHunt OAuth Client Secret (paired with api_key)
+    producthunt_oauth_redirect_uri: str = "https://srv1575227.hstgr.cloud/api/oauth/producthunt/callback"
     github_token: str = ""  # optional, raises rate limit from 60→5000 req/hr
 
     # SMS (Twilio) — optional

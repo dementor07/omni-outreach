@@ -28,6 +28,7 @@ from app.routers import (
     leads,
     notifications,
     oauth,
+    oauth_producthunt,
     overview,
     queue,
     sequences,
@@ -111,6 +112,7 @@ app.include_router(inbox.router, prefix="/inbox", tags=["inbox"])
 app.include_router(approvals.router, prefix="/approvals", tags=["approvals"])
 app.include_router(agents.router, prefix="/agents", tags=["agents"])
 app.include_router(oauth.router, prefix="/oauth", tags=["oauth"])
+app.include_router(oauth_producthunt.router, prefix="/oauth/producthunt", tags=["oauth"])
 app.include_router(fragments.router, prefix="/fragments", tags=["fragments"])
 app.include_router(internal.router, prefix="/internal", tags=["internal"])
 

@@ -43,13 +43,30 @@ PH_API = "https://api.producthunt.com/v2/api/graphql"
 PH_OAUTH_URL = "https://api.producthunt.com/v2/oauth/token"
 
 
-async def _resolve_access_token() -> str | None:
+async def _resolve_access_token(preferred_user_id: str | None = None) -> str | None:
     """Return a usable bearer token for the GraphQL API, or None.
 
     Preference order:
-      1. client_credentials exchange against API_KEY/API_SECRET if both are set.
-      2. Raw ``PRODUCTHUNT_TOKEN`` if non-empty.
+      1. Per-operator user token from oauth_tokens table. This is the only
+         token tier that returns un-redacted makers + real votes. Resolved
+         via ``oauth_producthunt.resolve_user_access_token`` which handles
+         auto-refresh transparently.
+      2. client_credentials exchange against API_KEY/API_SECRET. Works for
+         products + topics + tagline but redacts maker PII and zeroes votes.
+      3. Raw ``PRODUCTHUNT_TOKEN`` (legacy; PH retired this auth mode).
     """
+    # 1. User-scoped token via oauth_tokens
+    try:
+        from app.routers.oauth_producthunt import resolve_user_access_token
+
+        token = await resolve_user_access_token(preferred_user_id=preferred_user_id)
+        if token:
+            log.info("[producthunt] using per-operator user token (full PII access)")
+            return token
+    except Exception as e:  # noqa: BLE001 — fall through to app-only auth
+        log.warning("[producthunt] user-token resolver failed: %s", e)
+
+    # 2. client_credentials fallback (data is partial — see module docstring)
     api_key = (getattr(settings, "producthunt_api_key", "") or "").strip()
     api_secret = (getattr(settings, "producthunt_api_secret", "") or "").strip()
     if api_key and api_secret:
@@ -64,16 +81,21 @@ async def _resolve_access_token() -> str | None:
                     },
                 )
             if r.status_code == 200:
-                token = (r.json() or {}).get("access_token")
-                if token:
-                    log.info("[producthunt] minted oauth client_credentials token")
-                    return token
+                tok = (r.json() or {}).get("access_token")
+                if tok:
+                    log.info(
+                        "[producthunt] using client_credentials token "
+                        "(makers + votes will be redacted)"
+                    )
+                    return tok
             log.warning(
                 "[producthunt] client_credentials exchange failed HTTP %s: %s",
                 r.status_code, r.text[:200],
             )
         except Exception as e:  # noqa: BLE001
             log.error("[producthunt] oauth exchange error: %s", e)
+
+    # 3. Legacy raw token (kept for compatibility; PH no longer accepts it)
     direct = (getattr(settings, "producthunt_token", "") or "").strip()
     return direct or None
 
