@@ -29,10 +29,13 @@ for url in URLS:
         print(f"    title: {driver.title}")
         print(f"    length: {len(html)}")
 
-        test_attrs = sorted(set(re.findall(r'data-test="([^"]+)"', html)))
-        print(f"    data-test attrs ({len(test_attrs)}):")
-        for ta in test_attrs[:40]:
-            print(f"      · {ta}")
+        # Find all /posts/ anchors and the surrounding section markup.
+        post_links = re.findall(r'<a[^>]*href="(/posts/[^"#?]+)[^"]*"[^>]*>', html)
+        print(f"    /posts/ anchors: {len(post_links)} — first 10: {post_links[:10]}")
 
-        for pat in ("post-item-", "vote-button", "product-item", "LaunchCard", "HomepageFeed", "leaderboard"):
-            print(f"    {pat:25s} → {len(re.findall(re.escape(pat), html))}")
+        section_marks = re.findall(r'data-test="(homepage-section-[^"]+)"', html)
+        print(f"    homepage sections: {section_marks}")
+
+        # Look for thumbnail data-test attrs (one per product card)
+        thumbs = re.findall(r'data-test="([^"]+-thumbnail)"', html)
+        print(f"    thumbnail anchors: {len(thumbs)} — first 10: {thumbs[:10]}")
