@@ -77,11 +77,20 @@ async def _resolve_access_token() -> str | None:
     direct = (getattr(settings, "producthunt_token", "") or "").strip()
     return direct or None
 
-# GraphQL query — pull recent posts in a topic with their makers expanded.
+# GraphQL query — pull top-voted posts in a topic.
+#
+# IMPORTANT: PH only returns real maker PII (name, username, profile URL) for
+# user-scoped tokens (authorization_code grant). For app-only tokens (the
+# client_credentials grant), maker fields are always returned as "[REDACTED]"
+# with id "0". We still query makers in case the operator wires a user token
+# later, but we can't rely on them being populated.
+#
 # Topics are slugs like "marketing", "saas", "advertising", "growth-hacking".
+# Order RANKING returns posts sorted by votes — much more useful than NEWEST,
+# which returns just-launched posts with 0 votes.
 _QUERY = """
 query ($topic: String!, $first: Int!, $after: String) {
-  posts(topic: $topic, first: $first, after: $after, order: NEWEST) {
+  posts(topic: $topic, first: $first, after: $after, order: RANKING) {
     pageInfo { hasNextPage endCursor }
     edges {
       node {
@@ -90,7 +99,9 @@ query ($topic: String!, $first: Int!, $after: String) {
         slug
         tagline
         url
+        website
         votesCount
+        topics { edges { node { name slug } } }
         makers {
           id
           name
@@ -98,7 +109,6 @@ query ($topic: String!, $first: Int!, $after: String) {
           headline
           twitterUsername
           websiteUrl
-          profileImage
           url
         }
       }
@@ -233,7 +243,43 @@ class ProductHuntSource(LeadSource):
                         continue
                     company = post.get("name") or ""
                     company_url = post.get("url") or ""
-                    for maker in post.get("makers") or []:
+                    company_website = post.get("website") or None
+                    tagline = post.get("tagline") or ""
+                    topics = [
+                        (e or {}).get("node", {}).get("slug")
+                        for e in ((post.get("topics") or {}).get("edges") or [])
+                    ]
+                    makers_list = post.get("makers") or []
+                    # PH redacts makers under app-only auth (id="0",
+                    # name="[REDACTED]"). Detect and emit a company-level lead
+                    # instead so downstream enrichment can resolve real people.
+                    real_makers = [m for m in makers_list if m.get("id") and m["id"] != "0"]
+                    if not real_makers and company:
+                        slug = post.get("slug") or company.lower()
+                        if slug in seen_makers:
+                            continue
+                        seen_makers.add(slug)
+                        all_leads.append(
+                            RawLead(
+                                first_name="",
+                                last_name="",
+                                headline=tagline,
+                                company=company,
+                                job_url=company_website or company_url,
+                                extra={
+                                    "producthunt_post_slug": post.get("slug"),
+                                    "producthunt_post_url": company_url,
+                                    "producthunt_website": company_website,
+                                    "producthunt_topics": [t for t in topics if t],
+                                    "post_votes": post.get("votesCount"),
+                                    "needs_person_enrichment": True,
+                                    "source_variant": "api_app_token",
+                                },
+                            )
+                        )
+                        fresh += 1
+                        continue
+                    for maker in real_makers:
                         maker_id = maker.get("id") or maker.get("username") or ""
                         if not maker_id or maker_id in seen_makers:
                             continue
@@ -245,7 +291,7 @@ class ProductHuntSource(LeadSource):
                                 first_name=first,
                                 last_name=last,
                                 linkedin_url=linkedin_url,
-                                headline=maker.get("headline") or "",
+                                headline=maker.get("headline") or tagline,
                                 company=company,
                                 job_url=maker.get("url"),
                                 extra={
@@ -253,6 +299,8 @@ class ProductHuntSource(LeadSource):
                                     "producthunt_username": maker.get("username"),
                                     "producthunt_post_slug": post.get("slug"),
                                     "producthunt_post_url": company_url,
+                                    "producthunt_website": company_website,
+                                    "producthunt_topics": [t for t in topics if t],
                                     "twitter_username": maker.get("twitterUsername"),
                                     "website_url": maker.get("websiteUrl"),
                                     "post_votes": post.get("votesCount"),
