@@ -18,6 +18,7 @@ from app.routers import (
     analytics,
     approvals,
     auth,
+    auth_google,
     blacklist,
     campaigns,
     fragments,
@@ -91,6 +92,7 @@ app.add_middleware(
 app.add_middleware(RequestIDMiddleware)
 
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
+app.include_router(auth_google.router, prefix="/auth/google", tags=["auth"])
 app.include_router(campaigns.router, prefix="/campaigns", tags=["campaigns"])
 app.include_router(leads.router, prefix="/leads", tags=["leads"])
 app.include_router(sequences.router, prefix="/sequences", tags=["sequences"])

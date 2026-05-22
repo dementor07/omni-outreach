@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -8,7 +8,10 @@ from passlib.context import CryptContext
 from app.config import settings
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
-bearer = HTTPBearer()
+# auto_error=False so we can also accept the JWT via the omni_jwt cookie
+# (set by the Google sign-in redirect). The dependency below tries cookie
+# first, falls back to the bearer header.
+bearer = HTTPBearer(auto_error=False)
 
 
 def hash_password(password: str) -> str:
@@ -35,5 +38,16 @@ def decode_access_token(token: str) -> str:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer)) -> str:
-    return decode_access_token(credentials.credentials)
+async def get_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+) -> str:
+    """Resolve the current user from either the Authorization header or the
+    omni_jwt cookie (set by the Google sign-in flow). Header wins when both
+    are present so explicit API calls still work."""
+    if credentials and credentials.credentials:
+        return decode_access_token(credentials.credentials)
+    cookie_token = request.cookies.get("omni_jwt")
+    if cookie_token:
+        return decode_access_token(cookie_token)
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")

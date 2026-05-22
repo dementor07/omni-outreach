@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
     google_oauth_redirect_uri: str = "https://srv1575227.hstgr.cloud/api/oauth/google/callback"
+    # Distinct callback for the sign-in flow (vs. the already-logged-in
+    # "connect Sheets" flow at /api/oauth/google/callback). Both must be
+    # registered in Google Cloud console under Authorized redirect URIs.
+    google_login_redirect_uri: str = "https://srv1575227.hstgr.cloud/api/auth/google/callback"
 
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24  # 24h

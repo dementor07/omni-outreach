@@ -1,9 +1,9 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from app.auth import create_access_token, hash_password, verify_password
+from app.auth import create_access_token, get_current_user, hash_password, verify_password
 from app.db import fetch_one
 
 router = APIRouter()
@@ -38,9 +38,26 @@ async def register(request: Request, body: RegisterRequest):
 @limiter.limit("10/minute")
 async def login(request: Request, body: LoginRequest):
     user = await fetch_one("SELECT * FROM users WHERE email=$1", body.email)
-    if not user or not verify_password(body.password, user["password_hash"]):
+    if not user or not user["password_hash"] or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     return {
         "access_token": create_access_token(str(user["id"])),
         "token_type": "bearer",
+    }
+
+
+@router.get("/me")
+async def me(user_id: str = Depends(get_current_user)) -> dict:
+    """Return the authenticated user's identity. Used by the frontend after
+    a Google-sign-in redirect to confirm the cookie is valid."""
+    row = await fetch_one(
+        "SELECT id, email, google_sub FROM users WHERE id=$1",
+        user_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {
+        "id": str(row["id"]),
+        "email": row["email"],
+        "google_connected": bool(row["google_sub"]),
     }
