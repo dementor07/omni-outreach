@@ -138,21 +138,27 @@ async def close_redis() -> None:
 async def acquire() -> AsyncGenerator[asyncpg.Connection, None]:
     """Acquire a connection with the tenant context bound for the txn.
 
-    Opens a transaction so ``SET LOCAL`` lasts the lifetime of the query
-    and unwinds cleanly on commit/rollback. Callers that need raw access
-    (no tenant binding — e.g. ``SELECT 1`` healthchecks) can use
+    Refuses to yield a connection when no workspace is bound. Without this
+    guard, RLS evaluates ``workspace_id = NULL`` (always false) and every
+    query returns zero rows silently — turning auth/tenancy bugs into
+    "the data disappeared" mysteries. Fail loud at the boundary instead.
+
+    Callers that legitimately need cross-tenant access wrap in
+    ``system_scope()``; callers that need raw access can use
     ``acquire_raw()``.
     """
+    ws = _current_workspace.get()
+    if ws is None:
+        raise RuntimeError(
+            "db.acquire() called with no workspace context — wrap in "
+            "system_scope() for background work, or ensure the route "
+            "depends on get_current_workspace."
+        )
     async with _pool.acquire() as conn:
-        ws = _current_workspace.get()
         async with conn.transaction():
-            if ws is not None:
-                # set_config is the function form of SET LOCAL — works with
-                # parametrised values, unlike the SQL `SET LOCAL` statement
-                # which needs the value inlined.
-                await conn.execute(
-                    "SELECT set_config('app.workspace_id', $1, true)", ws
-                )
+            await conn.execute(
+                "SELECT set_config('app.workspace_id', $1, true)", ws
+            )
             yield conn
 
 

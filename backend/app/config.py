@@ -1,10 +1,23 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
+
+_PLACEHOLDER_SECRETS = frozenset({"changeme", "secret", "password", "example", ""})
 
 
 class Settings(BaseSettings):
-    db_password: str = "changeme"
-    secret_key: str = "changeme"
+    db_password: str
+    secret_key: str
     database_url: str = ""
+
+    @field_validator("secret_key", "db_password")
+    @classmethod
+    def _reject_placeholder_secret(cls, v: str, info) -> str:
+        if not v or v.lower() in _PLACEHOLDER_SECRETS:
+            raise ValueError(
+                f"{info.field_name} must be a real secret from the environment; "
+                "the app refuses to start with a placeholder value."
+            )
+        return v
 
     frontend_url: str = "http://localhost:5173"  # CORS origin
 
@@ -52,7 +65,7 @@ class Settings(BaseSettings):
     twilio_auth_token: str = ""
     twilio_from_number: str = ""
 
-    redis_password: str = "changeme"
+    redis_password: str = ""
     redis_url: str = ""  # If set, takes precedence over redis_password-derived URL.
 
     # Google OAuth (Sheets lead source) — set in .env; empty disables the source.
@@ -82,7 +95,7 @@ class Settings(BaseSettings):
 
         if self.redis_url:
             return self.redis_url
-        if self.redis_password and self.redis_password != "changeme":
+        if self.redis_password:
             return f"redis://:{urllib.parse.quote(self.redis_password, safe='')}@redis:6379"
         return "redis://redis:6379"
 
