@@ -123,9 +123,20 @@ def upgrade() -> None:
     )
 
     # ── 2. Add workspace_id (nullable for the backfill window) ─────────────
+    # We do this in a DO block so missing tables get skipped silently. The
+    # OWNED_TABLES list is the *target* schema; older databases may have a
+    # subset (e.g. instagram_accounts only exists post-migration 008).
     for table in OWNED_TABLES:
         op.execute(
-            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS workspace_id UUID"
+            f"""
+            DO $$
+            BEGIN
+              IF EXISTS (SELECT 1 FROM information_schema.tables
+                         WHERE table_schema='public' AND table_name='{table}') THEN
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS workspace_id UUID;
+              END IF;
+            END $$;
+            """
         )
 
     # ── 3. Backfill: mint the legacy workspace, attach navij to it ─────────
@@ -174,32 +185,51 @@ def upgrade() -> None:
         """
     )
 
-    # 3d-cont: per-table backfill — runs against the legacy workspace. We
-    # resolve the workspace id inline because PL/pgSQL variables don't escape
-    # the DO block.
+    # 3d-cont: per-table backfill — runs against the legacy workspace.
+    # Skips tables that don't exist on this DB (same gate as step 2).
     for table in OWNED_TABLES:
         op.execute(
             f"""
-            UPDATE {table} SET workspace_id = (
-                SELECT id FROM workspaces WHERE slug = 'default' LIMIT 1
-            )
-            WHERE workspace_id IS NULL
+            DO $$
+            BEGIN
+              IF EXISTS (SELECT 1 FROM information_schema.tables
+                         WHERE table_schema='public' AND table_name='{table}') THEN
+                UPDATE {table} SET workspace_id = (
+                    SELECT id FROM workspaces WHERE slug = 'default' LIMIT 1
+                )
+                WHERE workspace_id IS NULL;
+              END IF;
+            END $$;
             """
         )
 
     # ── 4. Lock down: NOT NULL + FK + index per owned table ────────────────
+    # Only apply to tables that (a) exist on this DB and (b) actually have
+    # data backfilled. Empty tables on fresh installs still get the
+    # constraint via the same gate — the gate is just on table existence.
     for table in OWNED_TABLES:
         op.execute(
             f"""
-            ALTER TABLE {table}
-              ALTER COLUMN workspace_id SET NOT NULL,
-              ADD CONSTRAINT {table}_workspace_id_fkey
-                FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+            DO $$
+            BEGIN
+              IF EXISTS (SELECT 1 FROM information_schema.tables
+                         WHERE table_schema='public' AND table_name='{table}') THEN
+                ALTER TABLE {table}
+                  ALTER COLUMN workspace_id SET NOT NULL;
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.table_constraints
+                  WHERE table_schema='public'
+                    AND table_name='{table}'
+                    AND constraint_name='{table}_workspace_id_fkey'
+                ) THEN
+                  ALTER TABLE {table}
+                    ADD CONSTRAINT {table}_workspace_id_fkey
+                      FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+                END IF;
+                EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_workspace ON %I(workspace_id)', '{table}', '{table}');
+              END IF;
+            END $$;
             """
-        )
-        op.execute(
-            f"CREATE INDEX IF NOT EXISTS idx_{table}_workspace "
-            f"ON {table}(workspace_id)"
         )
 
 
