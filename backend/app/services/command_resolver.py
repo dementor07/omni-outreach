@@ -52,12 +52,19 @@ DELIVERY_CHANNELS: frozenset[str] = frozenset(
 
 
 def _maybe_decrypt(value: str | None) -> str | None:
+    """Decrypt a Fernet-encrypted credential, or pass through obvious plaintext.
+
+    Fernet tokens always start with ``gAAAAA`` (URL-safe base64 of the
+    Fernet version byte 0x80). Anything else is treated as legacy plaintext.
+    A token that LOOKS like Fernet but fails to decrypt is a real error
+    (corrupted ciphertext, rotated key, tampering) and is raised instead of
+    silently returning ciphertext bytes as the password.
+    """
     if not value:
         return value
-    try:
-        return decrypt(value)
-    except Exception:  # noqa: BLE001 — value may be plaintext from legacy rows
-        return value
+    if not value.startswith("gAAAAA"):
+        return value  # legacy plaintext row
+    return decrypt(value)
 
 
 async def _resolve_template_for_node(node_id: str) -> dict | None:
