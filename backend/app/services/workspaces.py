@@ -24,7 +24,7 @@ import logging
 import re
 import secrets
 
-from app.db import execute, fetch_all, fetch_one
+from app.db import execute, fetch_all, fetch_one, system_scope
 
 log = logging.getLogger(__name__)
 
@@ -60,59 +60,65 @@ async def ensure_default_workspace(user_id: str, email: str) -> str:
     Called from every authn path (password register/login, Google sign-in)
     so the JWT mint that follows can carry a real ``ws`` claim. Safe to
     call repeatedly — only the cold path mints a new workspace.
-    """
-    existing = await fetch_one(
-        """
-        SELECT workspace_id FROM workspace_members
-        WHERE user_id=$1
-        ORDER BY joined_at ASC
-        LIMIT 1
-        """,
-        user_id,
-    )
-    if existing:
-        return str(existing["workspace_id"])
 
-    # Cold path: mint a workspace, then add the user as owner.
-    seed = email.split("@", 1)[0] if "@" in email else "workspace"
-    slug = await _unique_slug(seed)
-    name = seed.replace(".", " ").replace("_", " ").replace("-", " ").title() or "Workspace"
-    row = await fetch_one(
-        """
-        INSERT INTO workspaces (name, slug, owner_user_id)
-        VALUES ($1, $2, $3) RETURNING id
-        """,
-        name,
-        slug,
-        user_id,
-    )
-    workspace_id = str(row["id"])
-    await execute(
-        """
-        INSERT INTO workspace_members (workspace_id, user_id, role)
-        VALUES ($1, $2, 'owner') ON CONFLICT DO NOTHING
-        """,
-        workspace_id,
-        user_id,
-    )
-    log.info("[workspaces] auto-created workspace=%s for user=%s", workspace_id, user_id)
-    return workspace_id
+    Runs entirely under ``system_scope`` — this function manipulates the
+    tenancy tables themselves and runs before the user has a workspace
+    context, so RLS would otherwise block the INSERTs.
+    """
+    async with system_scope():
+        existing = await fetch_one(
+            """
+            SELECT workspace_id FROM workspace_members
+            WHERE user_id=$1
+            ORDER BY joined_at ASC
+            LIMIT 1
+            """,
+            user_id,
+        )
+        if existing:
+            return str(existing["workspace_id"])
+
+        # Cold path: mint a workspace, then add the user as owner.
+        seed = email.split("@", 1)[0] if "@" in email else "workspace"
+        slug = await _unique_slug(seed)
+        name = seed.replace(".", " ").replace("_", " ").replace("-", " ").title() or "Workspace"
+        row = await fetch_one(
+            """
+            INSERT INTO workspaces (name, slug, owner_user_id)
+            VALUES ($1, $2, $3) RETURNING id
+            """,
+            name,
+            slug,
+            user_id,
+        )
+        workspace_id = str(row["id"])
+        await execute(
+            """
+            INSERT INTO workspace_members (workspace_id, user_id, role)
+            VALUES ($1, $2, 'owner') ON CONFLICT DO NOTHING
+            """,
+            workspace_id,
+            user_id,
+        )
+        log.info("[workspaces] auto-created workspace=%s for user=%s", workspace_id, user_id)
+        return workspace_id
 
 
 async def list_user_workspaces(user_id: str) -> list[dict]:
     """Returns ``[{id, name, slug, role, is_owner, joined_at}]`` for the
     workspace switcher. Ordered by join date ascending so the user's first
     workspace is the default."""
-    rows = await fetch_all(
-        """
-        SELECT w.id, w.name, w.slug, m.role, w.owner_user_id, m.joined_at
-        FROM workspace_members m
-        JOIN workspaces w ON w.id = m.workspace_id
-        WHERE m.user_id=$1
-        ORDER BY m.joined_at ASC
-        """,
-        user_id,
-    )
+    async with system_scope():
+        rows = await fetch_all(
+            """
+            SELECT w.id, w.name, w.slug, m.role, w.owner_user_id, m.joined_at
+            FROM workspace_members m
+            JOIN workspaces w ON w.id = m.workspace_id
+            WHERE m.user_id=$1
+            ORDER BY m.joined_at ASC
+            """,
+            user_id,
+        )
     return [
         {
             "id": str(r["id"]),
@@ -127,9 +133,10 @@ async def list_user_workspaces(user_id: str) -> list[dict]:
 
 
 async def user_is_member(user_id: str, workspace_id: str) -> bool:
-    row = await fetch_one(
-        "SELECT 1 FROM workspace_members WHERE user_id=$1 AND workspace_id=$2",
-        user_id,
-        workspace_id,
-    )
+    async with system_scope():
+        row = await fetch_one(
+            "SELECT 1 FROM workspace_members WHERE user_id=$1 AND workspace_id=$2",
+            user_id,
+            workspace_id,
+        )
     return row is not None

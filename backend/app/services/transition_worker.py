@@ -5,7 +5,7 @@ import logging
 from aiokafka import AIOKafkaConsumer
 
 from app.config import settings
-from app.db import close_pool, init_pool
+from app.db import close_pool, init_pool, system_scope
 from app.services.sequencer import queue_next_nodes
 
 log = logging.getLogger(__name__)
@@ -39,8 +39,11 @@ async def run_transition_worker():
 
                 log.info(f"[transition-worker] Advancing lead {lead_id} from {source_node_id} (handle={handle})")
 
-                # The sequencer will now emit the command for the NEXT node in the DAG
-                await queue_next_nodes(str(lead_id), str(source_node_id), handle=handle)
+                # Transitions arrive for leads across every workspace — run
+                # under system_scope so queue_next_nodes can read the lead's
+                # tenant off the row and resume the sequence.
+                async with system_scope():
+                    await queue_next_nodes(str(lead_id), str(source_node_id), handle=handle)
 
             except Exception as e:
                 log.error(f"[transition-worker] Failed to process transition: {e}")

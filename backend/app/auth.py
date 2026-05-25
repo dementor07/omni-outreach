@@ -32,7 +32,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from app.config import settings
-from app.db import fetch_one
+from app.db import fetch_one, set_request_workspace, system_scope
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 # auto_error=False so we can fall back to the omni_jwt cookie.
@@ -139,30 +139,35 @@ async def get_current_workspace(
     user_id = payload["sub"]
     workspace_id = payload.get("ws")
 
-    if workspace_id:
-        # Verify the user is still a member. Catches stale tokens after
-        # someone is removed from a workspace.
-        row = await fetch_one(
-            "SELECT 1 FROM workspace_members WHERE user_id=$1 AND workspace_id=$2",
-            user_id,
-            workspace_id,
-        )
-        if row:
-            return AuthContext(user_id=user_id, workspace_id=str(workspace_id))
-        # Membership revoked — fall through to default-pick below.
+    # workspace_members is not workspace-scoped (it IS the tenancy table),
+    # so we have to read it under system_scope() to bypass RLS. Doing this
+    # for the membership probe only, not for the resolved workspace.
+    async with system_scope():
+        if workspace_id:
+            row = await fetch_one(
+                "SELECT 1 FROM workspace_members WHERE user_id=$1 AND workspace_id=$2",
+                user_id,
+                workspace_id,
+            )
+            if row:
+                set_request_workspace(str(workspace_id))
+                return AuthContext(user_id=user_id, workspace_id=str(workspace_id))
+            # Membership revoked — fall through to default-pick below.
 
-    row = await fetch_one(
-        """
-        SELECT workspace_id FROM workspace_members
-        WHERE user_id=$1
-        ORDER BY joined_at ASC
-        LIMIT 1
-        """,
-        user_id,
-    )
+        row = await fetch_one(
+            """
+            SELECT workspace_id FROM workspace_members
+            WHERE user_id=$1
+            ORDER BY joined_at ASC
+            LIMIT 1
+            """,
+            user_id,
+        )
     if not row:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User has no workspace membership",
         )
-    return AuthContext(user_id=user_id, workspace_id=str(row["workspace_id"]))
+    resolved = str(row["workspace_id"])
+    set_request_workspace(resolved)
+    return AuthContext(user_id=user_id, workspace_id=resolved)

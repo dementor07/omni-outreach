@@ -4,7 +4,7 @@ import logging
 from redis import asyncio as aioredis
 from redis.exceptions import ResponseError
 
-from app.db import execute, fetch_one
+from app.db import execute, fetch_one, system_scope
 from app.services import sequencer
 from app.services.reply_classifier import classify_reply_async
 
@@ -82,7 +82,14 @@ async def _process_unipile_payload(payload: dict) -> None:
 
 
 async def process_stream_events(ctx: dict) -> None:
-    """Cron job to consume events from the Redis stream."""
+    """Cron job to consume events from the Redis stream.
+
+    Runs in system_scope because we iterate inbound webhooks across every
+    tenant — the lead lookup itself tells us which workspace each event
+    belongs to. The downstream UPDATE/INSERT writes use the tenant on the
+    matched lead row, but RLS would otherwise block them since the
+    background context has no request-scoped workspace.
+    """
     from app.config import settings
 
     redis = aioredis.from_url(settings.get_redis_url(), decode_responses=True)
@@ -103,19 +110,20 @@ async def process_stream_events(ctx: dict) -> None:
         if not streams:
             return
 
-        for stream, messages in streams:
-            for message_id, message_data in messages:
-                source = message_data.get("source")
-                payload_str = message_data.get("payload")
+        async with system_scope():
+            for stream, messages in streams:
+                for message_id, message_data in messages:
+                    source = message_data.get("source")
+                    payload_str = message_data.get("payload")
 
-                if source == "unipile" and payload_str:
-                    try:
-                        payload = json.loads(payload_str)
-                        await _process_unipile_payload(payload)
-                        # Acknowledge the message so it's removed from pending
-                        await redis.xack(STREAM_NAME, GROUP_NAME, message_id)
-                    except Exception as ex:
-                        log.exception(f"[stream_processor] Error processing message {message_id}: {ex}")
+                    if source == "unipile" and payload_str:
+                        try:
+                            payload = json.loads(payload_str)
+                            await _process_unipile_payload(payload)
+                            # Acknowledge the message so it's removed from pending
+                            await redis.xack(STREAM_NAME, GROUP_NAME, message_id)
+                        except Exception as ex:
+                            log.exception(f"[stream_processor] Error processing message {message_id}: {ex}")
 
     except Exception as e:
         log.exception(f"[stream_processor] Error reading from stream: {e}")

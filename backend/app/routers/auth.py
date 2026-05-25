@@ -4,7 +4,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.auth import create_access_token, get_current_user, hash_password, verify_password
-from app.db import fetch_one
+from app.db import fetch_one, system_scope
 from app.services.workspaces import ensure_default_workspace, list_user_workspaces
 
 router = APIRouter()
@@ -28,14 +28,18 @@ async def register(request: Request, body: RegisterRequest):
 
     Returning the token immediately means the frontend doesn't need to
     redirect through /login after a successful signup."""
-    existing = await fetch_one("SELECT id FROM users WHERE email=$1", body.email)
-    if existing:
-        raise HTTPException(status_code=409, detail="Email already registered")
-    user = await fetch_one(
-        "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email",
-        body.email,
-        hash_password(body.password),
-    )
+    # `users` is workspace-agnostic — read/write under system_scope so RLS
+    # (added in migration 020) doesn't block the lookup before the new user
+    # has any workspace membership.
+    async with system_scope():
+        existing = await fetch_one("SELECT id FROM users WHERE email=$1", body.email)
+        if existing:
+            raise HTTPException(status_code=409, detail="Email already registered")
+        user = await fetch_one(
+            "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email",
+            body.email,
+            hash_password(body.password),
+        )
     user_id = str(user["id"])
     workspace_id = await ensure_default_workspace(user_id, user["email"])
     return {
@@ -50,7 +54,8 @@ async def register(request: Request, body: RegisterRequest):
 @router.post("/login")
 @limiter.limit("10/minute")
 async def login(request: Request, body: LoginRequest):
-    user = await fetch_one("SELECT * FROM users WHERE email=$1", body.email)
+    async with system_scope():
+        user = await fetch_one("SELECT * FROM users WHERE email=$1", body.email)
     if not user or not user["password_hash"] or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     user_id = str(user["id"])
@@ -69,10 +74,11 @@ async def me(user_id: str = Depends(get_current_user)) -> dict:
     load with a stale localStorage token) to confirm the session is valid
     and to populate the workspace switcher.
     """
-    row = await fetch_one(
-        "SELECT id, email, google_sub FROM users WHERE id=$1",
-        user_id,
-    )
+    async with system_scope():
+        row = await fetch_one(
+            "SELECT id, email, google_sub FROM users WHERE id=$1",
+            user_id,
+        )
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
 

@@ -38,7 +38,7 @@ from fastapi.responses import RedirectResponse
 
 from app.auth import create_access_token
 from app.config import settings
-from app.db import execute, fetch_one
+from app.db import execute, fetch_one, system_scope
 from app.services.encryption import encrypt
 
 log = logging.getLogger(__name__)
@@ -210,37 +210,40 @@ async def login_callback(
         return _ui_redirect("error", "email_unverified")
 
     # 3. Find-or-create user. Match priority: google_sub → email.
-    user_id = await _upsert_user(sub=sub, email=email)
+    # users + google_oauth_tokens are not workspace-scoped; this runs
+    # before the user has any workspace context, so wrap in system_scope.
+    async with system_scope():
+        user_id = await _upsert_user(sub=sub, email=email)
 
-    # 4. Store Sheets refresh_token (only present on first consent).
-    if refresh_token:
-        await execute(
-            """
-            INSERT INTO google_oauth_tokens
-                (user_id, google_email, refresh_token_encrypted, scopes, connected_at)
-            VALUES ($1, $2, $3, $4, NOW())
-            ON CONFLICT (user_id) DO UPDATE
-              SET google_email             = EXCLUDED.google_email,
-                  refresh_token_encrypted = EXCLUDED.refresh_token_encrypted,
-                  scopes                   = EXCLUDED.scopes,
-                  connected_at             = NOW(),
-                  last_refresh_at          = NULL
-            """,
-            user_id,
-            email,
-            encrypt(refresh_token),
-            granted_scopes,
-        )
-        log.info("[auth-google] stored Sheets refresh_token user=%s email=%s", user_id, email)
-    else:
-        # No refresh_token can mean two things:
-        #   - user revoked + re-consented (Google won't issue another until
-        #     they revoke from myaccount.google.com first)
-        #   - we already have it from a prior login — that's fine
-        log.info(
-            "[auth-google] no refresh_token in response (existing grant?) user=%s",
-            user_id,
-        )
+        # 4. Store Sheets refresh_token (only present on first consent).
+        if refresh_token:
+            await execute(
+                """
+                INSERT INTO google_oauth_tokens
+                    (user_id, google_email, refresh_token_encrypted, scopes, connected_at)
+                VALUES ($1, $2, $3, $4, NOW())
+                ON CONFLICT (user_id) DO UPDATE
+                  SET google_email             = EXCLUDED.google_email,
+                      refresh_token_encrypted = EXCLUDED.refresh_token_encrypted,
+                      scopes                   = EXCLUDED.scopes,
+                      connected_at             = NOW(),
+                      last_refresh_at          = NULL
+                """,
+                user_id,
+                email,
+                encrypt(refresh_token),
+                granted_scopes,
+            )
+            log.info("[auth-google] stored Sheets refresh_token user=%s email=%s", user_id, email)
+        else:
+            # No refresh_token can mean two things:
+            #   - user revoked + re-consented (Google won't issue another until
+            #     they revoke from myaccount.google.com first)
+            #   - we already have it from a prior login — that's fine
+            log.info(
+                "[auth-google] no refresh_token in response (existing grant?) user=%s",
+                user_id,
+            )
 
     # Make sure the user has a workspace before we mint a token. First-time
     # Google signups land here with no workspace, so this is the cold path.

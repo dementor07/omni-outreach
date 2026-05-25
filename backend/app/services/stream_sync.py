@@ -43,7 +43,7 @@ from typing import Any
 from aiokafka import AIOKafkaConsumer
 
 from app.config import settings
-from app.db import close_pool, execute, fetch_one, init_pool
+from app.db import close_pool, execute, fetch_one, init_pool, system_scope
 
 log = logging.getLogger(__name__)
 
@@ -265,7 +265,12 @@ async def run_sync_worker() -> None:
                 log.error("[sync-worker] bad JSON on outreach.results: %s", e)
                 continue
             try:
-                await _process_result(data)
+                # Each result comes from the muscle for a lead in some
+                # workspace — the worker can't know which without reading
+                # the row. Run the entire result handler under system_scope
+                # so the lead lookup + downstream writes succeed.
+                async with system_scope():
+                    await _process_result(data)
             except Exception as e:  # noqa: BLE001 — never crash the loop
                 log.exception("[sync-worker] processing failed: %s", e)
     finally:
