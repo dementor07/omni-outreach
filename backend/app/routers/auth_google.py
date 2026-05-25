@@ -242,7 +242,12 @@ async def login_callback(
             user_id,
         )
 
-    jwt = create_access_token(user_id)
+    # Make sure the user has a workspace before we mint a token. First-time
+    # Google signups land here with no workspace, so this is the cold path.
+    from app.services.workspaces import ensure_default_workspace
+
+    workspace_id = await ensure_default_workspace(user_id, email)
+    jwt = create_access_token(user_id, workspace_id)
     return _ui_redirect("connected", token=jwt)
 
 
