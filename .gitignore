@@ -26,3 +26,8 @@ omni-vault/**/*.local.md
 
 # One-off personal scripts that operate outside the repo
 /clean_badges.py
+
+# Dead multi-LLM bridge/conference harness output (removed 2026-05-25)
+.bridge_logs/
+.bridge_context/
+.conference_logs/
