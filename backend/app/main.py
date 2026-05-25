@@ -37,6 +37,7 @@ from app.routers import (
     templates,
     tracking,
     webhooks,
+    workspaces,
 )
 from app.routers import settings as settings_router
 from app.services.bus import bus
@@ -93,6 +94,7 @@ app.add_middleware(RequestIDMiddleware)
 
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(auth_google.router, prefix="/auth/google", tags=["auth"])
+app.include_router(workspaces.router, prefix="/workspaces", tags=["workspaces"])
 app.include_router(campaigns.router, prefix="/campaigns", tags=["campaigns"])
 app.include_router(leads.router, prefix="/leads", tags=["leads"])
 app.include_router(sequences.router, prefix="/sequences", tags=["sequences"])
@@ -121,11 +123,14 @@ app.include_router(internal.router, prefix="/internal", tags=["internal"])
 
 @app.get("/health")
 async def health():
-    from app.db import fetch_one, redis_client
+    from app.db import fetch_one, redis_client, system_scope
 
     checks = {"api": "ok"}
     try:
-        row = await fetch_one("SELECT 1 AS ok")
+        # Health probe runs before any request context; system_scope satisfies
+        # acquire()'s required workspace binding.
+        async with system_scope():
+            row = await fetch_one("SELECT 1 AS ok")
         checks["db"] = "ok" if row else "error"
     except Exception as e:
         logger.warning("Health check DB failed: %s", e)

@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 
 from app.config import settings
-from app.db import execute, fetch_one
+from app.db import execute, fetch_one, set_request_workspace, system_scope
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -35,13 +35,20 @@ def _verify_sig(event_id: str, sig: str) -> bool:
 
 
 async def _record_event(event_id: str, event_type: str, request: Request):
-    """Record an open or click event for a tracked email."""
-    row = await fetch_one(
-        "SELECT lead_id, campaign_id, meta FROM events WHERE id=$1",
-        event_id,
-    )
+    """Record an open or click event for a tracked email.
+
+    Public endpoint (signed-only, no JWT) — we resolve the event's workspace
+    via system_scope, then bind it so subsequent writes land in the right
+    tenant under RLS.
+    """
+    async with system_scope():
+        row = await fetch_one(
+            "SELECT lead_id, campaign_id, meta, workspace_id FROM events WHERE id=$1",
+            event_id,
+        )
     if not row:
         return
+    set_request_workspace(str(row["workspace_id"]))
     ua = request.headers.get("user-agent", "")[:512]
     ip = request.client.host if request.client else "unknown"
     meta = json.dumps({"ip": ip, "ua": ua, "parent_event": event_id})

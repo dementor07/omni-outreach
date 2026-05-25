@@ -87,18 +87,36 @@ async def generic_inbound_event(request: Request):
     if not event_type:
         raise HTTPException(400, "event_type is required")
 
-    # Resolve lead
+    # Inbound webhooks have no JWT — resolve the lead under system_scope, then
+    # bind its workspace for the rest of the request so RLS guards downstream
+    # writes against the right tenant.
     lead_id = payload.get("lead_id")
-    if not lead_id and payload.get("lead_email"):
-        row = await db.fetch_one("SELECT id FROM leads WHERE email=$1 LIMIT 1", payload["lead_email"])
-        lead_id = str(row["id"]) if row else None
+    workspace_id: str | None = None
+    async with db.system_scope():
+        if lead_id:
+            row = await db.fetch_one("SELECT workspace_id FROM leads WHERE id=$1", lead_id)
+            if row:
+                workspace_id = str(row["workspace_id"])
+        if not lead_id and payload.get("lead_email"):
+            row = await db.fetch_one(
+                "SELECT id, workspace_id FROM leads WHERE email=$1 LIMIT 1",
+                payload["lead_email"],
+            )
+            if row:
+                lead_id = str(row["id"])
+                workspace_id = str(row["workspace_id"])
+        if not lead_id and payload.get("lead_linkedin_url"):
+            row = await db.fetch_one(
+                "SELECT id, workspace_id FROM leads WHERE linkedin_url=$1 LIMIT 1",
+                payload["lead_linkedin_url"],
+            )
+            if row:
+                lead_id = str(row["id"])
+                workspace_id = str(row["workspace_id"])
 
-    if not lead_id and payload.get("lead_linkedin_url"):
-        row = await db.fetch_one("SELECT id FROM leads WHERE linkedin_url=$1 LIMIT 1", payload["lead_linkedin_url"])
-        lead_id = str(row["id"]) if row else None
-
-    if not lead_id:
+    if not lead_id or not workspace_id:
         return {"status": "ignored", "reason": "lead not found"}
+    db.set_request_workspace(workspace_id)
 
     # Insert event
     await db.execute(
@@ -203,9 +221,14 @@ async def wake_lead_at_node(request: Request):
     if not lead_id or not node_id:
         raise HTTPException(status_code=400, detail="lead_id and node_id are required")
 
-    lead = await db.fetch_one("SELECT id, current_node_id FROM leads WHERE id=$1", lead_id)
+    async with db.system_scope():
+        lead = await db.fetch_one(
+            "SELECT id, current_node_id, workspace_id FROM leads WHERE id=$1",
+            lead_id,
+        )
     if not lead:
         raise HTTPException(status_code=404, detail="lead not found")
+    db.set_request_workspace(str(lead["workspace_id"]))
 
     from app.services import sequencer
 

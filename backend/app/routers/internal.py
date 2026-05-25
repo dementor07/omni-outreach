@@ -24,7 +24,7 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path
 from pydantic import BaseModel
 
 from app.config import settings
-from app.db import execute, fetch_one
+from app.db import execute, fetch_one, set_request_workspace, system_scope
 from app.services.encryption import decrypt, encrypt
 
 router = APIRouter()
@@ -76,36 +76,41 @@ async def mint_credential_ref(channel: str, bundle: dict) -> str:
 
 @router.get("/credentials/{ref}", dependencies=[Depends(require_muscle)])
 async def redeem_credential(ref: str = Path(..., min_length=8, max_length=128)) -> dict:
-    row = await fetch_one(
-        "SELECT channel, bundle_encrypted, expires_at, released_at FROM credential_refs WHERE ref=$1",
-        ref,
-    )
-    if not row:
-        raise HTTPException(status_code=404, detail="credential ref not found")
-    if row["released_at"]:
-        raise HTTPException(status_code=410, detail="credential ref already released")
-    if row["expires_at"] < datetime.now(UTC):
-        raise HTTPException(status_code=410, detail="credential ref expired")
+    # credential_refs is an operational table (not workspace-scoped) — the
+    # muscle authenticates with the shared secret, no JWT, so we run under
+    # system_scope to satisfy acquire()'s tenant binding requirement.
+    async with system_scope():
+        row = await fetch_one(
+            "SELECT channel, bundle_encrypted, expires_at, released_at FROM credential_refs WHERE ref=$1",
+            ref,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="credential ref not found")
+        if row["released_at"]:
+            raise HTTPException(status_code=410, detail="credential ref already released")
+        if row["expires_at"] < datetime.now(UTC):
+            raise HTTPException(status_code=410, detail="credential ref expired")
 
-    try:
-        bundle = json.loads(decrypt(row["bundle_encrypted"]))
-    except Exception as e:  # noqa: BLE001
-        log.error(f"[internal] credential decrypt failed for ref={ref[:8]}…: {e}")
-        raise HTTPException(status_code=500, detail="credential decode failed")
+        try:
+            bundle = json.loads(decrypt(row["bundle_encrypted"]))
+        except Exception as e:  # noqa: BLE001
+            log.error(f"[internal] credential decrypt failed for ref={ref[:8]}…: {e}")
+            raise HTTPException(status_code=500, detail="credential decode failed") from e
 
-    await execute(
-        "UPDATE credential_refs SET redeemed_at = COALESCE(redeemed_at, NOW()) WHERE ref=$1",
-        ref,
-    )
+        await execute(
+            "UPDATE credential_refs SET redeemed_at = COALESCE(redeemed_at, NOW()) WHERE ref=$1",
+            ref,
+        )
     return bundle
 
 
 @router.post("/credentials/{ref}/release", dependencies=[Depends(require_muscle)])
 async def release_credential(ref: str = Path(..., min_length=8, max_length=128)) -> dict:
-    await execute(
-        "UPDATE credential_refs SET released_at = NOW() WHERE ref=$1 AND released_at IS NULL",
-        ref,
-    )
+    async with system_scope():
+        await execute(
+            "UPDATE credential_refs SET released_at = NOW() WHERE ref=$1 AND released_at IS NULL",
+            ref,
+        )
     return {"status": "released"}
 
 
@@ -126,9 +131,22 @@ async def dispatch_pull(body: LeadGenDispatchBody = Body(...)) -> dict:
     """Run the lead-gen pull synchronously enough to give Rust a fired/empty/
     cooldown verdict it can push downstream. Mirrors the LeadGenPullHandler
     in dispatcher.py but is invoked by the muscle, not the legacy queue loop.
+
+    Muscle authenticates with the shared secret (no JWT), so we look up the
+    campaign's workspace and bind it for the duration of the request — every
+    tenant-scoped query underneath then runs against the right slice.
     """
     from app.services import lead_gen
     from app.services.sequencer import claim_race_winner_if_applicable  # noqa: F401
+
+    # Bind the campaign's workspace for the rest of the request.
+    async with system_scope():
+        camp = await fetch_one(
+            "SELECT workspace_id FROM campaigns WHERE id=$1", body.campaign_id
+        )
+    if not camp:
+        return {"status": "on_error", "error": "campaign not found"}
+    set_request_workspace(str(camp["workspace_id"]))
 
     node_id = body.node_id
     if not node_id:
@@ -193,7 +211,10 @@ async def dispatch_pull(body: LeadGenDispatchBody = Body(...)) -> dict:
 
 @router.post("/lead-gen/dispatch-csv-import", dependencies=[Depends(require_muscle)])
 async def dispatch_csv_import(body: LeadGenDispatchBody = Body(...)) -> dict:
-    """CSV-URL pull delegated from the muscle. Mirrors CsvImportHandler."""
+    """CSV-URL pull delegated from the muscle. Mirrors CsvImportHandler.
+
+    Same workspace-binding pattern as dispatch_pull — see that handler.
+    """
     import csv as _csv
     import io as _io
 
@@ -201,6 +222,14 @@ async def dispatch_csv_import(body: LeadGenDispatchBody = Body(...)) -> dict:
 
     from app.services import lead_gen
     from app.services.lead_sources.base import RawLead
+
+    async with system_scope():
+        camp = await fetch_one(
+            "SELECT workspace_id FROM campaigns WHERE id=$1", body.campaign_id
+        )
+    if not camp:
+        return {"status": "on_error", "error": "campaign not found"}
+    set_request_workspace(str(camp["workspace_id"]))
 
     node_id = body.node_id
     if not node_id:
@@ -266,16 +295,21 @@ async def dispatch_csv_import(body: LeadGenDispatchBody = Body(...)) -> dict:
 
 async def sweep_expired_credentials() -> int:
     """Called by the worker cron. Hard-deletes released or expired rows so
-    the table stays small (TTL is 10 min; in practice rows live <1s)."""
-    row = await fetch_one(
-        """
-        WITH deleted AS (
-          DELETE FROM credential_refs
-          WHERE released_at IS NOT NULL
-             OR expires_at < NOW() - INTERVAL '1 hour'
-          RETURNING ref
+    the table stays small (TTL is 10 min; in practice rows live <1s).
+
+    credential_refs is operational, not workspace-scoped — system_scope
+    satisfies acquire()'s tenant binding requirement.
+    """
+    async with system_scope():
+        row = await fetch_one(
+            """
+            WITH deleted AS (
+              DELETE FROM credential_refs
+              WHERE released_at IS NOT NULL
+                 OR expires_at < NOW() - INTERVAL '1 hour'
+              RETURNING ref
+            )
+            SELECT COUNT(*) AS n FROM deleted
+            """,
         )
-        SELECT COUNT(*) AS n FROM deleted
-        """,
-    )
     return int(row["n"]) if row else 0
