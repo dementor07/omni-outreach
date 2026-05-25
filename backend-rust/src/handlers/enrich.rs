@@ -5,6 +5,7 @@
 
 use crate::credentials;
 use crate::handlers::common;
+use crate::http::OUTBOUND;
 use crate::models::{ActionCommand, ExecutionResult};
 use serde_json::{json, Value};
 
@@ -49,7 +50,7 @@ async fn apollo(command: &ActionCommand) -> ExecutionResult {
         }
     }
 
-    let client = reqwest::Client::new();
+    let client = &*OUTBOUND;
     let resp = client
         .post("https://api.apollo.io/api/v1/people/match")
         .header("x-api-key", &api_key)
@@ -60,8 +61,15 @@ async fn apollo(command: &ActionCommand) -> ExecutionResult {
 
     let person: Value = match resp {
         Ok(r) if r.status().is_success() => r.json::<Value>().await.unwrap_or(json!({})).get("person").cloned().unwrap_or(json!({})),
-        Ok(r) => return common::fail(command, format!("apollo HTTP {}", r.status()), r.status().is_server_error()),
-        Err(e) => return common::fail(command, format!("apollo network: {e}"), true),
+        Ok(r) => {
+            let s = r.status();
+            tracing::warn!(status = s.as_u16(), "apollo HTTP error");
+            return common::fail(command, format!("APOLLO_HTTP_{}", s.as_u16()), s.is_server_error());
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "apollo network failure");
+            return common::fail(command, "APOLLO_NETWORK_ERROR", true);
+        }
     };
 
     let mutations = pick_mutations(&person, &["first_name", "last_name", "email", "headline", "company"]);
@@ -88,7 +96,8 @@ async fn hunter(command: &ActionCommand) -> ExecutionResult {
     let domain = command.payload.get("domain").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let company = command.lead.company.clone().unwrap_or_default();
     if first.is_empty() || last.is_empty() || (domain.is_empty() && company.is_empty()) {
-        return common::fail(command, "hunter needs first_name, last_name and domain/company", false);
+        credentials::release(&cred_ref).await;
+        return common::fail(command, "HUNTER_INSUFFICIENT_INPUT", false);
     }
 
     let mut params: Vec<(&str, String)> = vec![
@@ -102,7 +111,7 @@ async fn hunter(command: &ActionCommand) -> ExecutionResult {
         params.push(("company", company));
     }
 
-    let client = reqwest::Client::new();
+    let client = &*OUTBOUND;
     let resp = client
         .get("https://api.hunter.io/v2/email-finder")
         .query(&params)
@@ -112,8 +121,15 @@ async fn hunter(command: &ActionCommand) -> ExecutionResult {
 
     let data = match resp {
         Ok(r) if r.status().is_success() => r.json::<Value>().await.unwrap_or(json!({})).get("data").cloned().unwrap_or(json!({})),
-        Ok(r) => return common::fail(command, format!("hunter HTTP {}", r.status()), r.status().is_server_error()),
-        Err(e) => return common::fail(command, format!("hunter network: {e}"), true),
+        Ok(r) => {
+            let s = r.status();
+            tracing::warn!(status = s.as_u16(), "hunter HTTP error");
+            return common::fail(command, format!("HUNTER_HTTP_{}", s.as_u16()), s.is_server_error());
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "hunter network failure");
+            return common::fail(command, "HUNTER_NETWORK_ERROR", true);
+        }
     };
 
     let mutations = pick_mutations(&data, &["email", "linkedin_url"]);
@@ -137,10 +153,11 @@ async fn proxycurl(command: &ActionCommand) -> ExecutionResult {
     };
     let li = command.lead.linkedin_url.clone().unwrap_or_default();
     if li.is_empty() {
-        return common::fail(command, "proxycurl needs linkedin_url", false);
+        credentials::release(&cred_ref).await;
+        return common::fail(command, "PROXYCURL_MISSING_LINKEDIN_URL", false);
     }
 
-    let client = reqwest::Client::new();
+    let client = &*OUTBOUND;
     let resp = client
         .get("https://nubela.co/proxycurl/api/v2/linkedin")
         .bearer_auth(&api_key)
@@ -151,8 +168,15 @@ async fn proxycurl(command: &ActionCommand) -> ExecutionResult {
 
     let p = match resp {
         Ok(r) if r.status().is_success() => r.json::<Value>().await.unwrap_or(json!({})),
-        Ok(r) => return common::fail(command, format!("proxycurl HTTP {}", r.status()), r.status().is_server_error()),
-        Err(e) => return common::fail(command, format!("proxycurl network: {e}"), true),
+        Ok(r) => {
+            let s = r.status();
+            tracing::warn!(status = s.as_u16(), "proxycurl HTTP error");
+            return common::fail(command, format!("PROXYCURL_HTTP_{}", s.as_u16()), s.is_server_error());
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "proxycurl network failure");
+            return common::fail(command, "PROXYCURL_NETWORK_ERROR", true);
+        }
     };
 
     let mut mutations = pick_mutations(&p, &["first_name", "last_name", "headline"]);

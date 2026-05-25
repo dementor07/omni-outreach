@@ -40,7 +40,7 @@ fn shared_secret() -> Option<String> {
 /// auth_token, …).
 pub async fn redeem(credential_ref: &str) -> Result<Value, String> {
     let secret = shared_secret()
-        .ok_or_else(|| "MUSCLE_SHARED_SECRET not configured".to_string())?;
+        .ok_or_else(|| "CREDENTIAL_SHARED_SECRET_MISSING".to_string())?;
     let url = format!("{}/internal/credentials/{}", control_plane_base(), credential_ref);
 
     let resp = HTTP
@@ -48,17 +48,27 @@ pub async fn redeem(credential_ref: &str) -> Result<Value, String> {
         .bearer_auth(&secret)
         .send()
         .await
-        .map_err(|e| format!("credentials redeem network error: {e}"))?;
+        .map_err(|e| {
+            warn!(error = %e, credential_ref = %credential_ref, "credentials redeem network error");
+            "CREDENTIAL_REDEEM_NETWORK_ERROR".to_string()
+        })?;
 
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(format!("credentials redeem HTTP {status}: {}", body.chars().take(200).collect::<String>()));
+        warn!(
+            status = status.as_u16(),
+            body = body.chars().take(200).collect::<String>().as_str(),
+            credential_ref = %credential_ref,
+            "credentials redeem failed"
+        );
+        return Err(format!("CREDENTIAL_REDEEM_HTTP_{}", status.as_u16()));
     }
 
-    resp.json::<Value>()
-        .await
-        .map_err(|e| format!("credentials redeem decode error: {e}"))
+    resp.json::<Value>().await.map_err(|e| {
+        warn!(error = %e, credential_ref = %credential_ref, "credentials redeem decode error");
+        "CREDENTIAL_REDEEM_DECODE_ERROR".to_string()
+    })
 }
 
 /// Convenience — redeem and extract a single string field. Returns None if

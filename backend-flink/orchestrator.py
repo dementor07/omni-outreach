@@ -183,6 +183,21 @@ class JourneyProcessFunction(KeyedProcessFunction):
         self.pending_state.clear()
 
 
+def _extract_lead_key(x: str) -> str:
+    """Pull lead_id out of a result record for Flink keying.
+
+    A malformed record here would propagate as an unhandled exception in the
+    keyer (which runs before process_element's own try/except), restarting
+    the task. Bucketing parse errors into ``unknown`` lets the downstream
+    process_element handle them gracefully and emit nothing.
+    """
+    try:
+        v = json.loads(x)
+        return v.get("lead_id") or "unknown"
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        return "unknown"
+
+
 def run_orchestrator():
     env = StreamExecutionEnvironment.get_execution_environment()
     brokers = os.environ.get("KAFKA_BROKERS", "redpanda:9092")
@@ -211,7 +226,7 @@ def run_orchestrator():
 
     ds = env.from_source(source, WatermarkStrategy.no_watermarks(), "Results Source")
 
-    ds.key_by(lambda x: json.loads(x).get("lead_id", "unknown")) \
+    ds.key_by(_extract_lead_key) \
         .process(JourneyProcessFunction(), output_type=Types.STRING()) \
         .sink_to(sink)
 

@@ -5,6 +5,7 @@
 
 use crate::credentials;
 use crate::handlers::common;
+use crate::http::OUTBOUND;
 use crate::models::{ActionCommand, ExecutionResult};
 use serde_json::{json, Value};
 
@@ -27,7 +28,7 @@ pub async fn handle_hot_lead_alert(command: &ActionCommand) -> ExecutionResult {
         return common::skipped(command, "no alert targets");
     }
 
-    let client = reqwest::Client::new();
+    let client = &*OUTBOUND;
     let mut delivered: u32 = 0;
     let mut failures: Vec<String> = Vec::new();
 
@@ -40,14 +41,18 @@ pub async fn handle_hot_lead_alert(command: &ActionCommand) -> ExecutionResult {
         let bundle = match credentials::redeem(target_ref).await {
             Ok(b) => b,
             Err(e) => {
-                failures.push(format!("{kind}: redeem {e}"));
+                tracing::warn!(kind = %kind, error = %e, "alert redeem failed");
+                failures.push(format!("{kind}: ALERT_REDEEM_FAILED"));
+                // Best-effort release so the control plane can invalidate the
+                // token even though we won't proceed for this target.
+                credentials::release(target_ref).await;
                 continue;
             }
         };
         let outcome = match kind {
-            "slack" => send_slack(&client, &bundle, &title, &body).await,
-            "email" => send_resend(&client, &bundle, &title, &body).await,
-            _ => Err(format!("unknown alert kind {kind}")),
+            "slack" => send_slack(client, &bundle, &title, &body).await,
+            "email" => send_resend(client, &bundle, &title, &body).await,
+            _ => Err(format!("ALERT_UNKNOWN_KIND_{kind}")),
         };
         credentials::release(target_ref).await;
         match outcome {

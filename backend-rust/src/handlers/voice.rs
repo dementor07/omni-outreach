@@ -4,6 +4,7 @@
 
 use crate::credentials;
 use crate::handlers::common;
+use crate::http::OUTBOUND;
 use crate::models::{ActionCommand, ExecutionResult};
 use serde_json::{json, Value};
 
@@ -21,12 +22,19 @@ pub async fn handle_voice(command: &ActionCommand) -> ExecutionResult {
 
     let cred_ref = match command.credential_ref.as_ref() {
         Some(r) => r.clone(),
-        None => return common::fail(command, "voice command missing credential_ref", false),
+        None => return common::fail(command, "VOICE_MISSING_CREDENTIAL_REF", false),
     };
     let api_key = match credentials::redeem_field(&cred_ref, "api_key").await {
         Ok(Some(k)) => k,
-        Ok(None) => return common::fail(command, "credential bundle missing api_key", false),
-        Err(e) => return common::fail(command, e, true),
+        Ok(None) => {
+            credentials::release(&cred_ref).await;
+            return common::fail(command, "VOICE_CREDENTIAL_BUNDLE_INCOMPLETE", false);
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "retell credential redeem failed");
+            credentials::release(&cred_ref).await;
+            return common::fail(command, "VOICE_CREDENTIAL_REDEEM_FAILED", true);
+        }
     };
 
     let mut body = json!({
@@ -47,8 +55,7 @@ pub async fn handle_voice(command: &ActionCommand) -> ExecutionResult {
         body["retell_llm_dynamic_variables"] = vars.clone();
     }
 
-    let client = reqwest::Client::new();
-    let resp = client
+    let resp = OUTBOUND
         .post(RETELL_URL)
         .bearer_auth(&api_key)
         .json(&body)
@@ -70,8 +77,12 @@ pub async fn handle_voice(command: &ActionCommand) -> ExecutionResult {
         Ok(r) => {
             let s = r.status();
             let t = r.text().await.unwrap_or_default();
-            common::fail(command, format!("retell HTTP {s}: {}", t.chars().take(200).collect::<String>()), s.is_server_error() || s.as_u16() == 429)
+            tracing::warn!(status = s.as_u16(), body = t.chars().take(200).collect::<String>().as_str(), "retell HTTP error");
+            common::fail(command, format!("RETELL_HTTP_{}", s.as_u16()), s.is_server_error() || s.as_u16() == 429)
         }
-        Err(e) => common::fail(command, format!("retell network: {e}"), true),
+        Err(e) => {
+            tracing::warn!(error = %e, "retell network failure");
+            common::fail(command, "RETELL_NETWORK_ERROR", true)
+        }
     }
 }

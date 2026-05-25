@@ -4,6 +4,7 @@
 
 use crate::credentials;
 use crate::handlers::common;
+use crate::http::OUTBOUND;
 use crate::models::{ActionCommand, ExecutionResult};
 use serde_json::{json, Value};
 
@@ -11,14 +12,13 @@ const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
 const DEFAULT_MODEL: &str = "claude-haiku-4-5-20251001";
 
 async fn anthropic_text(api_key: &str, system: &str, user: &str, max_tokens: u32) -> Result<String, String> {
-    let client = reqwest::Client::new();
     let body = json!({
         "model": DEFAULT_MODEL,
         "max_tokens": max_tokens,
         "system": system,
         "messages": [{"role": "user", "content": user}]
     });
-    let r = client
+    let r = OUTBOUND
         .post(ANTHROPIC_URL)
         .header("x-api-key", api_key)
         .header("anthropic-version", "2023-06-01")
@@ -26,13 +26,20 @@ async fn anthropic_text(api_key: &str, system: &str, user: &str, max_tokens: u32
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("anthropic network: {e}"))?;
+        .map_err(|e| {
+            tracing::warn!(error = %e, "anthropic network failure");
+            "ANTHROPIC_NETWORK_ERROR".to_string()
+        })?;
     if !r.status().is_success() {
         let s = r.status();
         let t = r.text().await.unwrap_or_default();
-        return Err(format!("anthropic HTTP {s}: {}", t.chars().take(200).collect::<String>()));
+        tracing::warn!(status = s.as_u16(), body = t.chars().take(200).collect::<String>().as_str(), "anthropic HTTP error");
+        return Err(format!("ANTHROPIC_HTTP_{}", s.as_u16()));
     }
-    let v: Value = r.json().await.map_err(|e| format!("anthropic decode: {e}"))?;
+    let v: Value = r.json().await.map_err(|e| {
+        tracing::warn!(error = %e, "anthropic decode failure");
+        "ANTHROPIC_DECODE_ERROR".to_string()
+    })?;
     Ok(v["content"][0]["text"].as_str().unwrap_or("").trim().to_string())
 }
 

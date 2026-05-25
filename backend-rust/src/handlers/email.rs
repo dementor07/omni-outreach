@@ -29,12 +29,20 @@ pub async fn handle_email(command: &ActionCommand) -> ExecutionResult {
 
     let cred_ref = match command.credential_ref.as_ref() {
         Some(r) => r.clone(),
-        None => return common::fail(command, "email command missing credential_ref", false),
+        None => return common::fail(command, "EMAIL_MISSING_CREDENTIAL_REF", false),
     };
     let smtp_password = match credentials::redeem_field(&cred_ref, "smtp_password").await {
         Ok(Some(p)) => p,
-        Ok(None) => return common::fail(command, "credential bundle missing smtp_password", false),
-        Err(e) => return common::fail(command, e, true),
+        Ok(None) => {
+            credentials::release(&cred_ref).await;
+            return common::fail(command, "EMAIL_CREDENTIAL_BUNDLE_INCOMPLETE", false);
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "smtp credential redeem failed");
+            // Token may not exist server-side, but release is best-effort + cheap.
+            credentials::release(&cred_ref).await;
+            return common::fail(command, "EMAIL_CREDENTIAL_REDEEM_FAILED", true);
+        }
     };
 
     let creds = Credentials::new(smtp_username.clone(), smtp_password);
@@ -46,16 +54,28 @@ pub async fn handle_email(command: &ActionCommand) -> ExecutionResult {
     };
     let mailer = match mailer_builder {
         Ok(b) => b.credentials(creds).port(smtp_port).build(),
-        Err(e) => return common::fail(command, format!("SMTP relay config failed: {e}"), false),
+        Err(e) => {
+            tracing::warn!(error = %e, host = %smtp_host, "smtp relay config failed");
+            credentials::release(&cred_ref).await;
+            return common::fail(command, "EMAIL_RELAY_CONFIG_FAILED", false);
+        }
     };
 
     let from_addr = match from.parse() {
         Ok(a) => a,
-        Err(e) => return common::fail(command, format!("invalid from address: {e}"), false),
+        Err(e) => {
+            tracing::warn!(error = %e, from = %from, "invalid from address");
+            credentials::release(&cred_ref).await;
+            return common::fail(command, "EMAIL_INVALID_FROM_ADDRESS", false);
+        }
     };
     let to_addr = match to.parse() {
         Ok(a) => a,
-        Err(e) => return common::fail(command, format!("invalid recipient: {e}"), false),
+        Err(e) => {
+            tracing::warn!(error = %e, to = %to, "invalid recipient");
+            credentials::release(&cred_ref).await;
+            return common::fail(command, "EMAIL_INVALID_RECIPIENT", false);
+        }
     };
     let email_msg = match Message::builder()
         .from(from_addr)
@@ -65,7 +85,11 @@ pub async fn handle_email(command: &ActionCommand) -> ExecutionResult {
         .body(body.clone())
     {
         Ok(m) => m,
-        Err(e) => return common::fail(command, format!("message build: {e}"), false),
+        Err(e) => {
+            tracing::warn!(error = %e, "message build failed");
+            credentials::release(&cred_ref).await;
+            return common::fail(command, "EMAIL_MESSAGE_BUILD_FAILED", false);
+        }
     };
 
     // SmtpTransport is blocking; run on a worker thread so we don't block the runtime.
@@ -84,16 +108,23 @@ pub async fn handle_email(command: &ActionCommand) -> ExecutionResult {
             )
         }
         Ok(Err(e)) => {
-            error!("[email] smtp send failed: {e}");
+            error!(error = %e, lead_id = %command.lead.id, "smtp send failed");
             // Distinguish permanent (4xx-style invalid recipient) from transient.
+            // Detailed error stays in the structured log; the wire-side code is
+            // a CONSTANT_CASE sentinel so we don't leak SMTP banners or host
+            // identifiers downstream.
             let s = e.to_string().to_lowercase();
             let retriable = !(s.contains("invalid")
                 || s.contains("rejected")
                 || s.contains("does not exist")
                 || s.contains("user unknown")
                 || s.contains("mailbox unavailable"));
-            common::fail(command, e.to_string(), retriable)
+            let code = if retriable { "EMAIL_SMTP_TRANSIENT" } else { "EMAIL_SMTP_PERMANENT" };
+            common::fail(command, code, retriable)
         }
-        Err(join_err) => common::fail(command, format!("smtp join error: {join_err}"), true),
+        Err(join_err) => {
+            error!(error = %join_err, "smtp join error");
+            common::fail(command, "EMAIL_SMTP_JOIN_ERROR", true)
+        }
     }
 }

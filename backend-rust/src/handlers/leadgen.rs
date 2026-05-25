@@ -6,6 +6,7 @@
 
 use crate::credentials;
 use crate::handlers::common;
+use crate::http::OUTBOUND;
 use crate::models::{ActionCommand, ExecutionResult};
 use serde_json::{json, Value};
 
@@ -30,8 +31,7 @@ async fn delegate(command: &ActionCommand, endpoint: &str) -> ExecutionResult {
         "node_id": command.metadata.get("node_id"),
         "payload": command.payload,
     });
-    let client = reqwest::Client::new();
-    let resp = client
+    let resp = OUTBOUND
         .post(&url)
         .bearer_auth(&secret)
         .json(&body)
@@ -68,9 +68,13 @@ async fn delegate(command: &ActionCommand, endpoint: &str) -> ExecutionResult {
         Ok(r) => {
             let s = r.status();
             let t = r.text().await.unwrap_or_default();
-            common::fail(command, format!("lead-gen delegate HTTP {s}: {}", t.chars().take(200).collect::<String>()), s.is_server_error())
+            tracing::warn!(status = s.as_u16(), body = t.chars().take(200).collect::<String>().as_str(), "lead-gen delegate error");
+            common::fail(command, format!("LEADGEN_DELEGATE_HTTP_{}", s.as_u16()), s.is_server_error())
         }
-        Err(e) => common::fail(command, format!("lead-gen delegate network: {e}"), true),
+        Err(e) => {
+            tracing::warn!(error = %e, "lead-gen delegate network failure");
+            common::fail(command, "LEADGEN_DELEGATE_NETWORK_ERROR", true)
+        }
     }
 }
 

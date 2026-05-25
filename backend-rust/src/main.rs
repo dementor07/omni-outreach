@@ -1,5 +1,6 @@
 mod credentials;
 mod handlers;
+mod http;
 mod models;
 mod proxy;
 
@@ -112,7 +113,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     match claim {
                         Ok(res) if res.rows_affected() == 0 => {
                             warn!("duplicate command {command_id}; skipping");
-                            consumer.commit_message(&borrowed, CommitMode::Async)?;
+                            if let Err(e) = consumer.commit_message(&borrowed, CommitMode::Async) {
+                                error!("kafka commit failed for duplicate {command_id}: {e}");
+                            }
                             continue;
                         }
                         Err(e) => warn!("ledger insert failed for {command_id} ({e}); proceeding without dedupe guard"),
@@ -132,7 +135,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .await;
                 }
 
-                let result_json = serde_json::to_string(&result)?;
+                // Serialisation must never crash the consumer — dead-letter and continue.
+                let result_json = match serde_json::to_string(&result) {
+                    Ok(j) => j,
+                    Err(e) => {
+                        error!("serialize ExecutionResult for {command_id} failed: {e}");
+                        let _ = producer.send(
+                            FutureRecord::to("outreach.dead_letter")
+                                .payload(payload)
+                                .key("serialize_error"),
+                            Duration::from_secs(5),
+                        ).await;
+                        if let Err(ce) = consumer.commit_message(&borrowed, CommitMode::Async) {
+                            error!("kafka commit failed after serialize error for {command_id}: {ce}");
+                        }
+                        continue;
+                    }
+                };
                 if let Err((e, _)) = producer
                     .send(
                         FutureRecord::to("outreach.results")
@@ -144,7 +163,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 {
                     error!("failed to publish result for {command_id}: {e}");
                 }
-                consumer.commit_message(&borrowed, CommitMode::Async)?;
+                // Commit failures are logged and tolerated — at-least-once
+                // delivery is fine because processed_commands dedupes.
+                if let Err(e) = consumer.commit_message(&borrowed, CommitMode::Async) {
+                    error!("kafka commit failed for {command_id}: {e}");
+                }
                 info!("result published for {command_id} status={}", result.status.as_str());
             }
         }
