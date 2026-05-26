@@ -34,13 +34,16 @@ async def init_producer() -> None:
     global _producer
     if _producer is not None:
         return
+    # gzip ships with the stdlib — no extra wheels. zstd needs python-zstandard
+    # which would need adding to requirements.txt; gzip is fine until throughput
+    # makes it the bottleneck.
     _producer = AIOKafkaProducer(
         bootstrap_servers=settings.kafka_brokers,
         value_serializer=lambda v: json.dumps(v, separators=(",", ":")).encode("utf-8"),
         key_serializer=lambda k: k.encode("utf-8") if isinstance(k, str) else k,
         enable_idempotence=True,
         acks="all",
-        compression_type="zstd",
+        compression_type="gzip",
     )
     await _producer.start()
     log.info("[bus] producer started, brokers=%s", settings.kafka_brokers)
