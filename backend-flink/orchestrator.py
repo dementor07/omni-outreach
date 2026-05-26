@@ -218,6 +218,7 @@ def run_orchestrator():
             KafkaRecordSerializationSchema.builder()
             .set_topic("outreach.transitions")
             .set_value_serialization_schema(SimpleStringSchema())
+            
             .build()
         )
         .set_delivery_guarantee(DeliveryGuarantee.AT_LEAST_ONCE)
