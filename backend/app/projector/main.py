@@ -37,7 +37,7 @@ async def _archive_event(env: dict[str, Any], rec: ConsumerRecord) -> bool:
     """Insert into events_archive. Returns False if duplicate (offset already seen)."""
     row = await fetch_one(
         """
-        INSERT INTO events_archive
+        INSERT INTO omni_events_archive
           (id, workspace_id, event_type, entity_type, entity_id, payload,
            actor_user_id, correlation_id, kafka_topic, kafka_partition,
            kafka_offset, occurred_at)
@@ -68,7 +68,7 @@ async def _project_contact(env: dict[str, Any]) -> None:
     p = env.get("payload") or {}
     await execute(
         """
-        INSERT INTO contacts (id, workspace_id, email, first_name, last_name,
+        INSERT INTO omni_contacts (id, workspace_id, email, first_name, last_name,
                               company, headline, linkedin_url, phone, source, custom_fields)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
         ON CONFLICT (id) DO UPDATE SET
@@ -80,7 +80,7 @@ async def _project_contact(env: dict[str, Any]) -> None:
           linkedin_url  = COALESCE(EXCLUDED.linkedin_url,  contacts.linkedin_url),
           phone         = COALESCE(EXCLUDED.phone,         contacts.phone),
           source        = COALESCE(EXCLUDED.source,        contacts.source),
-          custom_fields = contacts.custom_fields || EXCLUDED.custom_fields,
+          custom_fields = omni_contacts.custom_fields || EXCLUDED.custom_fields,
           updated_at    = NOW()
         """,
         env["entity_id"],
@@ -101,14 +101,14 @@ async def _project_company(env: dict[str, Any]) -> None:
     p = env.get("payload") or {}
     await execute(
         """
-        INSERT INTO companies (id, workspace_id, name, domain, industry, size, custom_fields)
+        INSERT INTO omni_companies (id, workspace_id, name, domain, industry, size, custom_fields)
         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
         ON CONFLICT (id) DO UPDATE SET
           name          = COALESCE(EXCLUDED.name,     companies.name),
           domain        = COALESCE(EXCLUDED.domain,   companies.domain),
           industry      = COALESCE(EXCLUDED.industry, companies.industry),
           size          = COALESCE(EXCLUDED.size,     companies.size),
-          custom_fields = companies.custom_fields || EXCLUDED.custom_fields,
+          custom_fields = omni_companies.custom_fields || EXCLUDED.custom_fields,
           updated_at    = NOW()
         """,
         env["entity_id"],
@@ -125,7 +125,7 @@ async def _project_deal(env: dict[str, Any]) -> None:
     p = env.get("payload") or {}
     await execute(
         """
-        INSERT INTO deals (id, workspace_id, name, stage, value, currency,
+        INSERT INTO omni_deals (id, workspace_id, name, stage, value, currency,
                            contact_id, company_id, owner_user_id, close_date, custom_fields)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
         ON CONFLICT (id) DO UPDATE SET
@@ -137,7 +137,7 @@ async def _project_deal(env: dict[str, Any]) -> None:
           company_id    = COALESCE(EXCLUDED.company_id,    deals.company_id),
           owner_user_id = COALESCE(EXCLUDED.owner_user_id, deals.owner_user_id),
           close_date    = COALESCE(EXCLUDED.close_date,    deals.close_date),
-          custom_fields = deals.custom_fields || EXCLUDED.custom_fields,
+          custom_fields = omni_deals.custom_fields || EXCLUDED.custom_fields,
           updated_at    = NOW()
         """,
         env["entity_id"],
@@ -158,7 +158,7 @@ async def _project_lead(env: dict[str, Any]) -> None:
     p = env.get("payload") or {}
     await execute(
         """
-        INSERT INTO leads (id, workspace_id, contact_id, workflow_id,
+        INSERT INTO omni_leads (id, workspace_id, contact_id, workflow_id,
                            current_node_id, status, custom_fields)
         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
         ON CONFLICT (id) DO UPDATE SET
@@ -166,7 +166,7 @@ async def _project_lead(env: dict[str, Any]) -> None:
           workflow_id     = COALESCE(EXCLUDED.workflow_id,     leads.workflow_id),
           current_node_id = COALESCE(EXCLUDED.current_node_id, leads.current_node_id),
           status          = COALESCE(EXCLUDED.status,          leads.status),
-          custom_fields   = leads.custom_fields || EXCLUDED.custom_fields,
+          custom_fields   = omni_leads.custom_fields || EXCLUDED.custom_fields,
           updated_at      = NOW()
         """,
         env["entity_id"],
@@ -184,7 +184,7 @@ async def _project_message(env: dict[str, Any]) -> None:
     direction = "inbound" if env["event_type"] == "message.received" else "outbound"
     await execute(
         """
-        INSERT INTO messages (id, workspace_id, contact_id, channel, direction,
+        INSERT INTO omni_messages (id, workspace_id, contact_id, channel, direction,
                               subject, body, classification, confidence, metadata, occurred_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
         ON CONFLICT (id) DO NOTHING
@@ -225,7 +225,7 @@ async def _apply_projection(env: dict[str, Any]) -> None:
 async def _record_offset(rec: ConsumerRecord) -> None:
     await execute(
         """
-        INSERT INTO projector_offsets (kafka_topic, kafka_partition, kafka_offset, updated_at)
+        INSERT INTO omni_projector_offsets (kafka_topic, kafka_partition, kafka_offset, updated_at)
         VALUES ($1, $2, $3, NOW())
         ON CONFLICT (kafka_topic, kafka_partition) DO UPDATE
           SET kafka_offset = EXCLUDED.kafka_offset, updated_at = NOW()

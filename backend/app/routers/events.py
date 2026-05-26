@@ -114,7 +114,7 @@ async def list_events(
         f"""
         SELECT id, workspace_id, event_type, entity_type, entity_id, payload,
                actor_user_id, correlation_id, occurred_at
-        FROM events_archive
+        FROM omni_events_archive
         WHERE {' AND '.join(clauses)}
         ORDER BY occurred_at DESC
         LIMIT ${len(args)}

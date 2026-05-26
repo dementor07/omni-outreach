@@ -23,8 +23,8 @@ specific providers.
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import Awaitable, Callable
 
 from app.db import execute, fetch_one
 from app.services.encryption import decrypt, encrypt

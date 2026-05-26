@@ -76,13 +76,13 @@ class LeadOut(BaseModel):
 
 @router.get("/contacts", response_model=list[ContactOut], summary="List contacts in this workspace")
 async def list_contacts(_: AuthContext = Depends(get_current_workspace), limit: int = Query(100, ge=1, le=500)) -> list[ContactOut]:
-    rows = await fetch_all("SELECT * FROM contacts ORDER BY updated_at DESC LIMIT $1", limit)
+    rows = await fetch_all("SELECT * FROM omni_contacts ORDER BY updated_at DESC LIMIT $1", limit)
     return [ContactOut.model_validate(r) for r in rows]
 
 
 @router.get("/companies", response_model=list[CompanyOut], summary="List companies in this workspace")
 async def list_companies(_: AuthContext = Depends(get_current_workspace), limit: int = Query(100, ge=1, le=500)) -> list[CompanyOut]:
-    rows = await fetch_all("SELECT * FROM companies ORDER BY updated_at DESC LIMIT $1", limit)
+    rows = await fetch_all("SELECT * FROM omni_companies ORDER BY updated_at DESC LIMIT $1", limit)
     return [CompanyOut.model_validate(r) for r in rows]
 
 
@@ -93,9 +93,9 @@ async def list_deals(
     limit: int = Query(500, ge=1, le=2000),
 ) -> list[DealOut]:
     if stage:
-        rows = await fetch_all("SELECT * FROM deals WHERE stage = $1 ORDER BY updated_at DESC LIMIT $2", stage, limit)
+        rows = await fetch_all("SELECT * FROM omni_deals WHERE stage = $1 ORDER BY updated_at DESC LIMIT $2", stage, limit)
     else:
-        rows = await fetch_all("SELECT * FROM deals ORDER BY updated_at DESC LIMIT $1", limit)
+        rows = await fetch_all("SELECT * FROM omni_deals ORDER BY updated_at DESC LIMIT $1", limit)
     return [DealOut.model_validate(r) for r in rows]
 
 
@@ -106,7 +106,7 @@ async def list_leads(
     limit: int = Query(500, ge=1, le=5000),
 ) -> list[LeadOut]:
     if workflow_id:
-        rows = await fetch_all("SELECT * FROM leads WHERE workflow_id = $1 ORDER BY updated_at DESC LIMIT $2", workflow_id, limit)
+        rows = await fetch_all("SELECT * FROM omni_leads WHERE workflow_id = $1 ORDER BY updated_at DESC LIMIT $2", workflow_id, limit)
     else:
-        rows = await fetch_all("SELECT * FROM leads ORDER BY updated_at DESC LIMIT $1", limit)
+        rows = await fetch_all("SELECT * FROM omni_leads ORDER BY updated_at DESC LIMIT $1", limit)
     return [LeadOut.model_validate(r) for r in rows]

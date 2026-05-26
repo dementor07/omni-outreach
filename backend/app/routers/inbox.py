@@ -59,7 +59,7 @@ async def list_threads(
           (ARRAY_AGG(classification ORDER BY occurred_at DESC))[1] AS last_classification,
           (ARRAY_AGG(LEFT(body, 200)  ORDER BY occurred_at DESC))[1] AS last_snippet,
           (ARRAY_AGG(channel          ORDER BY occurred_at DESC))[1] AS last_channel
-        FROM messages
+        FROM omni_messages
         WHERE contact_id IS NOT NULL
         GROUP BY contact_id
         ORDER BY last_message_at DESC
@@ -84,7 +84,7 @@ async def get_thread(
         """
         SELECT id, contact_id, channel, direction, subject, body,
                classification, confidence, metadata, occurred_at
-        FROM messages
+        FROM omni_messages
         WHERE contact_id = $1
         ORDER BY occurred_at ASC
         LIMIT $2

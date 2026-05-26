@@ -101,14 +101,14 @@ class WorkflowDetail(BaseModel):
 
 @router.get("/workflows", response_model=list[WorkflowOut], summary="List workflows in this workspace")
 async def list_workflows(_: AuthContext = Depends(get_current_workspace)) -> list[WorkflowOut]:
-    rows = await fetch_all("SELECT * FROM workflows ORDER BY updated_at DESC")
+    rows = await fetch_all("SELECT * FROM omni_workflows ORDER BY updated_at DESC")
     return [WorkflowOut.model_validate(r) for r in rows]
 
 
 @router.post("/workflows", response_model=WorkflowOut, status_code=201, summary="Create a new workflow")
 async def create_workflow(body: WorkflowCreate, ctx: AuthContext = Depends(get_current_workspace)) -> WorkflowOut:
     row = await fetch_one(
-        "INSERT INTO workflows (workspace_id, name, timezone) VALUES ($1, $2, $3) RETURNING *",
+        "INSERT INTO omni_workflows (workspace_id, name, timezone) VALUES ($1, $2, $3) RETURNING *",
         ctx.workspace_id,
         body.name,
         body.timezone,
@@ -118,11 +118,11 @@ async def create_workflow(body: WorkflowCreate, ctx: AuthContext = Depends(get_c
 
 @router.get("/workflows/{workflow_id}", response_model=WorkflowDetail, summary="Fetch a workflow with all its nodes and edges")
 async def get_workflow(workflow_id: uuid.UUID, _: AuthContext = Depends(get_current_workspace)) -> WorkflowDetail:
-    wf = await fetch_one("SELECT * FROM workflows WHERE id = $1", workflow_id)
+    wf = await fetch_one("SELECT * FROM omni_workflows WHERE id = $1", workflow_id)
     if not wf:
         raise HTTPException(status_code=404, detail="workflow not found")
-    nodes = await fetch_all("SELECT * FROM workflow_nodes WHERE workflow_id = $1", workflow_id)
-    edges = await fetch_all("SELECT * FROM workflow_edges WHERE workflow_id = $1", workflow_id)
+    nodes = await fetch_all("SELECT * FROM omni_workflow_nodes WHERE workflow_id = $1", workflow_id)
+    edges = await fetch_all("SELECT * FROM omni_workflow_edges WHERE workflow_id = $1", workflow_id)
     return WorkflowDetail(
         workflow=WorkflowOut.model_validate(wf),
         nodes=[NodeOut.model_validate(n) for n in nodes],
@@ -141,7 +141,7 @@ async def update_workflow(
         raise HTTPException(status_code=400, detail="no fields to update")
     set_sql = ", ".join(f"{k} = ${i + 2}" for i, k in enumerate(fields))
     row = await fetch_one(
-        f"UPDATE workflows SET {set_sql}, updated_at = NOW() WHERE id = $1 RETURNING *",
+        f"UPDATE omni_workflows SET {set_sql}, updated_at = NOW() WHERE id = $1 RETURNING *",
         workflow_id,
         *fields.values(),
     )
@@ -152,7 +152,7 @@ async def update_workflow(
 
 @router.delete("/workflows/{workflow_id}", status_code=204, summary="Archive a workflow")
 async def archive_workflow(workflow_id: uuid.UUID, _: AuthContext = Depends(get_current_workspace)) -> None:
-    await execute("UPDATE workflows SET status = 'archived', updated_at = NOW() WHERE id = $1", workflow_id)
+    await execute("UPDATE omni_workflows SET status = 'archived', updated_at = NOW() WHERE id = $1", workflow_id)
 
 
 # ── Nodes ────────────────────────────────────────────────────────────────────
@@ -166,7 +166,7 @@ async def add_node(
 ) -> NodeOut:
     row = await fetch_one(
         """
-        INSERT INTO workflow_nodes (workspace_id, workflow_id, node_type, position_x, position_y, config)
+        INSERT INTO omni_workflow_nodes (workspace_id, workflow_id, node_type, position_x, position_y, config)
         VALUES ($1, $2, $3, $4, $5, $6::jsonb) RETURNING *
         """,
         ctx.workspace_id,
@@ -191,7 +191,7 @@ async def update_node(
         raise HTTPException(status_code=400, detail="no fields to update")
     set_sql = ", ".join(f"{k} = ${i + 3}" for i, k in enumerate(fields))
     row = await fetch_one(
-        f"UPDATE workflow_nodes SET {set_sql} WHERE id = $1 AND workflow_id = $2 RETURNING *",
+        f"UPDATE omni_workflow_nodes SET {set_sql} WHERE id = $1 AND workflow_id = $2 RETURNING *",
         node_id,
         workflow_id,
         *fields.values(),
@@ -207,7 +207,7 @@ async def remove_node(
     node_id: uuid.UUID,
     _: AuthContext = Depends(get_current_workspace),
 ) -> None:
-    await execute("DELETE FROM workflow_nodes WHERE id = $1 AND workflow_id = $2", node_id, workflow_id)
+    await execute("DELETE FROM omni_workflow_nodes WHERE id = $1 AND workflow_id = $2", node_id, workflow_id)
 
 
 # ── Edges ────────────────────────────────────────────────────────────────────
@@ -221,7 +221,7 @@ async def add_edge(
 ) -> EdgeOut:
     row = await fetch_one(
         """
-        INSERT INTO workflow_edges (workspace_id, workflow_id, source_node_id, target_node_id, source_handle, target_handle)
+        INSERT INTO omni_workflow_edges (workspace_id, workflow_id, source_node_id, target_node_id, source_handle, target_handle)
         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *
         """,
         ctx.workspace_id,
@@ -240,4 +240,4 @@ async def remove_edge(
     edge_id: uuid.UUID,
     _: AuthContext = Depends(get_current_workspace),
 ) -> None:
-    await execute("DELETE FROM workflow_edges WHERE id = $1 AND workflow_id = $2", edge_id, workflow_id)
+    await execute("DELETE FROM omni_workflow_edges WHERE id = $1 AND workflow_id = $2", edge_id, workflow_id)

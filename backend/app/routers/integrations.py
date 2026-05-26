@@ -54,12 +54,12 @@ async def list_connections(
 ) -> list[ConnectionOut]:
     if provider:
         rows = await fetch_all(
-            "SELECT id, provider, name, metadata, connected_at, last_refreshed_at FROM connections WHERE provider = $1 ORDER BY connected_at DESC",
+            "SELECT id, provider, name, metadata, connected_at, last_refreshed_at FROM omni_connections WHERE provider = $1 ORDER BY connected_at DESC",
             provider,
         )
     else:
         rows = await fetch_all(
-            "SELECT id, provider, name, metadata, connected_at, last_refreshed_at FROM connections ORDER BY connected_at DESC"
+            "SELECT id, provider, name, metadata, connected_at, last_refreshed_at FROM omni_connections ORDER BY connected_at DESC"
         )
     return [ConnectionOut.model_validate(r) for r in rows]
 
@@ -78,7 +78,7 @@ async def create_connection(body: ConnectionCreate, ctx: AuthContext = Depends(g
     try:
         row = await fetch_one(
             """
-            INSERT INTO connections (workspace_id, provider, name, credentials_encrypted, metadata)
+            INSERT INTO omni_connections (workspace_id, provider, name, credentials_encrypted, metadata)
             VALUES ($1, $2, $3, $4, $5::jsonb)
             RETURNING id, provider, name, metadata, connected_at, last_refreshed_at
             """,
@@ -95,4 +95,4 @@ async def create_connection(body: ConnectionCreate, ctx: AuthContext = Depends(g
 
 @router.delete("/{connection_id}", status_code=204, summary="Disconnect (delete) an integration")
 async def delete_connection(connection_id: uuid.UUID, _: AuthContext = Depends(get_current_workspace)) -> None:
-    await execute("DELETE FROM connections WHERE id = $1", connection_id)
+    await execute("DELETE FROM omni_connections WHERE id = $1", connection_id)
