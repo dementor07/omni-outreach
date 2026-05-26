@@ -18,12 +18,19 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.config import settings
 from app.db import close_pool, close_redis, init_pool, init_redis
 from app.logging_config import get_logger, setup_logging
+from app.nodes import discover as discover_nodes
 from app.routers import (
     auth,
     auth_google,
+    canvas,
+    events,
+    inbox,
+    integrations,
     internal,
+    nodes,
     oauth,
     oauth_producthunt,
+    projections,
     workspaces,
 )
 
@@ -49,7 +56,8 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Omni v2 backend")
     await init_pool(settings.get_asyncpg_dsn())
     await init_redis(settings.get_redis_url())
-    logger.info("Database and Redis connections established")
+    discover_nodes()
+    logger.info("Database, Redis, and node registry initialised")
     yield
     logger.info("Shutting down — closing connections")
     await close_pool()
@@ -88,8 +96,13 @@ app.include_router(oauth_producthunt.router, prefix="/oauth/producthunt", tags=[
 # Internal (muscle ↔ control plane)
 app.include_router(internal.router, prefix="/internal", tags=["internal"])
 
-# v2 routers land here as they are built:
-#   events, projections, nodes, canvas, inbox, integrations
+# v2 surface
+app.include_router(events.router, prefix="/events", tags=["events"])
+app.include_router(projections.router, prefix="/projections", tags=["projections"])
+app.include_router(nodes.router, prefix="/nodes", tags=["nodes"])
+app.include_router(canvas.router, prefix="/canvas", tags=["canvas"])
+app.include_router(integrations.router, prefix="/integrations", tags=["integrations"])
+app.include_router(inbox.router, prefix="/inbox", tags=["inbox"])
 
 
 @app.get("/health")
