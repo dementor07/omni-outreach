@@ -1,3 +1,10 @@
+"""Omni v2 control plane.
+
+Six routers: auth + workspaces + integrations + canvas + events + nodes.
+Everything else is a projection over the event log. See
+omni-vault/wiki/architecture/0001-v2-nuke.md for the ADR.
+"""
+
 import uuid
 from contextlib import asynccontextmanager
 
@@ -12,35 +19,13 @@ from app.config import settings
 from app.db import close_pool, close_redis, init_pool, init_redis
 from app.logging_config import get_logger, setup_logging
 from app.routers import (
-    accounts,
-    activity,
-    agents,
-    analytics,
-    approvals,
     auth,
     auth_google,
-    blacklist,
-    campaigns,
-    fragments,
-    inbox,
     internal,
-    job_search,
-    lead_gen,
-    leads,
-    notifications,
     oauth,
     oauth_producthunt,
-    overview,
-    queue,
-    sequences,
-    template_library,
-    templates,
-    tracking,
-    webhooks,
     workspaces,
 )
-from app.routers import settings as settings_router
-from app.services.bus import bus
 
 setup_logging()
 logger = get_logger(__name__)
@@ -61,21 +46,20 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting Omni Outreach backend")
+    logger.info("Starting Omni v2 backend")
     await init_pool(settings.get_asyncpg_dsn())
     await init_redis(settings.get_redis_url())
     logger.info("Database and Redis connections established")
     yield
     logger.info("Shutting down — closing connections")
-    await bus.close()
     await close_pool()
     await close_redis()
 
 
 app = FastAPI(
-    title="Omni API",
-    description="Backend for Omni — multi-channel outreach control plane.",
-    version="0.1.0",
+    title="Omni v2",
+    description="Streaming-native multi-tenant CRM with a pluggable canvas.",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -92,33 +76,20 @@ app.add_middleware(
 )
 app.add_middleware(RequestIDMiddleware)
 
+# Auth + tenancy
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(auth_google.router, prefix="/auth/google", tags=["auth"])
 app.include_router(workspaces.router, prefix="/workspaces", tags=["workspaces"])
-app.include_router(campaigns.router, prefix="/campaigns", tags=["campaigns"])
-app.include_router(leads.router, prefix="/leads", tags=["leads"])
-app.include_router(sequences.router, prefix="/sequences", tags=["sequences"])
-app.include_router(templates.router, prefix="/templates", tags=["templates"])
-app.include_router(accounts.router, prefix="/accounts", tags=["accounts"])
-app.include_router(queue.router, prefix="/queue", tags=["queue"])
-app.include_router(job_search.router, prefix="/job-search", tags=["job-search"])
-app.include_router(lead_gen.router, prefix="/lead-gen", tags=["lead-gen"])
-app.include_router(settings_router.router, prefix="/settings", tags=["settings"])
-app.include_router(overview.router, prefix="/overview", tags=["overview"])
-app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
-app.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
-app.include_router(activity.router, prefix="/activity", tags=["activity"])
-app.include_router(blacklist.router, prefix="/blacklist", tags=["blacklist"])
-app.include_router(tracking.router, prefix="/track", tags=["tracking"])
-app.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
-app.include_router(template_library.router, prefix="/template-library", tags=["template-library"])
-app.include_router(inbox.router, prefix="/inbox", tags=["inbox"])
-app.include_router(approvals.router, prefix="/approvals", tags=["approvals"])
-app.include_router(agents.router, prefix="/agents", tags=["agents"])
+
+# OAuth (will collapse into integrations.py once that lands)
 app.include_router(oauth.router, prefix="/oauth", tags=["oauth"])
 app.include_router(oauth_producthunt.router, prefix="/oauth/producthunt", tags=["oauth"])
-app.include_router(fragments.router, prefix="/fragments", tags=["fragments"])
+
+# Internal (muscle ↔ control plane)
 app.include_router(internal.router, prefix="/internal", tags=["internal"])
+
+# v2 routers land here as they are built:
+#   events, projections, nodes, canvas, inbox, integrations
 
 
 @app.get("/health")
@@ -127,8 +98,6 @@ async def health():
 
     checks = {"api": "ok"}
     try:
-        # Health probe runs before any request context; system_scope satisfies
-        # acquire()'s required workspace binding.
         async with system_scope():
             row = await fetch_one("SELECT 1 AS ok")
         checks["db"] = "ok" if row else "error"
