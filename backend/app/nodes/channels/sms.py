@@ -1,0 +1,58 @@
+"""SMS channel node — Twilio via the Rust muscle's handle_sms."""
+
+from __future__ import annotations
+
+import uuid
+
+from pydantic import BaseModel, Field
+
+from app.nodes import (
+    NodeCategory,
+    NodeContext,
+    NodeHandle,
+    NodeManifest,
+    NodeResult,
+    SideEffect,
+    register,
+)
+
+
+class SmsChannelConfig(BaseModel):
+    connection_name: str = Field(description="Twilio connection name (Settings → Integrations)")
+    body_template: str = Field(min_length=1, max_length=1600, description="Message body; supports {{contact.first_name}}-style variables")
+
+
+MANIFEST = NodeManifest(
+    type="channel.sms",
+    category=NodeCategory.CHANNEL,
+    summary="Send an SMS via a workspace Twilio connection",
+    config_schema=SmsChannelConfig,
+    output_handles=(
+        NodeHandle("sent", "Twilio accepted the message"),
+        NodeHandle("on_error", "Permanent failure (invalid number, no credit, …)"),
+    ),
+    capabilities=("connection:twilio",),
+    side_effect=SideEffect.NETWORK,
+    icon="message-square",
+)
+
+
+async def execute(ctx: NodeContext) -> NodeResult:
+    cfg = SmsChannelConfig(**ctx.config)
+    correlation_id = ctx.correlation_id or str(uuid.uuid4())
+    events = [
+        {
+            "event_type": "channel.sms.queued",
+            "entity_type": "lead",
+            "entity_id": ctx.lead.get("id"),
+            "payload": {
+                "connection_name": cfg.connection_name,
+                "body_template": cfg.body_template,
+                "correlation_id": correlation_id,
+            },
+        }
+    ]
+    return NodeResult(handle="sent", events=events, telemetry={"correlation_id": correlation_id})
+
+
+register(MANIFEST, execute)
