@@ -1,0 +1,70 @@
+# Omni v2 — runs alongside prod master on the same VPS, sharing
+# Postgres + Redpanda + Dragonfly (Redis API). Different ports, different
+# nginx vhost, no shared container names. See ADR 0001.
+#
+# Deploy:
+#   docker compose -p omni-v2 -f docker-compose.v2.yml up -d --build
+#
+# Prod master continues running under the default project (-p omni-outreach)
+# on the same host. Nothing here recreates a prod container.
+
+services:
+  backend-v2:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+    container_name: omni-v2-backend
+    env_file:
+      - .env
+    environment:
+      # Shared infra (joins the master compose network via external network below)
+      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
+      REDIS_URL: redis://:d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17@redis:6379
+      REDIS_PASSWORD: d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17
+      KAFKA_BROKERS: redpanda:9092
+      DB_PASSWORD: OmniOutreach2026
+      SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
+      MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
+      FRONTEND_URL: https://v2.srv1575227.hstgr.cloud
+    networks:
+      - omni-outreach_default
+    ports:
+      - "8001:8000"
+    restart: unless-stopped
+
+  projector-v2:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+    container_name: omni-v2-projector
+    command: python -m app.projector.main
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
+      KAFKA_BROKERS: redpanda:9092
+      DB_PASSWORD: OmniOutreach2026
+      SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
+    networks:
+      - omni-outreach_default
+    restart: unless-stopped
+
+  frontend-v2:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.v2
+    container_name: omni-v2-frontend
+    networks:
+      - omni-outreach_default
+    ports:
+      - "8080:80"
+      - "8443:443"
+    volumes:
+      - ./certs:/etc/nginx/certs:ro
+    restart: unless-stopped
+
+# Join master's docker-compose network so we can talk to db, redpanda, redis
+# by their service names without exposing them.
+networks:
+  omni-outreach_default:
+    external: true

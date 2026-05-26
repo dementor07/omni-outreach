@@ -1,0 +1,9 @@
+# v2 frontend — until the React app is rebuilt against v2 endpoints, this
+# image serves a minimal landing page that links to the OpenAPI Swagger UI
+# and proxies /api to backend-v2:8000.
+FROM nginx:1.27-alpine
+
+COPY nginx.v2.conf /etc/nginx/nginx.conf
+COPY public-v2/ /usr/share/nginx/html/
+
+EXPOSE 80 443
