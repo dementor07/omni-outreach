@@ -33,6 +33,7 @@ from app.routers import (
     projections,
     workspaces,
 )
+from app.services.bus import close_producer, init_producer
 
 setup_logging()
 logger = get_logger(__name__)
@@ -56,10 +57,12 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Omni v2 backend")
     await init_pool(settings.get_asyncpg_dsn())
     await init_redis(settings.get_redis_url())
+    await init_producer()
     discover_nodes()
-    logger.info("Database, Redis, and node registry initialised")
+    logger.info("Database, Redis, bus, and node registry initialised")
     yield
     logger.info("Shutting down — closing connections")
+    await close_producer()
     await close_pool()
     await close_redis()
 

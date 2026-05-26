@@ -1161,3 +1161,51 @@ Verified buttons end-to-end via chrome-devtools-mcp authenticated session:
 - Sources Configure: navigates with `?campaign_id=...`, LeadSources preselects correctly ✓
 - Canvas round-trip: add Email node, save (`POST /sequences/save` → 200), reload, nodes present in DB with `node_type` + `position_x/y` ✓
 - Mobile drawer at 375px: open / backdrop / close-on-nav ✓
+
+
+## 2026-05-26 — v2-nuke ship
+
+Branch `v2-nuke` from master @ `8258428`. Tagged master tip as
+`pre-v2-nuke` for rollback.
+
+**Commits on v2-nuke:**
+
+- `fb0a549` docs(adr): v2-nuke architecture decision + orchestrator hardening
+- `0f518d4` nuke: delete legacy execution path (53 files, -11,464 lines)
+- `bc0c1c7` feat(v2): event log + 6 routers + pluggable node registry (Postgres events — superseded)
+- (pending commit) feat(v2): Redpanda as event log + projector worker + projection tables
+
+**Files touched in the pending commit:**
+
+- `backend/alembic/versions/022_redpanda_projections.py` — drops `events`
+  + `_v` views; creates `contacts`/`companies`/`deals`/`leads`/`messages`
+  projection tables, `events_archive`, `projector_offsets`; RLS on all.
+- `backend/app/services/bus.py` — aiokafka producer wrapper; single
+  publish surface for every node and router.
+- `backend/app/projector/main.py` — long-running Redpanda consumer that
+  upserts projection tables + archives every event; idempotent via
+  `(topic, partition, offset)` unique constraint.
+- `backend/app/routers/events.py` — POST publishes to `omni.events`
+  (returns 202); GET reads `events_archive`.
+- `backend/app/routers/projections.py` — reads new projection tables.
+- `backend/app/routers/inbox.py` — reads new `messages` table.
+- `backend/app/routers/nodes.py` — `/execute` publishes node-returned
+  events via the bus.
+- `backend/app/main.py` — wires `init_producer` / `close_producer` into
+  the FastAPI lifespan.
+- `docker-compose.yml` — adds `projector` service; removes stale
+  `sync-worker` / `transition-worker` (legacy modules deleted in nuke);
+  removes `CHANNEL_MUSCLE_MODE` env var.
+- `omni-vault/wiki/architecture/0001-v2-nuke.md` — addendum recording
+  the Redpanda-as-source-of-truth correction.
+- `omni-vault/index.md` — links the ADR.
+
+**Operational notes:**
+
+- Master is untouched. Prod still runs the legacy code at
+  `srv1575227.hstgr.cloud`.
+- v2 will deploy to `v2.srv1575227.hstgr.cloud` (subdomain TBD) when
+  the smoke + lint pass clears.
+- Migration 022 is additive against the shared Postgres; master's
+  containers ignore the new tables.
+- Rollback: redeploy `pre-v2-nuke` tag, abandon the branch.

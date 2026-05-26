@@ -160,3 +160,17 @@ This supplement covers pages added or substantially revised after the previous i
 | [[ci-watcher]] | Background `until` loop on `gh run view`; deploy-progress check via SSH `pgrep docker compose up`; CLI cheat sheet; anti-patterns. |
 
 > The Operations heading further down this index is the older vault-meta list (CLAUDE.md, log.md, raw/, etc.). Those are vault meta, not runbooks; the table above is the live operational reference.
+
+
+---
+
+## 2026-05-26 — v2-nuke
+
+Architectural reset. The legacy Python dispatcher path is gone; the
+control plane is rebuilt around six small routers + a pluggable node
+registry, with Redpanda as the durable event log and Postgres as the
+projection store.
+
+| Page | Summary |
+| --- | --- |
+| [[0001-v2-nuke]] | ADR 0001 — Omni v2 nuke. Discards 53 files / -11,464 lines of legacy execution path; rebuilds around `events` (Redpanda topic + Postgres projections), `workflows` (canvas DAG), `connections` (generic integrations), and `app/nodes/` (pluggable node registry). Addendum corrects the original Postgres-events misstep — Redpanda is the source of truth. |

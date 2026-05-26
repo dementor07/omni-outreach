@@ -130,10 +130,6 @@ services:
       DB_PASSWORD: OmniOutreach2026
       SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
       MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
-      # Per-channel cutover allowlist. Channels in this list flow exclusively
-      # through the Rust muscle (no Python queue insert). Empty = legacy path
-      # for everything. Start with email+linkedin_invite and expand.
-      CHANNEL_MUSCLE_MODE: ${CHANNEL_MUSCLE_MODE:-email,linkedin_invite}
     depends_on:
       - db
       - redpanda
@@ -143,36 +139,23 @@ services:
     ports:
       - "8000:8000"
 
-  # --- SOTA Bridge Workers ---
-  sync-worker:
+  # --- Projection Worker ---
+  # Consumes omni.events from Redpanda and upserts projection tables
+  # (contacts/companies/deals/leads/messages) plus the queryable
+  # events_archive. The durable event log lives in Redpanda; Postgres
+  # only holds derived state.
+  projector:
     build:
       context: .
       dockerfile: ./backend/Dockerfile
-    command: python -m app.services.stream_sync
+    command: python -m app.projector.main
     env_file:
       - .env
     environment:
       DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
       KAFKA_BROKERS: redpanda:9092
-      REDIS_URL: redis://:d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17@redis:6379
-      REDIS_PASSWORD: d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17
-    depends_on:
-      - db
-      - redpanda
-      - redis
-    healthcheck:
-      disable: true
-
-  transition-worker:
-    build:
-      context: .
-      dockerfile: ./backend/Dockerfile
-    command: python -m app.services.transition_worker
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
-      KAFKA_BROKERS: redpanda:9092
+      DB_PASSWORD: OmniOutreach2026
+      SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
     depends_on:
       - db
       - redpanda

@@ -1,8 +1,7 @@
-"""Unified inbox — projection of inbound message events.
+"""Unified inbox — projection of inbound/outbound messages.
 
-Every inbound reply (email, LinkedIn, WhatsApp, SMS, …) is a
-``message.received`` event in the log. This router groups them by
-``contact_id`` so the UI can render a chat-style view.
+Reads ``messages`` (maintained by the projector from ``message.received``
+and ``message.sent`` events). Groups by contact for the thread list view.
 """
 
 from __future__ import annotations
@@ -23,22 +22,23 @@ router = APIRouter()
 class InboxMessage(BaseModel):
     id: uuid.UUID
     contact_id: uuid.UUID | None
-    channel: str | None
+    channel: str
     direction: str
-    body: str | None
     subject: str | None
+    body: str | None
     classification: str | None
     confidence: float | None
+    metadata: dict[str, Any]
     occurred_at: datetime
-    payload: dict[str, Any]
 
 
 class InboxThread(BaseModel):
     contact_id: uuid.UUID
     last_message_at: datetime
-    unread_count: int
+    message_count: int
     last_classification: str | None
     last_snippet: str | None
+    last_channel: str | None
 
 
 @router.get(
@@ -53,14 +53,14 @@ async def list_threads(
     rows = await fetch_all(
         """
         SELECT
-          (payload->>'contact_id')::uuid           AS contact_id,
-          MAX(occurred_at)                         AS last_message_at,
-          COUNT(*) FILTER (WHERE (payload->>'read')::boolean IS NOT TRUE) AS unread_count,
-          (ARRAY_AGG(payload->>'classification' ORDER BY occurred_at DESC))[1] AS last_classification,
-          (ARRAY_AGG(LEFT(payload->>'body', 200) ORDER BY occurred_at DESC))[1] AS last_snippet
-        FROM events
-        WHERE event_type = 'message.received'
-          AND payload ? 'contact_id'
+          contact_id,
+          MAX(occurred_at)                              AS last_message_at,
+          COUNT(*)                                      AS message_count,
+          (ARRAY_AGG(classification ORDER BY occurred_at DESC))[1] AS last_classification,
+          (ARRAY_AGG(LEFT(body, 200)  ORDER BY occurred_at DESC))[1] AS last_snippet,
+          (ARRAY_AGG(channel          ORDER BY occurred_at DESC))[1] AS last_channel
+        FROM messages
+        WHERE contact_id IS NOT NULL
         GROUP BY contact_id
         ORDER BY last_message_at DESC
         LIMIT $1
@@ -82,20 +82,10 @@ async def get_thread(
 ) -> list[InboxMessage]:
     rows = await fetch_all(
         """
-        SELECT
-          id,
-          (payload->>'contact_id')::uuid       AS contact_id,
-          (payload->>'channel')                AS channel,
-          COALESCE(payload->>'direction', 'inbound') AS direction,
-          (payload->>'body')                   AS body,
-          (payload->>'subject')                AS subject,
-          (payload->>'classification')         AS classification,
-          (payload->>'confidence')::float      AS confidence,
-          occurred_at,
-          payload
-        FROM events
-        WHERE event_type IN ('message.received', 'message.sent')
-          AND (payload->>'contact_id')::uuid = $1
+        SELECT id, contact_id, channel, direction, subject, body,
+               classification, confidence, metadata, occurred_at
+        FROM messages
+        WHERE contact_id = $1
         ORDER BY occurred_at ASC
         LIMIT $2
         """,

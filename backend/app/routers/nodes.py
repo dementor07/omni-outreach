@@ -18,8 +18,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.auth import AuthContext, get_current_workspace
-from app.db import execute as db_execute
 from app.nodes import NodeContext, get, manifests
+from app.services.bus import publish_event
 
 router = APIRouter()
 
@@ -46,7 +46,7 @@ class NodeExecuteRequest(BaseModel):
 class NodeExecuteResponse(BaseModel):
     handle: str
     telemetry: dict[str, Any]
-    events_appended: int
+    events_published: int = Field(description="Number of events published to omni.events")
     error: str | None
 
 
@@ -99,23 +99,21 @@ async def execute_node(
     )
     result = await fn(node_ctx)
 
+    # Nodes return events the runtime should publish — we own the bus call
+    # so node implementations stay pure (testable without Kafka running).
     for ev in result.events:
-        await db_execute(
-            """
-            INSERT INTO events (workspace_id, event_type, entity_type, entity_id, payload, actor_user_id, correlation_id)
-            VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
-            """,
-            ctx.workspace_id,
-            ev["event_type"],
-            ev["entity_type"],
-            ev.get("entity_id"),
-            ev.get("payload", {}),
-            ctx.user_id,
-            node_ctx.correlation_id,
+        await publish_event(
+            workspace_id=ctx.workspace_id,
+            event_type=ev["event_type"],
+            entity_type=ev["entity_type"],
+            entity_id=ev.get("entity_id"),
+            payload=ev.get("payload") or {},
+            actor_user_id=ctx.user_id,
+            correlation_id=node_ctx.correlation_id,
         )
     return NodeExecuteResponse(
         handle=result.handle,
         telemetry=result.telemetry,
-        events_appended=len(result.events),
+        events_published=len(result.events),
         error=result.error,
     )
