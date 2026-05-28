@@ -1209,3 +1209,85 @@ Branch `v2-nuke` from master @ `8258428`. Tagged master tip as
 - Migration 022 is additive against the shared Postgres; master's
   containers ignore the new tables.
 - Rollback: redeploy `pre-v2-nuke` tag, abandon the branch.
+
+
+## 2026-05-26 — v2 deployed alongside prod master
+
+v2 stack is live at `https://srv1575227.hstgr.cloud:8443/` (port 8443
+for HTTPS, 8080 for HTTP). Three containers: `omni-v2-backend` (port
+8001 internal), `omni-v2-projector`, `omni-v2-frontend`.
+
+Prod master untouched — 12 containers still running on the default
+project. Same Postgres / Redpanda / Dragonfly shared via the
+`omni-outreach_default` Docker network.
+
+**Layout on the VPS:**
+
+- `/home/omni-outreach` — prod master working tree (branch `master`)
+- `/home/omni-v2` — v2 working tree (branch `v2-nuke`), with
+  `/home/omni-v2/.env -> /home/omni-outreach/.env` and
+  `/home/omni-v2/certs -> /home/omni-outreach/certs` symlinks so both
+  share the same secrets + Let's Encrypt cert without duplication.
+
+**Migration state:**
+
+- Alembic version: `021 (head)` on the shared Postgres
+- 11 `omni_*` tables created in migration `021_omni_v2.py` (workflows
+  + nodes + edges + connections + projection tables + events_archive +
+  projector_offsets). RLS enforced on every workspace-owned table.
+
+**End-to-end smoke:**
+
+- `curl https://...:8443/api/health` → `{"status":"ok"}`
+- `curl https://...:8443/api/nodes -H 'Bearer ...'` → 4 node manifests
+  with full JSON schema (csv source, email channel, ai.compose,
+  crm.create_deal)
+- `curl https://srv1575227.hstgr.cloud/api/health` (prod master) →
+  `{"status":"ok"}` — untouched
+
+**Known follow-ups:**
+
+- `v2.srv1575227.hstgr.cloud` subdomain DNS + Let's Encrypt cert (right
+  now v2 uses the prod cert on port 8443; subdomain is the right shape
+  for real users).
+- Projector container reports unhealthy via docker compose's default
+  healthcheck despite running — fix or document the disable.
+- Next: port the remaining ~20 nodes (LinkedIn/SMS/Voice/Slack/webhook
+  channels, Apollo/Hunter/ProxyCurl/Sheets/PH sources, ai.classify/
+  score/enrich, delay/race/condition_* flow, crm.create_contact/
+  update_deal/create_task) and rebuild the React frontend pages.
+
+
+## 2026-05-26 — node registry now at 26 nodes
+
+Commit `3e138ee` on `v2-nuke`. Every legacy capability has a v2 home:
+
+**Channels (6):** email, linkedin, sms, voice, slack, webhook_out
+**Sources (6):** csv, apollo, hunter, sheets, producthunt, webhook_in
+**Enrich (2):** proxycurl, ai.enrich (research agent)
+**AI (3):** compose, classify, score
+**Conditions (2):** field_match, replied
+**Flow (3):** delay, race, human_approval
+**CRM (4):** create_contact, create_deal, create_task, update_deal
+
+Live verification: `curl https://srv1575227.hstgr.cloud:8443/api/nodes`
+returns 26 manifests with full JSON-schema configs (≈25KB response).
+
+**Shape established:**
+
+Every node is one file under `app/nodes/<category>/<name>.py`:
+
+  - Pydantic config schema (validated by the registry)
+  - `MANIFEST = NodeManifest(...)` at module scope
+  - `async def execute(ctx) -> NodeResult`
+  - `register(MANIFEST, execute)` at the bottom
+
+Channel + source + AI nodes are thin Python shims — they publish an
+event onto `omni.events` describing the operator's intent; the Rust
+muscle's handlers do the network calls and publish results back. Flow
+and condition nodes execute synchronously in Python because they only
+read context and pick a handle.
+
+Adding a new integration (ZenRows, Clay, RB2B, anything) is exactly
+**one file** in the appropriate category. No router edits, no schema
+migrations, no architectural decisions.
