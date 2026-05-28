@@ -1,0 +1,59 @@
+"""Notify the team that the current lead is hot (Slack / email digest).
+
+Emits a high-priority alert event the muscle routes to the configured channel.
+"""
+
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
+
+from app.nodes import (
+    NodeCategory,
+    NodeContext,
+    NodeHandle,
+    NodeManifest,
+    NodeResult,
+    SideEffect,
+    register,
+)
+
+
+class HotLeadAlertConfig(BaseModel):
+    connection_name: str | None = Field(None, description="Slack connection to notify; falls back to the workspace default")
+    note_template: str = Field(
+        "🔥 Hot lead: {{contact.first_name}} {{contact.last_name}} ({{contact.company}})",
+        min_length=1,
+        max_length=500,
+        description="Alert message; supports {{contact.*}} variables",
+    )
+
+
+MANIFEST = NodeManifest(
+    type="crm.hot_lead_alert",
+    category=NodeCategory.CRM,
+    summary="Send a hot-lead alert to the team",
+    config_schema=HotLeadAlertConfig,
+    output_handles=(
+        NodeHandle("default", "Alert dispatched"),
+        NodeHandle("on_error", "Alert could not be delivered"),
+    ),
+    capabilities=("connection:slack",),
+    side_effect=SideEffect.NETWORK,
+    icon="flame",
+)
+
+
+async def execute(ctx: NodeContext) -> NodeResult:
+    cfg = HotLeadAlertConfig(**ctx.config)
+    events = [
+        {
+            "event_type": "lead.hot_alert",
+            "entity_type": "lead",
+            "entity_id": ctx.lead.get("id"),
+            "payload": {"connection_name": cfg.connection_name, "note_template": cfg.note_template},
+        }
+    ]
+    return NodeResult(handle="default", events=events, telemetry={"connection_name": cfg.connection_name})
+
+
+register(MANIFEST, execute)

@@ -1,6 +1,7 @@
 """Omni v2 control plane.
 
-Six routers: auth + workspaces + integrations + canvas + events + nodes.
+Routers: auth + workspaces + integrations + canvas + events + nodes +
+inbox + projections + ai (AI Studio: scoring/compose/enrich/classify).
 Everything else is a projection over the event log. See
 omni-vault/wiki/architecture/0001-v2-nuke.md for the ADR.
 """
@@ -20,6 +21,7 @@ from app.db import close_pool, close_redis, init_pool, init_redis
 from app.logging_config import get_logger, setup_logging
 from app.nodes import discover as discover_nodes
 from app.routers import (
+    ai_studio,
     auth,
     auth_google,
     canvas,
@@ -106,6 +108,7 @@ app.include_router(nodes.router, prefix="/nodes", tags=["nodes"])
 app.include_router(canvas.router, prefix="/canvas", tags=["canvas"])
 app.include_router(integrations.router, prefix="/integrations", tags=["integrations"])
 app.include_router(inbox.router, prefix="/inbox", tags=["inbox"])
+app.include_router(ai_studio.router, prefix="/ai", tags=["ai"])
 
 
 @app.get("/health")

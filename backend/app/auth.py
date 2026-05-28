@@ -140,8 +140,10 @@ async def get_current_workspace(
     workspace_id = payload.get("ws")
 
     # workspace_members is not workspace-scoped (it IS the tenancy table),
-    # so we have to read it under system_scope() to bypass RLS. Doing this
-    # for the membership probe only, not for the resolved workspace.
+    # so we have to read it under system_scope() to bypass RLS. Resolve the
+    # workspace_id inside the system scope; bind it to the request context
+    # AFTER the scope exits so the system-scope reset doesn't clobber it.
+    resolved: str | None = None
     async with system_scope():
         if workspace_id:
             row = await fetch_one(
@@ -150,24 +152,26 @@ async def get_current_workspace(
                 workspace_id,
             )
             if row:
-                set_request_workspace(str(workspace_id))
-                return AuthContext(user_id=user_id, workspace_id=str(workspace_id))
-            # Membership revoked — fall through to default-pick below.
+                resolved = str(workspace_id)
 
-        row = await fetch_one(
-            """
-            SELECT workspace_id FROM workspace_members
-            WHERE user_id=$1
-            ORDER BY joined_at ASC
-            LIMIT 1
-            """,
-            user_id,
-        )
-    if not row:
+        if resolved is None:
+            row = await fetch_one(
+                """
+                SELECT workspace_id FROM workspace_members
+                WHERE user_id=$1
+                ORDER BY joined_at ASC
+                LIMIT 1
+                """,
+                user_id,
+            )
+            if row:
+                resolved = str(row["workspace_id"])
+
+    if resolved is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User has no workspace membership",
         )
-    resolved = str(row["workspace_id"])
+
     set_request_workspace(resolved)
     return AuthContext(user_id=user_id, workspace_id=resolved)

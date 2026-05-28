@@ -72,14 +72,14 @@ async def _project_contact(env: dict[str, Any]) -> None:
                               company, headline, linkedin_url, phone, source, custom_fields)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
         ON CONFLICT (id) DO UPDATE SET
-          email         = COALESCE(EXCLUDED.email,         contacts.email),
-          first_name    = COALESCE(EXCLUDED.first_name,    contacts.first_name),
-          last_name     = COALESCE(EXCLUDED.last_name,     contacts.last_name),
-          company       = COALESCE(EXCLUDED.company,       contacts.company),
-          headline      = COALESCE(EXCLUDED.headline,      contacts.headline),
-          linkedin_url  = COALESCE(EXCLUDED.linkedin_url,  contacts.linkedin_url),
-          phone         = COALESCE(EXCLUDED.phone,         contacts.phone),
-          source        = COALESCE(EXCLUDED.source,        contacts.source),
+          email         = COALESCE(EXCLUDED.email,         omni_contacts.email),
+          first_name    = COALESCE(EXCLUDED.first_name,    omni_contacts.first_name),
+          last_name     = COALESCE(EXCLUDED.last_name,     omni_contacts.last_name),
+          company       = COALESCE(EXCLUDED.company,       omni_contacts.company),
+          headline      = COALESCE(EXCLUDED.headline,      omni_contacts.headline),
+          linkedin_url  = COALESCE(EXCLUDED.linkedin_url,  omni_contacts.linkedin_url),
+          phone         = COALESCE(EXCLUDED.phone,         omni_contacts.phone),
+          source        = COALESCE(EXCLUDED.source,        omni_contacts.source),
           custom_fields = omni_contacts.custom_fields || EXCLUDED.custom_fields,
           updated_at    = NOW()
         """,
@@ -104,10 +104,10 @@ async def _project_company(env: dict[str, Any]) -> None:
         INSERT INTO omni_companies (id, workspace_id, name, domain, industry, size, custom_fields)
         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
         ON CONFLICT (id) DO UPDATE SET
-          name          = COALESCE(EXCLUDED.name,     companies.name),
-          domain        = COALESCE(EXCLUDED.domain,   companies.domain),
-          industry      = COALESCE(EXCLUDED.industry, companies.industry),
-          size          = COALESCE(EXCLUDED.size,     companies.size),
+          name          = COALESCE(EXCLUDED.name,     omni_companies.name),
+          domain        = COALESCE(EXCLUDED.domain,   omni_companies.domain),
+          industry      = COALESCE(EXCLUDED.industry, omni_companies.industry),
+          size          = COALESCE(EXCLUDED.size,     omni_companies.size),
           custom_fields = omni_companies.custom_fields || EXCLUDED.custom_fields,
           updated_at    = NOW()
         """,
@@ -129,14 +129,14 @@ async def _project_deal(env: dict[str, Any]) -> None:
                            contact_id, company_id, owner_user_id, close_date, custom_fields)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
         ON CONFLICT (id) DO UPDATE SET
-          name          = COALESCE(EXCLUDED.name,          deals.name),
-          stage         = COALESCE(EXCLUDED.stage,         deals.stage),
-          value         = COALESCE(EXCLUDED.value,         deals.value),
-          currency      = COALESCE(EXCLUDED.currency,      deals.currency),
-          contact_id    = COALESCE(EXCLUDED.contact_id,    deals.contact_id),
-          company_id    = COALESCE(EXCLUDED.company_id,    deals.company_id),
-          owner_user_id = COALESCE(EXCLUDED.owner_user_id, deals.owner_user_id),
-          close_date    = COALESCE(EXCLUDED.close_date,    deals.close_date),
+          name          = COALESCE(EXCLUDED.name,          omni_deals.name),
+          stage         = COALESCE(EXCLUDED.stage,         omni_deals.stage),
+          value         = COALESCE(EXCLUDED.value,         omni_deals.value),
+          currency      = COALESCE(EXCLUDED.currency,      omni_deals.currency),
+          contact_id    = COALESCE(EXCLUDED.contact_id,    omni_deals.contact_id),
+          company_id    = COALESCE(EXCLUDED.company_id,    omni_deals.company_id),
+          owner_user_id = COALESCE(EXCLUDED.owner_user_id, omni_deals.owner_user_id),
+          close_date    = COALESCE(EXCLUDED.close_date,    omni_deals.close_date),
           custom_fields = omni_deals.custom_fields || EXCLUDED.custom_fields,
           updated_at    = NOW()
         """,
@@ -162,10 +162,10 @@ async def _project_lead(env: dict[str, Any]) -> None:
                            current_node_id, status, custom_fields)
         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
         ON CONFLICT (id) DO UPDATE SET
-          contact_id      = COALESCE(EXCLUDED.contact_id,      leads.contact_id),
-          workflow_id     = COALESCE(EXCLUDED.workflow_id,     leads.workflow_id),
-          current_node_id = COALESCE(EXCLUDED.current_node_id, leads.current_node_id),
-          status          = COALESCE(EXCLUDED.status,          leads.status),
+          contact_id      = COALESCE(EXCLUDED.contact_id,      omni_leads.contact_id),
+          workflow_id     = COALESCE(EXCLUDED.workflow_id,     omni_leads.workflow_id),
+          current_node_id = COALESCE(EXCLUDED.current_node_id, omni_leads.current_node_id),
+          status          = COALESCE(EXCLUDED.status,          omni_leads.status),
           custom_fields   = omni_leads.custom_fields || EXCLUDED.custom_fields,
           updated_at      = NOW()
         """,
@@ -203,6 +203,113 @@ async def _project_message(env: dict[str, Any]) -> None:
     )
 
 
+def _score_to_tier(score: int) -> str:
+    """Map a 0-100 ICP score to a hot/warm/cold tier (HubSpot-style)."""
+    if score >= 70:
+        return "hot"
+    if score >= 40:
+        return "warm"
+    return "cold"
+
+
+async def _project_lead_score(env: dict[str, Any]) -> None:
+    """Latest ICP score per lead. Fed by ai.score.completed."""
+    p = env.get("payload") or {}
+    score = int(p.get("score") or 0)
+    score = max(0, min(100, score))
+    await execute(
+        """
+        INSERT INTO omni_lead_scores (lead_id, workspace_id, contact_id, score,
+                                      tier, reasons, model, correlation_id, scored_at)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, NOW())
+        ON CONFLICT (lead_id) DO UPDATE SET
+          contact_id     = COALESCE(EXCLUDED.contact_id, omni_lead_scores.contact_id),
+          score          = EXCLUDED.score,
+          tier           = EXCLUDED.tier,
+          reasons        = EXCLUDED.reasons,
+          model          = EXCLUDED.model,
+          correlation_id = EXCLUDED.correlation_id,
+          scored_at      = NOW()
+        """,
+        env["entity_id"],
+        env["workspace_id"],
+        p.get("contact_id"),
+        score,
+        _score_to_tier(score),
+        p.get("reasons") or [],
+        p.get("model"),
+        env.get("correlation_id"),
+    )
+
+
+# Map an ai.<kind>.<phase> event_type to (kind, status).
+_AI_JOB_LIFECYCLE = {
+    "queued": "queued",
+    "running": "running",
+    "completed": "done",
+    "failed": "failed",
+}
+
+
+async def _project_ai_job(env: dict[str, Any]) -> None:
+    """AI Studio run log. ai.<kind>.queued inserts; .completed/.failed update.
+
+    event_type is dotted: ``ai.score.queued``, ``ai.compose.completed`` …
+    """
+    parts = env["event_type"].split(".")
+    if len(parts) != 3 or parts[0] != "ai":
+        return
+    _, kind, phase = parts
+    if kind not in ("score", "compose", "enrich", "classify"):
+        return
+    status = _AI_JOB_LIFECYCLE.get(phase)
+    if status is None:
+        return
+
+    p = env.get("payload") or {}
+    correlation_id = env.get("correlation_id")
+
+    if status == "queued":
+        # Insert a new job row keyed by correlation_id (or event id fallback).
+        await execute(
+            """
+            INSERT INTO omni_ai_jobs (id, workspace_id, kind, status, entity_type,
+                                      entity_id, input, model, correlation_id, created_at)
+            VALUES ($1, $2, $3, 'queued', $4, $5, $6::jsonb, $7, $8, NOW())
+            ON CONFLICT (id) DO NOTHING
+            """,
+            correlation_id or env["id"],
+            env["workspace_id"],
+            kind,
+            env.get("entity_type"),
+            env.get("entity_id"),
+            p,
+            p.get("provider") or p.get("model"),
+            correlation_id,
+        )
+        return
+
+    # Terminal/running phase — update the matching job row by correlation_id.
+    await execute(
+        """
+        UPDATE omni_ai_jobs SET
+          status       = $2,
+          output       = CASE WHEN $3::jsonb = '{}'::jsonb THEN output ELSE $3::jsonb END,
+          model        = COALESCE($4, model),
+          cost_usd     = COALESCE($5, cost_usd),
+          error        = COALESCE($6, error),
+          completed_at = CASE WHEN $2 IN ('done','failed') THEN NOW() ELSE completed_at END
+        WHERE id = $1
+        """,
+        correlation_id or env["id"],
+        status,
+        p.get("output") or {},
+        p.get("model"),
+        p.get("cost_usd"),
+        p.get("error"),
+    )
+
+
 # Dispatch by entity_type — adding a new entity = one entry here.
 _PROJECTORS = {
     "contact": _project_contact,
@@ -217,6 +324,13 @@ async def _apply_projection(env: dict[str, Any]) -> None:
     entity = env["entity_type"]
     if et in ("message.received", "message.sent"):
         await _project_message(env)
+        return
+    # AI lifecycle events feed two projections: the job log (always) and,
+    # for completed scores, the per-lead score table.
+    if et.startswith("ai."):
+        await _project_ai_job(env)
+        if et == "ai.score.completed" and env.get("entity_id"):
+            await _project_lead_score(env)
         return
     if entity in _PROJECTORS and env.get("entity_id"):
         await _PROJECTORS[entity](env)

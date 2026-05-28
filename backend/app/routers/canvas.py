@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.auth import AuthContext, get_current_workspace
-from app.db import execute, fetch_all, fetch_one
+from app.db import acquire, execute, fetch_all, fetch_one
 
 router = APIRouter()
 
@@ -61,6 +61,27 @@ class EdgeCreate(BaseModel):
     target_node_id: uuid.UUID
     source_handle: str = "default"
     target_handle: str = "default"
+
+
+class GraphNodeIn(BaseModel):
+    id: uuid.UUID
+    node_type: str = Field(min_length=1, max_length=120)
+    position_x: float = 0
+    position_y: float = 0
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class GraphEdgeIn(BaseModel):
+    id: uuid.UUID | None = None
+    source_node_id: uuid.UUID
+    target_node_id: uuid.UUID
+    source_handle: str = "default"
+    target_handle: str = "default"
+
+
+class GraphSave(BaseModel):
+    nodes: list[GraphNodeIn] = Field(default_factory=list)
+    edges: list[GraphEdgeIn] = Field(default_factory=list)
 
 
 class WorkflowOut(BaseModel):
@@ -241,3 +262,71 @@ async def remove_edge(
     _: AuthContext = Depends(get_current_workspace),
 ) -> None:
     await execute("DELETE FROM omni_workflow_edges WHERE id = $1 AND workflow_id = $2", edge_id, workflow_id)
+
+
+# ── Bulk graph save ────────────────────────────────────────────────────────────
+
+
+@router.put(
+    "/workflows/{workflow_id}/graph",
+    response_model=WorkflowDetail,
+    summary="Replace a workflow's entire node+edge graph in one transaction",
+    description=(
+        "Atomically replaces all nodes and edges for the workflow with the posted "
+        "set. Client-supplied node ids are preserved so the canvas can save the "
+        "whole graph in a single call (local-state-first editing). Returns the "
+        "saved workflow with its nodes and edges."
+    ),
+)
+async def save_graph(
+    workflow_id: uuid.UUID,
+    body: GraphSave,
+    ctx: AuthContext = Depends(get_current_workspace),
+) -> WorkflowDetail:
+    async with acquire() as conn:
+        async with conn.transaction():
+            wf = await conn.fetchrow("SELECT * FROM omni_workflows WHERE id = $1", workflow_id)
+            if not wf:
+                raise HTTPException(status_code=404, detail="workflow not found")
+
+            # Replace-all: wipe then re-insert. Edges first (FK-free here, but keep order tidy).
+            await conn.execute("DELETE FROM omni_workflow_edges WHERE workflow_id = $1", workflow_id)
+            await conn.execute("DELETE FROM omni_workflow_nodes WHERE workflow_id = $1", workflow_id)
+
+            node_ids: set[uuid.UUID] = set()
+            for n in body.nodes:
+                await conn.execute(
+                    """
+                    INSERT INTO omni_workflow_nodes
+                      (id, workspace_id, workflow_id, node_type, position_x, position_y, config)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+                    """,
+                    n.id, ctx.workspace_id, workflow_id, n.node_type, n.position_x, n.position_y, n.config,
+                )
+                node_ids.add(n.id)
+
+            for e in body.edges:
+                # Skip dangling edges whose endpoints aren't in the posted node set.
+                if e.source_node_id not in node_ids or e.target_node_id not in node_ids:
+                    continue
+                await conn.execute(
+                    """
+                    INSERT INTO omni_workflow_edges
+                      (id, workspace_id, workflow_id, source_node_id, target_node_id, source_handle, target_handle)
+                    VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7)
+                    """,
+                    e.id, ctx.workspace_id, workflow_id,
+                    e.source_node_id, e.target_node_id, e.source_handle, e.target_handle,
+                )
+
+            await conn.execute("UPDATE omni_workflows SET updated_at = NOW() WHERE id = $1", workflow_id)
+
+            wf_row = await conn.fetchrow("SELECT * FROM omni_workflows WHERE id = $1", workflow_id)
+            nodes = await conn.fetch("SELECT * FROM omni_workflow_nodes WHERE workflow_id = $1", workflow_id)
+            edges = await conn.fetch("SELECT * FROM omni_workflow_edges WHERE workflow_id = $1", workflow_id)
+
+    return WorkflowDetail(
+        workflow=WorkflowOut.model_validate(dict(wf_row)),
+        nodes=[NodeOut.model_validate(dict(n)) for n in nodes],
+        edges=[EdgeOut.model_validate(dict(e)) for e in edges],
+    )
