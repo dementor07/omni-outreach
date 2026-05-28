@@ -25,7 +25,7 @@ services:
       DB_PASSWORD: OmniOutreach2026
       SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
       MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
-      FRONTEND_URL: https://v2.srv1575227.hstgr.cloud
+      FRONTEND_URL: https://145-223-21-222.sslip.io:8443
     networks:
       - omni-outreach_default
     ports:
@@ -61,6 +61,7 @@ services:
       - "8443:443"
     volumes:
       - ./certs:/etc/nginx/certs:ro
+      - ./acme:/var/www/certbot
     restart: unless-stopped
 
 # Join master's docker-compose network so we can talk to db, redpanda, redis

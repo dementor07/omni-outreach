@@ -31,3 +31,25 @@ omni-vault/**/*.local.md
 .bridge_logs/
 .bridge_context/
 .conference_logs/
+
+# Browser-verification scratch (Playwright MCP screenshots + snapshots)
+.playwright-mcp/
+/canvas-*.png
+/editor-*.png
+/palette-*.png
+frontend/screenshots/
+frontend/*.png
+screenshots/
+
+# One-off UI test scratch
+frontend/test-*.cjs
+
+# Pre-v2 page snapshots kept locally for reference
+/old_*.tsx
+frontend/src/pages/_legacy/
+
+# Architecture scratch diagrams (regenerated; not source of truth)
+/node_structure_blueprint.*
+/plugin_architecture_*
+/sota_grid_structure.md
+/python_tutorial/

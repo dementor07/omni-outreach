@@ -202,7 +202,10 @@ def _source_specs() -> list[SourceSpec]:
                 "topic": "marketing",
                 "per_page": 20,
                 "max_pages": 3,
-                "min_votes": 100,
+                # PH returns votesCount=0 under app-only OAuth (PII / metric
+                # protection on client_credentials grant), so leave min_votes
+                # at 0 unless a user-OAuth token is wired up.
+                "min_votes": 0,
             },
             cron_schedule="20 */6 * * *",
             credit_budget=None,
