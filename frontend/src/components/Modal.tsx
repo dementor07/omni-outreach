@@ -32,12 +32,12 @@ export default function Modal({ title, open, onClose, children, width = 'md' }: 
         className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
         onClick={onClose}
       />
-      <div className={`relative w-full max-h-[90vh] overflow-y-auto rounded-xl bg-white shadow-lg ${widthClasses[width]}`}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-          <h2 className="text-base font-semibold text-slate-900">{title}</h2>
+      <div className={`relative w-full max-h-[90vh] overflow-y-auto rounded-xl bg-white shadow-lg dark:bg-slate-900 dark:border dark:border-slate-800 ${widthClasses[width]}`}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+          <h2 className="text-base font-semibold text-slate-900 dark:text-white">{title}</h2>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 transition-colors"
+            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
           >
             <X size={18} />
           </button>

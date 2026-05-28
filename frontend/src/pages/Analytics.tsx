@@ -1,183 +1,109 @@
-import { useState, useEffect } from 'react'
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Users, Send, CheckCircle2, MessageSquare, BarChart3, Activity as ActivityIcon } from 'lucide-react'
+import { BarChart3, TrendingUp, Send, MessageSquare } from 'lucide-react'
 import { clsx } from 'clsx'
-import { api } from '../api/client'
+import { projections, inbox, ai } from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import StatCard from '../components/StatCard'
 import Card, { CardHeader } from '../components/Card'
 import EmptyState from '../components/EmptyState'
-import ChannelIcon, { CHANNEL_META } from '../components/ChannelIcon'
-import { Select } from '../components/FilterBar'
-
-interface Campaign { id: string; name: string }
-interface AnalyticsData {
-  funnel: { total_leads: number; invited: number; accepted: number; replied: number }
-  rates: { accept_rate: number; reply_rate: number }
-  channel_breakdown: { channel: string; cnt: number }[]
-  daily_activity: { events: number }[]
-}
 
 export default function Analytics() {
-  const campaignsQ = useQuery<Campaign[]>({ queryKey: ['campaigns'], queryFn: () => api.get('/campaigns').then(r => r.data) })
-  const [campaignId, setCampaignId] = useState('')
+  const leadsQ = useQuery({ queryKey: ['leads'], queryFn: () => projections.leads({ limit: 2000 }) })
+  const dealsQ = useQuery({ queryKey: ['deals'], queryFn: () => projections.deals({ limit: 2000 }) })
+  const threadsQ = useQuery({ queryKey: ['inbox-threads'], queryFn: () => inbox.threads(200) })
+  const scoresQ = useQuery({ queryKey: ['lead-scores'], queryFn: () => ai.scores({ limit: 2000 }) })
 
-  useEffect(() => {
-    if (!campaignId && campaignsQ.data?.length) setCampaignId(campaignsQ.data[0].id)
-  }, [campaignsQ.data, campaignId])
+  const leads = leadsQ.data ?? []
+  const deals = dealsQ.data ?? []
+  const threads = threadsQ.data ?? []
+  const scores = scoresQ.data ?? []
 
-  const analyticsQ = useQuery<AnalyticsData>({
-    queryKey: ['analytics', campaignId],
-    queryFn: () => api.get(`/analytics/${campaignId}`).then(r => r.data),
-    enabled: !!campaignId,
-  })
+  // Funnel: leads → replied → deals → won
+  const total = leads.length
+  const replied = leads.filter((l) => l.status === 'replied').length
+  const dealsCount = deals.length
+  const won = deals.filter((d) => d.stage === 'closed_won').length
+  const funnel = [
+    { label: 'Leads', value: total, color: 'bg-brand-400' },
+    { label: 'Replied', value: replied, color: 'bg-violet-400' },
+    { label: 'Deals', value: dealsCount, color: 'bg-amber-400' },
+    { label: 'Won', value: won, color: 'bg-emerald-400' },
+  ]
+  const funnelMax = Math.max(1, ...funnel.map((f) => f.value))
 
-  const data = analyticsQ.data
-  const funnel = data?.funnel || { total_leads: 0, invited: 0, accepted: 0, replied: 0 }
-  const rates = data?.rates || { accept_rate: 0, reply_rate: 0 }
-  const channels = data?.channel_breakdown || []
-  const daily = data?.daily_activity || []
+  const tierDist = useMemo(() => {
+    const d = { hot: 0, warm: 0, cold: 0 }
+    for (const s of scores) d[s.tier] += 1
+    return d
+  }, [scores])
+
+  const replyRate = total > 0 ? Math.round((replied / total) * 100) : 0
+  const winRate = dealsCount > 0 ? Math.round((won / dealsCount) * 100) : 0
 
   return (
     <div className="space-y-6">
       <PageHeader
         screenLabel="Analytics"
-        eyebrow="Insights"
-        title="Campaign analytics"
-        description="Funnel, conversion rates, channel mix, and 30-day activity for the selected campaign."
-        actions={
-          <Select value={campaignId} onChange={setCampaignId}>
-            {(campaignsQ.data || []).length === 0 && <option value="">No campaigns</option>}
-            {(campaignsQ.data || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </Select>
-        }
+        eyebrow="Intelligence"
+        title="Analytics"
+        description="Conversion funnel, reply rates, and AI lead-quality distribution across your pipeline."
       />
 
-      {!campaignId ? (
-        <Card padding="lg"><EmptyState icon={BarChart3} title="Choose a campaign" description="Select a campaign to load analytics." /></Card>
-      ) : analyticsQ.isLoading ? (
-        <div className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{[0,1,2,3].map(i => <div key={i} className="h-28 skeleton rounded-2xl" />)}</div>
-          <div className="h-64 skeleton rounded-2xl" />
-        </div>
-      ) : (
-        <>
-          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label="Total leads" value={funnel.total_leads} icon={Users} accent="brand" />
-            <StatCard label="Invited" value={funnel.invited} icon={Send} accent="emerald" />
-            <StatCard label="Accepted" value={funnel.accepted} icon={CheckCircle2} accent="amber" hint={`${rates.accept_rate ?? 0}% accept rate`} />
-            <StatCard label="Replied" value={funnel.replied} icon={MessageSquare} accent="violet" hint={`${rates.reply_rate ?? 0}% reply rate`} />
-          </section>
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Total leads" value={total} icon={TrendingUp} accent="brand" />
+        <StatCard label="Reply rate" value={`${replyRate}%`} icon={MessageSquare} accent="violet" hint={`${replied} replied`} />
+        <StatCard label="Win rate" value={`${winRate}%`} icon={Send} accent="emerald" hint={`${won} of ${dealsCount} deals`} />
+        <StatCard label="Conversations" value={threads.length} icon={MessageSquare} accent="amber" />
+      </section>
 
-          <section className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
-            <Card padding="lg">
-              <CardHeader title="Funnel" description="Invite → Accept → Reply" />
-              <Funnel funnel={funnel} rates={rates} />
-            </Card>
-            <Card padding="lg">
-              <CardHeader title="Channel mix" description="Events by channel" />
-              {channels.length === 0 ? (
-                <EmptyState icon={ActivityIcon} title="No events" description="Channel mix will appear once events fire." />
-              ) : (
-                <div className="space-y-2.5">
-                  {channels.map(row => <ChannelBar key={row.channel} channel={row.channel} value={Number(row.cnt)} max={Math.max(...channels.map(c => Number(c.cnt)))} />)}
+      <section className="grid gap-4 xl:grid-cols-2">
+        <Card padding="lg">
+          <CardHeader title="Conversion funnel" description="Leads → Replied → Deals → Won" />
+          {total === 0 ? (
+            <EmptyState icon={BarChart3} title="No funnel data yet" description="Funnels populate once leads enter your campaigns." />
+          ) : (
+            <div className="space-y-3">
+              {funnel.map((f) => (
+                <div key={f.label}>
+                  <div className="flex items-center justify-between text-[12px]">
+                    <span className="font-medium text-slate-700 dark:text-slate-300">{f.label}</span>
+                    <span className="tabular-nums text-slate-500">{f.value.toLocaleString()}</span>
+                  </div>
+                  <div className="mt-1 h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                    <div className={clsx('h-full rounded-full transition-all', f.color)} style={{ width: `${Math.max(3, (f.value / funnelMax) * 100)}%` }} />
+                  </div>
                 </div>
-              )}
-            </Card>
-          </section>
-
-          <Card padding="lg">
-            <CardHeader title="Daily activity" description="Events over the last 30 days" />
-            <DailyActivity30 rows={daily} />
-          </Card>
-        </>
-      )}
-    </div>
-  )
-}
-
-function Funnel({ funnel, rates }: { funnel: AnalyticsData['funnel']; rates: AnalyticsData['rates'] }) {
-  const t = funnel.total_leads, i = funnel.invited, a = funnel.accepted, r = funnel.replied
-  const max = Math.max(1, t, i, a, r)
-  const rows = [
-    { label: 'Total Leads', value: t, color: 'bg-slate-200 dark:bg-slate-700', pct: undefined as number | undefined },
-    { label: 'Invited', value: i, color: 'bg-brand-500', pct: t ? Math.round((i / t) * 100) : 0 },
-    { label: 'Accepted', value: a, color: 'bg-emerald-500', pct: rates.accept_rate },
-    { label: 'Replied', value: r, color: 'bg-violet-500', pct: rates.reply_rate },
-  ]
-  return (
-    <div className="space-y-5">
-      {rows.map(row => (
-        <div key={row.label} className="group">
-          <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
-            <span>{row.label}</span>
-            <div className="flex items-center gap-2">
-              <span className="text-slate-900 dark:text-white tabular-nums">{row.value.toLocaleString()}</span>
-              {row.pct != null && (
-                <span className="rounded bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-500 dark:bg-slate-800/50">
-                  {row.pct}%
-                </span>
-              )}
+              ))}
             </div>
-          </div>
-          <div className="relative h-2.5 overflow-hidden rounded-full bg-slate-50 dark:bg-slate-800/50">
-            <div 
-              className={clsx('h-full rounded-full transition-all duration-700 ease-out', row.color)} 
-              style={{ width: `${(row.value / max) * 100}%` }} 
-            />
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
+          )}
+        </Card>
 
-function ChannelBar({ channel, value, max }: { channel: string; value: number; max: number }) {
-  const meta = CHANNEL_META[channel] || CHANNEL_META.email
-  const pct = max ? Math.round((value / max) * 100) : 0
-  return (
-    <div className="flex items-center gap-4 group">
-      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-50 dark:bg-slate-800/50 text-slate-400 group-hover:text-brand-500 transition-colors">
-        <ChannelIcon channel={channel} size={14} />
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-          <span>{meta.label}</span>
-          <span className="tabular-nums">{value.toLocaleString()}</span>
-        </div>
-        <div className="h-1.5 overflow-hidden rounded-full bg-slate-50 dark:bg-slate-800/50">
-          <div 
-            className="h-full rounded-full bg-brand-500 transition-all duration-500" 
-            style={{ width: `${pct}%` }} 
-          />
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function DailyActivity30({ rows }: { rows: { events: number }[] }) {
-  if (!rows || rows.length === 0) return <EmptyState icon={BarChart3} title="No events" description="A 30-day chart will appear once events fire." />
-  const max = Math.max(1, ...rows.map(r => Number(r.events)))
-  return (
-    <div className="flex items-end gap-1 px-1" style={{ height: 180 }}>
-      {rows.map((r, i) => {
-        const v = Number(r.events)
-        const pct = (v / max) * 100
-        return (
-          <div key={i} className="group relative flex flex-1 flex-col items-center h-full justify-end">
-            <div 
-              className="w-full rounded-t-sm bg-brand-500/20 group-hover:bg-brand-500 transition-all duration-300" 
-              style={{ height: `${Math.max(2, pct)}%` }} 
-              title={`${v} events`}
-            />
-            {/* Tooltip on hover */}
-            <div className="absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity bg-slate-900 text-white text-[10px] px-2 py-1 rounded shadow-xl whitespace-nowrap z-10">
-              {v} events
+        <Card padding="lg">
+          <CardHeader title="AI lead quality" description="ICP tier distribution from AI scoring" />
+          {scores.length === 0 ? (
+            <EmptyState icon={BarChart3} title="No scored leads" description="Run a scoring job in AI Studio to see quality distribution." />
+          ) : (
+            <div className="space-y-3">
+              {([['hot', 'bg-rose-400'], ['warm', 'bg-amber-400'], ['cold', 'bg-slate-300']] as const).map(([tier, color]) => {
+                const v = tierDist[tier]
+                const pct = scores.length ? Math.round((v / scores.length) * 100) : 0
+                return (
+                  <div key={tier}>
+                    <div className="flex items-center justify-between text-[12px]">
+                      <span className="font-medium capitalize text-slate-700 dark:text-slate-300">{tier}</span>
+                      <span className="tabular-nums text-slate-500">{v} ({pct}%)</span>
+                    </div>
+                    <div className="mt-1 h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                      <div className={clsx('h-full rounded-full', color)} style={{ width: `${Math.max(3, pct)}%` }} />
+                    </div>
+                  </div>
+                )
+              })}
             </div>
-          </div>
-        )
-      })}
+          )}
+        </Card>
+      </section>
     </div>
   )
 }

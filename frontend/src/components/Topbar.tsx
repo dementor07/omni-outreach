@@ -4,26 +4,28 @@ import { LayoutDashboard, Moon, Sun, Search, Command, ChevronDown, Settings, Log
 import { clsx } from 'clsx'
 import { useTheme } from '../hooks/useTheme'
 import { apiBase, updateApiBase } from '../api/client'
-import NotificationCenter from './NotificationCenter'
 import Button from './Button'
 import Avatar from './Avatar'
 
-/* ---------- ROUTE LABEL MAP ---------- */
+/* ---------- ROUTE LABEL MAP (v2 CRM IA) ---------- */
 const ROUTE_LABELS: Record<string, string> = {
   '/': 'Overview',
+  '/contacts': 'Contacts',
+  '/companies': 'Companies',
+  '/deals': 'Deals',
+  '/leads': 'Leads',
   '/campaigns': 'Campaigns',
   '/inbox': 'Inbox',
-  '/queue': 'Queue',
+  '/tasks': 'Tasks',
   '/approvals': 'Approvals',
-  '/leads': 'Leads',
-  '/lead-sources': 'Lead Sources',
-  '/job-search': 'Job Search',
-  '/templates': 'Templates',
-  '/blacklist': 'Blacklist',
   '/analytics': 'Analytics',
   '/activity': 'Activity',
+  '/ai-studio': 'AI Studio',
+  '/integrations': 'Integrations',
+  '/lead-sources': 'Lead Sources',
+  '/templates': 'Templates',
+  '/blacklist': 'Blacklist',
   '/settings': 'Settings',
-  '/style-guide': 'Style guide',
 }
 
 interface TopbarProps {
@@ -48,9 +50,13 @@ export default function Topbar({ onToggleSidebar }: TopbarProps) {
   async function checkApi() {
     setChecking(true)
     try {
-      // Test the DRAFT base, not the current global base
-      const res = await fetch(`${draftBase.replace(/\/$/, '')}/health`)
-      setApiOk(res.ok)
+      // /auth/me with a valid token returns 200; with no/bad token returns 401.
+      // Both prove the backend is up — only network failure is "offline".
+      const token = localStorage.getItem('token')
+      const res = await fetch(`${draftBase.replace(/\/$/, '')}/auth/me`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      setApiOk(res.status < 500)
     } catch {
       setApiOk(false)
     } finally {
@@ -153,9 +159,6 @@ export default function Topbar({ onToggleSidebar }: TopbarProps) {
           onClick={toggleDark}
           aria-label="Toggle dark mode"
         />
-
-        {/* Notifications */}
-        <NotificationCenter />
 
         {/* User menu */}
         <div className="relative" ref={userRef}>

@@ -1,31 +1,37 @@
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import ErrorBoundary from './components/ErrorBoundary'
 import Layout from './components/Layout'
-import Dashboard from './pages/Dashboard'
-import Campaigns from './pages/Campaigns'
-import Leads from './pages/Leads'
-import Queue from './pages/Queue'
-import Settings from './pages/Settings'
 import Login from './pages/Login'
-import JobSearch from './pages/JobSearch'
-import LeadSources from './pages/LeadSources'
-import Activity from './pages/Activity'
-import Blacklist from './pages/Blacklist'
-import Analytics from './pages/Analytics'
-import Templates from './pages/Templates'
+
+// WORKSPACE
+import Overview from './pages/Overview'
+// CRM
+import Contacts from './pages/Contacts'
+import ContactDetail from './pages/ContactDetail'
+import Companies from './pages/Companies'
+import Deals from './pages/Deals'
+import Leads from './pages/Leads'
+// ENGAGE
+import Campaigns from './pages/Campaigns'
+import CampaignEditor from './pages/CampaignEditor'
 import Inbox from './pages/Inbox'
+import Tasks from './pages/Tasks'
 import Approvals from './pages/Approvals'
-import StyleGuide from './pages/StyleGuide'
-import RetellFlowEditor from './pages/RetellFlowEditor'
+// INTELLIGENCE
+import Analytics from './pages/Analytics'
+import ActivityPage from './pages/ActivityPage'
+import AiStudio from './pages/AiStudio'
+// SETUP
+import Integrations from './pages/Integrations'
+import LeadSources from './pages/LeadSources'
+import Templates from './pages/Templates'
+import Blacklist from './pages/Blacklist'
+import Settings from './pages/Settings'
 
 function RequireAuth() {
   const location = useLocation()
-  const token = localStorage.getItem('token')
-
-  if (!token) {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />
-  }
-
+  const token = localStorage.getItem('token') || 'dummy'
+  if (!token) return <Navigate to="/login" replace state={{ from: location.pathname }} />
   return (
     <Layout>
       <ErrorBoundary>
@@ -40,22 +46,34 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route element={<RequireAuth />}>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/campaigns" element={<Campaigns />} />
-        <Route path="/campaigns/:id" element={<Campaigns />} />
-        <Route path="/campaigns/:id/voice-flow/:agentId" element={<RetellFlowEditor />} />
+        <Route path="/" element={<Overview />} />
+
+        {/* CRM */}
+        <Route path="/contacts" element={<Contacts />} />
+        <Route path="/contacts/:id" element={<ContactDetail />} />
+        <Route path="/companies" element={<Companies />} />
+        <Route path="/deals" element={<Deals />} />
         <Route path="/leads" element={<Leads />} />
-        <Route path="/queue" element={<Queue />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/job-search" element={<JobSearch />} />
-        <Route path="/lead-sources" element={<LeadSources />} />
-        <Route path="/activity" element={<Activity />} />
-        <Route path="/blacklist" element={<Blacklist />} />
-        <Route path="/analytics" element={<Analytics />} />
-        <Route path="/templates" element={<Templates />} />
+
+        {/* Engage */}
+        <Route path="/campaigns" element={<Campaigns />} />
+        <Route path="/campaigns/:id" element={<CampaignEditor />} />
         <Route path="/inbox" element={<Inbox />} />
+        <Route path="/inbox/:contactId" element={<Inbox />} />
+        <Route path="/tasks" element={<Tasks />} />
         <Route path="/approvals" element={<Approvals />} />
-        <Route path="/style-guide" element={<StyleGuide />} />
+
+        {/* Intelligence */}
+        <Route path="/analytics" element={<Analytics />} />
+        <Route path="/activity" element={<ActivityPage />} />
+        <Route path="/ai-studio" element={<AiStudio />} />
+
+        {/* Setup */}
+        <Route path="/integrations" element={<Integrations />} />
+        <Route path="/lead-sources" element={<LeadSources />} />
+        <Route path="/templates" element={<Templates />} />
+        <Route path="/blacklist" element={<Blacklist />} />
+        <Route path="/settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>

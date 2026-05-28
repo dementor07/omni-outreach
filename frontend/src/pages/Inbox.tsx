@@ -1,43 +1,49 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Filter, Sparkles, MessageSquare, Dot, CheckCircle2, Inbox as InboxIcon } from 'lucide-react'
 import { clsx } from 'clsx'
-import { api } from '../api/client'
+import { Inbox as InboxIcon, MessageSquare, Dot, CheckCircle2, Filter, Sparkles, ChevronLeft } from 'lucide-react'
+import { inbox, type InboxThread } from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
 import Button from '../components/Button'
+import Avatar from '../components/Avatar'
 import EmptyState from '../components/EmptyState'
-import { FilterBar, SearchInput, Select, Toggle } from '../components/FilterBar'
 import ChannelIcon, { CHANNEL_META } from '../components/ChannelIcon'
-import { fullName, timeAgo } from '../lib/format'
+import { FilterBar, SearchInput, Toggle } from '../components/FilterBar'
+import { timeAgo } from '../lib/format'
 
-interface InboxMsg { id: string; first_name?: string; last_name?: string; linkedin_url?: string; email?: string; company?: string; channel: string; occurred_at: string; meta?: { subject?: string; body?: string; message?: string; text?: string; reply_category?: string } }
-interface Campaign { id: string; name: string }
+type ClassFilter = 'all' | 'positive' | 'objection' | 'unsubscribe'
 
 export default function Inbox() {
+  const { contactId } = useParams<{ contactId?: string }>()
+  const navigate = useNavigate()
+  const threadsQ = useQuery({ queryKey: ['inbox-threads'], queryFn: () => inbox.threads(200) })
+  const threadQ = useQuery({
+    queryKey: ['inbox-thread', contactId],
+    queryFn: () => inbox.thread(contactId!),
+    enabled: !!contactId,
+  })
+
   const [channelFilter, setChannelFilter] = useState('')
-  const [campaignFilter, setCampaignFilter] = useState('')
   const [search, setSearch] = useState('')
+  const [classFilter, setClassFilter] = useState<ClassFilter>('all')
 
-  const statsQ = useQuery<{ total: number; by_channel: { channel: string; cnt: number }[] }>({ queryKey: ['inbox-stats'], queryFn: () => api.get('/inbox/stats').then(r => r.data) })
-  const campaignsQ = useQuery<Campaign[]>({ queryKey: ['campaigns'], queryFn: () => api.get('/campaigns').then(r => r.data) })
+  const threads = threadsQ.data ?? []
+  const byChannel = useMemo(() => groupByChannel(threads), [threads])
+  const totalThreads = threads.length
 
-  const params = new URLSearchParams()
-  if (channelFilter) params.set('channel', channelFilter)
-  if (campaignFilter) params.set('campaign_id', campaignFilter)
-  const inboxQ = useQuery<{ messages: InboxMsg[] }>({ queryKey: ['inbox', channelFilter, campaignFilter], queryFn: () => api.get(`/inbox?${params.toString()}`).then(r => r.data) })
-
-  const messages = inboxQ.data?.messages || []
-  const visible = search
-    ? messages.filter(m => {
-        const blob = `${fullName(m)} ${m.company || ''} ${m.meta?.subject || ''} ${m.meta?.body || m.meta?.message || ''}`.toLowerCase()
-        return blob.includes(search.toLowerCase())
-      })
-    : messages
-
-  const byChannel = statsQ.data?.by_channel || []
-  const totalInbox = statsQ.data?.total ?? 0
+  const visible = useMemo(() => {
+    let out = threads
+    if (channelFilter) out = out.filter((t) => t.last_channel === channelFilter)
+    if (classFilter !== 'all') out = out.filter((t) => t.last_classification === classFilter)
+    if (search) {
+      const q = search.toLowerCase()
+      out = out.filter((t) => (t.last_snippet ?? '').toLowerCase().includes(q) || t.contact_id.toLowerCase().includes(q))
+    }
+    return out
+  }, [threads, channelFilter, classFilter, search])
 
   return (
     <div className="space-y-6">
@@ -45,7 +51,7 @@ export default function Inbox() {
         screenLabel="Inbox"
         eyebrow="Replies"
         title="Unified inbox"
-        description="Every inbound reply across LinkedIn, email, WhatsApp, SMS, and voice — one stream."
+        description="Every inbound and outbound message across email, LinkedIn, SMS, voice — one projection."
         actions={
           <>
             <Button variant="secondary" size="md" icon={Filter}>Saved views</Button>
@@ -53,33 +59,39 @@ export default function Inbox() {
           </>
         }
         meta={
-          totalInbox > 0 && !statsQ.isLoading ? (
+          totalThreads > 0 && !threadsQ.isLoading ? (
             <div className="flex flex-wrap items-center gap-1.5">
               <button
+                type="button"
                 onClick={() => setChannelFilter('')}
                 className={clsx(
                   'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold transition-colors',
-                  !channelFilter ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300',
+                  !channelFilter
+                    ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300',
                 )}
               >
-                All <span className="tabular-nums opacity-70">{totalInbox.toLocaleString()}</span>
+                All <span className="tabular-nums opacity-70">{totalThreads.toLocaleString()}</span>
               </button>
-              {byChannel.map(ch => {
-                const meta = CHANNEL_META[ch.channel] || CHANNEL_META.email
+              {byChannel.map(({ channel, count }) => {
+                const meta = CHANNEL_META[channel] ?? CHANNEL_META.email
                 const Ic = meta.icon
-                const active = channelFilter === ch.channel
+                const active = channelFilter === channel
                 return (
                   <button
-                    key={ch.channel}
-                    onClick={() => setChannelFilter(active ? '' : ch.channel)}
+                    key={channel}
+                    type="button"
+                    onClick={() => setChannelFilter(active ? '' : channel)}
                     className={clsx(
                       'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold transition-colors',
-                      active ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300',
+                      active
+                        ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300',
                     )}
                   >
                     <Ic size={12} />
                     {meta.label}
-                    <span className="tabular-nums opacity-70">{Number(ch.cnt).toLocaleString()}</span>
+                    <span className="tabular-nums opacity-70">{count.toLocaleString()}</span>
                   </button>
                 )
               })}
@@ -89,69 +101,207 @@ export default function Inbox() {
       />
 
       <FilterBar>
-        <SearchInput placeholder="Search replies, names, companies…" value={search} onChange={setSearch} />
-        <Select value={campaignFilter} onChange={setCampaignFilter}>
-          <option value="">All campaigns</option>
-          {(campaignsQ.data || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </Select>
+        <SearchInput placeholder="Search by snippet or contact id…" value={search} onChange={setSearch} />
         <Toggle
-          value="all"
-          onChange={() => {}}
+          value={classFilter}
+          onChange={(v) => setClassFilter(v as ClassFilter)}
           items={[
             { value: 'all', label: 'All', icon: InboxIcon },
-            { value: 'unread', label: 'Unread', icon: Dot },
             { value: 'positive', label: 'Positive', icon: CheckCircle2 },
+            { value: 'objection', label: 'Objection', icon: Dot },
+            { value: 'unsubscribe', label: 'Unsubscribe', icon: Dot },
           ]}
         />
       </FilterBar>
 
-      {inboxQ.isLoading ? (
-        <div className="space-y-2">{[0,1,2,3].map(i => <div key={i} className="h-20 skeleton rounded-2xl" />)}</div>
+      {threadsQ.isLoading ? (
+        <div className="space-y-2">{[0, 1, 2, 3].map((i) => <div key={i} className="h-20 skeleton rounded-2xl" />)}</div>
       ) : visible.length === 0 ? (
         <Card padding="lg">
           <EmptyState
             icon={MessageSquare}
             title={search ? 'No matches' : 'No replies yet'}
-            description={search ? 'Try a different query or clear filters.' : 'Inbound replies will appear here when leads respond to your outreach.'}
+            description={search ? 'Try a different query or clear filters.' : 'Inbound replies will appear here when contacts respond to your outreach.'}
           />
         </Card>
+      ) : contactId ? (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[360px_1fr]">
+          <ThreadList threads={visible} activeId={contactId} />
+          <ThreadPane
+            contactId={contactId}
+            messages={threadQ.data ?? []}
+            loading={threadQ.isLoading}
+            onBack={() => navigate('/inbox')}
+          />
+        </div>
       ) : (
         <div className="space-y-2">
-          {visible.map(msg => <InboxRow key={msg.id} msg={msg} />)}
+          {visible.map((t) => (
+            <ThreadRow key={t.contact_id} thread={t} />
+          ))}
         </div>
       )}
     </div>
   )
 }
 
-function InboxRow({ msg }: { msg: InboxMsg }) {
-  const preview = msg.meta?.body || msg.meta?.message || msg.meta?.text || ''
-  const cat = msg.meta?.reply_category
-  const catVariant = cat === 'positive' ? 'success' : cat === 'negative' ? 'danger' : 'info'
+function groupByChannel(threads: InboxThread[]): { channel: string; count: number }[] {
+  const counts = new Map<string, number>()
+  for (const t of threads) {
+    if (!t.last_channel) continue
+    counts.set(t.last_channel, (counts.get(t.last_channel) ?? 0) + 1)
+  }
+  return Array.from(counts.entries())
+    .map(([channel, count]) => ({ channel, count }))
+    .sort((a, b) => b.count - a.count)
+}
+
+// ── Row layout (no thread selected) ──────────────────────────────────────────
+function ThreadRow({ thread }: { thread: InboxThread }) {
+  const cls = thread.last_classification
+  const variant: 'success' | 'danger' | 'info' | 'neutral' =
+    cls === 'positive' ? 'success' : cls === 'unsubscribe' ? 'danger' : cls === 'objection' ? 'info' : 'neutral'
+  const channel = thread.last_channel ?? 'email'
+  const shortId = thread.contact_id.slice(0, 8)
   return (
-    <Card padding="none" className="group cursor-pointer transition-shadow hover:shadow-sm">
-      <div className="flex items-start gap-3 p-4">
-        <ChannelIcon channel={msg.channel} size="md" />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{fullName(msg)}</span>
-              {msg.company && <span className="truncate text-xs text-slate-500">at {msg.company}</span>}
-              <Badge label={msg.channel} asChannel />
-              {cat && <Badge label={cat} variant={catVariant as 'success' | 'danger' | 'info'} dot />}
+    <Link to={`/inbox/${thread.contact_id}`} className="block">
+      <Card padding="none" className="group cursor-pointer transition-shadow hover:shadow-sm">
+        <div className="flex items-start gap-3 p-4">
+          <Avatar name={shortId} size={36} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">Contact {shortId}</span>
+                <span className="text-xs text-slate-400">{thread.message_count} msgs</span>
+                <Badge label={channel} asChannel />
+                {cls && <Badge label={cls} variant={variant} dot />}
+              </div>
+              <span className="flex-shrink-0 text-[11px] tabular-nums text-slate-400">
+                {timeAgo(thread.last_message_at)}
+              </span>
             </div>
-            <span className="flex-shrink-0 text-[11px] tabular-nums text-slate-400">{timeAgo(msg.occurred_at)}</span>
+            {thread.last_snippet && (
+              <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-slate-500 dark:text-slate-400">
+                {thread.last_snippet}
+              </p>
+            )}
           </div>
-          {msg.meta?.subject && (
-            <div className="mt-1 truncate text-[13px] font-medium text-slate-600 dark:text-slate-300">{msg.meta.subject}</div>
-          )}
-          {preview && (
-            <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-slate-500 dark:text-slate-400">
-              {typeof preview === 'string' ? preview : '—'}
-            </p>
-          )}
+        </div>
+      </Card>
+    </Link>
+  )
+}
+
+// ── Thread list (left side when one is selected) ─────────────────────────────
+function ThreadList({ threads, activeId }: { threads: InboxThread[]; activeId: string }) {
+  return (
+    <Card padding="none" className="max-h-[640px] overflow-y-auto">
+      <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+        {threads.map((t) => {
+          const channel = t.last_channel ?? 'email'
+          const cls = t.last_classification
+          const variant: 'success' | 'danger' | 'info' | 'neutral' =
+            cls === 'positive' ? 'success' : cls === 'unsubscribe' ? 'danger' : cls === 'objection' ? 'info' : 'neutral'
+          const isActive = activeId === t.contact_id
+          return (
+            <li key={t.contact_id}>
+              <Link
+                to={`/inbox/${t.contact_id}`}
+                className={clsx(
+                  'flex items-start gap-3 px-3 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/50',
+                  isActive && 'bg-brand-50 dark:bg-brand-900/20',
+                )}
+              >
+                <Avatar name={t.contact_id.slice(0, 8)} size={32} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                      Contact {t.contact_id.slice(0, 8)}
+                    </p>
+                    <span className="text-[10px] tabular-nums text-slate-400">{timeAgo(t.last_message_at)}</span>
+                  </div>
+                  <p className="mt-0.5 truncate text-xs text-slate-500">{t.last_snippet ?? '—'}</p>
+                  <div className="mt-1.5 flex items-center gap-1.5">
+                    <Badge label={channel} asChannel size="xs" />
+                    {cls && <Badge label={cls} variant={variant} size="xs" dot />}
+                    <span className="text-[10px] text-slate-400">{t.message_count} msgs</span>
+                  </div>
+                </div>
+              </Link>
+            </li>
+          )
+        })}
+      </ul>
+    </Card>
+  )
+}
+
+// ── Thread pane (right side) ─────────────────────────────────────────────────
+function ThreadPane({
+  contactId,
+  messages,
+  loading,
+  onBack,
+}: {
+  contactId: string
+  messages: import('../api/v2').InboxMessage[]
+  loading: boolean
+  onBack: () => void
+}) {
+  return (
+    <Card padding="none" className="flex max-h-[640px] flex-col">
+      <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onBack}
+            title="Back to thread list"
+            aria-label="Back to thread list"
+            className="rounded p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 lg:hidden"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <Avatar name={contactId.slice(0, 8)} size={32} />
+          <div>
+            <p className="text-sm font-semibold text-slate-900 dark:text-white">Contact {contactId.slice(0, 8)}</p>
+            <p className="text-[11px] text-slate-500">{messages.length} messages</p>
+          </div>
         </div>
       </div>
+      <div className="flex-1 space-y-3 overflow-y-auto p-4">
+        {loading ? (
+          <p className="text-sm text-slate-500">Loading…</p>
+        ) : messages.length === 0 ? (
+          <EmptyState title="No messages" description="Nothing yet on this thread." />
+        ) : (
+          messages.map((m) => <MessageBubble key={m.id} m={m} />)
+        )}
+      </div>
     </Card>
+  )
+}
+
+function MessageBubble({ m }: { m: import('../api/v2').InboxMessage }) {
+  const outbound = m.direction === 'outbound'
+  return (
+    <div className={clsx('flex items-start gap-2', outbound ? 'justify-end' : 'justify-start')}>
+      {!outbound && <ChannelIcon channel={m.channel} size="sm" />}
+      <div
+        className={clsx(
+          'max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm',
+          outbound
+            ? 'bg-brand-500 text-white'
+            : 'border border-slate-200 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100',
+        )}
+      >
+        {m.subject && <p className={clsx('mb-1 text-xs font-semibold', outbound ? 'opacity-90' : 'text-slate-500')}>{m.subject}</p>}
+        <p className="whitespace-pre-wrap">{m.body ?? ''}</p>
+        <p className={clsx('mt-1.5 text-[10px]', outbound ? 'opacity-70' : 'text-slate-400')}>
+          {m.channel} · {new Date(m.occurred_at).toLocaleString()}
+          {m.classification && <span className="ml-1">· {m.classification}</span>}
+        </p>
+      </div>
+      {outbound && <ChannelIcon channel={m.channel} size="sm" />}
+    </div>
   )
 }

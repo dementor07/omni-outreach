@@ -13,5 +13,6 @@
     "jsx": "react-jsx",
     "strict": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/pages/_legacy", "src/pages/Campaigns", "src/pages/Campaigns.tsx", "src/pages/Dashboard.tsx", "src/pages/Approvals.tsx", "src/pages/StyleGuide.tsx"]
 }

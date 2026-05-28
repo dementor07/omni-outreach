@@ -1,48 +1,57 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, Megaphone, Users, ListTodo, Settings, LogOut, Zap,
-  Search, Database, Activity, ShieldOff, BarChart3, FileText, Inbox,
-  UserCheck, ChevronRight,
+  LayoutDashboard, Megaphone, Inbox, ListTodo, UserCheck,
+  Users, Building2, KanbanSquare, Contact,
+  BarChart3, Activity, Sparkles,
+  Plug, Database, FileText, ShieldOff, Settings, LogOut, Zap,
+  ChevronRight,
 } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
-import { api } from '../api/client'
 import { clsx } from 'clsx'
 
-type NavItem = { to: string; label: string; icon: React.ElementType; badge?: 'count' }
+type NavItem = { to: string; label: string; icon: React.ElementType }
 type NavGroup = { label: string | null; items: NavItem[] }
 
+// CRM + outbound + AI information architecture (HubSpot/Salesforce/Apollo).
 const NAV_GROUPS: NavGroup[] = [
   {
     label: null,
     items: [
-      { to: '/',          label: 'Overview',   icon: LayoutDashboard },
-      { to: '/campaigns', label: 'Campaigns',  icon: Megaphone },
-      { to: '/inbox',     label: 'Inbox',      icon: Inbox },
-      { to: '/queue',     label: 'Queue',      icon: ListTodo },
-      { to: '/approvals', label: 'Approvals',  icon: UserCheck, badge: 'count' },
+      { to: '/', label: 'Overview', icon: LayoutDashboard },
     ],
   },
   {
-    label: 'Data',
+    label: 'CRM',
     items: [
-      { to: '/leads',        label: 'Leads',        icon: Users },
-      { to: '/lead-sources', label: 'Lead Sources',  icon: Database },
-      { to: '/job-search',   label: 'Job Search',    icon: Search },
-      { to: '/templates',    label: 'Templates',     icon: FileText },
-      { to: '/blacklist',    label: 'Blacklist',     icon: ShieldOff },
+      { to: '/contacts', label: 'Contacts', icon: Contact },
+      { to: '/companies', label: 'Companies', icon: Building2 },
+      { to: '/deals', label: 'Deals', icon: KanbanSquare },
+      { to: '/leads', label: 'Leads', icon: Users },
     ],
   },
   {
-    label: 'Insights',
+    label: 'Engage',
+    items: [
+      { to: '/campaigns', label: 'Campaigns', icon: Megaphone },
+      { to: '/inbox', label: 'Inbox', icon: Inbox },
+      { to: '/tasks', label: 'Tasks', icon: ListTodo },
+      { to: '/approvals', label: 'Approvals', icon: UserCheck },
+    ],
+  },
+  {
+    label: 'Intelligence',
     items: [
       { to: '/analytics', label: 'Analytics', icon: BarChart3 },
-      { to: '/activity',  label: 'Activity',  icon: Activity },
+      { to: '/activity', label: 'Activity', icon: Activity },
+      { to: '/ai-studio', label: 'AI Studio', icon: Sparkles },
     ],
   },
   {
-    label: 'System',
+    label: 'Setup',
     items: [
-      { to: '/style-guide', label: 'Style guide', icon: Zap },
+      { to: '/integrations', label: 'Integrations', icon: Plug },
+      { to: '/lead-sources', label: 'Lead Sources', icon: Database },
+      { to: '/templates', label: 'Templates', icon: FileText },
+      { to: '/blacklist', label: 'Blacklist', icon: ShieldOff },
     ],
   },
 ]
@@ -53,12 +62,6 @@ interface SidebarProps {
 
 export default function Sidebar({ collapsed = false }: SidebarProps) {
   const navigate = useNavigate()
-  const approvalsCountQuery = useQuery<{ pending: number }>({
-    queryKey: ['approvals-count'],
-    queryFn: async () => (await api.get<{ pending: number }>('/approvals/count')).data,
-    refetchInterval: 30_000,
-  })
-  const pending = approvalsCountQuery.data?.pending ?? 0
 
   function logout() {
     localStorage.removeItem('token')
@@ -95,42 +98,31 @@ export default function Sidebar({ collapsed = false }: SidebarProps) {
               </p>
             )}
             <div className="space-y-0.5">
-              {group.items.map(({ to, label, icon: Icon, badge }) => {
-                const showBadge = badge === 'count' && pending > 0
-                return (
-                  <NavLink
-                    key={to}
-                    to={to}
-                    end={to === '/'}
-                    className={({ isActive }) =>
-                      clsx(
-                        'group relative flex w-full items-center rounded-lg text-sm font-medium transition-colors',
-                        collapsed ? 'h-9 justify-center px-0' : 'gap-2.5 px-2.5 py-1.5',
-                        isActive
-                          ? 'bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300'
-                          : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white',
-                      )
-                    }
-                    title={collapsed ? label : undefined}
-                  >
-                    {({ isActive }) => (
-                      <>
-                        <Icon size={16} />
-                        {!collapsed && <span className="flex-1 truncate text-left">{label}</span>}
-                        {!collapsed && showBadge && (
-                          <span className="rounded-md bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-white">
-                            {pending}
-                          </span>
-                        )}
-                        {collapsed && showBadge && (
-                          <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white dark:ring-slate-950" />
-                        )}
-                        {isActive && !collapsed && <ChevronRight size={12} className="text-brand-400" />}
-                      </>
-                    )}
-                  </NavLink>
-                )
-              })}
+              {group.items.map(({ to, label, icon: Icon }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={to === '/'}
+                  className={({ isActive }) =>
+                    clsx(
+                      'group relative flex w-full items-center rounded-lg text-sm font-medium transition-colors',
+                      collapsed ? 'h-9 justify-center px-0' : 'gap-2.5 px-2.5 py-1.5',
+                      isActive
+                        ? 'bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300'
+                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white',
+                    )
+                  }
+                  title={collapsed ? label : undefined}
+                >
+                  {({ isActive }) => (
+                    <>
+                      <Icon size={16} />
+                      {!collapsed && <span className="flex-1 truncate text-left">{label}</span>}
+                      {isActive && !collapsed && <ChevronRight size={12} className="text-brand-400" />}
+                    </>
+                  )}
+                </NavLink>
+              ))}
             </div>
           </div>
         ))}
@@ -155,6 +147,7 @@ export default function Sidebar({ collapsed = false }: SidebarProps) {
           {!collapsed && <span>Settings</span>}
         </NavLink>
         <button
+          type="button"
           onClick={logout}
           className={clsx(
             'flex w-full items-center rounded-lg text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white',
