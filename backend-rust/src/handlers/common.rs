@@ -97,3 +97,46 @@ pub fn opt_s(command: &ActionCommand, key: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
 }
+
+/// SSRF guard. Block hosts that target cloud metadata, loopback, link-local,
+/// or RFC-1918 private ranges. Defence-in-depth; not a complete SSRF defence
+/// (no DNS-rebinding protection, no full IP parse), but covers the obvious
+/// attack vectors. Shared by every handler that fetches an operator-supplied
+/// URL (webhook, http_call). For a stricter posture, resolve the host to an IP
+/// and reject any in the non-public ranges.
+pub fn is_blocked_host(host: &str) -> bool {
+    let h = host.to_ascii_lowercase();
+    h == "localhost"
+        || h == "0.0.0.0"
+        || h == "::"
+        || h == "::1"
+        || h == "169.254.169.254" // AWS / GCP / Azure IMDS
+        || h.starts_with("127.")
+        || h.starts_with("10.")
+        || h.starts_with("192.168.")
+        || h.starts_with("172.16.")
+        || h.starts_with("172.17.")
+        || h.starts_with("172.18.")
+        || h.starts_with("172.19.")
+        || h.starts_with("172.2") // 172.20.–172.29.
+        || h.starts_with("172.30.")
+        || h.starts_with("172.31.")
+        || h.starts_with("fd") // IPv6 ULA fc00::/7
+        || h.starts_with("fc")
+        || h.starts_with("fe80:") // IPv6 link-local
+}
+
+/// Validate an operator-supplied URL: must be http/https and not target a
+/// blocked host. Returns the parsed URL or a stable error code.
+pub fn validate_outbound_url(url: &str) -> Result<reqwest::Url, &'static str> {
+    let parsed = url.parse::<reqwest::Url>().map_err(|_| "INVALID_URL")?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        _ => return Err("INVALID_SCHEME"),
+    }
+    match parsed.host_str() {
+        None => Err("MISSING_HOST"),
+        Some(h) if is_blocked_host(h) => Err("PRIVATE_URL_BLOCKED"),
+        Some(_) => Ok(parsed),
+    }
+}
