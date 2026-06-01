@@ -1,0 +1,142 @@
+"""Build an ActionCommand for a canvas node and publish it to the muscle.
+
+The dispatcher and transition worker both call ``dispatch_node`` to fire the
+node a lead currently sits on. This module owns:
+
+  - node type  -> ChannelType            (which muscle handler runs)
+  - node config + lead -> command payload (rendered, self-contained)
+  - connection name -> one-shot credential_ref (secret never in the payload)
+
+A node whose ``side_effect`` is not NETWORK/MUTATE (conditions, delays) has no
+muscle command — the orchestrator advances it via its returned handle without a
+muscle round-trip. Those are handled by the dispatcher directly, not here.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import uuid
+from datetime import UTC, datetime
+from typing import Any
+
+from app.core.events import ChannelType
+from app.db import fetch_one, system_scope
+from app.services import bus
+from app.services.encryption import decrypt
+
+log = logging.getLogger(__name__)
+
+# Node type -> muscle channel. Only side-effecting nodes appear here; anything
+# absent is resolved locally by the dispatcher (conditions/flow) instead of
+# being sent to the muscle.
+NODE_CHANNEL: dict[str, ChannelType] = {
+    "channel.email": ChannelType.EMAIL,
+    "channel.sms": ChannelType.SMS,
+    "channel.voice": ChannelType.VOICE,
+    "channel.linkedin": ChannelType.LINKEDIN_DM,
+    "channel.whatsapp": ChannelType.WHATSAPP,
+    "channel.instagram": ChannelType.INSTAGRAM,
+    "channel.telegram": ChannelType.TELEGRAM,
+    "channel.slack": ChannelType.WEBHOOK,
+    "channel.webhook_out": ChannelType.WEBHOOK,
+    "crm.add_tag": ChannelType.ADD_TAG,
+    "crm.remove_tag": ChannelType.REMOVE_TAG,
+    "crm.hot_lead_alert": ChannelType.HOT_LEAD_ALERT,
+    "ai.enrich": ChannelType.ENRICH,
+    "ai.compose": ChannelType.AI_COMPOSE,
+    # Claude classifier handler — both screen variants share it. The asymmetric
+    # error policy lives in the node's payload (on_error_handle), not here.
+    "ai.screen_company": ChannelType.AI_SCREEN,
+    "ai.screen_person": ChannelType.AI_SCREEN,
+    # Apify-driven LinkedIn jobs source (multi-step actor protocol).
+    "source.linkedin_jobs": ChannelType.APIFY,
+    # Per-company Serper search (multi-pattern x titles, dedupe).
+    "source.serper_people": ChannelType.SERPER_PEOPLE,
+    # Every declarative HTTP node (sources built via http_node) routes to the
+    # generic handler. The dispatcher detects these by the emitted intent
+    # carrying channel="http_call".
+    "__http_call__": ChannelType.HTTP_CALL,
+}
+
+# Provider tag (from the node manifest capability "connection:<provider>")
+# used to look up the workspace connection that holds the secret.
+_CHANNEL_PROVIDER: dict[ChannelType, str] = {
+    ChannelType.EMAIL: "smtp",
+    ChannelType.SMS: "twilio",
+    ChannelType.VOICE: "retell",
+    ChannelType.LINKEDIN_DM: "unipile",
+    ChannelType.WHATSAPP: "unipile",
+    ChannelType.INSTAGRAM: "unipile",
+    ChannelType.TELEGRAM: "unipile",
+}
+
+
+async def _mint_credential_ref(workspace_id: str, connection_name: str | None, channel: str) -> str | None:
+    """Resolve a workspace connection by name into a one-shot credential ref.
+    Returns None when the node declares no connection (e.g. inline webhook)."""
+    if not connection_name:
+        return None
+    async with system_scope():
+        row = await fetch_one(
+            "SELECT credentials_encrypted FROM omni_connections WHERE workspace_id=$1 AND name=$2",
+            workspace_id,
+            connection_name,
+        )
+    if not row:
+        log.warning("[dispatch] no connection %r for workspace %s", connection_name, workspace_id)
+        return None
+    bundle = json.loads(decrypt(row["credentials_encrypted"]))
+    # mint_credential_ref persists the encrypted bundle and returns the ref.
+    from app.routers.internal import mint_credential_ref
+
+    return await mint_credential_ref(channel, bundle)
+
+
+def _lead_context(lead: dict[str, Any], contact: dict[str, Any] | None) -> dict[str, Any]:
+    c = contact or {}
+    return {
+        "id": str(lead["id"]),
+        "campaign_id": str(lead.get("workflow_id") or lead["id"]),
+        "email": c.get("email"),
+        "linkedin_url": c.get("linkedin_url"),
+        "phone": c.get("phone"),
+        "first_name": c.get("first_name"),
+        "last_name": c.get("last_name"),
+        "company": c.get("company"),
+        "extra_data": lead.get("custom_fields") or {},
+    }
+
+
+async def build_command(
+    *,
+    workspace_id: str,
+    channel: ChannelType,
+    lead: dict[str, Any],
+    contact: dict[str, Any] | None,
+    node_id: str,
+    payload: dict[str, Any],
+    connection_name: str | None,
+    correlation_id: str | None = None,
+) -> dict[str, Any]:
+    """Assemble the ActionCommand envelope the muscle consumes."""
+    credential_ref = await _mint_credential_ref(workspace_id, connection_name, channel.value)
+    return {
+        "command_id": str(uuid.uuid4()),
+        "task_id": str(uuid.uuid4()),
+        "channel": channel.value,
+        "lead": _lead_context(lead, contact),
+        "payload": payload,
+        "credential_ref": credential_ref,
+        "metadata": {
+            "workspace_id": workspace_id,
+            "node_id": node_id,
+            "correlation_id": correlation_id or str(uuid.uuid4()),
+        },
+        "occurred_at": datetime.now(UTC).isoformat(),
+    }
+
+
+async def publish_command(command: dict[str, Any]) -> None:
+    """Send the assembled command to the muscle, keyed by lead id for ordering."""
+    await bus.publish_command(command, key=command["lead"]["id"])

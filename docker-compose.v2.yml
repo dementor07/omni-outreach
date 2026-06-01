@@ -49,6 +49,80 @@ services:
       - omni-outreach_default
     restart: unless-stopped
 
+  # The execution worker (Rust). Consumes outreach.commands, performs the
+  # real I/O per channel handler, emits outreach.results. CONTROL_PLANE_URL
+  # points at the v2 backend so credential refs resolve against v2 connections.
+  muscle-v2:
+    build:
+      context: ./backend-rust
+    container_name: omni-v2-muscle
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
+      CONTROL_PLANE_URL: http://backend-v2:8000
+      MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
+      RUST_LOG: execution_engine=info,info
+    networks:
+      - omni-outreach_default
+    restart: unless-stopped
+
+  # Dispatcher: enrolls leads and turns the lead's current node into an
+  # ActionCommand on outreach.commands (resolves channel, renders payload,
+  # mints a one-shot credential_ref). Consumes lead-enrollment + transition
+  # advancement requests.
+  dispatcher-v2:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+    container_name: omni-v2-dispatcher
+    command: python -m app.execution.dispatcher
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
+      KAFKA_BROKERS: redpanda:9092
+      DB_PASSWORD: OmniOutreach2026
+      SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
+      MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
+    networks:
+      - omni-outreach_default
+    restart: unless-stopped
+
+  # Transition worker: consumes outreach.transitions (emitted by the Flink
+  # orchestrator), walks the canvas edge for (source_node_id, handle), sets
+  # the lead's next node, and asks the dispatcher to fire it.
+  transitions-v2:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+    container_name: omni-v2-transitions
+    command: python -m app.execution.transition_worker
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
+      KAFKA_BROKERS: redpanda:9092
+      DB_PASSWORD: OmniOutreach2026
+      SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
+    networks:
+      - omni-outreach_default
+    restart: unless-stopped
+
+  # Submits the pyflink orchestrator job (outreach.results -> outreach.transitions)
+  # to the shared Flink jobmanager from the master stack. Idempotent enough:
+  # if the job is already registered a duplicate submit fails and we tail; the
+  # registered job survives. Restart re-submits if the cluster was wiped.
+  orchestrator-v2:
+    build:
+      context: ./backend-flink
+    container_name: omni-v2-orchestrator
+    command: sh -lc "until curl -fsS http://flink-jobmanager:8081/overview >/dev/null 2>&1; do echo waiting for jobmanager; sleep 3; done && (flink run -d -m flink-jobmanager:8081 -py /opt/flink/usrlib/orchestrator.py || echo 'submit failed (job may already be running)') && tail -f /dev/null"
+    environment:
+      - KAFKA_BROKERS=redpanda:9092
+    networks:
+      - omni-outreach_default
+    restart: unless-stopped
+
   frontend-v2:
     build:
       context: ./frontend

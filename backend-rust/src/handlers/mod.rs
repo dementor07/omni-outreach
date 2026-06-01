@@ -1,14 +1,20 @@
-//! Channel handler dispatch. Every ChannelType variant routes to exactly
-//! one async handler. Unknown variants fall to the catch-all (which exists
-//! only as a defence against schema drift — at this point every variant
-//! has a handler).
+//! Channel handler dispatch. Every ChannelType variant routes to exactly one
+//! async handler. `HttpCall` is the generic, config-driven handler that lets
+//! new REST integrations ship as a Python-only node. `Unknown` catches any
+//! channel value the worker doesn't recognise (schema drift / a node type
+//! deployed ahead of the worker) and returns a clean error instead of
+//! silently dropping the command.
 
+pub mod ai_screen;
 pub mod alert;
+pub mod apify;
 pub mod common;
 pub mod email;
 pub mod enrich;
+pub mod http_call;
 pub mod leadgen;
 pub mod linkedin; // re-export shim, see file
+pub mod serper_people;
 pub mod sms;
 pub mod tag;
 pub mod transform;
@@ -39,5 +45,12 @@ pub async fn dispatch(command: &ActionCommand) -> ExecutionResult {
         ChannelType::AiCompose => transform::handle_ai_compose(command).await,
         ChannelType::LeadGenPull => leadgen::handle_lead_gen_pull(command).await,
         ChannelType::CsvImport => leadgen::handle_csv_import(command).await,
+        ChannelType::HttpCall => http_call::handle_http_call(command).await,
+        ChannelType::Apify => apify::handle_apify(command).await,
+        ChannelType::AiScreen => ai_screen::handle_ai_screen(command).await,
+        ChannelType::SerperPeople => serper_people::handle_serper_people(command).await,
+        ChannelType::Unknown => {
+            common::fail(command, format!("UNKNOWN_CHANNEL_{}", command.channel.as_str()), false)
+        }
     }
 }

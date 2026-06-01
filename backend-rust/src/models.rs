@@ -52,6 +52,33 @@ pub enum ChannelType {
     LeadGenPull,
     #[serde(rename = "csv_import")]
     CsvImport,
+    /// Config-driven HTTP integration. The node declares the request
+    /// (method/url/headers/auth/body + response->handle mapping) in `payload`;
+    /// one shared handler executes it. Lets Python-only authors add REST
+    /// integrations with no Rust.
+    #[serde(rename = "http_call")]
+    HttpCall,
+    /// Apify actor run + poll + dataset fetch. Multi-step protocol (POST run,
+    /// poll status, GET items) — not expressible as a single http_call. Used
+    /// by `source.linkedin_jobs` and any other Apify-driven source.
+    #[serde(rename = "apify")]
+    Apify,
+    /// Anthropic Claude structured-classification call returning ACCEPT/REJECT.
+    /// Used by `ai.screen_company` and `ai.screen_person`. The node's payload
+    /// carries `on_error_handle` so the asymmetric fail-open / fail-closed
+    /// policies live in the node config, not in the worker.
+    #[serde(rename = "ai_screen")]
+    AiScreen,
+    /// Per-company Serper multi-pattern LinkedIn profile search. Loops 2
+    /// patterns × N roles, dedupes URLs, caps at max_per_company. Used by
+    /// `source.serper_people`.
+    #[serde(rename = "serper_people")]
+    SerperPeople,
+    /// Any channel value the worker doesn't recognise. Deserializes here
+    /// instead of failing the whole command at parse time, so dispatch can
+    /// return a clean, debuggable error.
+    #[serde(other)]
+    Unknown,
 }
 
 impl ChannelType {
@@ -77,6 +104,11 @@ impl ChannelType {
             ChannelType::AiCompose => "ai_compose",
             ChannelType::LeadGenPull => "lead_gen_pull",
             ChannelType::CsvImport => "csv_import",
+            ChannelType::HttpCall => "http_call",
+            ChannelType::Apify => "apify",
+            ChannelType::AiScreen => "ai_screen",
+            ChannelType::SerperPeople => "serper_people",
+            ChannelType::Unknown => "unknown",
         }
     }
 }

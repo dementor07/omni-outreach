@@ -36,6 +36,10 @@ class ChannelType(StrEnum):
     AI_COMPOSE = "ai_compose"
     LEAD_GEN_PULL = "lead_gen_pull"
     CSV_IMPORT = "csv_import"
+    HTTP_CALL = "http_call"  # config-driven REST integration (generic handler)
+    APIFY = "apify"  # Apify actor run + poll + dataset fetch (source.linkedin_jobs)
+    AI_SCREEN = "ai_screen"  # Claude ACCEPT/REJECT classifier (ai.screen_company / ai.screen_person)
+    SERPER_PEOPLE = "serper_people"  # Multi-pattern per-company Serper LinkedIn search
 
 
 class EventType(StrEnum):

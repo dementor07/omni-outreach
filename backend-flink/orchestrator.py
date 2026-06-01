@@ -96,6 +96,12 @@ class JourneyProcessFunction(KeyedProcessFunction):
                 "status": data.get("status"),
                 "error": data.get("error"),
                 "telemetry": data.get("telemetry") or {},
+                # Forward any column mutations the muscle wants applied (e.g. a
+                # source handler writing custom_fields[companies]). The
+                # transition worker is the one place lead rows are updated, so
+                # it applies these before firing the next node.
+                "lead_mutations": data.get("lead_mutations") or {},
+                "workspace_id": _safe_get(data, "metadata", "workspace_id"),
             },
         }
 
@@ -218,7 +224,7 @@ def run_orchestrator():
             KafkaRecordSerializationSchema.builder()
             .set_topic("outreach.transitions")
             .set_value_serialization_schema(SimpleStringSchema())
-            
+            .set_validation_mode(KafkaRecordSerializationSchema.ValidationMode.STRICT)
             .build()
         )
         .set_delivery_guarantee(DeliveryGuarantee.AT_LEAST_ONCE)

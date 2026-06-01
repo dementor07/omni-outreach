@@ -25,6 +25,9 @@ from app.config import settings
 log = logging.getLogger(__name__)
 
 EVENTS_TOPIC = "omni.events"
+COMMANDS_TOPIC = "outreach.commands"  # muscle ActionCommands (in-flight)
+RESULTS_TOPIC = "outreach.results"  # muscle ExecutionResults (in-flight)
+TRANSITIONS_TOPIC = "outreach.transitions"  # Flink orchestrator output
 
 _producer: AIOKafkaProducer | None = None
 
@@ -91,3 +94,13 @@ async def publish_events(envelopes: list[dict[str, Any]]) -> None:
         raise RuntimeError("bus producer not initialised")
     for env in envelopes:
         await _producer.send_and_wait(EVENTS_TOPIC, value=env, key=env["workspace_id"])
+
+
+async def publish_command(command: dict[str, Any], *, key: str) -> None:
+    """Publish an ActionCommand envelope onto outreach.commands. The muscle
+    consumes this topic. `key` is the partition key (lead_id keeps a lead's
+    commands ordered)."""
+    if _producer is None:
+        raise RuntimeError("bus producer not initialised")
+    await _producer.send_and_wait(COMMANDS_TOPIC, value=command, key=key)
+
