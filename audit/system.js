@@ -62,7 +62,11 @@ async function renderProcess(){
   const maxRow=Math.max(...Object.values(byCol).map(a=>a.length));
   const W=PADX*2+maxCol*COLW+NW, H=PADY*2+maxRow*ROWH;
 
-  const overlaysByTarget={}; (proc.overlays||[]).forEach(o=>{ (overlaysByTarget[o.target]=overlaysByTarget[o.target]||[]).push(o); });
+  // Only unresolved overlays (status still VERIFIED) paint a hop red. A
+  // FIXED/DISMISSED finding is resolved — its hop is no longer a stall-point.
+  const overlaysByTarget={};
+  (proc.overlays||[]).filter(o=>!o.resolved).forEach(o=>{ (overlaysByTarget[o.target]=overlaysByTarget[o.target]||[]).push(o); });
+  const openCount=(proc.overlays||[]).filter(o=>!o.resolved).length;
   const COLOR={produce:'#1f6feb',topic:'#8957e5',worker:'#238636',store:'#9e6a03'};
 
   const edgeP = proc.edges.map(e=>{
@@ -92,10 +96,17 @@ async function renderProcess(){
     `<path d="M0,0 L7,3 L0,6 Z" fill="#30363d"/></marker></defs>`+
     edgeP+nodeP+`</svg>`+
     `<div style="margin-top:10px;font-size:11px;color:var(--muted)">`+
-    `<span style="color:var(--crit)">●</span> red = a HIGH/MEDIUM finding stalls work at this hop — hover for which. `+
-    `${(proc.overlays||[]).length} stall-points overlaid.</div>`+
+    `<span style="color:var(--crit)">●</span> red = a HIGH/MEDIUM finding still stalls work at this hop — hover for which. `+
+    `${openCount} open / ${(proc.overlays||[]).length} historical stall-points.</div>`+
     `<div style="margin-top:6px;font-size:11px">`+
-    (proc.overlays||[]).map(o=>`<div><b style="color:var(--crit)">${_esc(o.finding)}</b> @ <code>${_esc(o.target)}</code> — ${_esc(o.note)}</div>`).join('')+
+    (proc.overlays||[]).map(o=>{
+      const resolved=!!o.resolved;
+      const color=resolved?'var(--ok,#3fb950)':'var(--crit)';
+      const mark=resolved?'✓ ':'';
+      const deco=resolved?'text-decoration:line-through;opacity:.7':'';
+      return `<div style="${deco}"><b style="color:${color}">${mark}${_esc(o.finding)}</b> `+
+        `<span style="color:var(--muted)">[${_esc(o.status||'?')}]</span> @ <code>${_esc(o.target)}</code> — ${_esc(o.note)}</div>`;
+    }).join('')+
     `</div>`;
 }
 

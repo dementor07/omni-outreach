@@ -352,9 +352,11 @@ def get_topics() -> dict[str, Any]:
 
 @app.get("/api/process")
 def get_process() -> dict[str, Any]:
-    """Static pipeline topology with finding stall-points overlaid. The nodes
-    are the planes; edges are the topics. `findings` flags which hops the audit
-    found broken so the UI can paint them red."""
+    """Pipeline topology with finding stall-points overlaid. The nodes are the
+    planes; edges are the topics. Each overlay carries the LIVE status of its
+    finding (read from findings.json) so the UI paints a FIXED/DISMISSED hop as
+    resolved instead of red — the overlay map is the historical set of implicated
+    hops; their current truth comes from the findings file."""
     nodes = [
         {"id": "nodes", "label": "Canvas nodes", "kind": "produce"},
         {"id": "omni.events", "label": "omni.events", "kind": "topic"},
@@ -384,10 +386,12 @@ def get_process() -> dict[str, Any]:
         {"from": "transitions", "to": "outreach.results"},
         {"from": "projector", "to": "db"},
     ]
-    # Overlay: map HIGH/MEDIUM findings to the hop they implicate.
+    # Overlay: the historical map of HIGH/MEDIUM findings to the hop they
+    # implicate. The current status is stitched in live below so a resolved
+    # finding stops painting its hop red.
     overlays = [
         {"target": "dispatcher", "finding": "CONTRACT-001",
-         "note": "11 nodes dead-on-arrival: emit intent but no NODE_CHANNEL route → lead stalls"},
+         "note": "nodes that emit an unroutable intent now error the lead loudly instead of stalling; dead canvas nodes removed"},
         {"target": "dispatcher", "finding": "DEPLOY-002",
          "note": "auto_offset_reset=latest → intents before join never dispatched"},
         {"target": "transitions", "finding": "DEPLOY-001",
@@ -403,6 +407,19 @@ def get_process() -> dict[str, Any]:
         {"target": "outreach.dead_letter", "finding": "RETRY-THEME",
          "note": "DLQ has no consumer; nothing redrives poison"},
     ]
+    # Stitch live status + the recorded fix onto each overlay so the UI knows
+    # whether the hop is still broken (VERIFIED) or resolved (FIXED/DISMISSED).
+    try:
+        data = _load()
+        by_id = {f["id"]: f for f in data["findings"]}
+    except Exception:  # noqa: BLE001 — viz must not 500 if findings is unreadable
+        by_id = {}
+    for o in overlays:
+        f = by_id.get(o["finding"], {})
+        o["status"] = f.get("status", "UNKNOWN")
+        o["resolved"] = o["status"] in ("FIXED", "DISMISSED")
+        if f.get("fix"):
+            o["fix"] = f["fix"]
     return {"nodes": nodes, "edges": edges, "overlays": overlays}
 
 
