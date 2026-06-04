@@ -75,7 +75,15 @@
       "status": "VERIFIED",
       "title": "Legacy schema (migrations 001-020) coexists with v2 omni_* tables",
       "evidence": "24 migrations: 001-020 build the LEGACY schema (job_search, credit_budget, scheduled_lead_gen, sota_stream, email_accounts, leads/campaigns/queue/sequence_nodes), 021-024 build v2 (omni_*). The v2 nuke added omni_* projections but left legacy migrations + tables in place (DB inspection earlier showed leads/campaigns/queue/sequence_nodes with a few rows each). Schema cross-check PASSES for the v2 hot path (for_each columns from 023, ai kinds from 024 all present + used). The drift is dead legacy tables, not broken refs.",
-      "recommendation": "After confirming nothing reads them, drop the legacy tables in a new migration. Low urgency (they don't break v2), but they're the DB mirror of the dead-service cluster (SVC-002)."
+      "recommendation": "After confirming nothing reads them, drop the legacy tables in a new migration. Low urgency (they don't break v2), but they're the DB mirror of the dead-service cluster (SVC-002).",
+      "history": [
+        {
+          "status": "VERIFIED",
+          "actor": "phase-out-non-v2",
+          "note": "Migration 025 authored to drop 27 verified-unused legacy tables; NOT yet applied (needs DB backup + deliberate alembic upgrade). approvals/shared/omni_* excluded.",
+          "at": "2026-06-04T07:35:11.115185+00:00"
+        }
+      ]
     },
     {
       "id": "SCHEMA-GOOD",
@@ -138,10 +146,18 @@
       "file": "backend-rust/src/handlers/leadgen.rs",
       "line": 25,
       "severity": "DRIFT",
-      "status": "VERIFIED",
+      "status": "FIXED",
       "title": "leadgen handler delegates back to control plane — contradicts ADR 0001 'muscle never delegates back'",
       "evidence": "leadgen.rs POSTs to {control_plane_base}/internal/{endpoint} to run a lead-gen pull, but internal.py's docstring says 'In v2 the muscle never delegates back; lead sources are nodes the muscle executes directly. See ADR 0001.' and the dispatch-pull endpoints were removed. So this handler calls an endpoint that no longer exists -> would always fail. Likely dead/legacy handler still compiled in.",
-      "recommendation": "Confirm the /internal/{endpoint} target exists; if not, remove the leadgen handler + its ChannelType. Lead-gen is canvas-node sources now."
+      "recommendation": "Confirm the /internal/{endpoint} target exists; if not, remove the leadgen handler + its ChannelType. Lead-gen is canvas-node sources now.",
+      "history": [
+        {
+          "status": "FIXED",
+          "actor": "phase-out-non-v2",
+          "note": "Removed in v2 phase-out (branch phase-out-non-v2)",
+          "at": "2026-06-04T07:18:31.264723+00:00"
+        }
+      ]
     },
     {
       "id": "RUST-GOOD",
@@ -160,10 +176,18 @@
       "file": "backend/app/services/lead_source_registry.py",
       "line": 14,
       "severity": "MEDIUM",
-      "status": "VERIFIED",
+      "status": "FIXED",
       "title": "lead_source_registry.py is BROKEN on import (ModuleNotFoundError) and dead",
       "evidence": "Confirmed by actually importing it: `from app.services import lead_source_registry` raises ModuleNotFoundError: No module named 'app.services.lead_sources.apify_jobs'. The lead_sources/ dir is empty except __pycache__ (15 ghost .pyc: apify_jobs, naukri, naukri_stealth, apollo, hunter, producthunt, proxycurl, google_sheets, github, manual, base, utils, _stealth). The v2 nuke deleted the source modules but left the registry importing them. 0 callers anywhere (app/scripts/tests), so it breaks nothing — but it's a broken file in the tree, and a footgun for anyone who tries to use it.",
-      "recommendation": "Delete lead_source_registry.py + the empty lead_sources/ dir (+ its __pycache__). Lead sources are canvas nodes now (sources/*.py). NOTE: confirms there is NO usable internal Naukri source — the ghost naukri.pyc source is gone; Allen's branch is the Naukri reference to port."
+      "recommendation": "Delete lead_source_registry.py + the empty lead_sources/ dir (+ its __pycache__). Lead sources are canvas nodes now (sources/*.py). NOTE: confirms there is NO usable internal Naukri source — the ghost naukri.pyc source is gone; Allen's branch is the Naukri reference to port.",
+      "history": [
+        {
+          "status": "FIXED",
+          "actor": "phase-out-non-v2",
+          "note": "Removed in v2 phase-out (branch phase-out-non-v2)",
+          "at": "2026-06-04T07:18:31.264723+00:00"
+        }
+      ]
     },
     {
       "id": "SVC-002",
@@ -171,10 +195,18 @@
       "file": "backend/app/services/screener.py",
       "line": null,
       "severity": "DRIFT",
-      "status": "VERIFIED",
+      "status": "FIXED",
       "title": "Dead legacy service cluster (~370 LOC): screener, renderer, linkedin, voice",
       "evidence": "Traced callers across app/scripts/tests: screener.py (0), renderer.py (0), linkedin.py (0), voice.py (0) — all unreferenced. Their docstrings name legacy node types (condition_ai_screen, action_ai_compose, action_data_transform) that v2 replaced; the v2 equivalents run in the Rust muscle (ChannelType.AI_SCREEN/AI_COMPOSE) or as canvas nodes. These are pre-v2 services orphaned by the muscle cutover.",
-      "recommendation": "Delete the four dead services (verify once more with a project-wide grep incl. dynamic imports before removing). ~370 LOC of confusion gone."
+      "recommendation": "Delete the four dead services (verify once more with a project-wide grep incl. dynamic imports before removing). ~370 LOC of confusion gone.",
+      "history": [
+        {
+          "status": "FIXED",
+          "actor": "phase-out-non-v2",
+          "note": "Removed in v2 phase-out (branch phase-out-non-v2)",
+          "at": "2026-06-04T07:18:31.264723+00:00"
+        }
+      ]
     },
     {
       "id": "ENC-001",
@@ -496,10 +528,18 @@
       "file": "frontend/src/pages/Campaigns/index.tsx",
       "line": null,
       "severity": "MEDIUM",
-      "status": "VERIFIED",
+      "status": "FIXED",
       "title": "Dead canvas-editor code in the Campaigns LIST page",
       "evidence": "App.tsx routes /campaigns -> <Campaigns/> (no :id) and /campaigns/:id -> <CampaignEditor/>. Campaigns/index.tsx reads useParams().id (always undefined at /campaigns) and has full canvas state (useNodesState/useGetGraph/useCanvasHistory) + imports components/Canvas|Panels|Sidebar. Playwright PROOF: /campaigns renders a list of campaign cards (no canvas); /campaigns/:id renders CampaignEditor with the real ReactFlow canvas. The canvas code in Campaigns/index.tsx is unreachable.",
-      "recommendation": "Strip canvas state + imports from Campaigns/index.tsx (make it a pure list page); delete the unused components/Canvas|Panels|Sidebar subtree. Verify tsc+eslint stay green and /campaigns still lists."
+      "recommendation": "Strip canvas state + imports from Campaigns/index.tsx (make it a pure list page); delete the unused components/Canvas|Panels|Sidebar subtree. Verify tsc+eslint stay green and /campaigns still lists.",
+      "history": [
+        {
+          "status": "FIXED",
+          "actor": "phase-out-non-v2",
+          "note": "Removed in v2 phase-out (branch phase-out-non-v2)",
+          "at": "2026-06-04T07:18:31.264723+00:00"
+        }
+      ]
     },
     {
       "id": "FE-002",
@@ -507,10 +547,18 @@
       "file": "frontend/src/pages/Campaigns/components/",
       "line": null,
       "severity": "MEDIUM",
-      "status": "VERIFIED",
+      "status": "FIXED",
       "title": "components/Canvas|Panels|Sidebar subtree is dead-at-runtime but live-at-import (~2430 LOC)",
       "evidence": "Traced: the subtree is imported ONLY by Campaigns/index.tsx (lines 59-65), and ONLY by that file's canvas-editor code path which is unreachable (route /campaigns never passes :id; the editor is CampaignEditor at /campaigns/:id — Playwright-confirmed). So tsc/eslint see live imports (it compiles), but at runtime none of it renders. Removable, but NOT in isolation: must FIRST strip the dead canvas code + these 7 imports from Campaigns/index.tsx (FE-001), THEN delete the subtree, else the build breaks. Corrected from SUSPECTED after full route + Playwright trace.",
-      "recommendation": "Sequence: (1) reduce Campaigns/index.tsx to a pure list page, removing canvas state + the 7 components/* imports; (2) delete pages/Campaigns/components/; (3) confirm tsc+eslint green + /campaigns still lists + /campaigns/:id editor unaffected."
+      "recommendation": "Sequence: (1) reduce Campaigns/index.tsx to a pure list page, removing canvas state + the 7 components/* imports; (2) delete pages/Campaigns/components/; (3) confirm tsc+eslint green + /campaigns still lists + /campaigns/:id editor unaffected.",
+      "history": [
+        {
+          "status": "FIXED",
+          "actor": "phase-out-non-v2",
+          "note": "Removed in v2 phase-out (branch phase-out-non-v2)",
+          "at": "2026-06-04T07:18:31.264723+00:00"
+        }
+      ]
     },
     {
       "id": "PY-001",
