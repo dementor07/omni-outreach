@@ -5,11 +5,11 @@ import axios from 'axios'
 // Docker network (same origin, no CORS). The vite dev server proxies the
 // same path to localhost:8000 (see vite.config.ts).
 //
-// Override via VITE_API_BASE in `.env.local` when pointing a build at a
-// remote backend (preview deploy, staging, ngrok tunnel) — canonical
-// override is `https://srv1575227.hstgr.cloud/api`. Never point this at
-// `omnioutreach.space`: that domain is configured as an nginx server_name
-// alias but has no DNS A record (NXDOMAIN). See omni-vault/wiki/architecture/system-overview.md.
+// Override via VITE_API_BASE in `.env.local` (or the runtime localStorage key
+// `omni_api_base`) when pointing a build at a remote backend (preview deploy,
+// staging, tunnel). Deployment-specific hostnames live in the deploy docs /
+// env, not in source — see omni-vault/wiki/architecture/system-overview.md for
+// the canonical host and any server_name aliases to avoid.
 //
 // Trailing slash is stripped so callers can write `${apiBase}/foo` without
 // doubling. Exported so non-axios consumers (e.g. EventSource for SSE) can

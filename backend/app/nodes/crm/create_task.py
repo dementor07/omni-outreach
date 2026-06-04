@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, timedelta
 
 from pydantic import BaseModel, Field
 
@@ -48,8 +48,12 @@ async def execute(ctx: NodeContext) -> NodeResult:
             "entity_type": "task",
             "entity_id": task_id,
             "payload": {
+                # title_template is rendered by the projector against the lead
+                # context; the raw template is carried here.
                 "title_template": cfg.title_template,
-                "due_date": (date.today().toordinal() + cfg.due_in_days),
+                # ISO date string the projector inserts directly (was an opaque
+                # ordinal int before — CONTRACT-004 cleanup).
+                "due_date": (date.today() + timedelta(days=cfg.due_in_days)).isoformat(),
                 "assign_to_user_id": cfg.assign_to_user_id,
                 "priority": cfg.priority,
                 "contact_id": str(contact_id),

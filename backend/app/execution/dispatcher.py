@@ -157,8 +157,12 @@ async def run() -> None:
         bootstrap_servers=settings.kafka_brokers,
         group_id=CONSUMER_GROUP,
         value_deserializer=lambda b: json.loads(b.decode("utf-8")),
-        enable_auto_commit=True,
-        auto_offset_reset="latest",
+        # DEPLOY-002: 'latest' silently dropped any intent already on omni.events
+        # before this group joined. 'earliest' replays them; dedupe downstream is
+        # the muscle's credential-ref ledger. EXEC-001: manual commit-after-publish
+        # (commit=True below) instead of a timer that can race the publish.
+        enable_auto_commit=False,
+        auto_offset_reset="earliest",
     )
     await consumer.start()
     log.info("[dispatcher] consuming %s", EVENTS_TOPIC)
@@ -172,7 +176,7 @@ async def run() -> None:
             pass
 
     try:
-        await bus.consume_forever(consumer, handle_event, name="dispatcher", stop_event=stop)
+        await bus.consume_forever(consumer, handle_event, name="dispatcher", stop_event=stop, commit=True)
     finally:
         await consumer.stop()
         await bus.close_producer()

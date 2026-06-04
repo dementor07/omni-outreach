@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.auth import AuthContext, get_current_workspace
@@ -22,6 +22,37 @@ from app.db import fetch_all
 from app.services.bus import publish_event
 
 router = APIRouter()
+
+# EVT-001: POST /events writes to the durable log and the projector applies it
+# faithfully, so an unrestricted endpoint lets any authed user fabricate
+# projected state in their own tenant (fake lead scores, forged completions,
+# spoofed sequence-ended). Only allow event_types a human is meant to author by
+# hand — CRM mutations and manual notes. Everything else (ai.*, *.queued,
+# *.completed, *.requested, lead.sequence_ended, …) is worker-produced and must
+# not be injectable through this endpoint.
+_USER_PUBLISHABLE_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        "contact.created",
+        "contact.updated",
+        "company.created",
+        "company.updated",
+        "deal.created",
+        "deal.updated",
+        "deal.stage_changed",
+        "note.added",
+    }
+)
+
+
+def _assert_user_publishable(event_type: str) -> None:
+    if event_type not in _USER_PUBLISHABLE_EVENT_TYPES:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"event_type {event_type!r} is not user-publishable; "
+                "worker-only events cannot be injected via this endpoint"
+            ),
+        )
 
 
 class EventCreate(BaseModel):
@@ -57,6 +88,7 @@ class EventOut(BaseModel):
     ),
 )
 async def append_event(body: EventCreate, ctx: AuthContext = Depends(get_current_workspace)) -> EventOut:
+    _assert_user_publishable(body.event_type)
     env = await publish_event(
         workspace_id=ctx.workspace_id,
         event_type=body.event_type,

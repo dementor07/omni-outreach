@@ -25,6 +25,7 @@ policy treats that as a superuser bypass.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator
@@ -112,11 +113,42 @@ async def _setup_connection(conn: asyncpg.Connection) -> None:
     )
 
 
-async def init_pool(dsn: str) -> None:
+async def init_pool(dsn: str, *, retries: int = 30, backoff_s: float = 2.0) -> None:
+    """Create the asyncpg pool, retrying while Postgres comes up.
+
+    DEPLOY-004: db/redpanda live in the master compose project, so v2 workers
+    can't `depends_on` them. On a cold boot the worker starts before Postgres is
+    accepting connections; without this it would raise, exit, and crash-loop
+    (restart: unless-stopped) churning the host. Retry-with-backoff lets the
+    worker wait for infra instead. Bounded so a genuinely-misconfigured DSN
+    still fails loudly rather than retrying forever."""
     global _pool
-    _pool = await asyncpg.create_pool(
-        dsn, min_size=2, max_size=10, ssl=False, init=_setup_connection
-    )
+    last_err: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            _pool = await asyncpg.create_pool(
+                dsn, min_size=2, max_size=10, ssl=False, init=_setup_connection
+            )
+            if attempt > 1:
+                log.info("[db] pool established on attempt %d", attempt)
+            return
+        except (asyncpg.InvalidPasswordError, asyncpg.InvalidCatalogNameError, asyncpg.InvalidAuthorizationSpecificationError):
+            # Deterministic config errors — wrong password / missing database /
+            # bad role. Retrying can't fix these; fail fast and loud.
+            raise
+        except (OSError, ConnectionError, asyncpg.CannotConnectNowError) as e:
+            # Transient "infra not up yet" on cold boot — Postgres still starting,
+            # network not ready. These are what the retry loop is for (DEPLOY-004).
+            last_err = e
+            log.warning(
+                "[db] pool init attempt %d/%d failed (%s); retrying in %.1fs",
+                attempt,
+                retries,
+                type(e).__name__,
+                backoff_s,
+            )
+            await asyncio.sleep(backoff_s)
+    raise RuntimeError(f"could not establish DB pool after {retries} attempts") from last_err
 
 
 async def init_redis(url: str = "redis://redis:6379") -> None:

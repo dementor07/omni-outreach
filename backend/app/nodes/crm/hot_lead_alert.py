@@ -45,9 +45,14 @@ MANIFEST = NodeManifest(
 
 async def execute(ctx: NodeContext) -> NodeResult:
     cfg = HotLeadAlertConfig(**ctx.config)
+    # CONTRACT-002: the dispatcher only routes intent events (suffix
+    # .queued/.requested). The old 'lead.hot_alert' failed _is_intent, so the
+    # HOT_LEAD_ALERT muscle channel (which has a real Rust handler) was never
+    # reached and no alert was ever sent. Emit the .queued intent so node_type
+    # routing fires.
     events = [
         {
-            "event_type": "lead.hot_alert",
+            "event_type": "crm.hot_lead_alert.queued",
             "entity_type": "lead",
             "entity_id": ctx.lead.get("id"),
             "payload": {"connection_name": cfg.connection_name, "note_template": cfg.note_template},

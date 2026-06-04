@@ -1,5 +1,9 @@
 # Stage 1: Build
-FROM rustlang/rust:nightly-bookworm-slim as builder
+# RUST-001: pinned STABLE toolchain (matches rust-toolchain.toml channel 1.89.0)
+# instead of `nightly`. nightly let transitive deps float forward and broke
+# clean rebuilds. --locked below enforces the committed Cargo.lock so the image
+# resolves exactly the audited dependency tree.
+FROM rust:1.89-bookworm as builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y pkg-config libssl-dev build-essential zlib1g-dev libsasl2-dev libzstd-dev librdkafka-dev && rm -rf /var/lib/apt/lists/*
@@ -7,8 +11,9 @@ RUN apt-get update && apt-get install -y pkg-config libssl-dev build-essential z
 WORKDIR /usr/src/app
 COPY . .
 
-# Build for release
-RUN cargo build --release
+# Build for release against the committed lockfile (fails if Cargo.lock is
+# missing or out of sync, rather than silently re-resolving).
+RUN cargo build --release --locked
 
 # Stage 2: Runtime
 FROM debian:bookworm-slim

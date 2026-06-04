@@ -1,8 +1,21 @@
-from datetime import datetime
-from enum import StrEnum
-from typing import Any
+"""Event-plane vocabulary.
 
-from pydantic import UUID4, BaseModel, Field
+Only the enums here are live code: ``ChannelType`` is imported by the
+dispatcher/commands to route a node to a muscle handler, and ``TaskStatus`` /
+``EventType`` document the wire vocabulary shared with the Rust muscle and the
+Flink orchestrator.
+
+EXEC-006: the former ``ActionCommand`` / ``ExecutionResult`` / ``LeadContext`` /
+``StateTransition`` Pydantic models were removed. They were never imported or
+instantiated — the command/result/transition envelopes are built and consumed
+as plain dicts in ``execution/commands.py`` and ``execution/transition_worker.py``
+and on the Rust side — and the stale models had drifted from the real wire shape
+(missing task_id/lead_id/metadata/event_type/lead_mutations), so keeping them
+only misled readers. The canonical wire shape is the dict assembled in
+``commands.build_command`` and ``transition_worker._emit_synthetic_result``.
+"""
+
+from enum import StrEnum
 
 
 class TaskStatus(StrEnum):
@@ -45,55 +58,3 @@ class EventType(StrEnum):
     RESULT_TASK = "result_task"  # Execution -> Bus -> Orchestration (Flink/Python)
     STATE_TRANSITION = "state_transition"  # Orchestration -> Bus -> Telemetry/UI
     TELEMETRY_SIGNAL = "telemetry_signal"  # Real-time metrics
-
-
-class LeadContext(BaseModel):
-    id: UUID4
-    campaign_id: UUID4
-    email: str | None = None
-    linkedin_url: str | None = None
-    first_name: str | None = None
-    last_name: str | None = None
-    company: str | None = None
-    chat_id: str | None = None
-    extra_data: dict[str, Any] = Field(default_factory=dict)
-
-
-class ActionCommand(BaseModel):
-    """The 'Work Order' for the Execution Plane (Rust/Python)"""
-
-    command_id: UUID4
-    task_id: UUID4  # Legacy queue ID for now
-    channel: ChannelType
-    lead: LeadContext
-    payload: dict[str, Any] = Field(default_factory=dict)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    occurred_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class ExecutionResult(BaseModel):
-    """The 'Receipt' from the Execution Plane"""
-
-    command_id: UUID4
-    status: TaskStatus
-    error: str | None = None
-    is_retriable: bool = True
-    telemetry: dict[str, Any] = Field(default_factory=dict)
-    occurred_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class StateTransition(BaseModel):
-    """The signal that a Lead has moved in the DAG.
-
-    Wire shape matches the ``transition_worker`` consumer (Flink emits this
-    envelope directly): ``source_node_id`` is the node the lead just left
-    and ``handle`` is the outgoing edge label.
-    """
-
-    lead_id: UUID4
-    campaign_id: UUID4
-    source_node_id: UUID4
-    handle: str = "default"
-    event_type: str = "transition"
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    occurred_at: datetime = Field(default_factory=datetime.utcnow)

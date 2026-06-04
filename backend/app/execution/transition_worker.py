@@ -206,6 +206,18 @@ async def _fan_out(workspace_id: str, parent: dict, for_each_node: dict, correla
     max_items = 500 if _raw_max is None else max(0, int(_raw_max))
     for_each_id = str(for_each_node["id"])
 
+    # DEPLOY-001 idempotency: a redelivered transition (rebalance / replay) must
+    # not double-spawn children. A parent that already fanned out at THIS node
+    # is parked status='waiting' at current_node_id=for_each_id with a non-null
+    # fanout_total. Detect that and no-op rather than spawning a second wave.
+    if (
+        str(parent.get("current_node_id") or "") == for_each_id
+        and (parent.get("status") or "") == "waiting"
+        and parent.get("fanout_total") is not None
+    ):
+        log.info("fan_out skipped: lead %s already fanned out at %s (redelivery)", parent.get("id"), for_each_id)
+        return
+
     cycle_hit, root_id = await _ancestor_visited_for_each(workspace_id, parent, for_each_id)
     if cycle_hit:
         log.error(
@@ -324,6 +336,34 @@ async def _join_arrive(workspace_id: str, child: dict, correlation_id: str | Non
     log.info("join released parent %s -> %s", parent["id"], done_edge["target_node_id"])
 
 
+# Intent-event suffixes the dispatcher recognises (must match dispatcher._is_intent).
+_INTENT_SUFFIXES = (".queued", ".requested")
+
+
+def _is_intent_event(event_type: str) -> bool:
+    return bool(event_type) and event_type.endswith(_INTENT_SUFFIXES)
+
+
+def _classify_emitted_events(events: list[dict]) -> str:
+    """Classify what a non-muscle node's emitted events mean for advancement:
+
+      'projection_only' — no intent events; the events are facts for the
+          projector (e.g. contact.tag_added). The lead should advance locally
+          via a synthetic result, exactly like a condition/flow node.
+      'routable_intent' — every intent event is dispatcher-routable (carries
+          channel=='http_call'; the only route left for a non-muscle node). The
+          muscle result will drive the next transition; do nothing here.
+      'dead_on_arrival' — emits an intent the dispatcher can't route. The lead
+          would stall silently (CONTRACT-001) — caller errors it instead.
+    """
+    intents = [e for e in events if _is_intent_event(e.get("event_type") or "")]
+    if not intents:
+        return "projection_only"
+    if all((e.get("payload") or {}).get("channel") == "http_call" for e in intents):
+        return "routable_intent"
+    return "dead_on_arrival"
+
+
 async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: dict, correlation_id: str | None) -> None:
     """Run the target node's execute() and route its output.
 
@@ -339,6 +379,21 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
         await _advance_lead(workspace_id, str(lead["id"]), None, status="errored")
         return
 
+    # CONTRACT-006: surface the contact's most recent inbound (reply) timestamp
+    # so condition.replied can evaluate against real data. The node itself has no
+    # DB handle — the worker is the place with one (same pattern as has_tag
+    # reading custom_fields.tags). Cheap single-row lookup, only when needed.
+    last_inbound_at = None
+    if node_type == "condition.replied" and lead.get("contact_id"):
+        async with system_scope():
+            row = await fetch_one(
+                "SELECT MAX(occurred_at) AS last_inbound FROM omni_messages "
+                "WHERE workspace_id=$1 AND contact_id=$2 AND direction='inbound'",
+                workspace_id,
+                lead["contact_id"],
+            )
+        last_inbound_at = (row or {}).get("last_inbound")
+
     ctx = noderegistry.NodeContext(
         workspace_id=workspace_id,
         workflow_id=str(node.get("workflow_id") or lead.get("workflow_id") or ""),
@@ -349,6 +404,7 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
             "id": str(lead["id"]),
             "contact_id": lead.get("contact_id"),
             "custom_fields": lead.get("custom_fields") or {},
+            "last_inbound_at": last_inbound_at.isoformat() if last_inbound_at else None,
         },
         correlation_id=correlation_id,
     )
@@ -376,10 +432,44 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
             )
         await bus.publish_events(envelopes)
 
-    # A condition/flow node has no muscle hop: it already chose a handle, so we
-    # immediately emit a synthetic result for the orchestrator to transition on.
-    if commands.NODE_CHANNEL.get(node_type) is None and result.events == []:
+    # CONTRACT-005: a node that parks (flow.human_approval) suspends the lead.
+    # Its events were published above (approval.requested -> approvals queue);
+    # the lead now WAITS and must not advance. It resumes when the resolve
+    # endpoint emits approval.resolved, which arrives as a transition off this
+    # node's chosen handle.
+    if result.park:
+        await _advance_lead(workspace_id, str(lead["id"]), str(node["id"]), status="waiting")
+        log.info("lead %s parked at %s (%s)", lead["id"], node["id"], node_type)
+        return
+
+    # Decide how the lead advances past this node:
+    #   * muscle channel (node_type in NODE_CHANNEL) → a command was/will be
+    #     dispatched off the intent event; the muscle's result drives the next
+    #     transition. Nothing to do here.
+    #   * non-muscle node → classify its emitted events:
+    #       - projection_only (no intents, or none at all): a condition/flow
+    #         node that chose a handle, or a CRM mutation that emitted facts for
+    #         the projector (e.g. contact.tag_added). Advance locally via a
+    #         synthetic result.
+    #       - routable_intent: every intent is dispatcher-routable (http_call);
+    #         the muscle result drives the next transition. Do nothing.
+    #       - dead_on_arrival: an intent the dispatcher can't route. The lead
+    #         would stall silently (CONTRACT-001). Make it LOUD — error the lead.
+    if commands.NODE_CHANNEL.get(node_type) is not None:
+        return
+    kind = _classify_emitted_events(result.events)
+    if kind == "projection_only":
         await _emit_synthetic_result(workspace_id, str(lead["id"]), str(node["id"]), result.handle, correlation_id)
+    elif kind == "dead_on_arrival":
+        log.error(
+            "node %s (%s) emitted unroutable intent event(s) %s — no muscle channel/handler; "
+            "marking lead %s errored instead of stalling silently (CONTRACT-001)",
+            node["id"],
+            node_type,
+            [e.get("event_type") for e in result.events],
+            lead["id"],
+        )
+        await _advance_lead(workspace_id, str(lead["id"]), None, status="errored")
 
 
 async def _emit_synthetic_result(workspace_id: str, lead_id: str, node_id: str, handle: str, correlation_id: str | None) -> None:
@@ -397,6 +487,11 @@ async def _emit_synthetic_result(workspace_id: str, lead_id: str, node_id: str, 
             "workspace_id": workspace_id,
             "node_id": node_id,
             "next_handle": handle,
+            # DATAFLOW-001: carry the run identity forward. Without this the
+            # orchestrator emits the next transition with correlation_id=None and
+            # the downstream node mints a fresh id (`ctx.correlation_id or uuid4`),
+            # forking the trace at every condition/flow/synthetic hop.
+            "correlation_id": correlation_id,
         },
         "event_type": "result_task",
         "occurred_at": datetime.now(UTC).isoformat(),
@@ -426,24 +521,80 @@ async def _apply_lead_mutations(workspace_id: str, lead_id: str, mutations: dict
                 workspace_id,
             )
 
+    # CONTRACT-003: persist tag mutations into custom_fields.tags (a JSONB string
+    # array). condition.has_tag reads the same location. The ADD_TAG/REMOVE_TAG
+    # muscle handlers return lead_mutations.{add_tag|remove_tag: <tag>}; apply
+    # them set-wise so re-delivery is idempotent.
+    add_tag = mutations.get("add_tag")
+    remove_tag = mutations.get("remove_tag")
+    if isinstance(add_tag, str) and add_tag:
+        async with system_scope():
+            await execute(
+                """
+                UPDATE omni_leads SET custom_fields = jsonb_set(
+                    COALESCE(custom_fields,'{}'::jsonb), '{tags}',
+                    (
+                        SELECT COALESCE(jsonb_agg(DISTINCT t), '[]'::jsonb)
+                        FROM jsonb_array_elements_text(
+                            COALESCE(custom_fields->'tags','[]'::jsonb) || to_jsonb($1::text)
+                        ) AS t
+                    ), true
+                ), updated_at = NOW()
+                WHERE id=$2 AND workspace_id=$3
+                """,
+                add_tag,
+                lead_id,
+                workspace_id,
+            )
+    if isinstance(remove_tag, str) and remove_tag:
+        async with system_scope():
+            await execute(
+                """
+                UPDATE omni_leads SET custom_fields = jsonb_set(
+                    COALESCE(custom_fields,'{}'::jsonb), '{tags}',
+                    (
+                        SELECT COALESCE(jsonb_agg(t), '[]'::jsonb)
+                        FROM jsonb_array_elements_text(COALESCE(custom_fields->'tags','[]'::jsonb)) AS t
+                        WHERE t <> $1::text
+                    ), true
+                ), updated_at = NOW()
+                WHERE id=$2 AND workspace_id=$3
+                """,
+                remove_tag,
+                lead_id,
+                workspace_id,
+            )
+
 
 async def handle_transition(t: dict) -> None:
     lead_id = t.get("lead_id")
     handle = t.get("handle") or "default"
     source_node_id = t.get("source_node_id")
     meta = t.get("metadata") or {}
-    workspace_id = meta.get("workspace_id")
+    echoed_workspace_id = meta.get("workspace_id")
     correlation_id = meta.get("correlation_id")
     lead_mutations = meta.get("lead_mutations") or {}
     if not (lead_id and source_node_id):
         return
+
+    # DATAFLOW-003: the muscle echoes workspace_id through its metadata, but the
+    # muscle is not trusted to assert tenancy. The lead row is the source of
+    # truth — derive workspace_id from it by lead_id, and only trust the echoed
+    # value as a cross-check. A mismatch means a tenancy bug or a tampered
+    # result; refuse the transition rather than acting in the echoed tenant.
+    async with system_scope():
+        row = await fetch_one("SELECT workspace_id FROM omni_leads WHERE id=$1", lead_id)
+    workspace_id = str(row["workspace_id"]) if row else None
     if not workspace_id:
-        # Fall back: read it off the lead.
-        async with system_scope():
-            row = await fetch_one("SELECT workspace_id FROM omni_leads WHERE id=$1", lead_id)
-        workspace_id = str(row["workspace_id"]) if row else None
-    if not workspace_id:
-        log.warning("transition without workspace_id; lead=%s", lead_id)
+        log.warning("transition for unknown lead=%s; dropping", lead_id)
+        return
+    if echoed_workspace_id and str(echoed_workspace_id) != workspace_id:
+        log.error(
+            "transition workspace mismatch: lead=%s echoed=%s actual=%s — refusing",
+            lead_id,
+            echoed_workspace_id,
+            workspace_id,
+        )
         return
 
     # Apply any column mutations the muscle returned (e.g. a source handler
@@ -451,6 +602,19 @@ async def handle_transition(t: dict) -> None:
     # for_each or downstream node sees the freshly merged data.
     if lead_mutations:
         await _apply_lead_mutations(workspace_id, lead_id, lead_mutations)
+
+    # FLINK-001: the orchestrator emits handle="__retry__" after a retriable
+    # failure's backoff timer fires. This is NOT an edge — re-fire the SAME node
+    # the lead failed on (source_node_id) so the command is genuinely redriven.
+    if handle == "__retry__":
+        node = await _node_row(workspace_id, source_node_id)
+        lead, contact = await _lead_with_contact(workspace_id, lead_id)
+        if node and lead:
+            log.info("redriving lead %s at node %s (retry)", lead_id, source_node_id)
+            await _fire_node(workspace_id, lead, contact, node, correlation_id)
+        else:
+            log.warning("retry for lead %s: node/lead gone; dropping", lead_id)
+        return
 
     target = await _target_node(workspace_id, source_node_id, handle)
     if not target:
@@ -495,8 +659,13 @@ async def run() -> None:
         bootstrap_servers=settings.kafka_brokers,
         group_id=CONSUMER_GROUP,
         value_deserializer=lambda b: json.loads(b.decode("utf-8")),
-        enable_auto_commit=True,
-        auto_offset_reset="latest",
+        # DEPLOY-001: manual commit-after-success (commit=True below). A timer
+        # auto-commit could advance the offset mid-handle, dropping a transition
+        # on crash; or redeliver after a rebalance and re-run _fan_out, double-
+        # spawning children. We commit only after handle_transition returns, and
+        # _fan_out is now idempotent on (parent, for_each_node). Keep replicas:1.
+        enable_auto_commit=False,
+        auto_offset_reset="earliest",
     )
     await consumer.start()
     log.info("[transitions] consuming %s", TRANSITIONS_TOPIC)
@@ -510,7 +679,7 @@ async def run() -> None:
             pass
 
     try:
-        await bus.consume_forever(consumer, handle_transition, name="transitions", stop_event=stop)
+        await bus.consume_forever(consumer, handle_transition, name="transitions", stop_event=stop, commit=True)
     finally:
         await consumer.stop()
         await bus.close_producer()

@@ -47,7 +47,7 @@ pub async fn handle_http_call(command: &ActionCommand) -> ExecutionResult {
         return common::fail(command, "HTTP_CALL_URL_MISSING", false);
     }
     // SSRF guard: shared with webhook.
-    if let Err(code) = common::validate_outbound_url(&url) {
+    if let Err(code) = common::validate_outbound_url(&url).await {
         return common::fail(command, format!("HTTP_CALL_{code}"), false);
     }
 

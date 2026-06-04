@@ -19,7 +19,7 @@ RUN wget -q -P /opt/flink/lib \
 
 # PyFlink runtime.
 RUN ln -s /usr/bin/python3 /usr/bin/python && \
-    pip3 install --no-cache-dir apache-flink==1.18.0 kafka-python-ng
+    pip3 install --no-cache-dir apache-flink==1.18.0 kafka-python-ng==2.2.3
 
 # Orchestrator + analytics SQL.
 WORKDIR /opt/flink/usrlib

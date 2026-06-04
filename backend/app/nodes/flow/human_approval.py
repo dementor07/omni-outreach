@@ -47,17 +47,28 @@ async def execute(ctx: NodeContext) -> NodeResult:
     events = [
         {
             "event_type": "approval.requested",
-            "entity_type": "lead",
+            "entity_type": "approval",
             "entity_id": ctx.lead.get("id"),
             "payload": {
                 "prompt": cfg.prompt,
                 "timeout_hours": cfg.timeout_hours,
                 "node_id": ctx.node_id,
+                "lead_id": ctx.lead.get("id"),
                 "correlation_id": correlation_id,
             },
         }
     ]
-    return NodeResult(handle="approved", events=events, telemetry={"correlation_id": correlation_id, "parked": True})
+    # CONTRACT-005: PARK the lead. The old code returned handle="approved",
+    # which advanced the lead down the approved edge immediately — it never
+    # actually waited for a human. With park=True the transition worker suspends
+    # the lead (status='waiting'); it resumes only when the resolve endpoint
+    # emits approval.resolved with the operator's chosen handle.
+    return NodeResult(
+        handle="approved",
+        events=events,
+        park=True,
+        telemetry={"correlation_id": correlation_id, "parked": True},
+    )
 
 
 register(MANIFEST, execute)

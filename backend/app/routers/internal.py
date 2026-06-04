@@ -41,7 +41,10 @@ def require_muscle(authorization: str = Header(..., alias="Authorization")) -> N
         raise HTTPException(status_code=503, detail="muscle shared secret not configured")
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="missing bearer")
-    if authorization.removeprefix("Bearer ").strip() != expected:
+    provided = authorization.removeprefix("Bearer ").strip()
+    # SEC-002: constant-time compare so the secret can't be recovered by timing
+    # the response to a byte-by-byte guess. `!=` short-circuits on first mismatch.
+    if not secrets.compare_digest(provided, expected):
         raise HTTPException(status_code=401, detail="invalid muscle secret")
 
 
@@ -69,6 +72,16 @@ async def mint_credential_ref(channel: str, bundle: dict) -> str:
 
 @router.get("/credentials/{ref}", dependencies=[Depends(require_muscle)])
 async def redeem_credential(ref: str = Path(..., min_length=8, max_length=128)) -> dict:
+    """Resolve a credential ref to its decrypted bundle.
+
+    SEC-003: this is intentionally *short-TTL, multi-read until released*, not a
+    strict single-use token. A multi-step muscle handler (e.g. Apify: run →
+    poll → fetch) re-reads the same ref within the TTL; enforcing true one-shot
+    would break those flows. The ref stops working once it is released
+    (``released_at``) or its TTL (``CREDENTIAL_TTL_SECONDS``) expires. The
+    redeemed_at timestamp is recorded on first read for observability only and
+    does NOT gate subsequent reads.
+    """
     async with system_scope():
         row = await fetch_one(
             "SELECT channel, bundle_encrypted, expires_at, released_at FROM credential_refs WHERE ref=$1",

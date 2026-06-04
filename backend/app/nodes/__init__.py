@@ -96,18 +96,31 @@ class NodeContext:
 
 @dataclass
 class NodeResult:
-    """What ``execute`` returns. ``handle`` selects the outgoing edge."""
+    """What ``execute`` returns. ``handle`` selects the outgoing edge.
+
+    ``park=True`` means the node intentionally suspends the lead: its events are
+    published (e.g. a flow.human_approval emitting ``approval.requested``) but
+    the lead does NOT advance — no synthetic result is emitted. It resumes only
+    when an external event re-fires it (e.g. ``approval.resolved`` from the
+    resolve endpoint). Without this, a node that emits a non-intent event would
+    be treated as projection-only and advanced immediately (CONTRACT-005)."""
 
     handle: str = "default"
     events: list[dict[str, Any]] = field(default_factory=list)
     telemetry: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+    park: bool = False
 
 
 NodeExecuteFn = Callable[[NodeContext], Awaitable[NodeResult]]
 
 
 _REGISTRY: dict[str, tuple[NodeManifest, NodeExecuteFn]] = {}
+
+# PY-001: modules that failed to import during discover(). Surfaced via
+# import_failures() so /health can report a broken node loudly instead of the
+# palette silently missing it. {module_name: "ExcType: message"}.
+_IMPORT_FAILURES: dict[str, str] = {}
 
 
 def register(manifest: NodeManifest, execute_fn: NodeExecuteFn) -> None:
@@ -129,8 +142,18 @@ def manifests() -> list[NodeManifest]:
 
 def discover() -> None:
     """Auto-import every module under ``app/nodes/<category>/`` so each one
-    has a chance to call ``register()``. Called once at app startup."""
+    has a chance to call ``register()``. Called once at app startup.
+
+    PY-001: a node that fails to import is recorded in ``_IMPORT_FAILURES`` (and,
+    when ``NODE_DISCOVERY_STRICT`` is set, re-raised) so a broken node is loud —
+    surfaced by ``import_failures()`` / ``/health`` — instead of silently absent
+    from the palette."""
+    import os
+
     import app.nodes as pkg
+
+    _IMPORT_FAILURES.clear()
+    strict = os.getenv("NODE_DISCOVERY_STRICT", "").lower() in ("1", "true", "yes")
 
     for _finder, name, _ispkg in pkgutil.walk_packages(pkg.__path__, prefix="app.nodes."):
         if name == "app.nodes":
@@ -138,5 +161,18 @@ def discover() -> None:
         try:
             importlib.import_module(name)
         except Exception as e:  # noqa: BLE001
+            _IMPORT_FAILURES[name] = f"{type(e).__name__}: {e}"
             log.exception("[nodes] failed to import %s: %s", name, e)
-    log.info("[nodes] registry loaded: %d nodes", len(_REGISTRY))
+            if strict:
+                raise
+    log.info(
+        "[nodes] registry loaded: %d nodes, %d import failures",
+        len(_REGISTRY),
+        len(_IMPORT_FAILURES),
+    )
+
+
+def import_failures() -> dict[str, str]:
+    """Modules that failed to import during the last ``discover()`` —
+    {module_name: 'ExcType: message'}. Empty when all nodes loaded."""
+    return dict(_IMPORT_FAILURES)

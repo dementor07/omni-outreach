@@ -57,7 +57,11 @@ class Settings(BaseSettings):
     producthunt_token: str = ""  # ProductHunt Developer Token (legacy; unused since PH retired user-token bearer auth)
     producthunt_api_key: str = ""  # ProductHunt OAuth Client ID (from /v2/oauth/applications)
     producthunt_api_secret: str = ""  # ProductHunt OAuth Client Secret (paired with api_key)
-    producthunt_oauth_redirect_uri: str = "https://srv1575227.hstgr.cloud/api/oauth/producthunt/callback"
+    # CFG-002 / DEPLOY-007: OAuth redirect URIs must come from the environment —
+    # no prod hostname baked into the default. Empty means the corresponding
+    # OAuth flow is disabled until configured. Drive these + FRONTEND_URL from
+    # the same canonical external host so they can't disagree.
+    producthunt_oauth_redirect_uri: str = ""
     github_token: str = ""  # optional, raises rate limit from 60→5000 req/hr
 
     # SMS (Twilio) — optional
@@ -71,11 +75,11 @@ class Settings(BaseSettings):
     # Google OAuth (Sheets lead source) — set in .env; empty disables the source.
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
-    google_oauth_redirect_uri: str = "https://srv1575227.hstgr.cloud/api/oauth/google/callback"
+    google_oauth_redirect_uri: str = ""  # CFG-002: env-driven, no prod-host default
     # Distinct callback for the sign-in flow (vs. the already-logged-in
     # "connect Sheets" flow at /api/oauth/google/callback). Both must be
     # registered in Google Cloud console under Authorized redirect URIs.
-    google_login_redirect_uri: str = "https://srv1575227.hstgr.cloud/api/auth/google/callback"
+    google_login_redirect_uri: str = ""  # CFG-002: env-driven, no prod-host default
 
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24  # 24h

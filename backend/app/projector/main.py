@@ -155,6 +155,71 @@ async def _project_deal(env: dict[str, Any]) -> None:
     )
 
 
+async def _project_task(env: dict[str, Any]) -> None:
+    """CONTRACT-004: persist crm.create_task's ``task.created`` into omni_tasks.
+
+    The node carries a title *template*; we store the rendered title when the
+    payload already has a concrete ``title``, else fall back to the template
+    string verbatim (rendering happens upstream in the node context). due_date is
+    an ISO date string."""
+    p = env.get("payload") or {}
+    due_date = p.get("due_date")
+    await execute(
+        """
+        INSERT INTO omni_tasks (id, workspace_id, contact_id, title, due_date,
+                           assign_to_user_id, priority, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'open')
+        ON CONFLICT (id) DO NOTHING
+        """,
+        env["entity_id"],
+        env["workspace_id"],
+        p.get("contact_id"),
+        p.get("title") or p.get("title_template") or "Task",
+        datetime.fromisoformat(due_date).date() if due_date else None,
+        p.get("assign_to_user_id"),
+        p.get("priority") or "normal",
+    )
+
+
+async def _project_approval(env: dict[str, Any]) -> None:
+    """CONTRACT-005: track the approvals queue.
+
+    ``approval.requested`` inserts a pending row (keyed by lead_id so a node only
+    has one open approval per lead). ``approval.resolved`` flips it to the
+    operator's outcome. Both keyed on lead_id via the unique-ish (id) PK derived
+    from entity_id (the lead id), so resolution updates the same row."""
+    p = env.get("payload") or {}
+    et = env["event_type"]
+    if et == "approval.requested":
+        await execute(
+            """
+            INSERT INTO omni_approvals (id, workspace_id, lead_id, node_id, prompt,
+                               status, correlation_id)
+            VALUES ($1, $2, $3, $4, $5, 'pending', $6)
+            ON CONFLICT (id) DO NOTHING
+            """,
+            env["entity_id"],
+            env["workspace_id"],
+            p.get("lead_id") or env["entity_id"],
+            p.get("node_id"),
+            p.get("prompt") or "",
+            env.get("correlation_id"),
+        )
+    elif et == "approval.resolved":
+        await execute(
+            """
+            UPDATE omni_approvals
+               SET status = $1, resolved_handle = $1, resolved_by = $2,
+                   resolved_at = NOW()
+             WHERE id = $3 AND workspace_id = $4 AND status = 'pending'
+            """,
+            p.get("handle") or "approved",
+            p.get("resolved_by"),
+            env["entity_id"],
+            env["workspace_id"],
+        )
+
+
 async def _project_lead(env: dict[str, Any]) -> None:
     p = env.get("payload") or {}
     await execute(
@@ -181,6 +246,12 @@ async def _project_lead(env: dict[str, Any]) -> None:
 
 
 async def _project_message(env: dict[str, Any]) -> None:
+    # PROJ-002: messages are an append-only log, so this projector keys on the
+    # EVENT id (env["id"]) rather than an entity_id like the upsert projectors
+    # (_project_contact/company/lead). Two message events never share an id, so
+    # ON CONFLICT (id) DO NOTHING is pure idempotency for redelivery — there is
+    # deliberately no message "correction"/update path. If message editing is
+    # ever needed, switch to an entity_id key + an UPDATE branch.
     p = env.get("payload") or {}
     direction = "inbound" if env["event_type"] == "message.received" else "outbound"
     await execute(
@@ -324,6 +395,7 @@ _PROJECTORS = {
     "company": _project_company,
     "deal": _project_deal,
     "lead": _project_lead,
+    "task": _project_task,  # CONTRACT-004
 }
 
 
@@ -339,6 +411,10 @@ async def _apply_projection(env: dict[str, Any]) -> None:
         await _project_ai_job(env)
         if et == "ai.score.completed" and env.get("entity_id"):
             await _project_lead_score(env)
+        return
+    # CONTRACT-005: approvals queue (request -> resolved), keyed by lead id.
+    if et in ("approval.requested", "approval.resolved") and env.get("entity_id"):
+        await _project_approval(env)
         return
     if entity in _PROJECTORS and env.get("entity_id"):
         await _PROJECTORS[entity](env)
@@ -377,9 +453,17 @@ async def run() -> None:
         # instead so we keep offset access.
         env = rec.value
         async with system_scope():
-            inserted = await _archive_event(env, rec)
-            if inserted:
-                await _apply_projection(env)
+            # PROJ-001: apply the projection BEFORE archiving, so a transient
+            # projection failure leaves the offset uncommitted and the record is
+            # redelivered with the projection re-attempted. All projections are
+            # idempotent upserts (ON CONFLICT), so re-applying on redelivery is
+            # safe. Gating projection on the archive's first-insert (the old
+            # `if inserted`) meant a post-archive projection failure would, on
+            # redelivery, hit ON CONFLICT DO NOTHING and silently skip the
+            # projection forever. Archive is now the durable commit-point that
+            # marks "projected".
+            await _apply_projection(env)
+            await _archive_event(env, rec)
             await _record_offset(rec)
         await consumer.commit()
 

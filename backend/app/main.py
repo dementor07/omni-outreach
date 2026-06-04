@@ -22,6 +22,7 @@ from app.logging_config import get_logger, setup_logging
 from app.nodes import discover as discover_nodes
 from app.routers import (
     ai_studio,
+    approvals,
     auth,
     auth_google,
     canvas,
@@ -109,6 +110,7 @@ app.include_router(canvas.router, prefix="/canvas", tags=["canvas"])
 app.include_router(integrations.router, prefix="/integrations", tags=["integrations"])
 app.include_router(inbox.router, prefix="/inbox", tags=["inbox"])
 app.include_router(ai_studio.router, prefix="/ai", tags=["ai"])
+app.include_router(approvals.router, prefix="/approvals", tags=["approvals"])
 
 
 @app.get("/health")
@@ -132,5 +134,17 @@ async def health():
     except Exception as e:
         logger.warning("Health check Redis failed: %s", e)
         checks["redis"] = "error"
+
+    # PY-001: surface any node that failed to import during discovery. A broken
+    # node is silently missing from the palette otherwise; here it flips /health
+    # to degraded and names the offending module(s).
+    import app.nodes as noderegistry
+
+    node_failures = noderegistry.import_failures()
+    checks["nodes"] = "ok" if not node_failures else "error"
+
     status = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
-    return {"status": status, "checks": checks}
+    body: dict[str, object] = {"status": status, "checks": checks}
+    if node_failures:
+        body["node_import_failures"] = node_failures
+    return body

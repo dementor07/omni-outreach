@@ -46,9 +46,14 @@ RUN addgroup --system app && \
 
 WORKDIR /app
 
-# Deps layer (cached unless requirements change)
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Deps layer (cached unless the lockfile changes).
+# DEP-001: install from the fully-pinned requirements.lock (uv pip compile of
+# requirements.txt) so the image is reproducible — a fresh build can't silently
+# resolve a different, possibly-vulnerable transitive tree. requirements.txt is
+# the human-edited input; regenerate the lock with:
+#   uv pip compile backend/requirements.txt -o backend/requirements.lock
+COPY backend/requirements.txt backend/requirements.lock ./
+RUN pip install --no-cache-dir -r requirements.lock
 
 # App code
 COPY backend/alembic.ini .

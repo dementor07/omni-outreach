@@ -7,8 +7,40 @@
 #
 # Prod master continues running under the default project (-p omni-outreach)
 # on the same host. Nothing here recreates a prod container.
+#
+# DEPLOY-006: secrets are NOT inlined here anymore — they come from the
+# gitignored .env via ${VAR} interpolation (compose auto-loads .env). See
+# .env for the variable list. Rotate any value that was ever committed.
+
+x-secret-env: &secret-env
+  DATABASE_URL: ${DATABASE_URL}
+  KAFKA_BROKERS: ${KAFKA_BROKERS}
+  DB_PASSWORD: ${DB_PASSWORD}
+  SECRET_KEY: ${SECRET_KEY}
 
 services:
+  # DEPLOY-003: pre-create the topics with intentional partition counts instead
+  # of relying on Redpanda implicit auto-create (which lands every topic at 1
+  # partition — an accidental capacity cap). Runs once and exits; other services
+  # don't hard-depend on it (topics also auto-create) but running it makes the
+  # partitioning a deliberate decision. Idempotent: `create` is a no-op if the
+  # topic exists.
+  topics-init:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: omni-v2-topics-init
+    entrypoint: ["/bin/sh", "-lc"]
+    command: >
+      'until rpk cluster info --brokers redpanda:9092 >/dev/null 2>&1; do echo waiting for redpanda; sleep 2; done &&
+       rpk topic create omni.events         -p 6 -r 1 --brokers redpanda:9092 || true &&
+       rpk topic create outreach.commands    -p 6 -r 1 --brokers redpanda:9092 || true &&
+       rpk topic create outreach.results     -p 6 -r 1 --brokers redpanda:9092 || true &&
+       rpk topic create outreach.transitions -p 6 -r 1 --brokers redpanda:9092 || true &&
+       rpk topic create outreach.dead_letter -p 1 -r 1 --brokers redpanda:9092 || true &&
+       echo topics-init done'
+    networks:
+      - omni-outreach_default
+    restart: "no"
+
   backend-v2:
     build:
       context: .
@@ -17,15 +49,12 @@ services:
     env_file:
       - .env
     environment:
+      <<: *secret-env
       # Shared infra (joins the master compose network via external network below)
-      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
-      REDIS_URL: redis://:d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17@redis:6379
-      REDIS_PASSWORD: d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17
-      KAFKA_BROKERS: redpanda:9092
-      DB_PASSWORD: OmniOutreach2026
-      SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
+      REDIS_URL: ${REDIS_URL}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
-      FRONTEND_URL: https://145-223-21-222.sslip.io:8443
+      FRONTEND_URL: ${FRONTEND_URL}
     networks:
       - omni-outreach_default
     ports:
@@ -41,10 +70,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
-      KAFKA_BROKERS: redpanda:9092
-      DB_PASSWORD: OmniOutreach2026
-      SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
+      <<: *secret-env
     networks:
       - omni-outreach_default
     # Background worker — the image's HEALTHCHECK curls :8000 which only the
@@ -61,8 +87,8 @@ services:
       context: ./backend-rust
     container_name: omni-v2-muscle
     environment:
-      KAFKA_BROKERS: redpanda:9092
-      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      DATABASE_URL: ${DATABASE_URL}
       CONTROL_PLANE_URL: http://backend-v2:8000
       MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
       # Don't share the consumer group with the legacy execution engine —
@@ -87,10 +113,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
-      KAFKA_BROKERS: redpanda:9092
-      DB_PASSWORD: OmniOutreach2026
-      SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
+      <<: *secret-env
       MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
     networks:
       - omni-outreach_default
@@ -110,10 +133,10 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
-      KAFKA_BROKERS: redpanda:9092
-      DB_PASSWORD: OmniOutreach2026
-      SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
+      <<: *secret-env
+      # DEPLOY-005: this worker can mint credential refs (via the dispatcher
+      # path it shares), so it must carry the same shared secret as the others.
+      MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
     networks:
       - omni-outreach_default
     healthcheck:

@@ -10,10 +10,22 @@ export type UUID = string
 export type ISODate = string
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
+// FE-003: matches the real GET /auth/me response (see backend auth.py:me).
+// The old shape ({ user_id, workspace_id }) never matched what the server sent.
+export interface MeWorkspace {
+  id: UUID
+  name: string
+  slug: string
+  role: string
+  owner_user_id: UUID
+  joined_at: ISODate
+}
+
 export interface MeResponse {
-  user_id: UUID
+  id: UUID
   email: string
-  workspace_id: UUID | null
+  google_connected: boolean
+  workspaces: MeWorkspace[]
 }
 
 export const auth = {

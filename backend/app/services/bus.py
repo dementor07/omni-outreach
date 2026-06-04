@@ -28,6 +28,7 @@ EVENTS_TOPIC = "omni.events"
 COMMANDS_TOPIC = "outreach.commands"  # muscle ActionCommands (in-flight)
 RESULTS_TOPIC = "outreach.results"  # muscle ExecutionResults (in-flight)
 TRANSITIONS_TOPIC = "outreach.transitions"  # Flink orchestrator output
+DEAD_LETTER_TOPIC = "outreach.dead_letter"  # poison records that exhausted handling
 
 _producer: AIOKafkaProducer | None = None
 
@@ -105,6 +106,26 @@ async def publish_command(command: dict[str, Any], *, key: str) -> None:
     await _producer.send_and_wait(COMMANDS_TOPIC, value=command, key=key)
 
 
+async def publish_dead_letter(
+    *, worker: str, original: Any, error: str, topic: str, partition: int, offset: int
+) -> None:
+    """Park a record that failed handling onto the dead-letter topic so the
+    offset can advance without losing the payload. Best-effort: if the producer
+    itself is down we log and let the caller decide whether to advance."""
+    if _producer is None:
+        raise RuntimeError("bus producer not initialised")
+    envelope = {
+        "worker": worker,
+        "error": error,
+        "source_topic": topic,
+        "source_partition": partition,
+        "source_offset": offset,
+        "original": original,
+        "dead_lettered_at": datetime.now(UTC).isoformat(),
+    }
+    await _producer.send_and_wait(DEAD_LETTER_TOPIC, value=envelope, key=worker)
+
+
 # ── Defensive consume loop ────────────────────────────────────────────────
 # A consumer must never be killed by a single bad batch. Two failure classes:
 #
@@ -125,17 +146,30 @@ async def publish_command(command: dict[str, Any], *, key: str) -> None:
 # in requirements cover snappy/lz4/zstd; this guard covers the unknown.
 
 from aiokafka import AIOKafkaConsumer  # noqa: E402
-from aiokafka.errors import KafkaError  # noqa: E402
 
 
 async def _skip_current_batch(consumer: AIOKafkaConsumer) -> None:
-    """Advance every assigned partition one past its current position so a
-    poison (undecodable) batch is stepped over instead of re-fetched."""
-    for tp in list(consumer.assignment()):
+    """Step every assigned partition PAST the entire poison batch.
+
+    A codec/decode failure is raised for the whole fetched batch before any
+    record surfaces, so we don't know which offsets it spanned. Seeking to the
+    partition's high-watermark (end) steps past all of it in one move; advancing
+    a single offset (the old ``pos + 1``) would re-fetch and re-fail the same
+    batch on the next poll (EXEC-002)."""
+    assignment = list(consumer.assignment())
+    if not assignment:
+        return
+    try:
+        end_offsets = await consumer.end_offsets(assignment)
+    except Exception:  # noqa: BLE001
+        end_offsets = {}
+    for tp in assignment:
         try:
-            pos = await consumer.position(tp)
-            consumer.seek(tp, pos + 1)
-            log.warning("[bus] skipped poison batch on %s -> offset %s", tp, pos + 1)
+            target = end_offsets.get(tp)
+            if target is None:
+                target = await consumer.position(tp) + 1
+            consumer.seek(tp, target)
+            log.warning("[bus] skipped poison batch on %s -> offset %s", tp, target)
         except Exception:  # noqa: BLE001
             log.exception("[bus] failed to skip batch on %s", tp)
 
@@ -151,28 +185,62 @@ async def consume_forever(
 ) -> None:
     """Run a crash-tolerant consume loop.
 
-    - fetch errors (codec/decode) → log + skip the batch, never crash
-    - per-record handler errors → log + skip the record
-    - clean shutdown when stop_event is set
+    Failure policy (RETRY-THEME / EXEC-001):
+      - fetch errors (codec/decode) → log + skip the whole poison batch, never crash
+      - handler error with ``commit=True`` → dead-letter the record, then advance
+        past it (at-least-once with a poison escape hatch). The offset is only
+        committed AFTER the record was either handled or dead-lettered, so a
+        crash mid-handle redelivers the record instead of dropping it.
+      - handler error with ``commit=False`` (auto-commit consumers / the
+        projector, which commits inside ``on_record``) → log + skip the record.
+      - clean shutdown when stop_event is set.
+
+    ``commit`` consumers MUST be created with ``enable_auto_commit=False`` so the
+    only commits are the deliberate after-success ones below.
     """
     while stop_event is None or not stop_event.is_set():
         try:
             batch = await consumer.getmany(timeout_ms=1000, max_records=50)
-        except (KafkaError, Exception) as e:  # noqa: BLE001 — fetch-level (incl. codec) failures
+        except Exception as e:  # noqa: BLE001 — fetch-level (incl. codec) failures (EXEC-004)
             log.exception("[%s] fetch failed (%s); skipping poison batch", name, type(e).__name__)
             await _skip_current_batch(consumer)
             continue
         for _tp, records in batch.items():
             for rec in records:
+                handled = False
                 try:
                     await handler(rec.value)
                     if on_record is not None:
                         await on_record(rec)
+                    handled = True
                 except Exception:  # noqa: BLE001 — never kill the loop on one record
                     log.exception("[%s] failed to handle record offset=%s", name, getattr(rec, "offset", "?"))
-            if commit:
-                try:
-                    await consumer.commit()
-                except Exception:  # noqa: BLE001
-                    log.exception("[%s] commit failed", name)
+                    if commit:
+                        # Park the poison record so advancing the offset doesn't
+                        # lose it, then fall through to commit past it.
+                        try:
+                            await publish_dead_letter(
+                                worker=name,
+                                original=rec.value,
+                                error="handler raised",
+                                topic=rec.topic,
+                                partition=rec.partition,
+                                offset=rec.offset,
+                            )
+                            handled = True
+                            log.warning("[%s] dead-lettered offset=%s", name, rec.offset)
+                        except Exception:  # noqa: BLE001 — DLQ itself unavailable
+                            log.exception(
+                                "[%s] dead-letter failed for offset=%s; NOT advancing (will redeliver)",
+                                name,
+                                rec.offset,
+                            )
+                # Manual commit-after-success: only advance once the record was
+                # handled or safely parked. Commit per record so a crash never
+                # strands an un-handled offset behind a committed one.
+                if commit and handled:
+                    try:
+                        await consumer.commit()
+                    except Exception:  # noqa: BLE001
+                        log.exception("[%s] commit failed at offset=%s", name, rec.offset)
 

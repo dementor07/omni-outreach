@@ -15,7 +15,7 @@ pub async fn handle_webhook(command: &ActionCommand) -> ExecutionResult {
     }
 
     // SSRF guard: only http/https + reject private/loopback/cloud-metadata hosts.
-    if let Err(code) = common::validate_outbound_url(&url) {
+    if let Err(code) = common::validate_outbound_url(&url).await {
         return common::fail(command, format!("WEBHOOK_{code}"), false);
     }
 

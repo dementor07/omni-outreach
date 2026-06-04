@@ -16,6 +16,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -88,7 +89,10 @@ async def create_connection(body: ConnectionCreate, ctx: AuthContext = Depends(g
             encrypted,
             body.metadata,
         )
-    except Exception as e:  # noqa: BLE001 — most likely uniqueness violation
+    except asyncpg.UniqueViolationError as e:
+        # INT-001: only a real uniqueness collision is a 409. Other DB errors
+        # (connection lost, constraint/type errors) must surface as 500, not be
+        # masked as "already exists".
         raise HTTPException(status_code=409, detail="connection with that (provider, name) already exists") from e
     return ConnectionOut.model_validate(row)
 

@@ -4,26 +4,31 @@ This test encodes the dispatcher/transition-worker reachability invariant
 *exactly as the runtime applies it* and asserts that no side-effecting node is
 dead-on-arrival.
 
-The runtime rule (transition_worker._fire_node, line ~382):
+The runtime rule (transition_worker._fire_node, after the CONTRACT-001 fix):
 
-    a fired node advances the lead IFF
-        node_type in NODE_CHANNEL                 (-> a muscle command)
-      OR result.events == []                      (-> a local synthetic result)
+    a fired non-muscle node advances the lead IFF
+        node_type in NODE_CHANNEL                    (-> a muscle command), OR
+        it emits NO intent events (projection_only)  (-> a local synthetic
+            result; condition/flow nodes and CRM nodes that emit only
+            projection facts like contact.created), OR
+        every intent it emits is dispatcher-routable (channel=="http_call").
 
-A node that emits an intent event but whose node_type is absent from
-NODE_CHANNEL gets NEITHER -> the lead stalls silently. So the static, faithful
-proxy for "reachable" is:
+    A node that emits an intent event the dispatcher CANNOT route is
+    dead-on-arrival — _fire_node now logs an error and errors the lead instead
+    of stalling it silently.
+
+Static faithful proxy for "reachable":
 
     reachable(node) :=
         node.type in NODE_CHANNEL
-        OR node.category in {FLOW, CONDITION}        # never emit routable intents
-        OR node.type in LOCALLY_RESOLVED_SOURCES     # known self-contained / http_call
+        OR node.category in {FLOW, CONDITION}
+        OR node.type in LOCALLY_RESOLVED_SOURCES     # self-contained / http_call
+        OR node emits only projection-only events     # CRM create/update mutations
 
-Any SOURCE/AI/CHANNEL/CRM node with a NETWORK/MUTATE side-effect that fails all
-three is dead-on-arrival.
-
-This test is RED today (8 known dead nodes) and turns GREEN when CONTRACT-001 is
-fixed — at which point finding CONTRACT-001 may flip to FIXED in the dashboard.
+After the CONTRACT-001/002/004/005 fixes this should be GREEN (KNOWN_DEAD empty):
+the genuinely-dead source/ai nodes were removed from the registry, the CRM tag
++ alert nodes were given .queued intents, and the CRM create/update nodes are
+projection-only (they advance locally).
 """
 
 from __future__ import annotations
@@ -50,46 +55,26 @@ LOCALLY_RESOLVED = {
     "source.webhook_in",  # passive declaration (listener lives in an HTTP route)
 }
 
-# Categories whose nodes are advanced locally by the transition worker (they
-# return a handle and emit no routable intent), so they never need a channel.
-LOCAL_CATEGORIES = {NodeCategory.FLOW, NodeCategory.CONDITION}
+# Categories whose nodes are advanced locally by the transition worker. FLOW and
+# CONDITION return a handle with no routable intent. CRM mutation nodes that are
+# NOT in NODE_CHANNEL emit projection-only events (contact.created, deal.created,
+# task.created, …) — after the CONTRACT-001 fix the worker classifies those as
+# projection_only and advances the lead via a synthetic result, so they are
+# reachable too.
+LOCAL_CATEGORIES = {NodeCategory.FLOW, NodeCategory.CONDITION, NodeCategory.CRM}
 
-# The known dead-on-arrival set as of the audit (CONTRACT-001). The test treats
-# these as the current expected-failures so the suite documents the gap until
-# it's fixed; remove a node from here as it gets wired.
-KNOWN_DEAD = {
-    # --- stall with NOTHING (CONTRACT-001 HIGH): no route, no projection ---
-    "ai.score",
-    "ai.classify",
-    "source.apollo",
-    "source.hunter",
-    "source.proxycurl",
-    "source.sheets",
-    "source.producthunt",
-    # NOTE: crm.hot_lead_alert is NOT listed here — it IS in NODE_CHANNEL so this
-    # static reachability check considers it routable. Its real defect is that
-    # its emitted event_type never passes dispatcher._is_intent (CONTRACT-002),
-    # which a separate event_type-suffix test must prove, not this one.
-    # --- stall AFTER a projection lands (CONTRACT-004 MEDIUM): the lead still
-    #     stalls because the node emits events but has no channel, even though
-    #     its projection event is applied. The runtime mechanism is identical to
-    #     CONTRACT-001 (the _fire_node guard fails both arms); the audit graded
-    #     them lower only because *some* state is persisted. The test is the
-    #     honest superset and tracks them too. ---
-    "crm.create_contact",
-    "crm.create_deal",
-    "crm.update_deal",
-    "crm.create_task",
-}
+# Dead-on-arrival tracker. EMPTY after the CONTRACT-001/002/004/005 fixes:
+#   * genuinely-dead source/ai canvas nodes were removed from the registry
+#     (ai.score/ai.classify -> AI-Studio-only; apollo/hunter/proxycurl/sheets/
+#     producthunt deleted), so they no longer appear in manifests();
+#   * crm.add_tag/remove_tag/hot_lead_alert now emit .queued intents and route
+#     via NODE_CHANNEL;
+#   * crm.create_*/update_* are projection-only (LOCAL_CATEGORIES above).
+KNOWN_DEAD: set[str] = set()
 
 
 def _reachable(m) -> bool:
     if m.type in NODE_CHANNEL:
-        # hot_lead_alert is a special case: it IS in NODE_CHANNEL but its emitted
-        # event_type ("lead.hot_alert") never passes dispatcher._is_intent, so it
-        # is unreachable in practice. We treat NODE_CHANNEL membership as
-        # reachable here and let the dedicated CONTRACT-002 test cover the
-        # event_type-suffix gap.
         return True
     if m.category in LOCAL_CATEGORIES:
         return True
