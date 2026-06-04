@@ -104,3 +104,75 @@ async def publish_command(command: dict[str, Any], *, key: str) -> None:
         raise RuntimeError("bus producer not initialised")
     await _producer.send_and_wait(COMMANDS_TOPIC, value=command, key=key)
 
+
+# ── Defensive consume loop ────────────────────────────────────────────────
+# A consumer must never be killed by a single bad batch. Two failure classes:
+#
+#   1. Decode/codec failure — a producer wrote the batch in a compression codec
+#      this consumer's aiokafka doesn't have a library for (e.g. an operator
+#      using `rpk produce`, whose default is snappy). The error is raised
+#      *inside* the fetch/iteration, before any record surfaces, so a naive
+#      `for rec in consumer: try: ...` does NOT catch it — the loop dies and
+#      the container crash-loops on the same poison offset forever.
+#
+#   2. Handler failure — our own code threw on one record. That one we log and
+#      skip; the rest of the batch is fine.
+#
+# `consume_forever` guards both. On a fetch-level error it logs loudly and
+# skips the batch by advancing each assigned partition past its current
+# position, so one undecodable message can't wedge the whole worker. Real
+# traffic uses gzip (see init_producer) which always decodes; the codec libs
+# in requirements cover snappy/lz4/zstd; this guard covers the unknown.
+
+from aiokafka import AIOKafkaConsumer  # noqa: E402
+from aiokafka.errors import KafkaError  # noqa: E402
+
+
+async def _skip_current_batch(consumer: AIOKafkaConsumer) -> None:
+    """Advance every assigned partition one past its current position so a
+    poison (undecodable) batch is stepped over instead of re-fetched."""
+    for tp in list(consumer.assignment()):
+        try:
+            pos = await consumer.position(tp)
+            consumer.seek(tp, pos + 1)
+            log.warning("[bus] skipped poison batch on %s -> offset %s", tp, pos + 1)
+        except Exception:  # noqa: BLE001
+            log.exception("[bus] failed to skip batch on %s", tp)
+
+
+async def consume_forever(
+    consumer: AIOKafkaConsumer,
+    handler,  # async callable(record_value) -> None
+    *,
+    name: str,
+    stop_event=None,
+    commit: bool = False,
+    on_record=None,  # optional async callable(rec) for manual commit/offset bookkeeping
+) -> None:
+    """Run a crash-tolerant consume loop.
+
+    - fetch errors (codec/decode) → log + skip the batch, never crash
+    - per-record handler errors → log + skip the record
+    - clean shutdown when stop_event is set
+    """
+    while stop_event is None or not stop_event.is_set():
+        try:
+            batch = await consumer.getmany(timeout_ms=1000, max_records=50)
+        except (KafkaError, Exception) as e:  # noqa: BLE001 — fetch-level (incl. codec) failures
+            log.exception("[%s] fetch failed (%s); skipping poison batch", name, type(e).__name__)
+            await _skip_current_batch(consumer)
+            continue
+        for _tp, records in batch.items():
+            for rec in records:
+                try:
+                    await handler(rec.value)
+                    if on_record is not None:
+                        await on_record(rec)
+                except Exception:  # noqa: BLE001 — never kill the loop on one record
+                    log.exception("[%s] failed to handle record offset=%s", name, getattr(rec, "offset", "?"))
+            if commit:
+                try:
+                    await consumer.commit()
+                except Exception:  # noqa: BLE001
+                    log.exception("[%s] commit failed", name)
+

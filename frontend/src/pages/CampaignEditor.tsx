@@ -81,6 +81,40 @@ interface OmniNodeData extends Record<string, unknown> {
 }
 type OmniRfNode = Node<OmniNodeData>
 
+// ── Cycle detection ───────────────────────────────────────────────────────
+// flow.for_each is a sharp primitive: every visit spawns the whole collection
+// again. A back-edge that lands on a for_each already upstream of the source
+// creates infinite recursion (see 2026-06 incident: 113k leads in 2h from one
+// mis-wired edge). Refuse such edges at draw time.
+function createsForEachCycle(
+  source: string,
+  target: string,
+  nodes: OmniRfNode[],
+  edges: Edge[],
+): boolean {
+  const targetNode = nodes.find((n) => n.id === target)
+  if (!targetNode || targetNode.data.manifest.type !== 'flow.for_each') return false
+  // Walk upstream from `source` using existing edges; if `target` is reachable,
+  // the new edge closes a cycle back into the for_each.
+  const incoming = new Map<string, string[]>()
+  for (const e of edges) {
+    if (!e.source || !e.target) continue
+    const list = incoming.get(e.target) ?? []
+    list.push(e.source)
+    incoming.set(e.target, list)
+  }
+  const seen = new Set<string>()
+  const stack: string[] = [source]
+  while (stack.length) {
+    const cur = stack.pop() as string
+    if (cur === target) return true
+    if (seen.has(cur)) continue
+    seen.add(cur)
+    for (const upstream of incoming.get(cur) ?? []) stack.push(upstream)
+  }
+  return false
+}
+
 // ── Custom node ───────────────────────────────────────────────────────────
 function OmniNode({ data, selected }: NodeProps<OmniRfNode>) {
   const { manifest, config } = data
@@ -272,13 +306,26 @@ export default function CampaignEditor() {
   })
 
   const onConnect = useCallback((conn: Connection) => {
+    if (!conn.source || !conn.target) return
+    if (createsForEachCycle(conn.source, conn.target, rfNodes, rfEdges)) {
+      // A back-edge that lands on a flow.for_each already in the path melts
+      // the system (see incident log: one wrong edge spawned 113k leads).
+      // Refuse and tell the user why.
+      alert(
+        'Cannot create this edge: it would loop back into a flow.for_each ' +
+        'that is already upstream. flow.for_each has no recursion guard at ' +
+        'the canvas level — use a separate workflow or a flow.condition to ' +
+        'short-circuit instead.'
+      )
+      return
+    }
     setRfEdges((eds) => {
       const next = addEdge({ ...conn, type: 'omni' }, eds)
       pushState(rfNodes, next)
       return next
     })
     setDirty(true)
-  }, [rfNodes, setRfEdges, pushState])
+  }, [rfNodes, rfEdges, setRfEdges, pushState])
 
   const onNodeClick = useCallback((_e: React.MouseEvent, node: Node) => setSelectedNodeId(node.id), [])
 

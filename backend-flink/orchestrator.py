@@ -102,6 +102,11 @@ class JourneyProcessFunction(KeyedProcessFunction):
                 # it applies these before firing the next node.
                 "lead_mutations": data.get("lead_mutations") or {},
                 "workspace_id": _safe_get(data, "metadata", "workspace_id"),
+                # Forward correlation_id so a run keeps one identity across
+                # every muscle round-trip. Without this, each hop past the
+                # first loses the correlation and the run fragments into many
+                # ids — making end-to-end tracing impossible. (See trace tool.)
+                "correlation_id": _safe_get(data, "metadata", "correlation_id"),
             },
         }
 
@@ -224,7 +229,6 @@ def run_orchestrator():
             KafkaRecordSerializationSchema.builder()
             .set_topic("outreach.transitions")
             .set_value_serialization_schema(SimpleStringSchema())
-            .set_validation_mode(KafkaRecordSerializationSchema.ValidationMode.STRICT)
             .build()
         )
         .set_delivery_guarantee(DeliveryGuarantee.AT_LEAST_ONCE)

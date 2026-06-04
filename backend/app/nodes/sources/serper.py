@@ -41,4 +41,5 @@ http_source_node(
     build_request=build_request,
     capabilities=("connection:serper",),
     icon="search",
-)
+)                   
+

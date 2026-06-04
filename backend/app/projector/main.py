@@ -26,6 +26,7 @@ from aiokafka.structs import ConsumerRecord
 
 from app.config import settings
 from app.db import close_pool, execute, fetch_one, init_pool, system_scope
+from app.services import bus
 from app.services.bus import EVENTS_TOPIC
 
 log = logging.getLogger(__name__)
@@ -260,7 +261,14 @@ async def _project_ai_job(env: dict[str, Any]) -> None:
     if len(parts) != 3 or parts[0] != "ai":
         return
     _, kind, phase = parts
-    if kind not in ("score", "compose", "enrich", "classify"):
+    # Screen nodes emit ai.screen_company.* / ai.screen_person.*; the muscle
+    # result envelope uses ai.screen.completed. Collapse all screen variants to
+    # the single audit kind 'screen' so the run log records them regardless of
+    # which naming scheme produced the event. (omni_ai_jobs.kind allows 'screen'
+    # as of migration 024.)
+    if kind.startswith("screen"):
+        kind = "screen"
+    if kind not in ("score", "compose", "enrich", "classify", "screen"):
         return
     status = _AI_JOB_LIFECYCLE.get(phase)
     if status is None:
@@ -361,20 +369,36 @@ async def run() -> None:
     )
     await consumer.start()
     log.info("[projector] consuming %s", EVENTS_TOPIC)
+
+    async def _handle(rec) -> None:
+        # The projector needs the record itself (offset bookkeeping), so it
+        # takes the raw record rather than just the value. consume_forever
+        # passes rec.value to handler; we pass a thin wrapper via on_record
+        # instead so we keep offset access.
+        env = rec.value
+        async with system_scope():
+            inserted = await _archive_event(env, rec)
+            if inserted:
+                await _apply_projection(env)
+            await _record_offset(rec)
+        await consumer.commit()
+
     try:
-        async for rec in consumer:
-            env = rec.value
-            try:
-                async with system_scope():
-                    inserted = await _archive_event(env, rec)
-                    if inserted:
-                        await _apply_projection(env)
-                    await _record_offset(rec)
-                await consumer.commit()
-            except Exception as e:  # noqa: BLE001 — never kill the loop
-                log.exception("[projector] failed to process offset=%s: %s", rec.offset, e)
+        # handler is a no-op; all work (incl. manual commit) happens in
+        # on_record where we still have the record + offset. This keeps the
+        # codec-skip / crash-tolerance guarantees of consume_forever.
+        await bus.consume_forever(
+            consumer,
+            lambda _value: _noop(),
+            name="projector",
+            on_record=_handle,
+        )
     finally:
         await consumer.stop()
+
+
+async def _noop() -> None:
+    return None
 
 
 async def main() -> None:

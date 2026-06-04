@@ -47,6 +47,10 @@ services:
       SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
     networks:
       - omni-outreach_default
+    # Background worker — the image's HEALTHCHECK curls :8000 which only the
+    # FastAPI backend serves. Disable so docker doesn't mark this unhealthy.
+    healthcheck:
+      disable: true
     restart: unless-stopped
 
   # The execution worker (Rust). Consumes outreach.commands, performs the
@@ -61,6 +65,10 @@ services:
       DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
       CONTROL_PLANE_URL: http://backend-v2:8000
       MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
+      # Don't share the consumer group with the legacy execution engine —
+      # otherwise the older muscle eats v2 commands and dies on unknown
+      # channel variants. See main.rs for the override hook.
+      MUSCLE_CONSUMER_GROUP: muscle-v2
       RUST_LOG: execution_engine=info,info
     networks:
       - omni-outreach_default
@@ -86,6 +94,8 @@ services:
       MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
     networks:
       - omni-outreach_default
+    healthcheck:
+      disable: true
     restart: unless-stopped
 
   # Transition worker: consumes outreach.transitions (emitted by the Flink
@@ -106,6 +116,8 @@ services:
       SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
     networks:
       - omni-outreach_default
+    healthcheck:
+      disable: true
     restart: unless-stopped
 
   # Submits the pyflink orchestrator job (outreach.results -> outreach.transitions)

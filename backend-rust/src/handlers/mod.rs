@@ -12,7 +12,6 @@ pub mod common;
 pub mod email;
 pub mod enrich;
 pub mod http_call;
-pub mod leadgen;
 pub mod linkedin; // re-export shim, see file
 pub mod serper_people;
 pub mod sms;
@@ -43,8 +42,6 @@ pub async fn dispatch(command: &ActionCommand) -> ExecutionResult {
         ChannelType::HotLeadAlert => alert::handle_hot_lead_alert(command).await,
         ChannelType::DataTransform => transform::handle_data_transform(command).await,
         ChannelType::AiCompose => transform::handle_ai_compose(command).await,
-        ChannelType::LeadGenPull => leadgen::handle_lead_gen_pull(command).await,
-        ChannelType::CsvImport => leadgen::handle_csv_import(command).await,
         ChannelType::HttpCall => http_call::handle_http_call(command).await,
         ChannelType::Apify => apify::handle_apify(command).await,
         ChannelType::AiScreen => ai_screen::handle_ai_screen(command).await,

@@ -34,8 +34,6 @@ class ChannelType(StrEnum):
     HOT_LEAD_ALERT = "hot_lead_alert"
     DATA_TRANSFORM = "data_transform"
     AI_COMPOSE = "ai_compose"
-    LEAD_GEN_PULL = "lead_gen_pull"
-    CSV_IMPORT = "csv_import"
     HTTP_CALL = "http_call"  # config-driven REST integration (generic handler)
     APIFY = "apify"  # Apify actor run + poll + dataset fetch (source.linkedin_jobs)
     AI_SCREEN = "ai_screen"  # Claude ACCEPT/REJECT classifier (ai.screen_company / ai.screen_person)

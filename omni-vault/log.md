@@ -4,6 +4,32 @@ Append-only. Format: `## [YYYY-MM-DD] operation | description`
 
 ---
 
+## [2026-06-01] v2-pipeline-watch | Apify source fan-out restored on VPS
+
+Caught up from Claude's v2 work on `/home/omni-v2`:
+- v2 stack is running under `docker compose -p omni-v2 -f docker-compose.v2.yml`.
+- `muscle-v2` is the Rust v0.2 consumer group for `outreach.commands`.
+- `muscle-v2` fixes already present: `MAX_POLL_INTERVAL` raised to 60m, group isolated as `muscle-v2`, Apify poll cap raised to 45m, `auto.offset.reset=earliest`, and Postgres `processed_commands` ledger dedupe.
+
+Live pipeline state observed:
+- Fresh lead `ef904d21-a797-4d71-857e-8f94c180bf2e` fired `source.linkedin_jobs`.
+- Rust command `8526a9be-ed04-44fb-b5c0-a6624f86f9be` ran Apify actor `TRqkOdSRBLMin2jH1`.
+- Apify completed successfully: `jobs_returned=100`, `companies_extracted=78`.
+- Initial transition was missing `lead_mutations`, so `flow.for_each` saw empty `companies` and walked to `flow.end`.
+
+Fix applied:
+- Rebuilt and redeployed `orchestrator-v2` with the DAG-aware Flink orchestrator that forwards `metadata.workspace_id` and `metadata.lead_mutations`.
+- Removed the PyFlink-incompatible `KafkaRecordSerializationSchemaBuilder.set_validation_mode(...)` call.
+- Canceled stale Flink job `36080ae67f4b99cc4ae04b3d13757054`.
+- New Flink job `90fc862392af5c3119a33794e4ea41ef` is running.
+- Replayed the corrected transition for command `8526a9be...` into `outreach.transitions`.
+
+Result after replay:
+- Parent lead now has 78 companies in `custom_fields.companies`.
+- `flow.for_each` spawned the configured cap of 50 children.
+- Company filter / `ai.screen_company` / `source.serper_people` branches are actively flowing through `muscle-v2`.
+- Contacts are not yet created at the tracking moment; the pipeline is still draining through screening and people search.
+
 ## [2026-05-17] sota-backend | Brain/Muscle/Spine/Lungs stack deployed on VPS
 
 Deployed the agreed SOTA backend stack to `srv1575227.hstgr.cloud`: FastAPI control plane, Rust execution engine, Redpanda event spine, Flink journey orchestrator, DragonflyDB memory layer, Postgres sink, nginx edge.

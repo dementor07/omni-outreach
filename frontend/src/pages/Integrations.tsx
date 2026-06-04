@@ -10,6 +10,7 @@ import EmptyState from '../components/EmptyState'
 
 const KNOWN_PROVIDERS = [
   'apollo', 'hunter', 'proxycurl', 'sheets', 'producthunt',
+  'apify', 'serper',
   'anthropic', 'openai', 'mindstudio',
   'smtp', 'twilio', 'unipile', 'slack', 'retell',
 ] as const

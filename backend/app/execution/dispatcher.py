@@ -172,14 +172,7 @@ async def run() -> None:
             pass
 
     try:
-        while not stop.is_set():
-            batch = await consumer.getmany(timeout_ms=1000, max_records=50)
-            for _tp, records in batch.items():
-                for rec in records:
-                    try:
-                        await handle_event(rec.value)
-                    except Exception:  # noqa: BLE001
-                        log.exception("[dispatcher] failed to handle event")
+        await bus.consume_forever(consumer, handle_event, name="dispatcher", stop_event=stop)
     finally:
         await consumer.stop()
         await bus.close_producer()

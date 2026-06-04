@@ -31,7 +31,6 @@ from aiokafka import AIOKafkaConsumer
 
 import app.nodes as noderegistry
 from app.config import settings
-from app.core.events import ChannelType
 from app.db import close_pool, execute, fetch_one, init_pool, system_scope
 from app.execution import commands
 from app.services import bus
@@ -40,6 +39,16 @@ log = logging.getLogger("transitions")
 
 TRANSITIONS_TOPIC = "outreach.transitions"
 CONSUMER_GROUP = "v2-transitions"
+
+# Recursion guards for flow.for_each. A single mis-wired loop edge can melt the
+# system (see 2026-06 incident: one edge from a downstream join back into the
+# for_each created a 113k-lead explosion). Two guards:
+#   1. Ancestor walk — if any ancestor lead was spawned by THIS for_each node,
+#      refuse to fan out again (the canvas has a cycle).
+#   2. Per-root descendant cap — if the root parent's lineage already exceeds
+#      MAX_DESCENDANTS_PER_ROOT, refuse further fan-out (runaway growth).
+MAX_DESCENDANTS_PER_ROOT = 10_000
+MAX_ANCESTOR_WALK_DEPTH = 64
 
 
 async def _target_node(workspace_id: str, source_node_id: str, handle: str) -> dict | None:
@@ -120,21 +129,118 @@ async def _advance_and_fire(workspace_id: str, lead_id: str, target_node_id: str
         await _fire_node(workspace_id, lead, contact, node, correlation_id)
 
 
+async def _ancestor_visited_for_each(
+    workspace_id: str, parent: dict, for_each_id: str
+) -> tuple[bool, str | None]:
+    """Walk parent_lead_id upward; return (True, root_id) if any ancestor was
+    spawned by THIS for_each node (cycle in the canvas wiring). Also returns
+    the root parent_id (top of the chain) regardless, so callers can use it
+    for the per-root descendant cap."""
+    current_origin = parent.get("origin_node_id")
+    if current_origin and str(current_origin) == for_each_id:
+        return True, str(parent["id"])
+    cur = parent
+    root_id = str(parent["id"])
+    for _ in range(MAX_ANCESTOR_WALK_DEPTH):
+        parent_id = cur.get("parent_lead_id")
+        if not parent_id:
+            return False, root_id
+        async with system_scope():
+            cur = await fetch_one(
+                "SELECT id, parent_lead_id, origin_node_id FROM omni_leads "
+                "WHERE id=$1 AND workspace_id=$2",
+                str(parent_id),
+                workspace_id,
+            )
+        if not cur:
+            return False, root_id
+        root_id = str(cur["id"])
+        if cur.get("origin_node_id") and str(cur["origin_node_id"]) == for_each_id:
+            return True, root_id
+    log.warning(
+        "ancestor walk for lead %s exceeded depth %d — treating as cycle",
+        parent.get("id"),
+        MAX_ANCESTOR_WALK_DEPTH,
+    )
+    return True, root_id
+
+
+async def _descendant_count_for_root(workspace_id: str, root_id: str) -> int:
+    """Count total leads in the lineage rooted at root_id (recursive CTE).
+    Used to enforce MAX_DESCENDANTS_PER_ROOT."""
+    async with system_scope():
+        row = await fetch_one(
+            """
+            WITH RECURSIVE lineage(id) AS (
+                SELECT id FROM omni_leads WHERE id=$1 AND workspace_id=$2
+                UNION ALL
+                SELECT l.id FROM omni_leads l
+                JOIN lineage ON l.parent_lead_id = lineage.id
+                WHERE l.workspace_id=$2
+            )
+            SELECT count(*) AS n FROM lineage
+            """,
+            root_id,
+            workspace_id,
+        )
+    return int((row or {}).get("n") or 0)
+
+
 async def _fan_out(workspace_id: str, parent: dict, for_each_node: dict, correlation_id: str | None) -> None:
     """A lead reached a flow.for_each node. Read the collection from the
     parent's custom_fields and spawn one child lead per element on the `each`
     edge. The parent parks (status='waiting') at the for_each node until the
-    join barrier releases it. Empty collection -> walk done/empty immediately."""
+    join barrier releases it. Empty collection -> walk done/empty immediately.
+
+    Refuses to fan out when the canvas has a cycle (an ancestor was spawned
+    by this same for_each) or when the root lineage already exceeds the
+    per-root descendant cap. In both cases the parent is routed down the
+    done/empty edge so the workflow terminates cleanly instead of melting."""
     cfg = for_each_node.get("config") or {}
     items_key = cfg.get("items_key") or "items"
     item_field = cfg.get("item_field") or "item"
-    max_items = int(cfg.get("max_items") or 500)
+    # `or 500` would turn an explicit max_items=0 into 500 — a footgun when an
+    # operator wants to disable a fan-out arm. Treat a missing/None value as
+    # the default, but honour 0 (and any explicit int) literally.
+    _raw_max = cfg.get("max_items")
+    max_items = 500 if _raw_max is None else max(0, int(_raw_max))
     for_each_id = str(for_each_node["id"])
 
-    items = (parent.get("custom_fields") or {}).get(items_key) or []
-    if not isinstance(items, list):
+    cycle_hit, root_id = await _ancestor_visited_for_each(workspace_id, parent, for_each_id)
+    if cycle_hit:
+        log.error(
+            "fan_out refused: cycle detected at for_each=%s for lead=%s (root=%s)",
+            for_each_id,
+            parent.get("id"),
+            root_id,
+        )
         items = []
-    items = items[:max_items]
+    else:
+        descendants = await _descendant_count_for_root(workspace_id, root_id)
+        if descendants >= MAX_DESCENDANTS_PER_ROOT:
+            log.error(
+                "fan_out refused: per-root descendant cap %d reached for root=%s at for_each=%s",
+                MAX_DESCENDANTS_PER_ROOT,
+                root_id,
+                for_each_id,
+            )
+            items = []
+        else:
+            items = (parent.get("custom_fields") or {}).get(items_key) or []
+            if not isinstance(items, list):
+                items = []
+            items = items[:max_items]
+            # Cap each fan-out so a single rogue collection can't blow past
+            # the per-root limit in one shot.
+            remaining = MAX_DESCENDANTS_PER_ROOT - descendants
+            if len(items) > remaining:
+                log.warning(
+                    "fan_out clamped: %d items -> %d to respect per-root cap (root=%s)",
+                    len(items),
+                    remaining,
+                    root_id,
+                )
+                items = items[:remaining]
 
     each_edge = await _outgoing_edge(workspace_id, for_each_id, "each")
     if not items or not each_edge:
@@ -404,14 +510,7 @@ async def run() -> None:
             pass
 
     try:
-        while not stop.is_set():
-            batch = await consumer.getmany(timeout_ms=1000, max_records=50)
-            for _tp, records in batch.items():
-                for rec in records:
-                    try:
-                        await handle_transition(rec.value)
-                    except Exception:  # noqa: BLE001
-                        log.exception("[transitions] failed to handle transition")
+        await bus.consume_forever(consumer, handle_transition, name="transitions", stop_event=stop)
     finally:
         await consumer.stop()
         await bus.close_producer()

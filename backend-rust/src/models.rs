@@ -48,10 +48,6 @@ pub enum ChannelType {
     DataTransform,
     #[serde(rename = "ai_compose")]
     AiCompose,
-    #[serde(rename = "lead_gen_pull")]
-    LeadGenPull,
-    #[serde(rename = "csv_import")]
-    CsvImport,
     /// Config-driven HTTP integration. The node declares the request
     /// (method/url/headers/auth/body + response->handle mapping) in `payload`;
     /// one shared handler executes it. Lets Python-only authors add REST
@@ -102,8 +98,6 @@ impl ChannelType {
             ChannelType::HotLeadAlert => "hot_lead_alert",
             ChannelType::DataTransform => "data_transform",
             ChannelType::AiCompose => "ai_compose",
-            ChannelType::LeadGenPull => "lead_gen_pull",
-            ChannelType::CsvImport => "csv_import",
             ChannelType::HttpCall => "http_call",
             ChannelType::Apify => "apify",
             ChannelType::AiScreen => "ai_screen",

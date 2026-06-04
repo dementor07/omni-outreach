@@ -1,0 +1,8 @@
+# Pin the toolchain so builds are reproducible. The muscle is edition-2021 and
+# needs nothing from nightly; the Dockerfile previously used `nightly`, which
+# let transitive deps float forward to versions requiring unstable features
+# (e.g. hashbrown's edition2024 requirement) and broke clean rebuilds. A pinned
+# stable channel + a committed Cargo.lock makes every build deterministic.
+[toolchain]
+channel = "1.83.0"
+components = ["clippy", "rustfmt"]
