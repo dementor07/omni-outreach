@@ -427,7 +427,8 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
                     await company_kg.set_screening_status(workspace_id, resolved.id, "rejected")
                 # Signal scoring from this job's title/description.
                 title = company_row.get("title") or company_row.get("job_title") or ""
-                total, signals = company_kg.score_signals(title, description, role_count=1)
+                role_count = int(company_row.get("role_count") or 1)
+                total, signals = company_kg.score_signals(title, description, role_count=role_count)
                 if signals:
                     await company_kg.persist_signals(workspace_id, resolved.id, signals, "naukri")
             node_custom_fields["company_resolution"] = {

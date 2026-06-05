@@ -137,17 +137,32 @@ pub async fn handle_naukri(command: &ActionCommand) -> ExecutionResult {
 }
 
 /// Dedupe by company name, carrying the columns the downstream company filter /
-/// Claude screen / people search need. Same row shape as `apify::extract_companies`.
+/// Claude screen / people search need. Same row shape as `apify::extract_companies`,
+/// plus `title` and `role_count` (number of postings seen for that company) so the
+/// downstream signal scorer can score hiring signals + the multiple_roles signal.
 fn extract_companies(jobs: &[CamoufoxJob]) -> Vec<Value> {
+    use std::collections::HashMap;
+    // Count postings per company (case-insensitive) for the multiple_roles signal.
+    let mut role_counts: HashMap<String, i64> = HashMap::new();
+    for job in jobs {
+        let n = job.company_name.trim().to_lowercase();
+        if !n.is_empty() && !job.title.trim().is_empty() {
+            *role_counts.entry(n).or_insert(0) += 1;
+        }
+    }
+
     let mut seen: HashSet<String> = HashSet::new();
     let mut out: Vec<Value> = Vec::new();
     for job in jobs {
         let name = job.company_name.trim().to_string();
-        if name.is_empty() || job.title.trim().is_empty() || !seen.insert(name.to_lowercase()) {
+        let key = name.to_lowercase();
+        if name.is_empty() || job.title.trim().is_empty() || !seen.insert(key.clone()) {
             continue;
         }
         out.push(json!({
             "company_name": name,
+            "title": job.title.trim(),
+            "role_count": role_counts.get(&key).copied().unwrap_or(1),
             "company_url": "",
             "sector": "",
             "industry": "",
