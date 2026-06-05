@@ -13,6 +13,7 @@ pub mod email;
 pub mod enrich;
 pub mod http_call;
 pub mod linkedin; // re-export shim, see file
+pub mod naukri;
 pub mod serper_people;
 pub mod sms;
 pub mod tag;
@@ -46,6 +47,7 @@ pub async fn dispatch(command: &ActionCommand) -> ExecutionResult {
         ChannelType::Apify => apify::handle_apify(command).await,
         ChannelType::AiScreen => ai_screen::handle_ai_screen(command).await,
         ChannelType::SerperPeople => serper_people::handle_serper_people(command).await,
+        ChannelType::Naukri => naukri::handle_naukri(command).await,
         ChannelType::Unknown => {
             common::fail(command, format!("UNKNOWN_CHANNEL_{}", command.channel.as_str()), false)
         }

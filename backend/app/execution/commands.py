@@ -51,6 +51,8 @@ NODE_CHANNEL: dict[str, ChannelType] = {
     "ai.screen_person": ChannelType.AI_SCREEN,
     # Apify-driven LinkedIn jobs source (multi-step actor protocol).
     "source.linkedin_jobs": ChannelType.APIFY,
+    # Camoufox-driven Naukri.com jobs source (anti-detect headless scrape).
+    "source.naukri": ChannelType.NAUKRI,
     # Per-company Serper search (multi-pattern x titles, dedupe).
     "source.serper_people": ChannelType.SERPER_PEOPLE,
     # Every declarative HTTP node (sources built via http_node) routes to the

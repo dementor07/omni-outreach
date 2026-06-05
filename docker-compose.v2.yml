@@ -82,6 +82,19 @@ services:
   # The execution worker (Rust). Consumes outreach.commands, performs the
   # real I/O per channel handler, emits outreach.results. CONTROL_PLANE_URL
   # points at the v2 backend so credential refs resolve against v2 connections.
+  # Camoufox anti-detect headless-browser microservice. The muscle calls it to
+  # scrape Naukri (source.naukri) and render JS-heavy company team pages. Isolated
+  # in its own container so the Playwright dep stays out of the Rust/Python images.
+  camoufox-v2:
+    build:
+      context: ./services/camoufox
+    container_name: omni-v2-camoufox
+    environment:
+      CAMOUFOX_SHARED_SECRET: ${CAMOUFOX_SHARED_SECRET:-dev-camoufox-secret-rotate-me}
+    networks:
+      - omni-outreach_default
+    restart: unless-stopped
+
   muscle-v2:
     build:
       context: ./backend-rust
@@ -91,6 +104,9 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       CONTROL_PLANE_URL: http://backend-v2:8000
       MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
+      # Camoufox microservice (source.naukri + team crawl).
+      CAMOUFOX_BASE_URL: http://camoufox-v2:8100
+      CAMOUFOX_SHARED_SECRET: ${CAMOUFOX_SHARED_SECRET:-dev-camoufox-secret-rotate-me}
       # Don't share the consumer group with the legacy execution engine —
       # otherwise the older muscle eats v2 commands and dies on unknown
       # channel variants. See main.rs for the override hook.

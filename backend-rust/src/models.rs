@@ -70,6 +70,12 @@ pub enum ChannelType {
     /// `source.serper_people`.
     #[serde(rename = "serper_people")]
     SerperPeople,
+    /// Camoufox-driven Naukri.com job scrape. Calls the internal Camoufox
+    /// microservice (anti-detect headless browser) to scrape one role keyword,
+    /// dedupes by company, writes the company list to
+    /// `lead_mutations.custom_fields[companies_key]`. Used by `source.naukri`.
+    #[serde(rename = "naukri")]
+    Naukri,
     /// Any channel value the worker doesn't recognise. Deserializes here
     /// instead of failing the whole command at parse time, so dispatch can
     /// return a clean, debuggable error.
@@ -102,6 +108,7 @@ impl ChannelType {
             ChannelType::Apify => "apify",
             ChannelType::AiScreen => "ai_screen",
             ChannelType::SerperPeople => "serper_people",
+            ChannelType::Naukri => "naukri",
             ChannelType::Unknown => "unknown",
         }
     }
