@@ -19,6 +19,7 @@ routers with one shape.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
 from typing import Any, Literal
@@ -26,8 +27,12 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+import app.nodes as noderegistry
 from app.auth import AuthContext, get_current_workspace
 from app.db import acquire, execute, fetch_all, fetch_one
+from app.services import bus
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -329,4 +334,164 @@ async def save_graph(
         workflow=WorkflowOut.model_validate(dict(wf_row)),
         nodes=[NodeOut.model_validate(dict(n)) for n in nodes],
         edges=[EdgeOut.model_validate(dict(e)) for e in edges],
+    )
+
+
+# ── Run (enroll a seed lead at the entry node) ─────────────────────────────────
+
+
+class RunRequest(BaseModel):
+    # Optionally start at a specific node (defaults to the workflow's entry node
+    # — the one with no incoming edge). Useful to re-run from a particular source.
+    start_node_id: uuid.UUID | None = None
+
+
+class RunResponse(BaseModel):
+    lead_id: uuid.UUID
+    workflow_id: uuid.UUID
+    start_node_id: uuid.UUID
+    node_type: str
+    correlation_id: uuid.UUID
+    handle: str
+    events_published: int
+
+
+async def _entry_node(workflow_id: uuid.UUID, workspace_id: str) -> dict | None:
+    """The workflow's entry node — the one no edge targets. If several qualify
+    (parallel sources), prefer a source.* node, else the first by position."""
+    nodes = await fetch_all(
+        "SELECT id, node_type, config FROM omni_workflow_nodes WHERE workflow_id = $1 AND workspace_id = $2 ORDER BY position_y, position_x",
+        workflow_id,
+        workspace_id,
+    )
+    if not nodes:
+        return None
+    targeted = await fetch_all(
+        "SELECT DISTINCT target_node_id FROM omni_workflow_edges WHERE workflow_id = $1 AND workspace_id = $2",
+        workflow_id,
+        workspace_id,
+    )
+    targeted_ids = {str(r["target_node_id"]) for r in targeted}
+    roots = [n for n in nodes if str(n["id"]) not in targeted_ids]
+    if not roots:
+        return None
+    for n in roots:
+        if str(n["node_type"]).startswith("source."):
+            return n
+    return roots[0]
+
+
+@router.post(
+    "/workflows/{workflow_id}/run",
+    response_model=RunResponse,
+    summary="Run a workflow — enroll a seed lead at the entry node and fire it",
+    description=(
+        "Creates a seed lead positioned at the workflow's entry (source) node and "
+        "fires that node, publishing its intent event(s) so the dispatcher routes "
+        "the muscle command and the pipeline begins. This is the missing trigger: "
+        "without it, workflows are inert CRUD and no lead is ever produced. The "
+        "source's discovered entities fan out into child leads via flow.for_each, "
+        "which then appear in the Leads view."
+    ),
+)
+async def run_workflow(
+    workflow_id: uuid.UUID,
+    body: RunRequest,
+    ctx: AuthContext = Depends(get_current_workspace),
+) -> RunResponse:
+    wf = await fetch_one(
+        "SELECT * FROM omni_workflows WHERE id = $1 AND workspace_id = $2", workflow_id, ctx.workspace_id
+    )
+    if not wf:
+        raise HTTPException(status_code=404, detail="workflow not found")
+
+    if body.start_node_id:
+        node = await fetch_one(
+            "SELECT id, node_type, config FROM omni_workflow_nodes WHERE id = $1 AND workflow_id = $2 AND workspace_id = $3",
+            body.start_node_id,
+            workflow_id,
+            ctx.workspace_id,
+        )
+        if not node:
+            raise HTTPException(status_code=404, detail="start_node_id not in this workflow")
+    else:
+        node = await _entry_node(workflow_id, ctx.workspace_id)
+        if not node:
+            raise HTTPException(status_code=400, detail="workflow has no entry node to run (add a source node)")
+
+    node_type = str(node["node_type"])
+    try:
+        _manifest, execute_fn = noderegistry.get(node_type)
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=f"entry node type {node_type!r} is not registered") from e
+
+    lead_id = str(uuid.uuid4())
+    node_id = str(node["id"])
+    correlation_id = str(uuid.uuid4())
+
+    # Seed lead positioned at the entry node. No contact yet — a source run
+    # discovers entities that fan out into child leads (each carrying its item
+    # in custom_fields) which then advance toward a contact.
+    await execute(
+        """
+        INSERT INTO omni_leads (id, workspace_id, contact_id, workflow_id, current_node_id, status, custom_fields)
+        VALUES ($1, $2, NULL, $3, $4, 'active', '{}'::jsonb)
+        """,
+        lead_id,
+        ctx.workspace_id,
+        workflow_id,
+        node_id,
+    )
+
+    # Run the entry node and publish its intent event(s) with lead_id + node_id
+    # stamped, so the dispatcher resolves the channel and the muscle runs — the
+    # same shape transition_worker._fire_node publishes mid-graph.
+    node_ctx = noderegistry.NodeContext(
+        workspace_id=ctx.workspace_id,
+        workflow_id=str(workflow_id),
+        node_id=node_id,
+        config=node.get("config") or {},
+        lead={"id": lead_id, "contact_id": None, "custom_fields": {}},
+        correlation_id=correlation_id,
+    )
+    result = await execute_fn(node_ctx)
+
+    published = 0
+    for ev in result.events:
+        payload = dict(ev.get("payload") or {})
+        payload.setdefault("node_id", node_id)
+        payload.setdefault("lead_id", lead_id)
+        payload.setdefault("correlation_id", correlation_id)
+        await bus.publish_event(
+            workspace_id=ctx.workspace_id,
+            event_type=ev["event_type"],
+            # Re-home a workflow-scoped source intent onto the seed lead so the
+            # dispatcher's lead path (entity_id == lead_id) resolves node_id from
+            # current_node_id. Non-lead facts keep their own entity_type.
+            entity_type="lead" if ev.get("entity_type") in (None, "workflow") else ev["entity_type"],
+            entity_id=lead_id if ev.get("entity_type") in (None, "workflow") else ev.get("entity_id"),
+            payload=payload,
+            actor_user_id=ctx.user_id,
+            correlation_id=correlation_id,
+        )
+        published += 1
+
+    if result.error:
+        # Source validated but refused (bad config). Surface it; the lead is left
+        # for inspection rather than silently orphaned.
+        log.warning("run_workflow %s entry node %s errored: %s", workflow_id, node_type, result.error)
+        raise HTTPException(status_code=422, detail=f"entry node error: {result.error}")
+
+    log.info(
+        "ran workflow %s: seeded lead %s at %s (%s), published %d intent event(s)",
+        workflow_id, lead_id, node_id, node_type, published,
+    )
+    return RunResponse(
+        lead_id=uuid.UUID(lead_id),
+        workflow_id=workflow_id,
+        start_node_id=uuid.UUID(node_id),
+        node_type=node_type,
+        correlation_id=uuid.UUID(correlation_id),
+        handle=result.handle,
+        events_published=published,
     )

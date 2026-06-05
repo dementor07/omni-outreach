@@ -16,7 +16,7 @@ import {
   Database, Send, Bot, Clock, UserCheck, MessageSquare, Mail, Phone, Linkedin,
   AtSign, Sparkles, FileSpreadsheet, Webhook, ListChecks, Globe, Tag as TagIcon,
   Users, Settings as SettingsIcon, Trash2,
-  MessageCircle, Instagram, Shuffle, Target, Octagon, Flame,
+  MessageCircle, Instagram, Shuffle, Target, Octagon, Flame, Play,
   type LucideIcon,
 } from 'lucide-react'
 import { canvas, nodes as nodesApi, projections, type NodeManifest, type WorkflowStatus } from '../api/v2'
@@ -24,6 +24,7 @@ import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
 import Button from '../components/Button'
+import { useToast } from '../components/Toast'
 import NodeConfigPanel from '../components/NodeConfigPanel'
 import { useCanvasHistory } from '../hooks/useCanvasHistory'
 import Tabs from '../components/Tabs'
@@ -218,6 +219,7 @@ let dropSeq = 0
 export default function CampaignEditor() {
   const { id } = useParams<{ id: string }>()
   const qc = useQueryClient()
+  const toast = useToast()
   const [searchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'sequence')
   const leadsQuery = useQuery({
@@ -303,6 +305,19 @@ export default function CampaignEditor() {
       setDirty(false)
       qc.invalidateQueries({ queryKey: ['workflow', id] })
     },
+  })
+
+  // Run the workflow: seed a lead at the entry (source) node and fire it. The
+  // discovered entities fan out into child leads that surface in the Leads tab.
+  const hasSource = useMemo(() => rfNodes.some((n) => n.data.manifest.type.startsWith('source.')), [rfNodes])
+  const runMut = useMutation({
+    mutationFn: () => canvas.run(id!),
+    onSuccess: (r) => {
+      toast.success(`Run started at ${r.node_type} — ${r.events_published} intent dispatched. Leads will appear shortly.`)
+      qc.invalidateQueries({ queryKey: ['workflow-leads', id] })
+      qc.invalidateQueries({ queryKey: ['leads'] })
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Run failed'),
   })
 
   const onConnect = useCallback((conn: Connection) => {
@@ -435,6 +450,17 @@ export default function CampaignEditor() {
             </div>
             <Button size="sm" variant="primary" icon={Save} onClick={() => saveMut.mutate()} isLoading={saveMut.isPending} disabled={!dirty}>
               {dirty ? 'Save' : 'Saved'}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={Play}
+              onClick={() => runMut.mutate()}
+              isLoading={runMut.isPending}
+              disabled={dirty || !hasSource}
+              title={dirty ? 'Save the graph before running' : !hasSource ? 'Add a source node to run' : 'Enroll a lead at the source node and start the pipeline'}
+            >
+              Run
             </Button>
           </Panel>
 

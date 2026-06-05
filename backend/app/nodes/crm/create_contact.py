@@ -44,7 +44,7 @@ async def execute(ctx: NodeContext) -> NodeResult:
     if not cfg.email and not cfg.linkedin_url:
         return NodeResult(handle="default", error="CONTACT_REQUIRES_EMAIL_OR_LINKEDIN")
     contact_id = str(uuid.uuid4())
-    events = [
+    events: list[dict] = [
         {
             "event_type": "contact.created",
             "entity_type": "contact",
@@ -61,6 +61,22 @@ async def execute(ctx: NodeContext) -> NodeResult:
             },
         }
     ]
+    # Bind the new contact to the lead this node ran on, so the discovered +
+    # screened person actually becomes a person-stage lead (contact_id set)
+    # instead of leaving a contact orphaned from the pipeline. _project_lead's
+    # COALESCE upsert keys on the existing lead id and fills in contact_id.
+    # Without this the Naukri company->person chain creates contacts but never a
+    # person lead, and the Leads view can't show identity for them.
+    lead_id = ctx.lead.get("id")
+    if lead_id:
+        events.append(
+            {
+                "event_type": "lead.contact_attached",
+                "entity_type": "lead",
+                "entity_id": str(lead_id),
+                "payload": {"contact_id": contact_id, "status": "active"},
+            }
+        )
     return NodeResult(handle="default", events=events, telemetry={"contact_id": contact_id})
 
 

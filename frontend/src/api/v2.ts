@@ -123,6 +123,16 @@ export interface WorkflowDetail {
   edges: WorkflowEdge[]
 }
 
+export interface RunResponse {
+  lead_id: UUID
+  workflow_id: UUID
+  start_node_id: UUID
+  node_type: string
+  correlation_id: UUID
+  handle: string
+  events_published: number
+}
+
 export const canvas = {
   list: () => api.get<Workflow[]>('/canvas/workflows').then((r) => r.data),
   create: (name: string, timezone = 'UTC') =>
@@ -147,6 +157,13 @@ export const canvas = {
   ) => api.post<WorkflowEdge>(`/canvas/workflows/${workflowId}/edges`, body).then((r) => r.data),
   removeEdge: (workflowId: UUID, edgeId: UUID) =>
     api.delete(`/canvas/workflows/${workflowId}/edges/${edgeId}`).then(() => undefined),
+
+  // Run a workflow: enroll a seed lead at the entry node and fire it so the
+  // pipeline begins. Returns the seed lead + correlation id to trace the run.
+  run: (workflowId: UUID, startNodeId?: UUID) =>
+    api
+      .post<RunResponse>(`/canvas/workflows/${workflowId}/run`, startNodeId ? { start_node_id: startNodeId } : {})
+      .then((r) => r.data),
 
   // Bulk replace the whole graph in one transaction (local-state-first editor).
   saveGraph: (
@@ -200,6 +217,11 @@ export interface Deal {
   updated_at: ISODate
 }
 
+// A lead's columns are additive per node, so it carries a computed identity +
+// stage and a flattened ``fields`` bag keyed by the workflow's LeadColumn keys
+// (see GET /projections/leads/columns).
+export type LeadStage = 'new' | 'source' | 'company' | 'resolved' | 'verifying' | 'person'
+
 export interface Lead {
   id: UUID
   contact_id: UUID | null
@@ -209,6 +231,23 @@ export interface Lead {
   custom_fields: Record<string, unknown>
   created_at: ISODate
   updated_at: ISODate
+  identity: string
+  stage: LeadStage
+  fields: Record<string, unknown>
+}
+
+export type LeadColumnKind = 'text' | 'number' | 'url' | 'badge' | 'date'
+
+export interface LeadColumn {
+  key: string
+  label: string
+  path: string
+  kind: LeadColumnKind
+}
+
+export interface LeadColumnsResponse {
+  workflow_id: UUID | null
+  columns: LeadColumn[]
 }
 
 export const projections = {
@@ -218,6 +257,12 @@ export const projections = {
     api.get<Deal[]>('/projections/deals', { params }).then((r) => r.data),
   leads: (params: { workflow_id?: UUID; limit?: number } = {}) =>
     api.get<Lead[]>('/projections/leads', { params }).then((r) => r.data),
+  leadColumns: (workflowId?: UUID) =>
+    api
+      .get<LeadColumnsResponse>('/projections/leads/columns', {
+        params: workflowId ? { workflow_id: workflowId } : undefined,
+      })
+      .then((r) => r.data),
 }
 
 // ── Inbox ────────────────────────────────────────────────────────────────────
