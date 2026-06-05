@@ -130,6 +130,9 @@ KNOWN_TOPICS = ["omni.events", "outreach.commands", "outreach.results",
 PROJECTION_TABLES = [
     "omni_events_archive", "omni_leads", "omni_contacts", "omni_companies",
     "omni_deals", "omni_messages", "omni_lead_scores", "omni_ai_jobs",
+    # Lead-gen knowledge graph + screening + metrics (Naukri absorption).
+    "omni_company_aliases", "omni_people_cache", "omni_company_signals",
+    "omni_company_blocklist", "omni_pipeline_metrics", "omni_tasks", "omni_approvals",
 ]
 
 app = FastAPI(title="Omni Outreach — Audit Control Plane", docs_url="/api/docs")

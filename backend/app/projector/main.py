@@ -220,6 +220,68 @@ async def _project_approval(env: dict[str, Any]) -> None:
         )
 
 
+async def _project_pipeline_metric(env: dict[str, Any]) -> None:
+    """Per-run pipeline cost/usage metrics. Each ``pipeline.metric`` event carries
+    deltas that ACCUMULATE into the run row (the event-sourced fan-out emits one
+    per company/person/lead). entity_id = run_id; payload.kind 'start'|'delta'|'end'."""
+    p = env.get("payload") or {}
+    kind = p.get("kind", "delta")
+    if kind == "start":
+        await execute(
+            """
+            INSERT INTO omni_pipeline_metrics (run_id, workspace_id, collector_source, correlation_id, metadata)
+            VALUES ($1, $2, $3, $4, $5::jsonb)
+            ON CONFLICT (run_id) DO NOTHING
+            """,
+            env["entity_id"],
+            env["workspace_id"],
+            p.get("collector_source"),
+            env.get("correlation_id"),
+            p.get("metadata") or {},
+        )
+        return
+    # delta / end: accumulate counters; 'end' also stamps completed_at.
+    await execute(
+        """
+        INSERT INTO omni_pipeline_metrics (
+            run_id, workspace_id, collector_source,
+            companies_collected, companies_qualified, companies_rejected,
+            people_found, people_verified, leads_created,
+            serper_calls, claude_calls, claude_input_tokens, claude_output_tokens, total_cost,
+            completed_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        ON CONFLICT (run_id) DO UPDATE SET
+            companies_collected  = omni_pipeline_metrics.companies_collected  + EXCLUDED.companies_collected,
+            companies_qualified  = omni_pipeline_metrics.companies_qualified  + EXCLUDED.companies_qualified,
+            companies_rejected   = omni_pipeline_metrics.companies_rejected   + EXCLUDED.companies_rejected,
+            people_found         = omni_pipeline_metrics.people_found         + EXCLUDED.people_found,
+            people_verified      = omni_pipeline_metrics.people_verified      + EXCLUDED.people_verified,
+            leads_created        = omni_pipeline_metrics.leads_created        + EXCLUDED.leads_created,
+            serper_calls         = omni_pipeline_metrics.serper_calls         + EXCLUDED.serper_calls,
+            claude_calls         = omni_pipeline_metrics.claude_calls         + EXCLUDED.claude_calls,
+            claude_input_tokens  = omni_pipeline_metrics.claude_input_tokens  + EXCLUDED.claude_input_tokens,
+            claude_output_tokens = omni_pipeline_metrics.claude_output_tokens + EXCLUDED.claude_output_tokens,
+            total_cost           = omni_pipeline_metrics.total_cost           + EXCLUDED.total_cost,
+            completed_at         = COALESCE(EXCLUDED.completed_at, omni_pipeline_metrics.completed_at)
+        """,
+        env["entity_id"],
+        env["workspace_id"],
+        p.get("collector_source"),
+        int(p.get("companies_collected") or 0),
+        int(p.get("companies_qualified") or 0),
+        int(p.get("companies_rejected") or 0),
+        int(p.get("people_found") or 0),
+        int(p.get("people_verified") or 0),
+        int(p.get("leads_created") or 0),
+        int(p.get("serper_calls") or 0),
+        int(p.get("claude_calls") or 0),
+        int(p.get("claude_input_tokens") or 0),
+        int(p.get("claude_output_tokens") or 0),
+        float(p.get("total_cost") or 0),
+        datetime.fromisoformat(env["occurred_at"]) if kind == "end" else None,
+    )
+
+
 async def _project_lead(env: dict[str, Any]) -> None:
     p = env.get("payload") or {}
     await execute(
@@ -415,6 +477,10 @@ async def _apply_projection(env: dict[str, Any]) -> None:
     # CONTRACT-005: approvals queue (request -> resolved), keyed by lead id.
     if et in ("approval.requested", "approval.resolved") and env.get("entity_id"):
         await _project_approval(env)
+        return
+    # Pipeline cost/usage metrics (per source run). entity_id = run_id.
+    if et == "pipeline.metric" and env.get("entity_id"):
+        await _project_pipeline_metric(env)
         return
     if entity in _PROJECTORS and env.get("entity_id"):
         await _PROJECTORS[entity](env)

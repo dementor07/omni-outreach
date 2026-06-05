@@ -33,7 +33,7 @@ import app.nodes as noderegistry
 from app.config import settings
 from app.db import close_pool, execute, fetch_one, init_pool, system_scope
 from app.execution import commands
-from app.services import bus
+from app.services import bus, company_kg
 
 log = logging.getLogger("transitions")
 
@@ -394,6 +394,53 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
             )
         last_inbound_at = (row or {}).get("last_inbound")
 
+    # Company knowledge-graph resolution for crm.resolve_company. The node has no
+    # DB handle, so the worker resolves+dedups the company here and injects the
+    # result into custom_fields.company_resolution (same pattern as replied).
+    node_custom_fields = dict(lead.get("custom_fields") or {})
+    if node_type == "crm.resolve_company":
+        cfg = node.get("config") or {}
+        item_field = cfg.get("item_field") or "item"
+        company_row = node_custom_fields.get(item_field) or {}
+        raw_name = (company_row.get("company_name") or "").strip()
+        if raw_name:
+            description = company_row.get("description") or ""
+            industry = company_row.get("industry") or company_row.get("sector") or ""
+            employee_count = company_row.get("employee_count")
+            async with system_scope():
+                resolved = await company_kg.resolve_company(
+                    workspace_id,
+                    raw_name,
+                    industry=industry or None,
+                    employee_count=employee_count,
+                    domain=company_row.get("company_url") or None,
+                )
+                # Local filter (blocklist / employee cap / enterprise / org type).
+                passed, reason = await company_kg.filter_company(
+                    workspace_id,
+                    resolved.name,
+                    description=description,
+                    industry=industry,
+                    employee_count=employee_count,
+                )
+                if not passed and resolved.screening_status != "rejected":
+                    await company_kg.set_screening_status(workspace_id, resolved.id, "rejected")
+                # Signal scoring from this job's title/description.
+                title = company_row.get("title") or company_row.get("job_title") or ""
+                total, signals = company_kg.score_signals(title, description, role_count=1)
+                if signals:
+                    await company_kg.persist_signals(workspace_id, resolved.id, signals, "naukri")
+            node_custom_fields["company_resolution"] = {
+                "company_id": resolved.id,
+                "name": resolved.name,
+                "screening_status": "rejected" if not passed else resolved.screening_status,
+                "people_discovered": resolved.people_discovered,
+                "created": resolved.created,
+                "filter_passed": passed,
+                "filter_reason": reason,
+                "signal_score": total,
+            }
+
     ctx = noderegistry.NodeContext(
         workspace_id=workspace_id,
         workflow_id=str(node.get("workflow_id") or lead.get("workflow_id") or ""),
@@ -403,7 +450,7 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
             **(contact or {}),
             "id": str(lead["id"]),
             "contact_id": lead.get("contact_id"),
-            "custom_fields": lead.get("custom_fields") or {},
+            "custom_fields": node_custom_fields,
             "last_inbound_at": last_inbound_at.isoformat() if last_inbound_at else None,
         },
         correlation_id=correlation_id,
