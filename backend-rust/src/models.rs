@@ -76,6 +76,12 @@ pub enum ChannelType {
     /// `lead_mutations.custom_fields[companies_key]`. Used by `source.naukri`.
     #[serde(rename = "naukri")]
     Naukri,
+    /// Apify-driven Indeed.com job scrape (`curious_coder/indeed-scraper`
+    /// actor). Same protocol as `apify`/`naukri` — dedupes by company, writes
+    /// the company list to `lead_mutations.custom_fields[companies_key]`. Used
+    /// by `source.indeed`.
+    #[serde(rename = "indeed")]
+    Indeed,
     /// Any channel value the worker doesn't recognise. Deserializes here
     /// instead of failing the whole command at parse time, so dispatch can
     /// return a clean, debuggable error.
@@ -109,6 +115,7 @@ impl ChannelType {
             ChannelType::AiScreen => "ai_screen",
             ChannelType::SerperPeople => "serper_people",
             ChannelType::Naukri => "naukri",
+            ChannelType::Indeed => "indeed",
             ChannelType::Unknown => "unknown",
         }
     }

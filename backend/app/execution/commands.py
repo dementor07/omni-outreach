@@ -53,6 +53,8 @@ NODE_CHANNEL: dict[str, ChannelType] = {
     "source.linkedin_jobs": ChannelType.APIFY,
     # Camoufox-driven Naukri.com jobs source (anti-detect headless scrape).
     "source.naukri": ChannelType.NAUKRI,
+    # Apify-driven Indeed.com jobs source (curious_coder/indeed-scraper actor).
+    "source.indeed": ChannelType.INDEED,
     # Per-company Serper search (multi-pattern x titles, dedupe).
     "source.serper_people": ChannelType.SERPER_PEOPLE,
     # Every declarative HTTP node (sources built via http_node) routes to the

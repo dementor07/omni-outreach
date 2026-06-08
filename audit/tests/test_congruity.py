@@ -177,3 +177,23 @@ def test_create_contact_reads_discovered_person_not_just_config():
                         lead={"id": "l2", "custom_fields": {}}, correlation_id=None)
     re = _asyncio.run(_create_contact(empty))
     assert re.error == "CONTACT_REQUIRES_EMAIL_OR_LINKEDIN" and not re.events
+
+
+# ── INDEED PORT: source.indeed channel must agree across node / map / Rust enum ─
+def test_source_indeed_channel_congruent_python_and_rust():
+    """REGRESSION (Indeed port): source.indeed must route to ChannelType.INDEED
+    in the Python NODE_CHANNEL map, the Python enum value must be 'indeed', and
+    the Rust ChannelType must carry a matching #[serde(rename = "indeed")]
+    variant + as_str arm + a dispatch arm — or the intent reaches the muscle and
+    falls into Unknown."""
+    from app.core.events import ChannelType as PyChannel
+
+    assert dispatcher.commands.NODE_CHANNEL.get("source.indeed") == PyChannel.INDEED
+    assert PyChannel.INDEED.value == "indeed"
+
+    models_rs = (REPO / "backend-rust/src/models.rs").read_text(encoding="utf-8")
+    assert 'rename = "indeed"' in models_rs and "Indeed," in models_rs
+    assert 'ChannelType::Indeed => "indeed"' in models_rs
+    mod_rs = (REPO / "backend-rust/src/handlers/mod.rs").read_text(encoding="utf-8")
+    assert "ChannelType::Indeed => indeed::handle_indeed(command).await" in mod_rs
+    assert "pub mod indeed;" in mod_rs

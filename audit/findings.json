@@ -57,6 +57,10 @@
    {
     "date": "2026-06-08",
     "note": "People-stage root cause (+1: PEOPLE-001). create_contact was config-only -> the discovery chain created no contact. Now reads the discovered person from custom_fields. Connections confirmed present (not the blocker). Remaining: wire the naukri-e2e-run graph edge past resolve_company (data, not code)."
+   },
+   {
+    "date": "2026-06-08",
+    "note": "Capability-parity port vs the fork (+1: PORT-001). Indeed job source added end-to-end (node + Py/Rust channel + muscle handler + lead columns). Matches Allen's 3-source count."
    }
   ]
  },
@@ -1246,6 +1250,18 @@
    "evidence": "create_contact built the contact.created payload purely from CreateContactConfig (cfg.email/first_name/...). The transition_worker passes node.config VERBATIM (config=node.get('config') or {}) with NO interpolation of the lead's custom_fields. So a fanned-out, Serper-discovered, Claude-screened person sitting in custom_fields.item was invisible: with empty config the node errored CONTACT_REQUIRES_EMAIL_OR_LINKEDIN, and with static config it created the SAME hardcoded contact for every person. This — not missing connections (serper+anthropic both exist on ws 14ac2dc2) — is why the Naukri/LinkedIn company->person chain never yielded a real named contact. Affected naukri-e2e-run AND 'Marketing Agencies India' identically.",
    "recommendation": "Read the discovered person from custom_fields[person_field] (default 'item'), let config override field-for-field, fail closed when neither yields an identity.",
    "fix": "create_contact now _merge_identity(cfg, custom_fields[person_field]): person row supplies email/linkedin_url/first+last (splits a single 'name')/company(_name)/headline(or title); explicit config wins; fail-closed when neither has email or linkedin. lead.contact_attached still binds the new contact to the lead (person-stage lead). Unit-verified (dynamic/override/empty). Regression test test_congruity.py::test_create_contact_reads_discovered_person_not_just_config. NOTE: the graph edge past resolve_company is a SEPARATE data fix (naukri-e2e-run dead-ends at resolve_company — no outgoing edge)."
+  },
+  {
+   "id": "PORT-001",
+   "area": "sources",
+   "file": "backend/app/nodes/sources/indeed.py",
+   "line": 1,
+   "severity": "GOOD",
+   "status": "FIXED",
+   "title": "Ported Allen's Indeed collector as source.indeed (capability parity with the fork)",
+   "evidence": "Allen's feature/dev-automation added an Indeed job source (omni_outreach_v3/src/collectors/indeed.rs, Apify curious_coder/indeed-scraper) on 2026-06-08, giving his standalone 3 sources to our 2. Directive: port every capability he leads on into our v2 spine ([[project_allen_bysignal_divergence]]).",
+   "recommendation": "Add source.indeed as a v2 node mirroring source.linkedin_jobs (shared Apify connection) + ChannelType.INDEED + a muscle indeed.rs handler.",
+   "fix": "source.indeed node (capabilities=connection:apify, country+keywords config) -> ChannelType.INDEED in events.py + commands.NODE_CHANNEL -> backend-rust handlers/indeed.rs (Apify run/poll/fetch, curious_coder~indeed-scraper, companyDetails.name/title/originalApplyUrl mapping, dedup by company w/ role_count — SAME row shape as naukri.rs) wired into models.rs enum/as_str + handlers/mod.rs dispatch. lead_columns.py gained source.indeed columns + pipeline order. 42 nodes (was 41), 0 import failures. Congruity test test_source_indeed_channel_congruent_python_and_rust guards the Py<->Rust enum agreement. Rust compiled in the muscle Docker build."
   }
  ]
 }

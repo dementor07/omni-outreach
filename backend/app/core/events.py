@@ -52,6 +52,7 @@ class ChannelType(StrEnum):
     AI_SCREEN = "ai_screen"  # Claude ACCEPT/REJECT classifier (ai.screen_company / ai.screen_person)
     SERPER_PEOPLE = "serper_people"  # Multi-pattern per-company Serper LinkedIn search
     NAUKRI = "naukri"  # Camoufox-driven Naukri.com job scrape (source.naukri)
+    INDEED = "indeed"  # Apify-driven Indeed.com job scrape (source.indeed)
 
 
 class EventType(StrEnum):
