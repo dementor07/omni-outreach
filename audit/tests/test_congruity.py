@@ -197,3 +197,24 @@ def test_source_indeed_channel_congruent_python_and_rust():
     mod_rs = (REPO / "backend-rust/src/handlers/mod.rs").read_text(encoding="utf-8")
     assert "ChannelType::Indeed => indeed::handle_indeed(command).await" in mod_rs
     assert "pub mod indeed;" in mod_rs
+
+
+# ── PEOPLE precision: is_company_mismatch must match the fork's latest logic ───
+def test_is_company_mismatch_matches_fork_logic():
+    """REGRESSION: the pre-Claude misattribution fast-path (verify_person calls
+    this) must reject only when the title names a DIFFERENT company via '@'/'at',
+    and must NOT fire on '|'/'·' separators (the fork's 2026-06-08 ae023fd8 fix —
+    those usually separate roles, not companies). Drift here either re-admits
+    misattributed people or wastes Claude calls."""
+    from app.services.people_scoring import is_company_mismatch as m
+
+    assert m("CEO @ OtherCorp", "SourceMash") is True
+    assert m("Director at Globex", "Acme") is True
+    assert m("CEO at SourceMash", "SourceMash") is False
+    assert m("Head of Growth at SourceMash Technologies", "SourceMash Technologies") is False
+    assert m("VP Sales @ Acme, ex-Google", "Acme") is False
+    # The fix: pipe / middot must NOT be treated as company indicators.
+    assert m("Founder | 3x startup advisor", "Acme") is False
+    assert m("CTO · building things", "Acme") is False
+    assert m("CEO at LinkedIn", "Acme") is False  # excluded sentinel
+    assert m("Sales Lead", "Acme") is False  # no separator
