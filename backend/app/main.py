@@ -6,6 +6,7 @@ Everything else is a projection over the event log. See
 omni-vault/wiki/architecture/0001-v2-nuke.md for the ADR.
 """
 
+import asyncio
 import uuid
 from contextlib import asynccontextmanager
 
@@ -34,6 +35,7 @@ from app.routers import (
     oauth,
     oauth_producthunt,
     projections,
+    webhooks_in,
     workspaces,
 )
 from app.services.bus import close_producer, init_producer
@@ -55,6 +57,25 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         return response
 
 
+async def _credential_sweep_loop(interval_seconds: int = 3600) -> None:
+    """CMP2: periodically hard-delete released/expired credential_refs so the
+    table doesn't grow unbounded. Runs on the backend (it holds the DB pool);
+    the muscle only mints + redeems. Tolerant of transient failures — logs and
+    retries on the next tick."""
+    from app.routers.internal import sweep_expired_credentials
+
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+            deleted = await sweep_expired_credentials()
+            if deleted:
+                logger.info("[credential-sweep] removed %d expired/released refs", deleted)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            logger.exception("[credential-sweep] tick failed; will retry next interval")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Omni v2 backend")
@@ -62,9 +83,15 @@ async def lifespan(app: FastAPI):
     await init_redis(settings.get_redis_url())
     await init_producer()
     discover_nodes()
-    logger.info("Database, Redis, bus, and node registry initialised")
+    sweep_task = asyncio.create_task(_credential_sweep_loop())
+    logger.info("Database, Redis, bus, node registry, and credential sweep initialised")
     yield
     logger.info("Shutting down — closing connections")
+    sweep_task.cancel()
+    try:
+        await sweep_task
+    except asyncio.CancelledError:
+        pass
     await close_producer()
     await close_pool()
     await close_redis()
@@ -111,6 +138,10 @@ app.include_router(integrations.router, prefix="/integrations", tags=["integrati
 app.include_router(inbox.router, prefix="/inbox", tags=["inbox"])
 app.include_router(ai_studio.router, prefix="/ai", tags=["ai"])
 app.include_router(approvals.router, prefix="/approvals", tags=["approvals"])
+
+# Inbound webhooks (source.webhook_in runtime). UNAUTHENTICATED by design —
+# external systems POST here; trust comes from the opaque ids + optional HMAC.
+app.include_router(webhooks_in.router, prefix="/webhooks", tags=["webhooks"])
 
 
 @app.get("/health")
