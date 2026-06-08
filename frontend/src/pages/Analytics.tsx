@@ -19,14 +19,17 @@ export default function Analytics() {
   const threads = threadsQ.data ?? []
   const scores = scoresQ.data ?? []
 
-  // Funnel: leads → replied → deals → won
+  // Funnel: leads → replied → converted → deals → won. "Converted" is the
+  // flow.goal outcome (lead.status === 'converted'), distinct from a deal win.
   const total = leads.length
   const replied = leads.filter((l) => l.status === 'replied').length
+  const converted = leads.filter((l) => l.status === 'converted').length
   const dealsCount = deals.length
   const won = deals.filter((d) => d.stage === 'closed_won').length
   const funnel = [
     { label: 'Leads', value: total, color: 'bg-brand-400' },
     { label: 'Replied', value: replied, color: 'bg-violet-400' },
+    { label: 'Converted', value: converted, color: 'bg-sky-400' },
     { label: 'Deals', value: dealsCount, color: 'bg-amber-400' },
     { label: 'Won', value: won, color: 'bg-emerald-400' },
   ]
@@ -59,7 +62,7 @@ export default function Analytics() {
 
       <section className="grid gap-4 xl:grid-cols-2">
         <Card padding="lg">
-          <CardHeader title="Conversion funnel" description="Leads → Replied → Deals → Won" />
+          <CardHeader title="Conversion funnel" description="Leads → Replied → Converted → Deals → Won" />
           {total === 0 ? (
             <EmptyState icon={BarChart3} title="No funnel data yet" description="Funnels populate once leads enter your campaigns." />
           ) : (

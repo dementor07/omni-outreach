@@ -17,6 +17,8 @@ const statusVariant: Record<string, keyof typeof badgeVariant> = {
   positive: 'success', negative: 'danger', neutral: 'neutral',
   pending: 'warning', approved: 'success', rejected: 'danger',
   replied: 'brand', stopped: 'danger',
+  // Lead lifecycle statuses set by the transition worker + flow.goal/end (M2/H1).
+  waiting: 'warning', completed: 'success', errored: 'danger', converted: 'success', ended: 'neutral', cancelled: 'neutral',
 }
 
 const channelVariant: Record<string, keyof typeof badgeVariant> = {

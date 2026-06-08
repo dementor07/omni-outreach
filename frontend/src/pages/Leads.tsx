@@ -79,7 +79,9 @@ export default function Leads() {
           <option value="active">Active</option>
           <option value="waiting">Waiting</option>
           <option value="replied">Replied</option>
+          <option value="converted">Converted</option>
           <option value="completed">Completed</option>
+          <option value="ended">Ended</option>
           <option value="stopped">Stopped</option>
           <option value="errored">Errored</option>
         </Select>
