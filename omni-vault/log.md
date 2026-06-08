@@ -1317,3 +1317,41 @@ read context and pick a handle.
 Adding a new integration (ZenRows, Clay, RB2B, anything) is exactly
 **one file** in the appropriate category. No router edits, no schema
 migrations, no architectural decisions.
+
+## [2026-06-08] frontend-index | Full frontend read + code-graph MCP + canvas-contract wiki
+
+Installed **codebase-memory-mcp v0.7.0** (DeusData) — local tree-sitter
+code-graph MCP, indexed the repo (5057 nodes / 9875 edges) for
+symbol/caller/route queries instead of grep. Project name uses uppercase
+drive letter (`C:/...`) — lowercase self-deletes the index db.
+
+Read the entire frontend (~8k LOC) line-by-line. Findings written to four
+new architecture pages: [[frontend-map]] (per-file index), [[canvas-contract]]
+(manifest → card/form/columns/run; the 5 leaks that force per-integration
+frontend edits), [[leads-pipeline]] (token-walks-DAG model + the 2026-06-08
+leads-view fix, commit 77669cf), [[frontend-seams]] (cleanup backlog).
+
+Key facts captured: one axios instance (not two clients) but two endpoint
+families (v2 event-sourced vs legacy REST); 6 of 10 legacy hooks are DEAD
+(no importer) → mostly deletable; `manifest.icon` is dead on the frontend
+(hardcoded NODE_TYPE_ICON map); NodeConfigPanel can't render list[str]
+fields; no connection:<provider> UX loop. These five canvas-contract leaks
+are the "smooth as butter" uniformity work for future integrations.
+
+## [2026-06-08] backend-read | Full backend line-by-line read + backend-map
+
+Read the ENTIRE backend: all 41 nodes + http_node factory, all 14 routers,
+the execution layer (dispatcher/commands/transition_worker/lead_columns),
+services + core (db RLS model, bus consume_forever, encryption HKDF/legacy
+Fernet, company_kg incl the cache_person stub, people_scoring, config,
+core/events ChannelType), the Rust muscle spine (main/models/dispatch/
+credentials/common/http_call + every handler's behavior), and the Flink
+orchestrator. Captured in [[backend-map]].
+
+Findings that matter for the manifest-uniformity refactor: TWO manifest
+construction patterns (direct NodeManifest vs http_node factory — both must
+support output_fields); ChannelType has #[serde(other)] Unknown so a new
+channel deserializes safe; a new muscle channel is a 5-edit coupling
+(Python enum + NODE_CHANNEL + Rust enum + dispatch arm + handler); array
+config fields confirmed on 7 nodes (list[str]) + 2 (list[int]); the
+serper.py uncommitted diff is whitespace-only (not a real anomaly).

@@ -174,3 +174,18 @@ projection store.
 | Page | Summary |
 | --- | --- |
 | [[0001-v2-nuke]] | ADR 0001 — Omni v2 nuke. Discards 53 files / -11,464 lines of legacy execution path; rebuilds around `events` (Redpanda topic + Postgres projections), `workflows` (canvas DAG), `connections` (generic integrations), and `app/nodes/` (pluggable node registry). Addendum corrects the original Postgres-events misstep — Redpanda is the source of truth. |
+
+
+---
+
+## 2026-06-08 — Frontend map + canvas contract
+
+Full line-by-line frontend read (~8k LOC) indexed via the newly installed codebase-memory-mcp local code-graph. Captures the manifest-driven canvas contract, the leads pipeline fix, and the concrete uniformity seams to close so future integrations need zero per-integration frontend edits.
+
+| Page | Summary |
+| --- | --- |
+| [[frontend-map]] | Per-file index of the React SPA: foundation (axios client, v2 API, lib), layout/nav, design system primitives, canvas, every page's data source, and the legacy/dead-hook footprint (6 of 10 legacy hooks are dead). |
+| [[canvas-contract]] | The NodeManifest → palette/card/handles/config-form/routing/run pipeline. What the manifest already drives (~70%) and the 5 leaks (icon, array fields, connection UX, output_fields, runs observability) that force per-integration frontend edits. |
+| [[leads-pipeline]] | A lead is a token walking a DAG; custom_fields is additive per node. Workflow-scoped dynamic columns (lead_columns.py + /projections/leads/columns), the POST /run trigger, lead.contact_attached, and the live e2e verification (Run → muscle → 18 companies). |
+| [[frontend-seams]] | Cleanup backlog ranked by leverage: dead hooks (delete), API split (4 consumers to migrate), duplicate utils, DataTable inconsistency, Badge status gaps, canvas leaks. |
+| [[backend-map]] | Per-file index of the ENTIRE backend (full line-by-line read): the execution loop, all 14 routers, execution layer, 41 nodes (+ 2 construction patterns + array-field inventory), services/core (db RLS, bus, encryption, company_kg), the Rust muscle spine + all handler behaviors, and the Flink orchestrator. |
