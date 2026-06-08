@@ -1,4 +1,20 @@
-"""Create a contact projection by emitting contact.created."""
+"""Create a contact projection by emitting contact.created.
+
+Two modes, in priority order:
+
+  1. Dynamic (the people-discovery chain): when the lead carries a discovered +
+     screened person under ``custom_fields[person_field]`` (default 'item',
+     what flow.for_each writes per child), the contact's identity is taken from
+     that person row. This is how a Naukri/LinkedIn company -> Serper people ->
+     screen -> contact chain produces a *real named contact*. Explicit config
+     fields (below) override the person row field-for-field when set.
+  2. Static (manual / single-contact flows): when there's no person row, every
+     field comes from config.
+
+Node config is NOT interpolated by the runtime (transition_worker passes the
+stored config verbatim), so reading the person here is the ONLY way a fanned-out
+person becomes a contact — without it the chain creates nothing.
+"""
 
 from __future__ import annotations
 
@@ -26,6 +42,12 @@ class CreateContactConfig(BaseModel):
     headline: str | None = None
     phone: str | None = None
     source: str = Field("workflow", description="Where this contact came from (workflow, manual, integration_name, …)")
+    person_field: str = Field(
+        "item",
+        description="custom_fields key holding the discovered/screened person to "
+        "turn into a contact (default 'item' — what flow.for_each writes). Config "
+        "fields above override the person row when set.",
+    )
 
 
 MANIFEST = NodeManifest(
@@ -41,7 +63,12 @@ MANIFEST = NodeManifest(
 
 async def execute(ctx: NodeContext) -> NodeResult:
     cfg = CreateContactConfig(**ctx.config)
-    if not cfg.email and not cfg.linkedin_url:
+    person = (ctx.lead.get("custom_fields") or {}).get(cfg.person_field) or {}
+    identity = _merge_identity(cfg, person)
+
+    if not identity["email"] and not identity["linkedin_url"]:
+        # No usable identity from config OR the discovered person — fail-closed
+        # so we never emit a nameless, contactless ghost.
         return NodeResult(handle="default", error="CONTACT_REQUIRES_EMAIL_OR_LINKEDIN")
     contact_id = str(uuid.uuid4())
     events: list[dict] = [
@@ -49,16 +76,7 @@ async def execute(ctx: NodeContext) -> NodeResult:
             "event_type": "contact.created",
             "entity_type": "contact",
             "entity_id": contact_id,
-            "payload": {
-                "email": cfg.email,
-                "linkedin_url": str(cfg.linkedin_url) if cfg.linkedin_url else None,
-                "first_name": cfg.first_name,
-                "last_name": cfg.last_name,
-                "company": cfg.company,
-                "headline": cfg.headline,
-                "phone": cfg.phone,
-                "source": cfg.source,
-            },
+            "payload": {**identity, "phone": cfg.phone, "source": cfg.source},
         }
     ]
     # Bind the new contact to the lead this node ran on, so the discovered +
@@ -78,6 +96,29 @@ async def execute(ctx: NodeContext) -> NodeResult:
             }
         )
     return NodeResult(handle="default", events=events, telemetry={"contact_id": contact_id})
+
+
+def _merge_identity(cfg: CreateContactConfig, person: dict) -> dict:
+    """Build the contact identity from the discovered person, letting any
+    explicitly-set config field win. Tolerates the person row carrying either
+    split first/last names or a single 'name', and the 'company_name' alias the
+    serper/screen nodes use."""
+    first = person.get("first_name")
+    last = person.get("last_name")
+    if not first and not last and person.get("name"):
+        parts = str(person["name"]).split(None, 1)
+        first = parts[0]
+        last = parts[1] if len(parts) > 1 else None
+
+    person_linkedin = person.get("linkedin_url")
+    return {
+        "email": cfg.email or person.get("email"),
+        "linkedin_url": str(cfg.linkedin_url) if cfg.linkedin_url else (person_linkedin or None),
+        "first_name": cfg.first_name or first,
+        "last_name": cfg.last_name or last,
+        "company": cfg.company or person.get("company_name") or person.get("company"),
+        "headline": cfg.headline or person.get("headline") or person.get("title"),
+    }
 
 
 register(MANIFEST, execute)

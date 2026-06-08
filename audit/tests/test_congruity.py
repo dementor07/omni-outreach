@@ -141,3 +141,39 @@ def test_clean_company_name_strips_taglines_only():
     assert clean_company_name("Telnyx") == "Telnyx"
     assert clean_company_name("") == ""
     assert clean_company_name(None) == ""
+
+
+# ── PEOPLE-CHAIN: crm.create_contact must build identity from the discovered person ─
+def test_create_contact_reads_discovered_person_not_just_config():
+    """REGRESSION (people stage): node config is passed verbatim — it is NOT
+    interpolated with the lead's custom_fields. So crm.create_contact MUST read
+    the screened person from custom_fields[person_field], or the Naukri/LinkedIn
+    company -> Serper people -> screen -> contact chain creates nothing. Config
+    fields override the person row; with neither identity it fails closed."""
+    import asyncio as _asyncio
+
+    from app.nodes import NodeContext
+    from app.nodes.crm.create_contact import execute as _create_contact
+
+    # Discovered person, empty config -> contact built from the person row.
+    ctx = NodeContext(
+        workspace_id="ws", workflow_id=None, node_id=None, config={},
+        lead={"id": "l1", "custom_fields": {"item": {
+            "name": "Rahul Menon", "headline": "Head of Growth",
+            "linkedin_url": "https://linkedin.com/in/rahul", "company_name": "SourceMash Technologies"}}},
+        correlation_id=None,
+    )
+    r = _asyncio.run(_create_contact(ctx))
+    assert r.error is None
+    payload = next(e for e in r.events if e["event_type"] == "contact.created")["payload"]
+    assert payload["first_name"] == "Rahul" and payload["last_name"] == "Menon"
+    assert payload["linkedin_url"] == "https://linkedin.com/in/rahul"
+    assert payload["company"] == "SourceMash Technologies"
+    # The lead must be bound to the new contact (person-stage lead).
+    assert any(e["event_type"] == "lead.contact_attached" for e in r.events)
+
+    # No person AND no config -> fail closed (no ghost contact).
+    empty = NodeContext(workspace_id="ws", workflow_id=None, node_id=None, config={},
+                        lead={"id": "l2", "custom_fields": {}}, correlation_id=None)
+    re = _asyncio.run(_create_contact(empty))
+    assert re.error == "CONTACT_REQUIRES_EMAIL_OR_LINKEDIN" and not re.events
