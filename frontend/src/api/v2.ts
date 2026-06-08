@@ -87,6 +87,34 @@ export const nodes = {
     api.post<NodeExecuteResponse>(`/nodes/${type}/execute`, body).then((r) => r.data),
 }
 
+// ── Lead-source preview (synchronous Naukri scrape) ──────────────────────────
+export interface NaukriPreviewRequest {
+  keyword: string
+  location?: string | null
+  max_pages?: number
+}
+
+export interface NaukriPreviewCompany {
+  company_name: string
+  title: string
+  role_count: number
+  location: string
+  experience: string
+  source_url: string
+}
+
+export interface NaukriPreviewResponse {
+  keyword: string
+  jobs_returned: number
+  companies_extracted: number
+  companies: NaukriPreviewCompany[]
+}
+
+export const sources = {
+  naukriPreview: (body: NaukriPreviewRequest) =>
+    api.post<NaukriPreviewResponse>('/sources/naukri/preview', body).then((r) => r.data),
+}
+
 // ── Canvas (workflows + nodes + edges) ───────────────────────────────────────
 export type WorkflowStatus = 'draft' | 'active' | 'paused' | 'archived'
 

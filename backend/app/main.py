@@ -35,6 +35,7 @@ from app.routers import (
     oauth,
     oauth_producthunt,
     projections,
+    sources,
     webhooks_in,
     workspaces,
 )
@@ -133,6 +134,7 @@ app.include_router(internal.router, prefix="/internal", tags=["internal"])
 app.include_router(events.router, prefix="/events", tags=["events"])
 app.include_router(projections.router, prefix="/projections", tags=["projections"])
 app.include_router(nodes.router, prefix="/nodes", tags=["nodes"])
+app.include_router(sources.router, prefix="/sources", tags=["sources"])
 app.include_router(canvas.router, prefix="/canvas", tags=["canvas"])
 app.include_router(integrations.router, prefix="/integrations", tags=["integrations"])
 app.include_router(inbox.router, prefix="/inbox", tags=["inbox"])

@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     muscle_shared_secret: str = ""
     deploy_webhook_secret: str = ""
 
+    # Camoufox anti-detect scraper microservice (internal Docker network). The
+    # Rust muscle reads these from its own env; the control plane needs them too
+    # for the synchronous source-preview endpoint (POST /sources/naukri/preview).
+    camoufox_base_url: str = "http://camoufox-v2:8100"
+    camoufox_shared_secret: str = ""  # X-Internal-Secret header; empty = open (dev)
+
     # Optional lead gen integrations
     apollo_api_key: str = ""
     hunter_api_key: str = ""

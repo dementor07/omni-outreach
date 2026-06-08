@@ -49,6 +49,10 @@
    {
     "date": "2026-06-08",
     "note": "Dedup-hardening pass (post-audit follow-up). +2 findings. Added clean_company_name tagline normalizer + auto-alias to company_kg.resolve_company (DEDUP-001); documented the Naukri employee/industry filter no-op (DEDUP-002). New regression test guards the hyphen-non-mangle contract."
+   },
+   {
+    "date": "2026-06-08",
+    "note": "Source-preview surface (Naukri-state option A). +1 finding (FEAT-002): synchronous POST /sources/naukri/preview + Lead Sources panel. Closes the async-source 'fire and lose the result' gap."
    }
   ]
  },
@@ -1214,6 +1218,18 @@
    "evidence": "filter_company enforces a <=500-employee cap + industry/domain signals, but Naukri's captured /jobapi/v3/search JSON carries neither employee_count nor structured industry. So for Naukri-sourced companies those gates never fire — a silent no-op an operator would assume was enforcing the size cap.",
    "recommendation": "Document the no-op at both the source node and the filter; note that enforcing the cap on Naukri leads requires upstream enrichment.",
    "fix": "Documented in sources/naukri.py docstring (CAVEAT block) + an inline NOTE at company_kg.filter_company's employee-cap check. Naukri companies are gated by name-blocklist + JD-keyword + hiring-signal score only; size cap needs domain->employee enrichment before crm.resolve_company. Not a bug — a documented limitation of the source."
+  },
+  {
+   "id": "FEAT-002",
+   "area": "sources",
+   "file": "backend/app/routers/sources.py",
+   "line": 1,
+   "severity": "MEDIUM",
+   "status": "FIXED",
+   "title": "No synchronous surface to preview a Naukri scrape (async-only source dropped results on the floor)",
+   "evidence": "source.naukri is async: the node emits an intent -> bus -> Rust muscle -> companies land on a lead's custom_fields for flow.for_each. Firing it ad-hoc via POST /nodes/{type}/execute returned events_published:1 and discarded the company list. An operator had no way to see what a keyword returns before wiring a workflow. Product gap (Naukri-state memory option A).",
+   "recommendation": "Add a synchronous POST /sources/naukri/preview that calls Camoufox directly + a Lead Sources panel.",
+   "fix": "Built app/services/naukri_preview.py (httpx -> Camoufox /scrape, dedups via _extract_companies mirroring the Rust naukri.rs extract_companies + clean_company_name, role_count per company) + app/routers/sources.py (POST /sources/naukri/preview, auth-scoped, 1-5 pages, maps PreviewError->HTTP status). config.py gained camoufox_base_url/camoufox_shared_secret. Frontend: v2.ts sources.naukriPreview + LeadSources.tsx NaukriPreviewPanel (keyword/location/pages form -> DataTable of companies). No bus, no lead, no persistence. tsc clean; audit reachability suite green."
   }
  ]
 }
