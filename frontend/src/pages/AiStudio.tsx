@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Sparkles, Gauge, PenLine, Database, Tag, Play } from 'lucide-react'
+import { Sparkles, Gauge, PenLine, Database, Tag, Play, ShieldCheck } from 'lucide-react'
 import { clsx } from 'clsx'
 import { ai, type AiJob, type AiJobKind } from '../api/v2'
 import PageHeader from '../components/PageHeader'
@@ -16,7 +16,13 @@ const KIND_META: Record<AiJobKind, { label: string; icon: React.ElementType; des
   compose: { label: 'AI compose', icon: PenLine, desc: 'Draft personalised outreach copy' },
   enrich: { label: 'Enrichment', icon: Database, desc: 'Fill missing contact/company fields' },
   classify: { label: 'Classify', icon: Tag, desc: 'Label inbound replies by intent' },
+  // Screening runs inside a workflow (ai.screen_company / ai.screen_person), not
+  // as an ad-hoc job — so it appears in the run log but not the launcher tiles.
+  screen: { label: 'ICP screen', icon: ShieldCheck, desc: 'Claude ACCEPT/REJECT against your ICP (runs in-workflow)' },
 }
+
+// Kinds an operator can launch ad-hoc from AI Studio (screen is workflow-only).
+const LAUNCHABLE_KINDS: AiJobKind[] = ['score', 'compose', 'enrich', 'classify']
 
 export default function AiStudio() {
   const qc = useQueryClient()
@@ -54,7 +60,7 @@ export default function AiStudio() {
 
       {/* Job launchers */}
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {(Object.keys(KIND_META) as AiJobKind[]).map((kind) => {
+        {LAUNCHABLE_KINDS.map((kind) => {
           const m = KIND_META[kind]
           const Icon = m.icon
           return (

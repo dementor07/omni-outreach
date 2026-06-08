@@ -365,7 +365,7 @@ export interface LeadScore {
   scored_at: ISODate
 }
 
-export type AiJobKind = 'score' | 'compose' | 'enrich' | 'classify'
+export type AiJobKind = 'score' | 'compose' | 'enrich' | 'classify' | 'screen'
 export type AiJobStatus = 'queued' | 'running' | 'done' | 'failed'
 
 export interface AiJob {

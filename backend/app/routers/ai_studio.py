@@ -47,7 +47,7 @@ class LeadScoreOut(BaseModel):
 
 class AiJobOut(BaseModel):
     id: uuid.UUID
-    kind: Literal["score", "compose", "enrich", "classify"]
+    kind: Literal["score", "compose", "enrich", "classify", "screen"]
     status: Literal["queued", "running", "done", "failed"]
     entity_type: str | None
     entity_id: uuid.UUID | None
@@ -61,7 +61,7 @@ class AiJobOut(BaseModel):
 
 
 class AiJobCreate(BaseModel):
-    kind: Literal["score", "compose", "enrich", "classify"]
+    kind: Literal["score", "compose", "enrich", "classify", "screen"]
     entity_type: str = Field("lead", description="What the job runs against (lead, contact, …)")
     entity_id: uuid.UUID | None = Field(None, description="Subject of the job")
     config: dict[str, Any] = Field(default_factory=dict, description="Job config (e.g. icp_description for score, instruction for compose)")
@@ -123,7 +123,7 @@ async def get_score(lead_id: uuid.UUID, _: AuthContext = Depends(get_current_wor
 )
 async def list_jobs(
     _: AuthContext = Depends(get_current_workspace),
-    kind: Literal["score", "compose", "enrich", "classify"] | None = Query(None),
+    kind: Literal["score", "compose", "enrich", "classify", "screen"] | None = Query(None),
     status: Literal["queued", "running", "done", "failed"] | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
 ) -> list[AiJobOut]:
