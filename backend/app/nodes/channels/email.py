@@ -57,9 +57,10 @@ async def execute(ctx: NodeContext) -> NodeResult:
     cfg = EmailChannelConfig(**ctx.config)
     correlation_id = ctx.correlation_id or str(uuid.uuid4())
 
-    # The actual Kafka publish lives in the bus client (added in a follow-up
-    # commit when bus.py is rewritten for v2). For now this node returns a
-    # stub event that records the intent — the bus wiring slots in here.
+    # Emit the channel.email.queued intent. The transition worker publishes it
+    # to omni.events; the dispatcher routes channel.email -> ChannelType.EMAIL ->
+    # the Rust muscle's handle_email (SMTP send). The node stays a pure shim —
+    # it renders config + reports intent; the muscle owns the network call.
     events = [
         {
             "event_type": "channel.email.queued",

@@ -62,11 +62,6 @@ def set_request_workspace(workspace_id: str) -> None:
     _current_workspace.set(workspace_id)
 
 
-def get_request_workspace() -> str | None:
-    """Read the current request's workspace (None if unset)."""
-    return _current_workspace.get()
-
-
 @asynccontextmanager
 async def system_scope() -> AsyncGenerator[None, None]:
     """Temporarily set the current workspace to ``SYSTEM_WORKSPACE``.

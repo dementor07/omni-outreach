@@ -179,7 +179,11 @@ async def get_latest_user_with_token(provider: str) -> str | None:
     """Fallback selector for cron-driven jobs that don't carry a user_id.
 
     Picks the most-recently-connected operator who has a row for this
-    provider. Good enough until campaigns get an owner_user_id column."""
+    provider. Good enough until campaigns get an owner_user_id column.
+
+    NOTE (CMP4, 2026-06-08): there is currently NO scheduler/cron in v2, so this
+    selector is not yet invoked from any periodic path — it exists for the
+    planned scheduled ProductHunt pull. Wire it up when that scheduler lands."""
     row = await fetch_one(
         """
         SELECT user_id FROM oauth_tokens

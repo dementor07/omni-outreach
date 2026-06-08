@@ -2,12 +2,11 @@ import { useMemo, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { clsx } from 'clsx'
-import { Inbox as InboxIcon, MessageSquare, Dot, CheckCircle2, Filter, Sparkles, ChevronLeft } from 'lucide-react'
+import { Inbox as InboxIcon, MessageSquare, Dot, CheckCircle2, ChevronLeft } from 'lucide-react'
 import { inbox, type InboxThread } from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
-import Button from '../components/Button'
 import Avatar from '../components/Avatar'
 import EmptyState from '../components/EmptyState'
 import ChannelIcon, { CHANNEL_META } from '../components/ChannelIcon'
@@ -52,12 +51,6 @@ export default function Inbox() {
         eyebrow="Replies"
         title="Unified inbox"
         description="Every inbound and outbound message across email, LinkedIn, SMS, voice — one projection."
-        actions={
-          <>
-            <Button variant="secondary" size="md" icon={Filter}>Saved views</Button>
-            <Button variant="primary" size="md" icon={Sparkles}>AI summarise</Button>
-          </>
-        }
         meta={
           totalThreads > 0 && !threadsQ.isLoading ? (
             <div className="flex flex-wrap items-center gap-1.5">

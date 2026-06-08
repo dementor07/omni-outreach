@@ -89,7 +89,11 @@ def verification_score(
         breakdown.append(("linkedin_url", 20))
     if domain_known:
         breakdown.append(("domain_verified", 10))
-    if any(k in t for k in ("ceo", "founder", "cto", "cmo", "vp", "director", "head of", "chief")):
-        breakdown.append(("decision_maker_title", 5))
+    # Seniority bonus, graduated by title (person_title_score): a CEO/founder is
+    # worth more than a generic "director". Scaled into a 0-10 band so it stays
+    # proportional to the other signals (was a flat +5 for any decision-maker).
+    seniority = person_title_score(title)  # 40 base .. 100
+    if seniority > 40:
+        breakdown.append(("decision_maker_title", round((seniority - 40) / 60 * 10)))
 
     return sum(s for _, s in breakdown), breakdown

@@ -59,10 +59,3 @@ def decrypt(token: str) -> str:
     except InvalidToken:
         log.error("Failed to decrypt integration key — token invalid or key rotated")
         raise ValueError("Decryption failed")
-
-
-def mask(value: str) -> str:
-    """Mask all but last 4 characters: ••••••••abc1"""
-    if len(value) <= 4:
-        return "••••"
-    return "•" * min(len(value) - 4, 12) + value[-4:]
