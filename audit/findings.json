@@ -45,6 +45,10 @@
    {
     "date": "2026-06-08",
     "note": "Completeness sweep (declared-but-unimplemented features). +11 findings. Fixed: webhook_in dead source (built router), flow.delay/flow.wait_until non-functional (now honour the orchestrator timer), credential_refs never swept (lifespan sweep), condition.replied channel filter inert, dead Inbox buttons + dead code removed, person_title_score wired in. Open: DRIFT-004 (PH cron pathway — no scheduler yet). New regression tests for delay primitives."
+   },
+   {
+    "date": "2026-06-08",
+    "note": "Dedup-hardening pass (post-audit follow-up). +2 findings. Added clean_company_name tagline normalizer + auto-alias to company_kg.resolve_company (DEDUP-001); documented the Naukri employee/industry filter no-op (DEDUP-002). New regression test guards the hyphen-non-mangle contract."
    }
   ]
  },
@@ -1186,6 +1190,30 @@
    "evidence": "Comment said the Kafka publish 'lives in a follow-up commit... stub event'. REALITY: channel.email is fully wired (NODE_CHANNEL -> dispatcher -> Rust handle_email). Stale misleading comment, no functional gap.",
    "recommendation": "Correct the comment.",
    "fix": "Rewrote the comment to describe the real .queued -> dispatcher -> handle_email path."
+  },
+  {
+   "id": "DEDUP-001",
+   "area": "services",
+   "file": "backend/app/services/company_kg.py",
+   "line": 53,
+   "severity": "MEDIUM",
+   "status": "FIXED",
+   "title": "No tagline normalizer — scraped company names deduped weaker than the source impl",
+   "evidence": "resolve_company matched on the raw scraped name (only a trailing single-word suffix strip in the fuzzy branch). Naukri's jobapi returns names like 'SourceMash Technologies | Leading Software Co' / 'Acme - We Build X'; the tagline defeated exact + alias match, so the same company was created multiple times. Allen's Rust normalizer stripped these; our port dropped it.",
+   "recommendation": "Add a clean_company_name() (pure) that strips taglines on |/-/:/bullet separators + trailing bracketed descriptors, apply it at the top of resolve_company, and auto-alias the original raw name.",
+   "fix": "Added clean_company_name() in company_kg.py (regex split on '\\s+[|:bullet-dash]\\s+' + trailing (..)/[..] strip + whitespace collapse) — deliberately requires spaces around '-' so 'Co-Working Spaces Ltd' is NOT mangled. resolve_company cleans the name before exact/alias/fuzzy/create. _register_alias() records the original tagline-bearing name as an 'auto_tagline' alias so the next scrape of that exact variant hits the alias fast-path. Regression test test_congruity.py::test_clean_company_name_strips_taglines_only (10 cases incl. the hyphen/dotted/empty non-mangle guards)."
+  },
+  {
+   "id": "DEDUP-002",
+   "area": "sources",
+   "file": "backend/app/nodes/sources/naukri.py",
+   "line": 9,
+   "severity": "LOW",
+   "status": "FIXED",
+   "title": "Naukri employee_count / industry filters silently no-op (jobapi omits those fields)",
+   "evidence": "filter_company enforces a <=500-employee cap + industry/domain signals, but Naukri's captured /jobapi/v3/search JSON carries neither employee_count nor structured industry. So for Naukri-sourced companies those gates never fire — a silent no-op an operator would assume was enforcing the size cap.",
+   "recommendation": "Document the no-op at both the source node and the filter; note that enforcing the cap on Naukri leads requires upstream enrichment.",
+   "fix": "Documented in sources/naukri.py docstring (CAVEAT block) + an inline NOTE at company_kg.filter_company's employee-cap check. Naukri companies are gated by name-blocklist + JD-keyword + hiring-signal score only; size cap needs domain->employee enrichment before crm.resolve_company. Not a bug — a documented limitation of the source."
   }
  ]
 }

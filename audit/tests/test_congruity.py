@@ -120,3 +120,24 @@ def test_flow_nodes_held_by_worker_not_advanced_immediately():
         "flow.delay/wait_until are not special-cased in _fire_node — they would "
         "advance immediately via the projection_only path"
     )
+
+
+# ── DEDUP: clean_company_name must strip taglines without mangling real names ──
+from app.services.company_kg import clean_company_name  # noqa: E402
+
+
+def test_clean_company_name_strips_taglines_only():
+    """REGRESSION (dedup hardening): scraped names arrive with taglines glued on
+    via | / - / : separators. We must strip the tagline to dedup, but must NOT
+    mangle a legitimately hyphenated name (no surrounding spaces on the hyphen)."""
+    assert clean_company_name("SourceMash Technologies | Leading Software Co") == "SourceMash Technologies"
+    assert clean_company_name("Acme - We Build X") == "Acme"
+    assert clean_company_name("Foo : RevOps Platform") == "Foo"
+    assert clean_company_name("Globex  Corp   [Remote]") == "Globex Corp"
+    assert clean_company_name("Acme (India)") == "Acme"
+    # Must NOT be mangled: hyphenated word, dotted name, plain name, empty.
+    assert clean_company_name("Co-Working Spaces Ltd") == "Co-Working Spaces Ltd"
+    assert clean_company_name("Scooter.ai") == "Scooter.ai"
+    assert clean_company_name("Telnyx") == "Telnyx"
+    assert clean_company_name("") == ""
+    assert clean_company_name(None) == ""

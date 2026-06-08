@@ -10,6 +10,14 @@ This is the source fan-out (1 keyword -> N companies). Downstream nodes resolve
 each company (dedup/KG), filter, signal-score, discover people, and verify into
 leads — the same interior pipeline as source.linkedin_jobs.
 
+CAVEAT — the captured ``/jobapi/v3/search`` JSON carries NO ``employee_count``
+and NO structured ``industry`` per company. So for Naukri-sourced companies the
+KG ``filter_company`` employee cap and any industry/domain signal gating are
+NO-OPS (they only bite for sources that supply those fields, e.g. LinkedIn jobs
++ enrichment). Naukri companies are gated by name blocklist + JD-keyword +
+hiring-signal score only. To enforce the size cap on Naukri leads, enrich the
+company (domain -> employee count) before ``crm.resolve_company``.
+
 Ported from omniagenticai/omni-outreach feature/dev-automation
 (omni_outreach_v3 NaukriCollector + Camoufox scraper), re-homed as a v2 source
 node so leads flow into the event log -> CRM/canvas/channels instead of a

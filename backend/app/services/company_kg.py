@@ -18,12 +18,39 @@ returns previously found decision-makers so people-discovery can be skipped.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 
 from app.db import execute, fetch_all, fetch_one
 
 log = logging.getLogger(__name__)
+
+# Separators a scraped name uses to glue a tagline / descriptor onto the real
+# company name: "SourceMash Technologies | Leading Software Co",
+# "Acme - We Build X", "Foo : RevOps Platform". Naukri's jobapi in particular
+# returns "<Company> | <hiring blurb>". We keep only the head segment.
+_TAGLINE_SPLIT = re.compile(r"\s+[|:•·–—]\s+|\s+-\s+")
+# Trailing parenthetical / bracketed descriptors: "Acme (India)", "Foo [Remote]".
+_TRAILING_BRACKET = re.compile(r"\s*[\(\[][^)\]]*[\)\]]\s*$")
+
+
+def clean_company_name(raw: str) -> str:
+    """Normalize a scraped company name before dedup matching.
+
+    Strips taglines glued on with ``|`` / ``-`` / ``:`` separators and trailing
+    bracketed descriptors, collapses whitespace. Pure (no DB). Mirrors Allen's
+    Rust normalizer so our dedup matches his. Suffix-stripping (Ltd/Pvt/...) is
+    handled separately during fuzzy match — this only removes taglines.
+
+    ``"SourceMash Technologies | Leading Software Co"`` -> ``"SourceMash Technologies"``
+    ``"Acme (India)"`` -> ``"Acme"`` ; ``""`` / ``None`` -> ``""``.
+    """
+    if not raw:
+        return ""
+    head = _TAGLINE_SPLIT.split(raw.strip(), maxsplit=1)[0]
+    head = _TRAILING_BRACKET.sub("", head)
+    return re.sub(r"\s+", " ", head).strip()
 
 # Common company-name suffixes stripped during fuzzy matching (resolver.rs parity).
 _COMMON_SUFFIXES: tuple[str, ...] = (
@@ -60,7 +87,8 @@ async def resolve_company(
 ) -> ResolvedCompany:
     """Resolve a raw company name to a canonical omni_companies row, deduping
     via exact / alias / fuzzy match and creating it if genuinely new."""
-    name = (name or "").strip()
+    raw_name = (name or "").strip()
+    name = clean_company_name(raw_name)
     if not name:
         raise ValueError("company name required")
 
@@ -78,6 +106,7 @@ async def resolve_company(
             row["id"],
             workspace_id,
         )
+        await _register_alias(workspace_id, row["id"], raw_name, name)
         return _to_resolved(row, created=False)
 
     # 2. Alias lookup.
@@ -144,7 +173,24 @@ async def resolve_company(
     if not row:
         raise RuntimeError(f"company resolve race lost and row vanished: {name}")
     created = str(row["id"]) == cid
+    await _register_alias(workspace_id, row["id"], raw_name, name)
     return _to_resolved(row, created=created)
+
+
+async def _register_alias(workspace_id: str, company_id, raw_name: str, clean_name: str) -> None:
+    """Record the original (tagline-bearing) scraped name as an alias when it
+    differs from the canonical name, so the next scrape of that exact variant
+    hits the alias fast-path instead of re-cleaning. No-op when they match."""
+    raw_name = (raw_name or "").strip()
+    if not raw_name or raw_name.lower() == (clean_name or "").lower():
+        return
+    await execute(
+        "INSERT INTO omni_company_aliases (workspace_id, company_id, alias, source) "
+        "VALUES ($1, $2, $3, 'auto_tagline') ON CONFLICT (workspace_id, alias) DO NOTHING",
+        workspace_id,
+        company_id,
+        raw_name,
+    )
 
 
 async def cached_people(workspace_id: str, company_id: str, limit: int = 10) -> list[dict]:
@@ -234,6 +280,9 @@ async def filter_company(
     for b in blocked:
         if b["pattern"] and b["pattern"].lower() in name_l:
             return False, f"blocklisted:{b['pattern']}"
+    # NOTE: a no-op for Naukri-sourced companies — Naukri's jobapi carries no
+    # employee_count, so this only bites when an upstream source/enrichment
+    # supplied the count (see sources/naukri.py docstring caveat).
     if employee_count is not None and employee_count > max_employees:
         return False, f"employee_count {employee_count} > {max_employees}"
     desc_l = (description or "").lower()
