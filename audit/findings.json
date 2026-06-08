@@ -61,6 +61,10 @@
    {
     "date": "2026-06-08",
     "note": "Capability-parity port vs the fork (+1: PORT-001). Indeed job source added end-to-end (node + Py/Rust channel + muscle handler + lead columns). Matches Allen's 3-source count."
+   },
+   {
+    "date": "2026-06-08",
+    "note": "First real Naukri->people e2e run (+1: E2E-001, OPEN/HIGH). Chain executes every stage but produces no contact: duplicate company fan-out + join over-count + screen verdict not written to child custom_fields. Ports/create_contact/dedup all live & correct; this is a pre-existing execution-layer defect."
    }
   ]
  },
@@ -1262,6 +1266,18 @@
    "evidence": "Allen's feature/dev-automation added an Indeed job source (omni_outreach_v3/src/collectors/indeed.rs, Apify curious_coder/indeed-scraper) on 2026-06-08, giving his standalone 3 sources to our 2. Directive: port every capability he leads on into our v2 spine ([[project_allen_bysignal_divergence]]).",
    "recommendation": "Add source.indeed as a v2 node mirroring source.linkedin_jobs (shared Apify connection) + ChannelType.INDEED + a muscle indeed.rs handler.",
    "fix": "source.indeed node (capabilities=connection:apify, country+keywords config) -> ChannelType.INDEED in events.py + commands.NODE_CHANNEL -> backend-rust handlers/indeed.rs (Apify run/poll/fetch, curious_coder~indeed-scraper, companyDetails.name/title/originalApplyUrl mapping, dedup by company w/ role_count — SAME row shape as naukri.rs) wired into models.rs enum/as_str + handlers/mod.rs dispatch. lead_columns.py gained source.indeed columns + pipeline order. 42 nodes (was 41), 0 import failures. Congruity test test_source_indeed_channel_congruent_python_and_rust guards the Py<->Rust enum agreement. Rust compiled in the muscle Docker build."
+  },
+  {
+   "id": "E2E-001",
+   "area": "execution",
+   "file": "backend/app/execution/transition_worker.py",
+   "line": 466,
+   "severity": "HIGH",
+   "status": "VERIFIED",
+   "title": "Naukri people-stage e2e fails: company fan-out duplicates + join over-counts + screen verdict not written to child custom_fields",
+   "evidence": "Live run 2026-06-08 (wf Marketing Agencies India, source.naukri start, lead 345d33d3): naukri scraped OK, 16 ai.screen_company ran (status=sent), but ZERO contacts. DB lineage: parent fanout_total=1 but fanout_done=64; 4 child leads ALL carry the SAME company ('Axis Max Life Insurance') = duplicate fan-out from a max_items:1 for_each; children completed with current_node_id=NULL and custom_fields.screen EMPTY (verdict never written back) so no child could route accept->serper_people. No source.serper_people.requested, no ai.screen_person.queued, no contact.created emitted. Three compounding bugs: (a) for_each spawned duplicate children for one company despite max_items:1; (b) flow.join fanout_done over-counts (64 vs total 1) because many handles route into one join; (c) ai.screen_company verdict (muscle result next_handle) is not persisted onto the child lead's custom_fields.screen, so routing past the screen can't see ACCEPT. Also data: the naukri 'marketing agency' scrape returned an insurance MNC, which the strict ICP prompt would reject anyway.",
+   "recommendation": "Trace _fan_out child creation (why duplicates for max_items:1) + _join_arrive counter semantics (count distinct children, not arrivals) + ensure the ai_screen result writes decision into the child's custom_fields before routing. Fix on a branch with a local harness, not live prod trial.",
+   "fix": "OPEN — diagnosed, not yet fixed. The ports + create_contact fix + dedup are live and correct; this is a pre-existing nested-fan-out/join + screen-writeback defect in the execution layer, surfaced by the first real Naukri->people e2e."
   }
  ]
 }
