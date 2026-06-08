@@ -307,6 +307,106 @@ async def _fan_out(workspace_id: str, parent: dict, for_each_node: dict, correla
     log.info("fanned out lead %s -> %d children at %s", parent_id, len(items), for_each_id)
 
 
+async def _outgoing_edges(workspace_id: str, source_node_id: str) -> list[dict]:
+    """All edges leaving a node (source_handle + target_node_id). Used by race
+    to spawn one child per branch arm."""
+    async with system_scope():
+        return await fetch_all(
+            "SELECT source_handle, target_node_id FROM omni_workflow_edges "
+            "WHERE workspace_id=$1 AND source_node_id=$2 ORDER BY source_handle",
+            workspace_id,
+            source_node_id,
+        )
+
+
+async def _race_fan_out(workspace_id: str, parent: dict, race_node: dict, correlation_id: str | None) -> None:
+    """A lead reached flow.race. Spawn one child per ``branch_*`` edge leaving the
+    race node; each child walks its arm in parallel. The parent parks
+    (status='waiting', fanout_total=#arms). The FIRST child to reach the matching
+    flow.join wins (see _join_arrive's race branch): the parent advances and the
+    losing siblings are cancelled. Reuses the same lineage columns
+    (parent_lead_id / origin_node_id) as for_each so the join machinery is shared.
+
+    Idempotent on redelivery: a parent already parked at this race node with a
+    non-null fanout_total has already fanned out — no-op."""
+    race_id = str(race_node["id"])
+    if (
+        str(parent.get("current_node_id") or "") == race_id
+        and (parent.get("status") or "") == "waiting"
+        and parent.get("fanout_total") is not None
+        and parent.get("fanout_total") > 0
+    ):
+        log.info("race_fan_out skipped: lead %s already raced at %s (redelivery)", parent.get("id"), race_id)
+        return
+
+    # Only the branch_* arms are race participants (the `timeout` handle is the
+    # parent's own escape, not a child arm).
+    arms = [
+        e for e in await _outgoing_edges(workspace_id, race_id)
+        if str(e["source_handle"]).startswith("branch_")
+    ]
+    if not arms:
+        # Misconfigured race with no arms — route the parent to timeout (or leaf).
+        timeout_edge = await _outgoing_edge(workspace_id, race_id, "timeout")
+        if timeout_edge:
+            await _advance_and_fire(workspace_id, str(parent["id"]), str(timeout_edge["target_node_id"]), correlation_id)
+        else:
+            await _advance_lead(workspace_id, str(parent["id"]), None, status="completed")
+        log.warning("race %s has no branch_* arms; parent routed to timeout/leaf", race_id)
+        return
+
+    parent_id = str(parent["id"])
+    async with system_scope():
+        await execute(
+            "UPDATE omni_leads SET current_node_id=$1, status='waiting', fanout_total=$2, "
+            "fanout_done=0, updated_at=NOW() WHERE id=$3 AND workspace_id=$4",
+            race_id,
+            len(arms),
+            parent_id,
+            workspace_id,
+        )
+
+    for arm in arms:
+        target_id = str(arm["target_node_id"])
+        child_id = str(uuid.uuid4())
+        child_fields = dict(parent.get("custom_fields") or {})
+        async with system_scope():
+            await execute(
+                """
+                INSERT INTO omni_leads
+                    (id, workspace_id, contact_id, workflow_id, current_node_id, status,
+                     custom_fields, parent_lead_id, origin_node_id)
+                VALUES ($1, $2, $3, $4, $5, 'active', $6, $7, $8)
+                """,
+                child_id,
+                workspace_id,
+                parent.get("contact_id"),
+                parent.get("workflow_id"),
+                target_id,
+                json.dumps(child_fields),
+                parent_id,
+                race_id,
+            )
+        child, contact = await _lead_with_contact(workspace_id, child_id)
+        arm_node = await _node_row(workspace_id, target_id)
+        if child and arm_node:
+            await _fire_node(workspace_id, child, contact, arm_node, correlation_id)
+
+    # Schedule the timeout: a delayed synthetic result for the PARENT on the
+    # race's `timeout` handle. When it fires, handle_transition only honours it
+    # if the parent is still parked at this race (no arm has won) — a winner
+    # flips the parent to 'active'/advances it, so the late timeout no-ops.
+    cfg = race_node.get("config") or {}
+    timeout_hours = cfg.get("timeout_hours")
+    timeout_hours = 168 if timeout_hours is None else int(timeout_hours)
+    await _emit_synthetic_result(
+        workspace_id, parent_id, race_id, "timeout", correlation_id,
+        delay_seconds=float(timeout_hours) * 3600.0,
+    )
+
+    log.info("raced lead %s -> %d parallel arms at %s (timeout %dh)", parent_id, len(arms), race_id, timeout_hours)
+
+
 async def _join_arrive(workspace_id: str, child: dict, correlation_id: str | None) -> None:
     """A child lead reached a flow.join. End the child, bump the parent's
     fanout_done, and release the parent down the for_each `done` edge once all
@@ -315,8 +415,47 @@ async def _join_arrive(workspace_id: str, child: dict, correlation_id: str | Non
     origin_node_id = child.get("origin_node_id")
     await _advance_lead(workspace_id, str(child["id"]), None, status="completed")
     if not parent_id:
-        return  # a join with no upstream for_each — child just ends
+        return  # a join with no upstream for_each/race — child just ends
 
+    # The origin node decides the barrier semantics: flow.race releases on the
+    # FIRST arrival (and cancels the losers); flow.for_each waits for ALL.
+    origin = await _node_row(workspace_id, str(origin_node_id)) if origin_node_id else None
+    origin_type = (origin or {}).get("node_type")
+
+    if origin_type == "flow.race":
+        # First-arm-wins. Atomically claim the win: only the first arrival flips
+        # the parent out of 'waiting'. RETURNING gates the race so a second
+        # arriving sibling sees no row and no-ops (idempotent under redelivery).
+        async with system_scope():
+            parent = await fetch_one(
+                "UPDATE omni_leads SET status='active', fanout_done = fanout_done + 1, "
+                "updated_at=NOW() WHERE id=$1 AND workspace_id=$2 AND status='waiting' RETURNING *",
+                str(parent_id),
+                workspace_id,
+            )
+        if not parent:
+            return  # a sibling already won (or parent gone) — this loser just ended above
+        # Cancel the still-running losing siblings (other children of this race).
+        async with system_scope():
+            await execute(
+                "UPDATE omni_leads SET status='cancelled', current_node_id=NULL, updated_at=NOW() "
+                "WHERE workspace_id=$1 AND parent_lead_id=$2 AND origin_node_id=$3 "
+                "AND id<>$4 AND status NOT IN ('completed','cancelled')",
+                workspace_id,
+                str(parent_id),
+                str(origin_node_id),
+                str(child["id"]),
+            )
+        done_edge = await _outgoing_edge(workspace_id, str(origin_node_id), "done")
+        if not done_edge:
+            await _advance_lead(workspace_id, str(parent["id"]), None, status="completed")
+            log.info("race won by %s; parent %s released (no done edge) -> completed", child["id"], parent["id"])
+            return
+        await _advance_and_fire(workspace_id, str(parent["id"]), str(done_edge["target_node_id"]), correlation_id)
+        log.info("race won by %s; parent %s -> %s, siblings cancelled", child["id"], parent["id"], done_edge["target_node_id"])
+        return
+
+    # flow.for_each barrier: wait for ALL children.
     async with system_scope():
         parent = await fetch_one(
             "UPDATE omni_leads SET fanout_done = fanout_done + 1, updated_at=NOW() "
@@ -334,6 +473,64 @@ async def _join_arrive(workspace_id: str, child: dict, correlation_id: str | Non
         return
     await _advance_and_fire(workspace_id, str(parent["id"]), str(done_edge["target_node_id"]), correlation_id)
     log.info("join released parent %s -> %s", parent["id"], done_edge["target_node_id"])
+
+
+# Fixed-duration unit table for flow.delay (mirrors the node's own table).
+_DELAY_UNIT_SECONDS = {"minutes": 60, "hours": 3600, "days": 86400}
+
+
+async def _workflow_timezone(workspace_id: str, workflow_id: str | None) -> str:
+    if not workflow_id:
+        return "UTC"
+    async with system_scope():
+        row = await fetch_one(
+            "SELECT timezone FROM omni_workflows WHERE id=$1 AND workspace_id=$2",
+            workflow_id,
+            workspace_id,
+        )
+    return (row or {}).get("timezone") or "UTC"
+
+
+async def _compute_flow_delay_seconds(workspace_id: str, node: dict) -> float:
+    """Seconds a flow.delay / flow.wait_until node should hold the lead.
+
+    flow.delay: amount × unit (fixed duration).
+    flow.wait_until: seconds until the next moment inside the configured
+    business-hours window (earliest_hour ≤ local hour < latest_hour, on an
+    allowed weekday), evaluated in the workflow's timezone. 0 if the window is
+    open right now."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    cfg = node.get("config") or {}
+    node_type = node.get("node_type")
+
+    if node_type == "flow.delay":
+        amount = int(cfg.get("amount") or 0)
+        unit = cfg.get("unit") or "hours"
+        return float(max(0, amount) * _DELAY_UNIT_SECONDS.get(unit, 3600))
+
+    # flow.wait_until
+    earliest = int(cfg.get("earliest_hour", 9))
+    latest = int(cfg.get("latest_hour", 17))
+    days = cfg.get("days_of_week") or [0, 1, 2, 3, 4]
+    try:
+        tz = ZoneInfo(await _workflow_timezone(workspace_id, node.get("workflow_id")))
+    except Exception:  # noqa: BLE001 — bad tz string → UTC
+        tz = ZoneInfo("UTC")
+    now = datetime.now(tz)
+    # Search forward up to 8 days for the first minute the window is open.
+    for day_offset in range(0, 8):
+        d = now + timedelta(days=day_offset)
+        if d.weekday() not in days:
+            continue
+        window_open = d.replace(hour=earliest, minute=0, second=0, microsecond=0)
+        window_close = d.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(hours=latest)
+        if day_offset == 0 and now >= window_open and now < window_close:
+            return 0.0  # already inside the window
+        if d >= now and window_open >= now:
+            return max(0.0, (window_open - now).total_seconds())
+    return 0.0  # no matching day found in a week → don't hold
 
 
 # Intent-event suffixes the dispatcher recognises (must match dispatcher._is_intent).
@@ -385,13 +582,26 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
     # reading custom_fields.tags). Cheap single-row lookup, only when needed.
     last_inbound_at = None
     if node_type == "condition.replied" and lead.get("contact_id"):
+        # CMP8: honour the node's optional `channel` filter — "did they reply on
+        # email specifically?" must not match a LinkedIn reply. The node has no DB
+        # handle, so the worker reads its config and filters the query.
+        replied_channel = (node.get("config") or {}).get("channel")
         async with system_scope():
-            row = await fetch_one(
-                "SELECT MAX(occurred_at) AS last_inbound FROM omni_messages "
-                "WHERE workspace_id=$1 AND contact_id=$2 AND direction='inbound'",
-                workspace_id,
-                lead["contact_id"],
-            )
+            if replied_channel:
+                row = await fetch_one(
+                    "SELECT MAX(occurred_at) AS last_inbound FROM omni_messages "
+                    "WHERE workspace_id=$1 AND contact_id=$2 AND direction='inbound' AND channel=$3",
+                    workspace_id,
+                    lead["contact_id"],
+                    replied_channel,
+                )
+            else:
+                row = await fetch_one(
+                    "SELECT MAX(occurred_at) AS last_inbound FROM omni_messages "
+                    "WHERE workspace_id=$1 AND contact_id=$2 AND direction='inbound'",
+                    workspace_id,
+                    lead["contact_id"],
+                )
         last_inbound_at = (row or {}).get("last_inbound")
 
     # Company knowledge-graph resolution for crm.resolve_company. The node has no
@@ -480,6 +690,35 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
             )
         await bus.publish_events(envelopes)
 
+    # M3: accrue the company knowledge-graph people cache. When a person reaches
+    # crm.create_contact inside the people fan-out, the lead carries the person
+    # (custom_fields.item) and the resolved company (custom_fields.company_resolution).
+    # Cache the person against that company and mark the company people-discovered,
+    # so a future run hits crm.resolve_company's `known` branch and skips paid
+    # re-discovery (the KG moat that was previously inert — cache_person had no
+    # caller). The node has no DB handle, so the worker does it (same pattern as
+    # the resolve_company injection above).
+    if node_type == "crm.create_contact" and not result.error:
+        person = node_custom_fields.get("item") or {}
+        resolution = node_custom_fields.get("company_resolution") or {}
+        company_id = resolution.get("company_id")
+        linkedin_url = person.get("linkedin_url") or (contact or {}).get("linkedin_url")
+        if company_id and linkedin_url:
+            person_name = " ".join(
+                p for p in (person.get("first_name"), person.get("last_name")) if p
+            ).strip() or person.get("name") or ""
+            async with system_scope():
+                await company_kg.cache_person(
+                    workspace_id,
+                    str(company_id),
+                    name=person_name,
+                    title=person.get("title") or person.get("headline"),
+                    linkedin_url=str(linkedin_url),
+                    source=person.get("source") or "discovery",
+                )
+                await company_kg.mark_people_discovered(workspace_id, str(company_id))
+            log.info("KG: cached person for company %s (people_discovered=true)", company_id)
+
     # CONTRACT-005: a node that parks (flow.human_approval) suspends the lead.
     # Its events were published above (approval.requested -> approvals queue);
     # the lead now WAITS and must not advance. It resumes when the resolve
@@ -505,6 +744,32 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
     #         would stall silently (CONTRACT-001). Make it LOUD — error the lead.
     if commands.NODE_CHANNEL.get(node_type) is not None:
         return
+    # H1: flow.goal / flow.end are TERMINAL — the lead exits here. Set a distinct
+    # terminal status (converted vs ended) directly so a goal-conversion is
+    # distinguishable from a dead-end in the Leads view + Analytics, instead of
+    # both collapsing to the generic 'completed' the leaf path would assign. No
+    # synthetic result is emitted (there is no outgoing edge to follow).
+    if node_type in ("flow.goal", "flow.end"):
+        terminal_status = "converted" if node_type == "flow.goal" else "ended"
+        await _advance_lead(workspace_id, str(lead["id"]), None, status=terminal_status)
+        log.info("lead %s reached %s -> status=%s", lead["id"], node_type, terminal_status)
+        return
+    # CMP9/CMP10: flow.delay / flow.wait_until must actually HOLD the lead. They
+    # advance on the same handle as a projection-only node, but with a non-zero
+    # delay so the orchestrator's processing-time timer fires the transition
+    # later (the mechanism flow.race's timeout uses). Without this they emitted
+    # delay only as telemetry and advanced immediately — a "wait 3 days" fired
+    # instantly. The lead parks 'waiting' until the timer releases it.
+    if node_type in ("flow.delay", "flow.wait_until"):
+        delay_seconds = await _compute_flow_delay_seconds(workspace_id, node)
+        if delay_seconds > 0:
+            await _advance_lead(workspace_id, str(lead["id"]), str(node["id"]), status="waiting")
+        await _emit_synthetic_result(
+            workspace_id, str(lead["id"]), str(node["id"]), result.handle, correlation_id,
+            delay_seconds=delay_seconds,
+        )
+        log.info("lead %s holding at %s for %.0fs", lead["id"], node_type, delay_seconds)
+        return
     kind = _classify_emitted_events(result.events)
     if kind == "projection_only":
         await _emit_synthetic_result(workspace_id, str(lead["id"]), str(node["id"]), result.handle, correlation_id)
@@ -520,14 +785,26 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
         await _advance_lead(workspace_id, str(lead["id"]), None, status="errored")
 
 
-async def _emit_synthetic_result(workspace_id: str, lead_id: str, node_id: str, handle: str, correlation_id: str | None) -> None:
+async def _emit_synthetic_result(
+    workspace_id: str,
+    lead_id: str,
+    node_id: str,
+    handle: str,
+    correlation_id: str | None,
+    delay_seconds: float = 0.0,
+) -> None:
     """For non-muscle nodes, publish an ExecutionResult-shaped envelope to
-    outreach.results so the Flink orchestrator emits the next transition."""
+    outreach.results so the Flink orchestrator emits the next transition.
+
+    ``delay_seconds`` > 0 schedules the transition for later via the
+    orchestrator's processing-time timer (the same mechanism flow.delay uses).
+    The orchestrator only delays ``sent`` results, so a delayed synthetic uses
+    status='sent'; an immediate one uses 'skipped' (ran, no side effect)."""
     result = {
         "command_id": str(uuid.uuid4()),
         "task_id": str(uuid.uuid4()),
         "lead_id": lead_id,
-        "status": "skipped",  # ran to completion, no side effect
+        "status": "sent" if delay_seconds > 0 else "skipped",
         "error": None,
         "is_retriable": False,
         "telemetry": {},
@@ -535,6 +812,7 @@ async def _emit_synthetic_result(workspace_id: str, lead_id: str, node_id: str, 
             "workspace_id": workspace_id,
             "node_id": node_id,
             "next_handle": handle,
+            "accumulated_delay_seconds": delay_seconds,
             # DATAFLOW-001: carry the run identity forward. Without this the
             # orchestrator emits the next transition with correlation_id=None and
             # the downstream node mints a fresh id (`ctx.correlation_id or uuid4`),
@@ -664,6 +942,36 @@ async def handle_transition(t: dict) -> None:
             log.warning("retry for lead %s: node/lead gone; dropping", lead_id)
         return
 
+    # flow.race timeout: the delayed timeout transition only fires the `timeout`
+    # arm if the parent is STILL parked at the race (no arm won). A winner already
+    # flipped the parent to 'active' and advanced it, so a late timeout is a stale
+    # no-op. Also cancel any still-running arms when the timeout actually fires.
+    if handle == "timeout":
+        async with system_scope():
+            prow = await fetch_one(
+                "SELECT status, current_node_id FROM omni_leads WHERE id=$1 AND workspace_id=$2",
+                lead_id,
+                workspace_id,
+            )
+        still_waiting = (
+            prow
+            and (prow.get("status") or "") == "waiting"
+            and str(prow.get("current_node_id") or "") == str(source_node_id)
+        )
+        if not still_waiting:
+            log.info("race timeout for lead %s ignored — already resolved", lead_id)
+            return
+        async with system_scope():
+            await execute(
+                "UPDATE omni_leads SET status='cancelled', current_node_id=NULL, updated_at=NOW() "
+                "WHERE workspace_id=$1 AND parent_lead_id=$2 AND origin_node_id=$3 "
+                "AND status NOT IN ('completed','cancelled')",
+                workspace_id,
+                lead_id,
+                str(source_node_id),
+            )
+        await _advance_lead(workspace_id, lead_id, None, status="active")
+
     target = await _target_node(workspace_id, source_node_id, handle)
     if not target:
         # Leaf reached on this handle — the lead's journey is done.
@@ -692,6 +1000,12 @@ async def handle_transition(t: dict) -> None:
     # spawn one child lead per element of the parent's collection.
     if target_type == "flow.for_each":
         await _fan_out(workspace_id, lead, target, correlation_id)
+        return
+
+    # flow.race: parallel fan-out. Spawn one child per branch_N edge; the parent
+    # parks until the FIRST child re-converges at a flow.join (first-arm-wins).
+    if target_type == "flow.race":
+        await _race_fan_out(workspace_id, lead, target, correlation_id)
         return
 
     await _fire_node(workspace_id, lead, contact, target, correlation_id)

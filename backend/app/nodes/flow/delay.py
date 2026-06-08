@@ -1,7 +1,9 @@
 """Wait a fixed duration before continuing.
 
-The orchestrator (Flink) reads this node's config, registers a
-processing-time timer, and emits the transition when it fires.
+The transition worker computes the delay (amount × unit) from this node's
+config and emits a *delayed* synthetic result; the Flink orchestrator's
+processing-time timer holds the lead (status='waiting') and fires the
+transition when it elapses. execute() only validates + reports the duration.
 """
 
 from __future__ import annotations

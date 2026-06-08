@@ -461,11 +461,52 @@ _PROJECTORS = {
 }
 
 
+async def _project_lead_outcome(env: dict[str, Any]) -> None:
+    """H1: record a lead's terminal outcome from flow.goal / flow.end.
+
+    flow.goal emits ``lead.goal_reached`` {goal_name, value}; flow.end emits
+    ``lead.sequence_ended`` {reason}. The transition worker already set the lead's
+    status (converted / ended); here we persist the outcome detail into
+    custom_fields so Analytics can attribute conversions (goal_name + value) and
+    explain dead-ends (reason). Keyed by entity_id (the lead)."""
+    p = env.get("payload") or {}
+    et = env["event_type"]
+    if et == "lead.goal_reached":
+        outcome = {
+            "kind": "converted",
+            "goal_name": p.get("goal_name"),
+            "value": p.get("value"),
+            "at": env.get("occurred_at"),
+        }
+        status = "converted"
+    else:  # lead.sequence_ended
+        outcome = {"kind": "ended", "reason": p.get("reason"), "at": env.get("occurred_at")}
+        status = "ended"
+    await execute(
+        """
+        UPDATE omni_leads
+           SET custom_fields = COALESCE(custom_fields, '{}'::jsonb) || jsonb_build_object('outcome', $1::jsonb),
+               status = $2,
+               updated_at = NOW()
+         WHERE id = $3 AND workspace_id = $4
+        """,
+        json.dumps(outcome),
+        status,
+        env["entity_id"],
+        env["workspace_id"],
+    )
+
+
 async def _apply_projection(env: dict[str, Any]) -> None:
     et = env["event_type"]
     entity = env["entity_type"]
     if et in ("message.received", "message.sent"):
         await _project_message(env)
+        return
+    # H1: terminal lead outcomes (conversion vs dead-end) carry detail the
+    # generic lead projector would drop. Handle before the entity dispatch.
+    if et in ("lead.goal_reached", "lead.sequence_ended") and env.get("entity_id"):
+        await _project_lead_outcome(env)
         return
     # AI lifecycle events feed two projections: the job log (always) and,
     # for completed scores, the per-lead score table.
