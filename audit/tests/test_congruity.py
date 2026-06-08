@@ -1,0 +1,122 @@
+"""Congruity invariants — encode the cross-boundary contracts whose drift caused
+the 2026-06-08 audit findings, so the same class of bug can't silently return.
+
+Each test is a runtime-faithful proxy for a contract that spans two parts of the
+system (dispatcher↔node config, Pydantic↔DB CHECK, Python enum↔Rust enum). They
+open no DB connection — pure static/registry checks.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from pathlib import Path
+
+os.environ.setdefault("DB_PASSWORD", "testpass")
+os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production")
+os.environ.setdefault("REDIS_PASSWORD", "")
+
+from app.core.events import ChannelType  # noqa: E402
+from app.execution import dispatcher  # noqa: E402
+
+REPO = Path(__file__).resolve().parents[2]
+
+
+# ── C1: channel.linkedin mode must route to the matching muscle channel ────────
+def test_linkedin_mode_routes_to_distinct_channels():
+    """REGRESSION C1: the dispatcher must map channel.linkedin + payload.mode to
+    the mode-specific ChannelType. The bug was a static NODE_CHANNEL value that
+    sent every mode as a DM."""
+    expected = {
+        "invite": ChannelType.LINKEDIN_INVITE,
+        "dm": ChannelType.LINKEDIN_DM,
+        "inmail": ChannelType.LINKEDIN_INMAIL,
+        "profile_view": ChannelType.LINKEDIN_PROFILE_VIEW,
+    }
+    for mode, chan in expected.items():
+        got = dispatcher._channel_for("channel.linkedin", {"mode": mode})
+        assert got == chan, f"channel.linkedin mode={mode!r} routed to {got}, expected {chan}"
+    # Absent/unknown mode falls back to the safe default (DM), not None.
+    assert dispatcher._channel_for("channel.linkedin", {}) == ChannelType.LINKEDIN_DM
+    assert dispatcher._channel_for("channel.linkedin", {"mode": "bogus"}) == ChannelType.LINKEDIN_DM
+
+
+def test_linkedin_node_config_modes_match_router_map():
+    """Every mode the channel.linkedin node config offers must be routable by the
+    dispatcher — config and router can't drift apart."""
+    src = (REPO / "backend/app/nodes/channels/linkedin.py").read_text(encoding="utf-8")
+    m = re.search(r'mode:\s*Literal\[([^\]]+)\]', src)
+    assert m, "could not find the LinkedIn mode Literal in the node config"
+    config_modes = set(re.findall(r'"(\w+)"', m.group(1)))
+    routed = set(dispatcher._LINKEDIN_MODE_CHANNEL)
+    assert config_modes == routed, (
+        f"LinkedIn node modes {config_modes} != dispatcher-routed modes {routed}"
+    )
+
+
+# ── H2: omni_ai_jobs.kind values must agree across DB CHECK, projector, Pydantic ─
+def _migration_kind_values() -> set[str]:
+    """The kinds the latest omni_ai_jobs.kind CHECK constraint allows."""
+    versions = REPO / "backend/alembic/versions"
+    allowed: set[str] = set()
+    # The widest CHECK wins (migrations only add). Scan all that mention the check.
+    for f in versions.glob("*.py"):
+        txt = f.read_text(encoding="utf-8")
+        for m in re.finditer(r"kind IN \(([^)]+)\)", txt):
+            allowed |= set(re.findall(r"'(\w+)'", m.group(1)))
+    return allowed
+
+
+def test_ai_job_kind_congruent_across_db_projector_pydantic():
+    """REGRESSION H2: a kind the projector can WRITE (e.g. 'screen') but the
+    AiJobOut Pydantic model can't represent makes GET /ai/jobs 500 on that row.
+    The DB CHECK, the projector's accepted set, and the response model must agree."""
+    db_kinds = _migration_kind_values()
+    assert db_kinds, "no omni_ai_jobs.kind CHECK found in migrations"
+
+    proj = (REPO / "backend/app/projector/main.py").read_text(encoding="utf-8")
+    pm = re.search(r'kind not in \(([^)]+)\)', proj)
+    assert pm, "could not find the projector's accepted-kind tuple"
+    proj_kinds = set(re.findall(r'"(\w+)"', pm.group(1)))
+
+    ai_router = (REPO / "backend/app/routers/ai_studio.py").read_text(encoding="utf-8")
+    out = re.search(r'class AiJobOut\(BaseModel\):.*?kind:\s*Literal\[([^\]]+)\]', ai_router, re.S)
+    assert out, "could not find AiJobOut.kind Literal"
+    pydantic_kinds = set(re.findall(r'"(\w+)"', out.group(1)))
+
+    # Anything the projector writes must be representable by the response model
+    # and allowed by the DB.
+    assert proj_kinds <= pydantic_kinds, (
+        f"projector writes kinds {proj_kinds - pydantic_kinds} that AiJobOut can't "
+        f"represent -> GET /ai/jobs 500s on those rows"
+    )
+    assert proj_kinds <= db_kinds, (
+        f"projector writes kinds {proj_kinds - db_kinds} the DB CHECK rejects"
+    )
+
+
+# ── CMP9/CMP10: flow.delay / flow.wait_until must actually delay ───────────────
+import asyncio  # noqa: E402
+
+from app.execution import transition_worker  # noqa: E402
+
+
+def test_flow_delay_computes_nonzero_seconds():
+    """REGRESSION CMP9: a flow.delay node must yield a positive delay so the
+    orchestrator timer holds the lead — not advance immediately."""
+    node = {"node_type": "flow.delay", "config": {"amount": 3, "unit": "days"}, "workflow_id": None}
+    secs = asyncio.run(transition_worker._compute_flow_delay_seconds("ws", node))
+    assert secs == 3 * 86400, f"flow.delay 3 days computed {secs}, expected 259200"
+
+    node2 = {"node_type": "flow.delay", "config": {"amount": 30, "unit": "minutes"}, "workflow_id": None}
+    assert asyncio.run(transition_worker._compute_flow_delay_seconds("ws", node2)) == 1800
+
+
+def test_flow_nodes_held_by_worker_not_advanced_immediately():
+    """REGRESSION CMP9/CMP10: the worker must special-case flow.delay/wait_until
+    so they ride the delay path, not the immediate projection_only path."""
+    src = (REPO / "backend/app/execution/transition_worker.py").read_text(encoding="utf-8")
+    assert 'node_type in ("flow.delay", "flow.wait_until")' in src, (
+        "flow.delay/wait_until are not special-cased in _fire_node — they would "
+        "advance immediately via the projection_only path"
+    )
