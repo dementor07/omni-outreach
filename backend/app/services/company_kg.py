@@ -193,17 +193,46 @@ async def _register_alias(workspace_id: str, company_id, raw_name: str, clean_na
     )
 
 
+# Confidence decay (plan.md Phase 4): people change jobs, so a cached person's
+# confidence erodes from last_verified. Computed at READ time so we never store
+# a stale value. −5 points per 30 days, floored at 10. A re-sighting resets
+# last_verified (cache_person), which lifts the decayed value back up.
+_CONFIDENCE_DECAY_PER_MONTH = 5
+_CONFIDENCE_FLOOR = 10
+_REVERIFY_BELOW = 50  # decayed confidence under this → re-verify on next run
+
+# SQL fragment computing the decayed confidence from stored confidence +
+# last_verified. GREATEST/floor keeps it in [floor, stored]. Reused by reads.
+_DECAYED_CONFIDENCE_SQL = (
+    "GREATEST("
+    f"  {_CONFIDENCE_FLOOR},"
+    f"  confidence - ({_CONFIDENCE_DECAY_PER_MONTH} * "
+    "   FLOOR(EXTRACT(EPOCH FROM (NOW() - last_verified)) / (30*86400))::int)"
+    ")"
+)
+
+
 async def cached_people(workspace_id: str, company_id: str, limit: int = 10) -> list[dict]:
-    """Return previously discovered people for a company (the KG cache hit).
-    A non-empty list means people-discovery can be skipped — zero cost."""
+    """Return previously discovered people for a company (the KG cache hit), with
+    confidence DECAYED from last_verified. A non-empty list of still-confident
+    people means people-discovery can be skipped — zero cost. Callers should
+    treat rows with ``decayed_confidence < reverify_below()`` as stale (re-verify)."""
     rows = await fetch_all(
-        "SELECT id, name, title, linkedin_url, confidence FROM omni_people_cache "
-        "WHERE workspace_id=$1 AND company_id=$2 ORDER BY confidence DESC LIMIT $3",
+        f"SELECT id, name, title, linkedin_url, confidence, "
+        f"       {_DECAYED_CONFIDENCE_SQL} AS decayed_confidence, last_verified "
+        "FROM omni_people_cache "
+        "WHERE workspace_id=$1 AND company_id=$2 ORDER BY decayed_confidence DESC LIMIT $3",
         workspace_id,
         company_id,
         limit,
     )
     return [dict(r) for r in rows]
+
+
+def reverify_below() -> int:
+    """Decayed-confidence threshold under which a cached person should be
+    re-verified on the next pipeline run (plan.md Phase 4)."""
+    return _REVERIFY_BELOW
 
 
 async def cache_person(
@@ -214,14 +243,24 @@ async def cache_person(
     title: str | None,
     linkedin_url: str | None,
     source: str,
-) -> None:
-    """Upsert a discovered person into the KG cache (keyed by linkedin_url)."""
-    await execute(
+) -> str | None:
+    """Upsert a discovered person into the KG cache (keyed by linkedin_url) and
+    record the person↔company relationship in the history graph. Re-sighting an
+    existing person resets last_verified (lifting decayed confidence) and bumps
+    stored confidence back toward fresh. Returns the person_cache id (None when
+    no linkedin_url — the cache is keyed on it)."""
+    if not linkedin_url:
+        return None
+    row = await fetch_one(
         """
-        INSERT INTO omni_people_cache (workspace_id, company_id, linkedin_url, name, title, source, last_verified)
-        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        INSERT INTO omni_people_cache (workspace_id, company_id, linkedin_url, name, title, source, confidence, last_verified)
+        VALUES ($1, $2, $3, $4, $5, $6, 90, NOW())
         ON CONFLICT (workspace_id, linkedin_url)
-        DO UPDATE SET name=$4, title=$5, source=$6, last_verified=NOW()
+        DO UPDATE SET name=$4, title=$5, source=$6,
+            -- a fresh sighting restores confidence (cap 90) + verifies it now
+            confidence=LEAST(90, omni_people_cache.confidence + 10),
+            last_verified=NOW()
+        RETURNING id
         """,
         workspace_id,
         company_id,
@@ -230,6 +269,73 @@ async def cache_person(
         title,
         source,
     )
+    person_id = str(row["id"]) if row else None
+    if person_id:
+        await record_person_company(workspace_id, person_id, company_id, title=title, source=source)
+    return person_id
+
+
+async def record_person_company(
+    workspace_id: str,
+    person_id: str,
+    company_id: str,
+    *,
+    title: str | None,
+    source: str,
+) -> None:
+    """Record (or refresh) a person's CURRENT stint at a company in the history
+    graph. The moat: when a known person resurfaces at a company we already
+    mapped, this is a no-op upsert — no discovery needed. A person moving to a
+    NEW company creates a new open stint, so person_company_history accumulates
+    the relationship timeline Apollo charges for."""
+    await execute(
+        """
+        INSERT INTO omni_person_company_history (workspace_id, person_id, company_id, title, source)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (workspace_id, person_id, company_id)
+        DO UPDATE SET title=COALESCE($4, omni_person_company_history.title),
+            source=$5, ended_at=NULL
+        """,
+        workspace_id,
+        person_id,
+        company_id,
+        title,
+        source,
+    )
+
+
+async def person_history(workspace_id: str, person_id: str) -> list[dict]:
+    """A person's full company timeline (current + past), newest first. The
+    relationship asset — used to skip discovery and to enrich a lead with where
+    a decision-maker has been."""
+    rows = await fetch_all(
+        """
+        SELECT h.company_id, c.name AS company_name, h.title, h.started_at, h.ended_at, h.source
+        FROM omni_person_company_history h
+        JOIN omni_companies c ON c.id = h.company_id
+        WHERE h.workspace_id=$1 AND h.person_id=$2
+        ORDER BY h.ended_at IS NULL DESC, h.started_at DESC
+        """,
+        workspace_id,
+        person_id,
+    )
+    return [dict(r) for r in rows]
+
+
+async def people_needing_reverification(workspace_id: str, limit: int = 100) -> list[dict]:
+    """Cached people whose DECAYED confidence has fallen below the re-verify
+    threshold — the next pipeline run should re-confirm them rather than trust
+    stale data (plan.md Phase 4 confidence decay)."""
+    rows = await fetch_all(
+        f"SELECT id, company_id, name, title, linkedin_url, "
+        f"       {_DECAYED_CONFIDENCE_SQL} AS decayed_confidence, last_verified "
+        "FROM omni_people_cache "
+        f"WHERE workspace_id=$1 AND ({_DECAYED_CONFIDENCE_SQL}) < {_REVERIFY_BELOW} "
+        "ORDER BY decayed_confidence ASC LIMIT $2",
+        workspace_id,
+        limit,
+    )
+    return [dict(r) for r in rows]
 
 
 async def mark_people_discovered(workspace_id: str, company_id: str) -> None:
