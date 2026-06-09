@@ -226,6 +226,26 @@ async def _fan_out(workspace_id: str, parent: dict, for_each_node: dict, correla
         log.info("fan_out skipped: lead %s already claimed/fanned at %s (redelivery/concurrent)", parent.get("id"), for_each_id)
         return
 
+    # E2E-002 (read-after-write): the `parent` arg is the snapshot the transition
+    # carried in. Under at-least-once redelivery, the delivery that WINS the claim
+    # may carry a snapshot taken before the source's company-list mutation landed
+    # (observed: 35 companies in the DB but fanout_total=0, zero children). Re-read
+    # custom_fields FRESH now — the claim above serializes us, and each delivery
+    # applies its own mutation in handle_transition before routing here, so the
+    # committed row always has the collection. This makes items read-after-write
+    # consistent regardless of how many times the source result was redelivered.
+    async with system_scope():
+        fresh = await fetch_one(
+            "SELECT custom_fields FROM omni_leads WHERE id=$1 AND workspace_id=$2",
+            str(parent["id"]),
+            workspace_id,
+        )
+    if fresh and fresh.get("custom_fields") is not None:
+        cf = fresh["custom_fields"]
+        if isinstance(cf, str):
+            cf = json.loads(cf)
+        parent = {**parent, "custom_fields": cf}
+
     cycle_hit, root_id = await _ancestor_visited_for_each(workspace_id, parent, for_each_id)
     if cycle_hit:
         log.error(

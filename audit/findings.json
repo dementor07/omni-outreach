@@ -73,6 +73,10 @@
    {
     "date": "2026-06-09",
     "note": "E2E re-run after E2E-001: 20-dupe fan-out FIXED (atomic claim blocks dup waves). New layer found (+1: E2E-002, OPEN/HIGH): source result redelivered ~5×, claim-winner reads pre-mutation snapshot -> fanout_total=0, no leads. Needs exactly-once source-result dedup + read-after-write fan-out, on a branch with a concurrency harness."
+   },
+   {
+    "date": "2026-06-09",
+    "note": "E2E-002 FIXED: _fan_out read-after-write (re-read custom_fields fresh post-claim). Deterministic concurrency harness (test_fanout_concurrency.py) reproduces+guards both the 20-dupe and 0-children bugs. Source-result dedup-by-command_id noted as non-blocking follow-up."
    }
   ]
  },
@@ -1293,11 +1297,11 @@
    "file": "backend/app/execution/transition_worker.py",
    "line": 209,
    "severity": "HIGH",
-   "status": "VERIFIED",
+   "status": "FIXED",
    "title": "Source result redelivered N× -> fan-out reads pre-mutation snapshot (fanout_total=0 with companies present)",
    "evidence": "After E2E-001 fix, run #3 (lead 76cf19e5): naukri scraped 35 companies (custom_fields.companies len=35) but parent ended fanout_total=0, status=active, ZERO children. transitions log shows FOUR 'fan_out skipped: already claimed/fanned (redelivery/concurrent)' — so the source.naukri RESULT was delivered ~5× to the transition worker. The atomic claim (E2E-001) correctly blocked the 4 dup waves (the 20-dupe bug IS fixed), but the ONE delivery that won the claim ran _fan_out against a parent snapshot whose custom_fields.companies mutation had not landed (or it claimed before _apply_lead_mutations of its own delivery committed), so items=[] -> fanout_total=0 and no children. Root cause: the source-command RESULT is not deduped (at-least-once redelivery of the naukri ExecutionResult) AND the claim+read-items sequence is not serialized with the company-list mutation apply. Result: a successful scrape produces zero leads intermittently.",
    "recommendation": "(1) Dedupe the source result by command_id in the muscle->results consumer (processed_commands ledger) so one scrape => one transition. (2) In _fan_out, read custom_fields fresh from the DB INSIDE the claim transaction (not from the passed-in snapshot), so the company list is read-after-write consistent with the mutation. Build + verify on a branch with a deterministic harness (simulate N concurrent deliveries) — NOT by re-running live paid scrapes.",
-   "fix": "OPEN. E2E-001 (dup waves) is FIXED + live; this is the next layer down — exactly-once source-result handling + read-after-write fan-out. Needs a local concurrency harness."
+   "fix": "_fan_out now re-reads custom_fields FRESH from the DB immediately after winning the atomic claim (read-after-write), instead of trusting the passed-in transition snapshot. The claim serializes us and each delivery applies its own mutation before routing, so the committed row always has the collection — fanout_total can no longer be 0 when companies are present. Proven by a deterministic asyncio concurrency harness (audit/tests/test_fanout_concurrency.py): (1) 5 concurrent/redelivered fan-outs spawn exactly ONE wave of 5 children (not 20); (2) a STALE empty snapshot still yields 3 children by reading the DB's committed 3 companies. The harness reproduces BOTH the 20-dupe (E2E-001) and 0-children (E2E-002) symptoms and confirms the fixes without paid live runs. FOLLOW-UP (lower priority, not blocking): dedupe the source ExecutionResult by command_id at the Flink results layer so one scrape => one transition (the read-after-write fix already makes redelivery harmless)."
   }
  ]
 }
