@@ -77,6 +77,10 @@
    {
     "date": "2026-06-09",
     "note": "E2E-002 FIXED: _fan_out read-after-write (re-read custom_fields fresh post-claim). Deterministic concurrency harness (test_fanout_concurrency.py) reproduces+guards both the 20-dupe and 0-children bugs. Source-result dedup-by-command_id noted as non-blocking follow-up."
+   },
+   {
+    "date": "2026-06-09",
+    "note": "E2E-002 fan-out concurrency bugs FIXED + harness-proven + live (read-after-write + claim-release + dedup). E2E-003 (OPEN/HIGH) remains: lead parks at for_each with collection present but no children spawn (fanout_total=0) — intermittent, upstream of the harness-validated fan-out logic; likely Flink delivery/ordering or each-edge resolution. Needs an INTEGRATION harness (real test PG + replayed envelopes), not live paid runs. STOP burning paid scrapes on this."
    }
   ]
  },
@@ -1302,6 +1306,18 @@
    "evidence": "After E2E-001 fix, run #3 (lead 76cf19e5): naukri scraped 35 companies (custom_fields.companies len=35) but parent ended fanout_total=0, status=active, ZERO children. transitions log shows FOUR 'fan_out skipped: already claimed/fanned (redelivery/concurrent)' — so the source.naukri RESULT was delivered ~5× to the transition worker. The atomic claim (E2E-001) correctly blocked the 4 dup waves (the 20-dupe bug IS fixed), but the ONE delivery that won the claim ran _fan_out against a parent snapshot whose custom_fields.companies mutation had not landed (or it claimed before _apply_lead_mutations of its own delivery committed), so items=[] -> fanout_total=0 and no children. Root cause: the source-command RESULT is not deduped (at-least-once redelivery of the naukri ExecutionResult) AND the claim+read-items sequence is not serialized with the company-list mutation apply. Result: a successful scrape produces zero leads intermittently.",
    "recommendation": "(1) Dedupe the source result by command_id in the muscle->results consumer (processed_commands ledger) so one scrape => one transition. (2) In _fan_out, read custom_fields fresh from the DB INSIDE the claim transaction (not from the passed-in snapshot), so the company list is read-after-write consistent with the mutation. Build + verify on a branch with a deterministic harness (simulate N concurrent deliveries) — NOT by re-running live paid scrapes.",
    "fix": "_fan_out now re-reads custom_fields FRESH from the DB immediately after winning the atomic claim (read-after-write), instead of trusting the passed-in transition snapshot. The claim serializes us and each delivery applies its own mutation before routing, so the committed row always has the collection — fanout_total can no longer be 0 when companies are present. Proven by a deterministic asyncio concurrency harness (audit/tests/test_fanout_concurrency.py): (1) 5 concurrent/redelivered fan-outs spawn exactly ONE wave of 5 children (not 20); (2) a STALE empty snapshot still yields 3 children by reading the DB's committed 3 companies. The harness reproduces BOTH the 20-dupe (E2E-001) and 0-children (E2E-002) symptoms and confirms the fixes without paid live runs. FOLLOW-UP (lower priority, not blocking): dedupe the source ExecutionResult by command_id at the Flink results layer so one scrape => one transition (the read-after-write fix already makes redelivery harmless)."
+  },
+  {
+   "id": "E2E-003",
+   "area": "execution",
+   "file": "backend/app/execution/transition_worker.py",
+   "line": 190,
+   "severity": "HIGH",
+   "status": "VERIFIED",
+   "title": "Lead parks at the company for_each with the collection present but _fan_out never spawns children (fanout_total=0)",
+   "evidence": "After E2E-001 (dup-wave) + E2E-002 (read-after-write + claim-release) fixes — all proven by the deterministic harness (audit/tests/test_fanout_concurrency.py, 3 cases) and live — multiple clean runs (leads 76cf19e5, 544fc6a7, 6739b54a) STILL end with the parent parked at the company for_each (current_node_id=for_each), 17-35 companies present in custom_fields.companies, fanout_total=0, ZERO children, _fanout_retry never set. The release-claim path didn't fire and (in the last run) there were NO transition-worker log lines for the lead at all in-window. Symptom is now intermittent + upstream of the Python fan-out logic that the harness validates: the lead reaches the for_each node-state but _fan_out either isn't invoked or sees an each_edge=None / items=[] path that the harness doesn't reproduce because it stubs the edges. Strongly suggests a Flink-orchestrator-layer delivery/ordering issue (backend-flink/orchestrator.py emits transition handle=metadata.next_handle; the naukri result's default transition + the companies mutation arrive as separate at-least-once envelopes) OR an each-edge lookup miss under the real graph.",
+   "recommendation": "Reproduce with an INTEGRATION harness against a real (test) Postgres + a fake bus that replays the actual naukri result envelope sequence, NOT live paid scrapes. Confirm whether (a) the for_each transition is emitted/consumed, (b) _outgoing_edge(for_each,'each') resolves under the real graph, (c) the mutation+transition ordering. Likely needs the source-result dedup-by-command_id at Flink + ensuring the collection mutation and the routing transition are the SAME envelope. The Python fan-out logic itself is correct (harness-proven).",
+   "fix": "OPEN. E2E-001 + E2E-002 (the in-_fan_out concurrency bugs) ARE fixed + harness-guarded + live. E2E-003 is the remaining layer: the lead doesn't reliably reach a working _fan_out invocation. Needs an integration harness + likely a Flink-layer fix; NOT solvable by more live paid trial."
   }
  ]
 }
