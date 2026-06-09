@@ -236,6 +236,19 @@ def test_fan_out_dedups_identical_items():
     assert _dedup_items([]) == []
 
 
+def test_fan_out_claims_atomically_no_duplicate_waves():
+    """REGRESSION E2E-001 (race): the old in-memory idempotency guard (read
+    current_node_id+status+fanout_total) had a TOCTOU hole — concurrent/redelivered
+    source results all passed it before any parked the parent, fanning out N waves
+    (observed 4×5=20 children for max_items:5). _fan_out must claim atomically via
+    UPDATE...WHERE fanout_total IS NULL RETURNING, so exactly one wave wins."""
+    src = (REPO / "backend/app/execution/transition_worker.py").read_text(encoding="utf-8")
+    assert "fanout_total IS NULL RETURNING id" in src, (
+        "fan-out must claim the right to spawn atomically; the in-memory guard races"
+    )
+    assert "if not claimed:" in src and "already claimed/fanned" in src
+
+
 def test_join_arrive_counts_distinct_children_idempotently():
     """REGRESSION E2E-001b: _join_arrive must bump the parent's fanout_done at
     most ONCE per child. Kafka redelivery re-runs the arrival; without an atomic

@@ -206,16 +206,24 @@ async def _fan_out(workspace_id: str, parent: dict, for_each_node: dict, correla
     max_items = 500 if _raw_max is None else max(0, int(_raw_max))
     for_each_id = str(for_each_node["id"])
 
-    # DEPLOY-001 idempotency: a redelivered transition (rebalance / replay) must
-    # not double-spawn children. A parent that already fanned out at THIS node
-    # is parked status='waiting' at current_node_id=for_each_id with a non-null
-    # fanout_total. Detect that and no-op rather than spawning a second wave.
-    if (
-        str(parent.get("current_node_id") or "") == for_each_id
-        and (parent.get("status") or "") == "waiting"
-        and parent.get("fanout_total") is not None
-    ):
-        log.info("fan_out skipped: lead %s already fanned out at %s (redelivery)", parent.get("id"), for_each_id)
+    # DEPLOY-001 / E2E-001: a redelivered OR concurrent transition must not
+    # double-spawn children. The old in-memory guard (check current_node_id +
+    # status + fanout_total on the read-back row) had a TOCTOU race: 4 copies of
+    # the source's result redelivered ~simultaneously all passed the guard before
+    # any committed the parking UPDATE, so the for_each fanned out 4×5=20 children
+    # for a max_items:5 collection. Replace it with an ATOMIC CLAIM: set a sentinel
+    # fanout_total=-1 only WHERE fanout_total IS NULL, gated by RETURNING. Exactly
+    # one transition wins the claim and proceeds; the rest get no row and no-op.
+    async with system_scope():
+        claimed = await fetch_one(
+            "UPDATE omni_leads SET fanout_total=-1, current_node_id=$1, status='waiting', "
+            "updated_at=NOW() WHERE id=$2 AND workspace_id=$3 AND fanout_total IS NULL RETURNING id",
+            for_each_id,
+            str(parent["id"]),
+            workspace_id,
+        )
+    if not claimed:
+        log.info("fan_out skipped: lead %s already claimed/fanned at %s (redelivery/concurrent)", parent.get("id"), for_each_id)
         return
 
     cycle_hit, root_id = await _ancestor_visited_for_each(workspace_id, parent, for_each_id)

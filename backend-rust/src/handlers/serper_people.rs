@@ -45,15 +45,38 @@ pub async fn handle_serper_people(command: &ActionCommand) -> ExecutionResult {
         if k.is_empty() { "people".to_string() } else { k }
     };
 
-    // Credential.
+    // Provider toggle (the per-node customization edge vs a hardcoded pipeline):
+    //   "serper"  — paid Google API, needs an api_key credential (default).
+    //   "searxng" — self-hosted meta-search, FREE, no credential; needs a base
+    //               URL (payload.searxng_url, else the SEARXNG_URL env default).
+    // Same Google-dork query patterns either way; only the call + parse differ.
+    let provider = {
+        let p = common::s(command, "provider");
+        if p.is_empty() { "serper".to_string() } else { p }
+    };
+
+    // Credential — only Serper needs one. SearXNG is unauthenticated infra.
     let cred_ref = command.credential_ref.clone();
-    let api_key = match &cred_ref {
-        Some(r) if !r.is_empty() => match credentials::redeem_field(r, "api_key").await {
-            Ok(Some(k)) => k,
-            Ok(None) => return common::fail(command, "SERPER_CREDENTIAL_NO_API_KEY", false),
-            Err(e) => return common::fail(command, format!("SERPER_CREDENTIAL_{e}"), true),
-        },
-        _ => return common::fail(command, "SERPER_CREDENTIAL_MISSING", false),
+    let api_key = if provider == "searxng" {
+        String::new()
+    } else {
+        match &cred_ref {
+            Some(r) if !r.is_empty() => match credentials::redeem_field(r, "api_key").await {
+                Ok(Some(k)) => k,
+                Ok(None) => return common::fail(command, "SERPER_CREDENTIAL_NO_API_KEY", false),
+                Err(e) => return common::fail(command, format!("SERPER_CREDENTIAL_{e}"), true),
+            },
+            _ => return common::fail(command, "SERPER_CREDENTIAL_MISSING", false),
+        }
+    };
+
+    let searxng_url = {
+        let u = common::s(command, "searxng_url");
+        if !u.is_empty() {
+            u
+        } else {
+            std::env::var("SEARXNG_URL").unwrap_or_else(|_| "http://searxng:8080".to_string())
+        }
     };
 
     let mut found: Vec<Value> = Vec::new();
@@ -71,45 +94,18 @@ pub async fn handle_serper_people(command: &ActionCommand) -> ExecutionResult {
             if found.len() >= max_per_company {
                 break 'outer;
             }
-            let body = json!({"q": pattern, "num": 10});
-            let mut attempt: u32 = 0;
-            let items = loop {
-                let resp = OUTBOUND
-                    .post(SERPER_URL)
-                    .header("X-API-KEY", &api_key)
-                    .header("Content-Type", "application/json")
-                    .json(&body)
-                    .send()
-                    .await;
-                match resp {
-                    Ok(r) if r.status().is_success() => {
-                        let v: Value = r.json().await.unwrap_or(Value::Null);
-                        break v["organic"].as_array().cloned().unwrap_or_default();
-                    }
-                    Ok(r) if r.status().as_u16() == 429 && attempt + 1 < MAX_RETRIES => {
-                        let wait = 1u64 << attempt;
-                        tracing::warn!(pattern = %pattern, "serper 429, retrying in {wait}s");
-                        tokio::time::sleep(Duration::from_secs(wait)).await;
-                        attempt += 1;
-                        continue;
-                    }
-                    Ok(r) => {
-                        tracing::warn!(status = %r.status(), pattern = %pattern, "serper pattern failed");
-                        break Vec::new();
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, pattern = %pattern, "serper request failed");
-                        break Vec::new();
-                    }
-                }
+            let hits = if provider == "searxng" {
+                search_searxng(&searxng_url, pattern).await
+            } else {
+                search_serper(&api_key, pattern).await
             };
 
-            for item in items {
-                let url = item["link"].as_str().unwrap_or("").trim().to_string();
+            for (url, raw_title) in hits {
+                let url = url.trim().to_string();
                 if !url.contains("linkedin.com/in/") || !seen_urls.insert(url.clone()) {
                     continue;
                 }
-                let raw_title = item["title"].as_str().unwrap_or("").trim().to_string();
+                let raw_title = raw_title.trim().to_string();
                 let name = clean_name(&raw_title);
                 let clean_role = clean_role_from_title(&raw_title, &company_name, role);
                 let parts: Vec<&str> = name.split_whitespace().collect();
@@ -147,6 +143,95 @@ pub async fn handle_serper_people(command: &ActionCommand) -> ExecutionResult {
     let handle = if found.is_empty() { "empty" } else { "default" };
     result.metadata.insert("next_handle".to_string(), json!(handle));
     result
+}
+
+/// Run one query pattern against Serper (paid Google API). Returns (url, title)
+/// pairs from the `organic` results, with 429 backoff. Empty on failure (a
+/// single pattern failing must not abort the whole company's discovery).
+async fn search_serper(api_key: &str, pattern: &str) -> Vec<(String, String)> {
+    let body = json!({"q": pattern, "num": 10});
+    let mut attempt: u32 = 0;
+    loop {
+        let resp = OUTBOUND
+            .post(SERPER_URL)
+            .header("X-API-KEY", api_key)
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await;
+        match resp {
+            Ok(r) if r.status().is_success() => {
+                let v: Value = r.json().await.unwrap_or(Value::Null);
+                return v["organic"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .map(|it| {
+                                (
+                                    it["link"].as_str().unwrap_or("").to_string(),
+                                    it["title"].as_str().unwrap_or("").to_string(),
+                                )
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+            }
+            Ok(r) if r.status().as_u16() == 429 && attempt + 1 < MAX_RETRIES => {
+                let wait = 1u64 << attempt;
+                tracing::warn!(pattern = %pattern, "serper 429, retrying in {wait}s");
+                tokio::time::sleep(Duration::from_secs(wait)).await;
+                attempt += 1;
+                continue;
+            }
+            Ok(r) => {
+                tracing::warn!(status = %r.status(), pattern = %pattern, "serper pattern failed");
+                return Vec::new();
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, pattern = %pattern, "serper request failed");
+                return Vec::new();
+            }
+        }
+    }
+}
+
+/// Run one query pattern against a self-hosted SearXNG instance (FREE — the
+/// economic equalizer). Uses the JSON output format (`format=json`); returns
+/// (url, title) pairs from `results`. SearXNG must have the `json` format
+/// enabled in its settings.yml. Empty on failure — never aborts discovery.
+async fn search_searxng(base_url: &str, pattern: &str) -> Vec<(String, String)> {
+    let url = format!("{}/search", base_url.trim_end_matches('/'));
+    let resp = OUTBOUND
+        .get(&url)
+        .query(&[("q", pattern), ("format", "json"), ("language", "en")])
+        .send()
+        .await;
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            let v: Value = r.json().await.unwrap_or(Value::Null);
+            v["results"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .map(|it| {
+                            (
+                                it["url"].as_str().unwrap_or("").to_string(),
+                                it["title"].as_str().unwrap_or("").to_string(),
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+        Ok(r) => {
+            tracing::warn!(status = %r.status(), pattern = %pattern, "searxng pattern failed");
+            Vec::new()
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, pattern = %pattern, "searxng request failed");
+            Vec::new()
+        }
+    }
 }
 
 fn clean_name(raw_title: &str) -> String {
