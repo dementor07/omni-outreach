@@ -89,6 +89,10 @@
    {
     "date": "2026-06-09",
     "note": "MILESTONE: with E2E-001/002/003 fixed, the Naukri->people chain mechanics are PROVEN end-to-end live (naukri->fan-out 2 correct children->screen_company accept->serper_people fired). Only remaining blocker to a real contact = E2E-004: Serper /search 400s on every query (bad key or request shape). NOT a pipeline bug. SearXNG toggle is the sidestep (needs a deployed instance)."
+   },
+   {
+    "date": "2026-06-09",
+    "note": "KG MOAT shipped (MOAT-001): person_company_history + confidence decay, migration 030 applied live (RLS-enabled, multi-tenant). The compounding relationship asset + job-change-aware decay. cache_person now records stints; decay verified against real PG."
    }
   ]
  },
@@ -1338,6 +1342,18 @@
    "evidence": "After E2E-001/002/003 fixed, the final run (lead 583d5ba0, accept-all screens) PROVED the chain mechanics end-to-end: naukri scraped -> company for_each spawned exactly 2 children (correct, not 0/not 20) -> both passed screen_company (custom_fields.screen.decision=accept: Innovaccer, Cubic Logics) -> serper_people FIRED. But every Serper API call returns HTTP 400 Bad Request (muscle log: 'serper pattern failed status=400 pattern=Cubic Logics CEO site:linkedin.com/in'), so profiles_found=0, custom_fields.people=[], the people for_each is empty, no ai.screen_person, no create_contact, no omni_contacts row. The 400 on EVERY query (valid {q,num} body) points to a bad/expired Serper api_key in the connection bundle OR a request-shape mismatch with Serper's current API.",
    "recommendation": "Verify the Serper connection's api_key (rotate if expired) and the request shape against Serper's current /search contract. OR flip serper_people to provider='searxng' (the toggle is built + live) once a SearXNG instance is deployed (SEARXNG_URL) — the economic-equalizer path sidesteps the paid Serper dependency entirely.",
    "fix": "OPEN — NOT a pipeline bug. The entire fan-out/screen/people-discovery chain is now proven working live; the only remaining gap to a verified lead is the Serper backend returning 400. Either fix the key/request or deploy SearXNG and switch the provider toggle."
+  },
+  {
+   "id": "MOAT-001",
+   "area": "kg",
+   "file": "backend/app/services/company_kg.py",
+   "line": 196,
+   "severity": "GOOD",
+   "status": "FIXED",
+   "title": "Knowledge-graph moat: person↔company history + confidence decay (vs Allen's fork)",
+   "evidence": "Allen's fork declares person_company_history + confidence decay as 'Apollo's actual moat — historical relationships, not scraping' (plan.md Phase 4). We had omni_people_cache (027) but no history graph and a static confidence.",
+   "recommendation": "Port the relationship graph + decay into our multi-tenant KG.",
+   "fix": "Migration 030 omni_person_company_history (person↔company stints, one open per pair, RLS-enabled — multi-tenant, which the single-tenant fork can't do) + idx_omni_people_cache_verified. company_kg: cache_person returns the person id + records the stint (record_person_company); a re-sighting restores confidence (+10 cap 90) + resets last_verified. Confidence decays at READ time (−5/month, floor 10) — verified against real Postgres (fresh=90,1mo=85,3mo=75,8mo=50). cached_people orders by decayed confidence; people_needing_reverification() lists rows <50; person_history() returns the full timeline. Deployed + migration 030 applied live (alembic_version=030, table+RLS+index confirmed). Regression tests test_kg_confidence_decay_spec + test_cache_person_records_history (19 audit tests green)."
   }
  ]
 }

@@ -277,3 +277,29 @@ def test_ai_screen_writes_verdict_to_custom_fields():
     assert '"screen"' in ai_screen_rs and '"decision"' in ai_screen_rs, (
         "ai_screen must write custom_fields.screen.{decision,verdict,reason}"
     )
+
+
+# ── KG MOAT: confidence decay spec + person↔company history wiring ─────────────
+def test_kg_confidence_decay_spec():
+    """REGRESSION (KG moat): confidence decay must follow the plan.md spec —
+    −5 points/month, floor 10, re-verify under 50 — and be computed at READ time
+    (no stored stale value). Guards the constants + the decayed-confidence SQL."""
+    from app.services import company_kg as kg
+
+    assert kg._CONFIDENCE_DECAY_PER_MONTH == 5
+    assert kg._CONFIDENCE_FLOOR == 10
+    assert kg.reverify_below() == 50
+    # The decay SQL must floor at 10 and subtract 5 per 30-day bucket from
+    # last_verified — not store a static value.
+    sql = kg._DECAYED_CONFIDENCE_SQL
+    assert "GREATEST(" in sql and "last_verified" in sql and "30*86400" in sql
+
+
+def test_cache_person_records_history():
+    """REGRESSION (KG moat): cache_person must record the person↔company stint so
+    the relationship graph accumulates (the moat), not just the flat cache."""
+    src = (REPO / "backend/app/services/company_kg.py").read_text(encoding="utf-8")
+    assert "async def record_person_company(" in src
+    assert "omni_person_company_history" in src
+    # cache_person must call record_person_company (history recorded on sighting).
+    assert "await record_person_company(" in src
