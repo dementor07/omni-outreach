@@ -65,6 +65,10 @@
    {
     "date": "2026-06-08",
     "note": "First real Naukri->people e2e run (+1: E2E-001, OPEN/HIGH). Chain executes every stage but produces no contact: duplicate company fan-out + join over-count + screen verdict not written to child custom_fields. Ports/create_contact/dedup all live & correct; this is a pre-existing execution-layer defect."
+   },
+   {
+    "date": "2026-06-08",
+    "note": "E2E-001 FIXED: fan-out dedup + join distinct-child idempotency + ai_screen verdict writeback. The nested for_each->join->screen chain no longer over-counts or duplicates; 3 regression tests added."
    }
   ]
  },
@@ -1273,11 +1277,11 @@
    "file": "backend/app/execution/transition_worker.py",
    "line": 466,
    "severity": "HIGH",
-   "status": "VERIFIED",
+   "status": "FIXED",
    "title": "Naukri people-stage e2e fails: company fan-out duplicates + join over-counts + screen verdict not written to child custom_fields",
    "evidence": "Live run 2026-06-08 (wf Marketing Agencies India, source.naukri start, lead 345d33d3): naukri scraped OK, 16 ai.screen_company ran (status=sent), but ZERO contacts. DB lineage: parent fanout_total=1 but fanout_done=64; 4 child leads ALL carry the SAME company ('Axis Max Life Insurance') = duplicate fan-out from a max_items:1 for_each; children completed with current_node_id=NULL and custom_fields.screen EMPTY (verdict never written back) so no child could route accept->serper_people. No source.serper_people.requested, no ai.screen_person.queued, no contact.created emitted. Three compounding bugs: (a) for_each spawned duplicate children for one company despite max_items:1; (b) flow.join fanout_done over-counts (64 vs total 1) because many handles route into one join; (c) ai.screen_company verdict (muscle result next_handle) is not persisted onto the child lead's custom_fields.screen, so routing past the screen can't see ACCEPT. Also data: the naukri 'marketing agency' scrape returned an insurance MNC, which the strict ICP prompt would reject anyway.",
    "recommendation": "Trace _fan_out child creation (why duplicates for max_items:1) + _join_arrive counter semantics (count distinct children, not arrivals) + ensure the ai_screen result writes decision into the child's custom_fields before routing. Fix on a branch with a local harness, not live prod trial.",
-   "fix": "OPEN — diagnosed, not yet fixed. The ports + create_contact fix + dedup are live and correct; this is a pre-existing nested-fan-out/join + screen-writeback defect in the execution layer, surfaced by the first real Naukri->people e2e."
+   "fix": "Three fixes: (a) _fan_out now _dedup_items() before the max_items cap so a source returning the same company/person twice spawns ONE child, not N (value-keyed, order-preserving). (b) _join_arrive ends the child via an atomic UPDATE...WHERE status<>'completed' RETURNING id and no-ops if not claimed, so a redelivered join-arrival bumps the parent's fanout_done at most once per DISTINCT child (kills the fanout_done=64 vs total=1 over-count that released the barrier early). (c) ai_screen.rs writes the verdict to lead_mutations.custom_fields.screen.{decision,verdict,reason,model} so the screen decision is durable (Leads column + scoring); routing still uses next_handle. Regression tests: test_fan_out_dedups_identical_items, test_join_arrive_counts_distinct_children_idempotently, test_ai_screen_writes_verdict_to_custom_fields. NOTE: the original run's single company was an insurance MNC that Claude correctly REJECTS — a clean re-run needs a real agency in the scrape; the structural bugs that prevented ANY lead are fixed."
   }
  ]
 }

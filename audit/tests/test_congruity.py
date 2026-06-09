@@ -218,3 +218,43 @@ def test_is_company_mismatch_matches_fork_logic():
     assert m("CTO · building things", "Acme") is False
     assert m("CEO at LinkedIn", "Acme") is False  # excluded sentinel
     assert m("Sales Lead", "Acme") is False  # no separator
+
+
+# ── E2E-001: fan-out dedup + join distinct-child counting + screen verdict writeback ─
+def test_fan_out_dedups_identical_items():
+    """REGRESSION E2E-001a: a source that returns the same company/person twice
+    must not spawn N identical children (wastes paid screens, inflates the join
+    barrier). _dedup_items collapses value-identical elements, preserving order."""
+    from app.execution.transition_worker import _dedup_items
+
+    c = {"company_name": "Axis Max Life Insurance", "title": "X"}
+    assert _dedup_items([c, c, c, c]) == [c]
+    a, b = {"company_name": "A"}, {"company_name": "B"}
+    assert _dedup_items([a, b, a, b, a]) == [a, b]
+    # key order must not defeat dedup
+    assert _dedup_items([{"a": 1, "b": 2}, {"b": 2, "a": 1}]) == [{"a": 1, "b": 2}]
+    assert _dedup_items([]) == []
+
+
+def test_join_arrive_counts_distinct_children_idempotently():
+    """REGRESSION E2E-001b: _join_arrive must bump the parent's fanout_done at
+    most ONCE per child. Kafka redelivery re-runs the arrival; without an atomic
+    claim the counter over-counts (observed fanout_done=64 vs total=1) and the
+    barrier releases early, tearing the parent down to flow.end before children
+    finish. The guard is an atomic UPDATE...WHERE status<>'completed' RETURNING."""
+    src = (REPO / "backend/app/execution/transition_worker.py").read_text(encoding="utf-8")
+    assert "status<>'completed' RETURNING id" in src, (
+        "join-arrival child completion must be an atomic claim; without the "
+        "RETURNING gate, redelivery double-counts fanout_done"
+    )
+    assert "if not claimed:" in src, "the join must no-op when the child was already counted"
+
+
+def test_ai_screen_writes_verdict_to_custom_fields():
+    """REGRESSION E2E-001c: the ai_screen muscle handler must persist the verdict
+    into lead_mutations.custom_fields.screen so the decision survives past routing
+    (Leads 'Screen' column, lead scoring). The handle routes; this makes it durable."""
+    ai_screen_rs = (REPO / "backend-rust/src/handlers/ai_screen.rs").read_text(encoding="utf-8")
+    assert '"screen"' in ai_screen_rs and '"decision"' in ai_screen_rs, (
+        "ai_screen must write custom_fields.screen.{decision,verdict,reason}"
+    )

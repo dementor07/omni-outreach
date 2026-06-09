@@ -83,6 +83,20 @@ pub async fn handle_ai_screen(command: &ActionCommand) -> ExecutionResult {
             let (verdict, reason) = parse_verdict(&raw);
             // Verdict ACCEPT/REJECT -> "accept"/"reject" handle.
             let handle = if verdict == "ACCEPT" { "accept" } else { "reject" };
+            // E2E-001c: persist the verdict onto the lead's custom_fields.screen
+            // so it survives past routing — feeds the Leads "Screen" column, lead
+            // scoring, and any downstream node that wants the decision/reason.
+            // The handle alone routes the lead; this makes the verdict durable.
+            let mutations = json!({
+                "custom_fields": {
+                    "screen": {
+                        "decision": handle,
+                        "verdict": verdict,
+                        "reason": reason,
+                        "model": model,
+                    }
+                }
+            });
             let mut result = common::ok(
                 command,
                 json!({
@@ -92,7 +106,7 @@ pub async fn handle_ai_screen(command: &ActionCommand) -> ExecutionResult {
                     "raw_first_line": raw.lines().next().unwrap_or("").to_string(),
                 }),
                 Some("ai.screen.completed"),
-                json!({}),
+                mutations,
             );
             result.metadata.insert("next_handle".to_string(), json!(handle));
             result

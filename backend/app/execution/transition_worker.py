@@ -241,6 +241,12 @@ async def _fan_out(workspace_id: str, parent: dict, for_each_node: dict, correla
             items = (parent.get("custom_fields") or {}).get(items_key) or []
             if not isinstance(items, list):
                 items = []
+            # E2E-001: defensively de-duplicate identical elements before the cap.
+            # A source that returns the same company/person twice (or a replayed
+            # mutation that appended a dup) must not spawn N identical children —
+            # that wastes paid screens and inflates the join barrier. Dedup by a
+            # stable JSON key, preserving first-seen order.
+            items = _dedup_items(items)
             items = items[:max_items]
             # Cap each fan-out so a single rogue collection can't blow past
             # the per-root limit in one shot.
@@ -305,6 +311,25 @@ async def _fan_out(workspace_id: str, parent: dict, for_each_node: dict, correla
             await _fire_node(workspace_id, child, contact, each_node, correlation_id)
 
     log.info("fanned out lead %s -> %d children at %s", parent_id, len(items), for_each_id)
+
+
+def _dedup_items(items: list) -> list:
+    """Drop duplicate fan-out elements, preserving first-seen order. Keyed by a
+    canonical JSON serialisation so dict elements (company/person rows) dedup by
+    value. Non-serialisable elements fall back to identity (never dropped)."""
+    seen: set[str] = set()
+    out: list = []
+    for el in items:
+        try:
+            key = json.dumps(el, sort_keys=True, default=str)
+        except (TypeError, ValueError):
+            out.append(el)
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(el)
+    return out
 
 
 async def _outgoing_edges(workspace_id: str, source_node_id: str) -> list[dict]:
@@ -413,7 +438,23 @@ async def _join_arrive(workspace_id: str, child: dict, correlation_id: str | Non
     children have arrived (fanout_done == fanout_total)."""
     parent_id = child.get("parent_lead_id")
     origin_node_id = child.get("origin_node_id")
-    await _advance_lead(workspace_id, str(child["id"]), None, status="completed")
+    # JOIN-IDEMPOTENCY (E2E-001): end the child atomically and gate everything
+    # below on whether THIS call is the one that completed it. Kafka is
+    # at-least-once, so the same child's join-arrival transition can be
+    # redelivered; without this guard each redelivery bumped the parent's
+    # fanout_done again (observed fanout_done=64 against fanout_total=1),
+    # releasing the barrier early and tearing the parent down to flow.end before
+    # the real children finished. Counting DISTINCT children (one increment per
+    # child, ever) is the correct barrier semantics.
+    async with system_scope():
+        claimed = await fetch_one(
+            "UPDATE omni_leads SET current_node_id=NULL, status='completed', updated_at=NOW() "
+            "WHERE id=$1 AND workspace_id=$2 AND status<>'completed' RETURNING id",
+            str(child["id"]),
+            workspace_id,
+        )
+    if not claimed:
+        return  # this child already arrived + was counted — redelivery no-op
     if not parent_id:
         return  # a join with no upstream for_each/race — child just ends
 
