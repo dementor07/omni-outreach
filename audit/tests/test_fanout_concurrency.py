@@ -47,7 +47,11 @@ class FakeLeads:
             "workspace_id": "ws",
             "current_node_id": None,
             "status": "active",
-            "fanout_total": None,
+            # FAITHFUL to the real schema: omni_leads.fanout_total is NOT NULL
+            # DEFAULT 0, so an un-fanned lead sits at 0, NOT NULL. The original
+            # harness seeded None and so MISSED E2E-003 (the claim predicate was
+            # `IS NULL`, which never matched a real seed lead). Seed 0 here.
+            "fanout_total": 0,
             "fanout_done": 0,
             "custom_fields": custom_fields,
             "contact_id": None,
@@ -69,13 +73,13 @@ def install(monkeypatch, store: FakeLeads):
 
     async def fake_fetch_one(sql: str, *args):
         s = " ".join(sql.split())
-        # The atomic claim: UPDATE ... fanout_total=-1 ... WHERE fanout_total IS NULL RETURNING id
-        if "fanout_total=-1" in s and "fanout_total IS NULL RETURNING id" in s:
+        # The atomic claim: UPDATE ... fanout_total=-1 ... WHERE fanout_total=0 RETURNING id
+        if "fanout_total=-1" in s and "fanout_total=0 RETURNING id" in s:
             for_each_id, lead_id, ws = args
             async with store._lock:
                 row = store.rows.get(lead_id)
-                if not row or row["fanout_total"] is not None:
-                    return None  # already claimed — lose the race
+                if not row or row["fanout_total"] != 0:
+                    return None  # already claimed (non-zero) — lose the race
                 row["fanout_total"] = -1
                 row["current_node_id"] = for_each_id
                 row["status"] = "waiting"
@@ -97,10 +101,10 @@ def install(monkeypatch, store: FakeLeads):
         # E2E-002 claim RELEASE: collection empty, await the mutation. Resets
         # fanout_total to NULL + bumps the retry counter so a later delivery
         # re-claims and fans out for real.
-        if "SET fanout_total=NULL, status='active'" in s:
+        if "SET fanout_total=0, status='active'" in s:
             patch_json, lead_id, ws = args
             row = store.rows[lead_id]
-            row["fanout_total"] = None
+            row["fanout_total"] = 0  # back to the unclaimed sentinel (not NULL)
             row["status"] = "active"
             row["custom_fields"] = {**row["custom_fields"], **json.loads(patch_json)}
             return
@@ -199,7 +203,7 @@ async def test_fan_out_releases_claim_when_collection_not_yet_arrived(monkeypatc
 
     # Delivery #1: routing transition arrives first, collection empty.
     await tw._fan_out("ws", {**store.rows["p3"]}, for_each, "corr")
-    assert store.rows["p3"]["fanout_total"] is None, "claim must be released, not consumed"
+    assert store.rows["p3"]["fanout_total"] == 0, "claim must be released to the 0 sentinel, not consumed"
     assert len(store.children) == 0
     assert store.rows["p3"]["custom_fields"].get("_fanout_retry") == 1
 

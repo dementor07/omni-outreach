@@ -243,8 +243,14 @@ def test_fan_out_claims_atomically_no_duplicate_waves():
     (observed 4×5=20 children for max_items:5). _fan_out must claim atomically via
     UPDATE...WHERE fanout_total IS NULL RETURNING, so exactly one wave wins."""
     src = (REPO / "backend/app/execution/transition_worker.py").read_text(encoding="utf-8")
-    assert "fanout_total IS NULL RETURNING id" in src, (
-        "fan-out must claim the right to spawn atomically; the in-memory guard races"
+    # E2E-003: omni_leads.fanout_total is NOT NULL DEFAULT 0, so the unclaimed
+    # sentinel is 0, not NULL. An `IS NULL` predicate never matches a seed lead
+    # and silently no-ops EVERY fan-out. The claim MUST be `fanout_total=0`.
+    assert "fanout_total=0 RETURNING id" in src, (
+        "fan-out claim must gate on fanout_total=0 (the NOT NULL DEFAULT), not IS NULL"
+    )
+    assert "fanout_total IS NULL RETURNING id" not in src, (
+        "the IS NULL claim predicate never matches a seed lead (E2E-003) — must be =0"
     )
     assert "if not claimed:" in src and "already claimed/fanned" in src
 

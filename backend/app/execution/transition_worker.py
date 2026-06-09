@@ -220,10 +220,16 @@ async def _fan_out(workspace_id: str, parent: dict, for_each_node: dict, correla
     # for a max_items:5 collection. Replace it with an ATOMIC CLAIM: set a sentinel
     # fanout_total=-1 only WHERE fanout_total IS NULL, gated by RETURNING. Exactly
     # one transition wins the claim and proceeds; the rest get no row and no-op.
+    # The claim sentinel is fanout_total: a lead that has NOT yet fanned out at
+    # this node sits at the column's NOT NULL DEFAULT 0 (seed leads) — so the
+    # "unclaimed" predicate is fanout_total=0, NOT `IS NULL` (an earlier cut used
+    # IS NULL, which never matched a seed lead and silently no-op'd EVERY fan-out:
+    # E2E-003). Claiming flips it to the -1 sentinel; the real count overwrites it
+    # at parking. Concurrent/redelivered claims then see != 0 and lose the race.
     async with system_scope():
         claimed = await fetch_one(
             "UPDATE omni_leads SET fanout_total=-1, current_node_id=$1, status='waiting', "
-            "updated_at=NOW() WHERE id=$2 AND workspace_id=$3 AND fanout_total IS NULL RETURNING id",
+            "updated_at=NOW() WHERE id=$2 AND workspace_id=$3 AND fanout_total=0 RETURNING id",
             for_each_id,
             str(parent["id"]),
             workspace_id,
@@ -314,7 +320,10 @@ async def _fan_out(workspace_id: str, parent: dict, for_each_node: dict, correla
         if attempts < FANOUT_EMPTY_RETRY_LIMIT:
             async with system_scope():
                 await execute(
-                    "UPDATE omni_leads SET fanout_total=NULL, status='active', "
+                    # Reset to the unclaimed sentinel (0, the column default) — NOT
+                    # NULL — so a later collection-bearing delivery re-claims via
+                    # the fanout_total=0 predicate above (E2E-003).
+                    "UPDATE omni_leads SET fanout_total=0, status='active', "
                     "custom_fields = COALESCE(custom_fields,'{}'::jsonb) || $1::jsonb, "
                     "updated_at=NOW() WHERE id=$2 AND workspace_id=$3",
                     json.dumps({"_fanout_retry": attempts + 1}),
