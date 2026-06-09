@@ -49,6 +49,12 @@ CONSUMER_GROUP = "v2-transitions"
 #      MAX_DESCENDANTS_PER_ROOT, refuse further fan-out (runaway growth).
 MAX_DESCENDANTS_PER_ROOT = 10_000
 MAX_ANCESTOR_WALK_DEPTH = 64
+# E2E-002: how many times a for_each may release its claim waiting for a
+# source's collection mutation to land (delivery-ordering gap) before treating
+# the collection as genuinely empty and routing to done/empty. Each redelivered
+# transition is one attempt; the source result is redelivered several times, so
+# a small bound is enough to bridge the gap without spinning on a truly-empty source.
+FANOUT_EMPTY_RETRY_LIMIT = 8
 
 
 async def _target_node(workspace_id: str, source_node_id: str, handle: str) -> dict | None:
@@ -289,6 +295,38 @@ async def _fan_out(workspace_id: str, parent: dict, for_each_node: dict, correla
                 items = items[:remaining]
 
     each_edge = await _outgoing_edge(workspace_id, for_each_id, "each")
+    parent_id = str(parent["id"])
+
+    # E2E-002 (delivery ordering): if we won the claim but the collection is still
+    # empty AND there's a real `each` arm, the source's collection mutation almost
+    # certainly hasn't landed yet (the Flink orchestrator delivers the mutation
+    # envelope and the for_each-routing transition separately + at-least-once, so
+    # the claim-winner can arrive first). RELEASE the claim (fanout_total back to
+    # NULL) so the later, collection-bearing delivery re-claims and fans out for
+    # real — instead of silently consuming the claim and routing to done/empty,
+    # which strands a full scrape with zero leads. A genuinely-empty collection
+    # just re-claims, re-reads empty, and falls through to done on a later pass;
+    # the staleness guard below caps that. Guarded by an attempt counter in
+    # custom_fields so a truly-empty source can't spin forever.
+    if not items and each_edge:
+        cf = dict((parent.get("custom_fields") or {}))
+        attempts = int(cf.get("_fanout_retry", 0))
+        if attempts < FANOUT_EMPTY_RETRY_LIMIT:
+            async with system_scope():
+                await execute(
+                    "UPDATE omni_leads SET fanout_total=NULL, status='active', "
+                    "custom_fields = COALESCE(custom_fields,'{}'::jsonb) || $1::jsonb, "
+                    "updated_at=NOW() WHERE id=$2 AND workspace_id=$3",
+                    json.dumps({"_fanout_retry": attempts + 1}),
+                    parent_id,
+                    workspace_id,
+                )
+            log.info(
+                "fan_out released claim for lead %s at %s: collection empty, awaiting mutation (retry %d/%d)",
+                parent_id, for_each_id, attempts + 1, FANOUT_EMPTY_RETRY_LIMIT,
+            )
+            return
+
     if not items or not each_edge:
         done_edge = await _outgoing_edge(workspace_id, for_each_id, "done") or await _outgoing_edge(
             workspace_id, for_each_id, "empty"
@@ -300,7 +338,6 @@ async def _fan_out(workspace_id: str, parent: dict, for_each_node: dict, correla
         return
 
     each_target = str(each_edge["target_node_id"])
-    parent_id = str(parent["id"])
 
     async with system_scope():
         await execute(

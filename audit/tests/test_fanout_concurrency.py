@@ -94,6 +94,16 @@ def install(monkeypatch, store: FakeLeads):
             for_each_id, total, lead_id, ws = args
             store.rows[lead_id]["fanout_total"] = total
             return
+        # E2E-002 claim RELEASE: collection empty, await the mutation. Resets
+        # fanout_total to NULL + bumps the retry counter so a later delivery
+        # re-claims and fans out for real.
+        if "SET fanout_total=NULL, status='active'" in s:
+            patch_json, lead_id, ws = args
+            row = store.rows[lead_id]
+            row["fanout_total"] = None
+            row["status"] = "active"
+            row["custom_fields"] = {**row["custom_fields"], **json.loads(patch_json)}
+            return
         # Child INSERT.
         if "INSERT INTO omni_leads" in s:
             store.children.append({"id": args[0], "custom_fields": args[5]})
@@ -171,3 +181,32 @@ async def test_fan_out_reads_collection_after_write(monkeypatch):
     # Read-after-write: it must have used the DB's 3 companies, not the empty arg.
     assert store.rows["p2"]["fanout_total"] == 3, store.rows["p2"]["fanout_total"]
     assert len(store.children) == 3, f"expected 3 children from fresh read, got {len(store.children)}"
+
+
+@pytest.mark.asyncio
+async def test_fan_out_releases_claim_when_collection_not_yet_arrived(monkeypatch):
+    """E2E-002 (delivery ordering): the for_each-routing transition can arrive
+    BEFORE the source's collection mutation (separate at-least-once envelopes).
+    Delivery #1 wins the claim but the DB collection is still empty -> it must
+    RELEASE the claim (fanout_total back to NULL) rather than route to done with
+    zero leads. Delivery #2, arriving after the mutation landed, then re-claims
+    and fans out the real count. Without the release, a full scrape strands at
+    zero children (the exact live E2E-002 symptom)."""
+    store = FakeLeads()
+    store.seed_parent("p3", {})  # collection NOT present yet
+    install(monkeypatch, store)
+    for_each = {"id": "fe3", "config": {"items_key": "companies", "item_field": "item", "max_items": 10}}
+
+    # Delivery #1: routing transition arrives first, collection empty.
+    await tw._fan_out("ws", {**store.rows["p3"]}, for_each, "corr")
+    assert store.rows["p3"]["fanout_total"] is None, "claim must be released, not consumed"
+    assert len(store.children) == 0
+    assert store.rows["p3"]["custom_fields"].get("_fanout_retry") == 1
+
+    # The collection mutation now lands (a later result envelope).
+    store.rows["p3"]["custom_fields"]["companies"] = [{"company_name": "A"}, {"company_name": "B"}]
+
+    # Delivery #2: re-claims (fanout_total is NULL again) and fans out for real.
+    await tw._fan_out("ws", {**store.rows["p3"]}, for_each, "corr")
+    assert store.rows["p3"]["fanout_total"] == 2, store.rows["p3"]["fanout_total"]
+    assert len(store.children) == 2, f"expected 2 children after mutation landed, got {len(store.children)}"
