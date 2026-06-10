@@ -31,7 +31,7 @@ from aiokafka import AIOKafkaConsumer
 
 import app.nodes as noderegistry
 from app.config import settings
-from app.db import close_pool, execute, fetch_one, init_pool, system_scope
+from app.db import close_pool, execute, fetch_all, fetch_one, init_pool, system_scope
 from app.execution import commands
 from app.services import bus, company_kg
 

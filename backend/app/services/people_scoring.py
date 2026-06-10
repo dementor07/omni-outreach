@@ -75,7 +75,6 @@ def verification_score(
     decision-maker title +5 bonus.
     """
     breakdown: list[tuple[str, int]] = []
-    t = (title or "").lower()
     tgt = (target_company or "").lower()
     snip = (snippet or "").lower()
 

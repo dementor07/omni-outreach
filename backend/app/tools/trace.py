@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 
 from app.config import settings
 from app.db import close_pool, fetch_all, init_pool, system_scope

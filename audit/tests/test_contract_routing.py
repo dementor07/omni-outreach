@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import os
 
-import pytest
 
 # Test stack env (mirrors backend/tests/conftest.py) so importing app.* doesn't
 # trip config's placeholder-secret guard. No DB connection is opened here.

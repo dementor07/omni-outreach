@@ -295,6 +295,23 @@ def test_kg_confidence_decay_spec():
     assert "GREATEST(" in sql and "last_verified" in sql and "30*86400" in sql
 
 
+def test_no_undefined_names_in_backend():
+    """REGRESSION (RACE-DOA): transition_worker._outgoing_edges called fetch_all
+    without importing it — flow.race fan-out crashed with NameError at runtime,
+    invisible to import checks (the name resolves lazily) and to the static
+    congruity tests. Run ruff's undefined-name rule (F821) over the backend so
+    ANY unresolved name fails the suite, not just this one."""
+    import subprocess
+    import sys
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "ruff", "check", str(REPO / "backend/app"),
+         "--select", "F821", "--output-format", "concise"],
+        capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, f"undefined names in backend/app:\n{proc.stdout}"
+
+
 def test_cache_person_records_history():
     """REGRESSION (KG moat): cache_person must record the person↔company stint so
     the relationship graph accumulates (the moat), not just the flat cache."""
