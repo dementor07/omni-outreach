@@ -37,7 +37,7 @@ def _run_deploy() -> tuple[bool, str]:
     for step in infra_steps:
         log.info("Running infra step: %s", " ".join(step))
         result = subprocess.run(
-            step, cwd="/home/omni-outreach", capture_output=True, text=True, timeout=300
+            step, cwd="/home/omni-outreach", capture_output=True, text=True, timeout=900
         )
         if result.returncode != 0:
             msg = (result.stderr or result.stdout)[:1000]
@@ -55,7 +55,7 @@ def _run_deploy() -> tuple[bool, str]:
     for step in v2_steps:
         log.info("Running v2 step: %s", " ".join(step))
         result = subprocess.run(
-            step, cwd="/home/omni-v2", capture_output=True, text=True, timeout=300
+            step, cwd="/home/omni-v2", capture_output=True, text=True, timeout=900
         )
         if result.returncode != 0:
             msg = (result.stderr or result.stdout)[:1000]
