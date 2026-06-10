@@ -29,12 +29,15 @@ async def test_register_and_login(client: httpx.AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_unauthenticated_campaigns(client: httpx.AsyncClient):
-    resp = await client.get("/campaigns")
+async def test_unauthenticated_canvas(client: httpx.AsyncClient):
+    # v2 replaced /campaigns with the canvas workflow API; it must reject
+    # unauthenticated callers (the legacy /campaigns route is gone -> 404).
+    resp = await client.get("/canvas/workflows")
     assert resp.status_code in (401, 403)
 
 
 @pytest.mark.asyncio
 async def test_unauthenticated_leads(client: httpx.AsyncClient):
-    resp = await client.get("/leads")
+    # v2 serves leads from the projections API (the legacy /leads route is gone).
+    resp = await client.get("/projections/leads")
     assert resp.status_code in (401, 403)
