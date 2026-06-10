@@ -189,6 +189,16 @@ services:
       - ./acme:/var/www/certbot
     restart: unless-stopped
 
+  searxng:
+    image: searxng/searxng:latest
+    container_name: omni-v2-searxng
+    volumes:
+      - ./searxng:/etc/searxng:ro
+    networks:
+      - omni-outreach_default
+    restart: unless-stopped
+
+
 # Join master's docker-compose network so we can talk to db, redpanda, redis
 # by their service names without exposing them.
 networks:
