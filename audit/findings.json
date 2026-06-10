@@ -93,6 +93,10 @@
    {
     "date": "2026-06-09",
     "note": "KG MOAT shipped (MOAT-001): person_company_history + confidence decay, migration 030 applied live (RLS-enabled, multi-tenant). The compounding relationship asset + job-change-aware decay. cache_person now records stints; decay verified against real PG."
+   },
+   {
+    "date": "2026-06-09",
+    "note": "Static error-analysis sweep (ruff E9/F + tsc + eslint + vite build + strict node discovery). One real runtime bug: RACE-DOA (flow.race NameError on fetch_all) — FIXED + F821 guard added. Everything else clean."
    }
   ]
  },
@@ -1354,6 +1358,18 @@
    "evidence": "Allen's fork declares person_company_history + confidence decay as 'Apollo's actual moat — historical relationships, not scraping' (plan.md Phase 4). We had omni_people_cache (027) but no history graph and a static confidence.",
    "recommendation": "Port the relationship graph + decay into our multi-tenant KG.",
    "fix": "Migration 030 omni_person_company_history (person↔company stints, one open per pair, RLS-enabled — multi-tenant, which the single-tenant fork can't do) + idx_omni_people_cache_verified. company_kg: cache_person returns the person id + records the stint (record_person_company); a re-sighting restores confidence (+10 cap 90) + resets last_verified. Confidence decays at READ time (−5/month, floor 10) — verified against real Postgres (fresh=90,1mo=85,3mo=75,8mo=50). cached_people orders by decayed confidence; people_needing_reverification() lists rows <50; person_history() returns the full timeline. Deployed + migration 030 applied live (alembic_version=030, table+RLS+index confirmed). Regression tests test_kg_confidence_decay_spec + test_cache_person_records_history (19 audit tests green)."
+  },
+  {
+   "id": "RACE-DOA",
+   "area": "execution",
+   "file": "backend/app/execution/transition_worker.py",
+   "line": 413,
+   "severity": "HIGH",
+   "status": "FIXED",
+   "title": "flow.race fan-out crashed with NameError — fetch_all used but never imported",
+   "evidence": "_outgoing_edges (used by _race_fan_out to spawn one child per branch_* edge) called fetch_all, but transition_worker imported only execute/fetch_one from app.db. Every flow.race execution would raise NameError: name 'fetch_all' is not defined at runtime. Hidden from `import` checks (the name resolves lazily inside the async fn) and from the congruity tests. Found by ruff F821 in a static-analysis sweep.",
+   "recommendation": "Import fetch_all + add an undefined-name (F821) gate so the bug class can't recur.",
+   "fix": "Added fetch_all to the app.db import. New audit test test_no_undefined_names_in_backend runs ruff F821 over backend/app so any unresolved name fails the suite. Same sweep removed dead code (people_scoring `t`, 3 unused imports). Committed d7f457e."
   }
  ]
 }
