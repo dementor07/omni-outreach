@@ -315,7 +315,7 @@ async def _fan_out(workspace_id: str, parent: dict, for_each_node: dict, correla
     # the staleness guard below caps that. Guarded by an attempt counter in
     # custom_fields so a truly-empty source can't spin forever.
     if not items and each_edge:
-        cf = dict((parent.get("custom_fields") or {}))
+        cf = dict(parent.get("custom_fields") or {})
         attempts = int(cf.get("_fanout_retry", 0))
         if attempts < FANOUT_EMPTY_RETRY_LIMIT:
             async with system_scope():

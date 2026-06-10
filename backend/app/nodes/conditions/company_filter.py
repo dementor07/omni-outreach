@@ -29,7 +29,6 @@ from app.nodes import (
     register,
 )
 
-
 DEFAULT_BLOCKLIST: tuple[str, ...] = (
     "amazon", "google", "meta", "microsoft", "apple", "ibm", "oracle", "sap",
     "salesforce", "adobe", "cisco", "intel", "accenture", "deloitte", "mckinsey",

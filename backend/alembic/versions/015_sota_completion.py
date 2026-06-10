@@ -16,6 +16,7 @@ Adds:
 """
 
 from collections.abc import Sequence
+
 from alembic import op
 
 revision: str = "015"

@@ -121,12 +121,12 @@ async def main() -> None:
     print(f"\n── LEAD LINEAGE ({len(leads)} leads) ──")
     if not leads:
         print("  (no leads tied to this run)")
-    for l in leads:
-        kind = "ROOT " if l["parent_lead_id"] is None else "child"
+    for ld in leads:
+        kind = "ROOT " if ld["parent_lead_id"] is None else "child"
         print(
-            f"  {kind} {_short(l['id'])}  status={l['status']:<10} "
-            f"node={_short(l['current_node_id'])} parent={_short(l['parent_lead_id'])} "
-            f"origin={_short(l['origin_node_id'])} fanout={l['fanout_done']}/{l['fanout_total']}"
+            f"  {kind} {_short(ld['id'])}  status={ld['status']:<10} "
+            f"node={_short(ld['current_node_id'])} parent={_short(ld['parent_lead_id'])} "
+            f"origin={_short(ld['origin_node_id'])} fanout={ld['fanout_done']}/{ld['fanout_total']}"
         )
 
     print(f"\n── AI JOBS ({len(jobs)} jobs) ──")
