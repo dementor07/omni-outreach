@@ -260,6 +260,18 @@ def run_orchestrator():
         .build()
     )
 
+    # RACE-7 (adjudicated): this sink writes outreach.transitions UNKEYED —
+    # transitions for one lead round-robin across partitions, and AT_LEAST_ONCE
+    # re-emits duplicates after checkpoint recovery. PyFlink's
+    # KafkaRecordSerializationSchema cannot derive a Kafka key from the record
+    # (set_key_serialization_schema serializes the SAME string as the key — it
+    # can't extract lead_id) without a custom Java serializer, so per-lead
+    # partition ordering is NOT enforced here. The safety property is instead
+    # owned by the consumer: transition_worker's terminal-state guard,
+    # positional advance claim, and claim-gated fan-out/race/join/retry paths
+    # make duplicated and re-ordered transitions no-ops. If a Java key
+    # serializer is ever added, key by lead_id — but the consumer contract must
+    # stay regardless (Kafka is at-least-once end to end).
     sink = (
         KafkaSink.builder()
         .set_bootstrap_servers(brokers)

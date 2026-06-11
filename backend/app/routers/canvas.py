@@ -456,6 +456,21 @@ async def run_workflow(
     )
     result = await execute_fn(node_ctx)
 
+    # SM-3: check the error BEFORE publishing events. The old order published
+    # the (errored) node's intents first, then 422'd with the seed lead still
+    # status='active' at the entry node — stranded forever, invisible except as
+    # a stuck row. An errored entry node now ships nothing, and the seed lead is
+    # marked 'errored' so the Leads view tells the truth instead of orphaning it.
+    if result.error:
+        await execute(
+            "UPDATE omni_leads SET status='errored', current_node_id=NULL, updated_at=NOW() "
+            "WHERE id=$1 AND workspace_id=$2",
+            lead_id,
+            ctx.workspace_id,
+        )
+        log.warning("run_workflow %s entry node %s errored: %s", workflow_id, node_type, result.error)
+        raise HTTPException(status_code=422, detail=f"entry node error: {result.error}")
+
     published = 0
     for ev in result.events:
         payload = dict(ev.get("payload") or {})
@@ -475,12 +490,6 @@ async def run_workflow(
             correlation_id=correlation_id,
         )
         published += 1
-
-    if result.error:
-        # Source validated but refused (bad config). Surface it; the lead is left
-        # for inspection rather than silently orphaned.
-        log.warning("run_workflow %s entry node %s errored: %s", workflow_id, node_type, result.error)
-        raise HTTPException(status_code=422, detail=f"entry node error: {result.error}")
 
     log.info(
         "ran workflow %s: seeded lead %s at %s (%s), published %d intent event(s)",

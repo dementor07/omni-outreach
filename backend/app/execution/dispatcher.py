@@ -153,6 +153,20 @@ async def handle_event(env: dict) -> None:
 
     connection_name = payload.get("connection_name") or config.get("connection_name")
 
+    # SPINE-2: a synthetic lead is a black hole the operator must hear about.
+    # When no lead row backs this intent, the command's lead.id is the NODE id;
+    # the muscle's result comes back keyed on it, and the transition worker's
+    # `WHERE id=<node_id>` lookup finds nothing — the transition (and any
+    # lead_mutations, e.g. a scraped company list) is silently dropped. Every
+    # live path seeds a real lead first (run_workflow / webhooks); if this fires,
+    # something dispatched outside those paths and its results WILL vanish.
+    if lead is None:
+        log.warning(
+            "dispatching intent %s with SYNTHETIC lead id=%s (no lead row): the muscle's "
+            "result will not advance any lead and its mutations will be dropped (SPINE-2)",
+            event_type,
+            lead_id or str(node_id),
+        )
     synthetic_lead = lead or {"id": lead_id or str(node_id), "workflow_id": payload.get("workflow_id")}
     command = await commands.build_command(
         workspace_id=workspace_id,

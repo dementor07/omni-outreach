@@ -256,17 +256,23 @@ def test_fan_out_claims_atomically_no_duplicate_waves():
 
 
 def test_join_arrive_counts_distinct_children_idempotently():
-    """REGRESSION E2E-001b: _join_arrive must bump the parent's fanout_done at
-    most ONCE per child. Kafka redelivery re-runs the arrival; without an atomic
-    claim the counter over-counts (observed fanout_done=64 vs total=1) and the
-    barrier releases early, tearing the parent down to flow.end before children
-    finish. The guard is an atomic UPDATE...WHERE status<>'completed' RETURNING."""
+    """REGRESSION E2E-001b: a child must bump the parent's fanout_done at most
+    ONCE, ever. Kafka redelivery re-runs the arrival; without an atomic claim
+    the counter over-counts (observed fanout_done=64 vs total=1) and the barrier
+    releases early. The claim now lives in _terminalize_lead (2026-06-11 spine
+    pass): UPDATE … WHERE status NOT IN (<terminal set>) RETURNING — stronger
+    than the old status<>'completed' (it also blocks re-counting a child that
+    ended errored/cancelled). Only the claiming call counts (count=True);
+    redeliveries re-attempt the claim-gated RELEASE only (count=False)."""
     src = (REPO / "backend/app/execution/transition_worker.py").read_text(encoding="utf-8")
-    assert "status<>'completed' RETURNING id" in src, (
-        "join-arrival child completion must be an atomic claim; without the "
-        "RETURNING gate, redelivery double-counts fanout_done"
+    assert "AND status NOT IN " in src and "RETURNING parent_lead_id, origin_node_id" in src, (
+        "child terminalization must be an atomic status-predicate claim; without "
+        "the RETURNING gate, redelivery double-counts fanout_done"
     )
-    assert "if not claimed:" in src, "the join must no-op when the child was already counted"
+    assert "count=True" in src and "count=False" in src, (
+        "only the terminalizing call may COUNT at the barrier; redeliveries may "
+        "only re-attempt the claim-gated release"
+    )
 
 
 def test_ai_screen_writes_verdict_to_custom_fields():

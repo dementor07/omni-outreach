@@ -98,7 +98,21 @@ async def _mint_credential_ref(workspace_id: str, connection_name: str | None, c
 
 
 def _lead_context(lead: dict[str, Any], contact: dict[str, Any] | None) -> dict[str, Any]:
+    """The wire-shape the Rust muscle deserializes as LeadContext (models.rs).
+
+    CONTRACT-1: every Option field the Rust struct declares should be honestly
+    populated when the data exists — previously headline/source and the social
+    chat-session fields were simply never sent, so the muscle always saw None.
+    Chat-session ids (chat_id/ig_chat_id/tg_chat_id) live in the LEAD's
+    custom_fields (written back by _apply_lead_mutations when send_chat opens a
+    chat); usernames/location come from the contact's custom_fields."""
     c = contact or {}
+    lead_cf = lead.get("custom_fields") or {}
+    if isinstance(lead_cf, str):
+        lead_cf = json.loads(lead_cf)
+    contact_cf = c.get("custom_fields") or {}
+    if isinstance(contact_cf, str):
+        contact_cf = json.loads(contact_cf)
     return {
         "id": str(lead["id"]),
         "campaign_id": str(lead.get("workflow_id") or lead["id"]),
@@ -108,7 +122,15 @@ def _lead_context(lead: dict[str, Any], contact: dict[str, Any] | None) -> dict[
         "first_name": c.get("first_name"),
         "last_name": c.get("last_name"),
         "company": c.get("company"),
-        "extra_data": lead.get("custom_fields") or {},
+        "headline": c.get("headline"),
+        "location": contact_cf.get("location"),
+        "source": c.get("source"),
+        "chat_id": lead_cf.get("chat_id"),
+        "ig_chat_id": lead_cf.get("ig_chat_id"),
+        "tg_chat_id": lead_cf.get("tg_chat_id"),
+        "instagram_username": contact_cf.get("instagram_username"),
+        "telegram_username": contact_cf.get("telegram_username"),
+        "extra_data": lead_cf,
     }
 
 

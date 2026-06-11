@@ -40,6 +40,14 @@ log = logging.getLogger("transitions")
 TRANSITIONS_TOPIC = "outreach.transitions"
 CONSUMER_GROUP = "v2-transitions"
 
+# Decision A (logic-integrity ledger): the terminal-state contract. A lead in
+# one of these states is DONE — no transition may advance, re-fire, or resurrect
+# it. Kafka is at-least-once and Flink's sink is AT_LEAST_ONCE, so redelivered/
+# re-emitted transitions for already-finished leads are NORMAL, not exceptional;
+# without this guard they resurrected errored leads (SM-1) and cancelled race
+# losers (SM-6). Enforced once, at handle_transition entry.
+TERMINAL_STATUSES = ("completed", "errored", "cancelled", "converted", "ended")
+
 # Recursion guards for flow.for_each. A single mis-wired loop edge can melt the
 # system (see 2026-06 incident: one edge from a downstream join back into the
 # for_each created a 113k-lead explosion). Two guards:
@@ -337,13 +345,24 @@ async def _fan_out(workspace_id: str, parent: dict, for_each_node: dict, correla
             return
 
     if not items or not each_edge:
+        # SEQ-FANOUT: release the -1 claim sentinel before routing on. Leaving
+        # it set meant this lead could never claim ANY later fan-out node (the
+        # claim predicate is fanout_total=0) — every sequential for_each after
+        # the first silently never fanned out.
+        async with system_scope():
+            await execute(
+                "UPDATE omni_leads SET fanout_total=0, fanout_done=0, updated_at=NOW() "
+                "WHERE id=$1 AND workspace_id=$2",
+                parent_id,
+                workspace_id,
+            )
         done_edge = await _outgoing_edge(workspace_id, for_each_id, "done") or await _outgoing_edge(
             workspace_id, for_each_id, "empty"
         )
         if done_edge:
             await _advance_and_fire(workspace_id, str(parent["id"]), str(done_edge["target_node_id"]), correlation_id)
         else:
-            await _advance_lead(workspace_id, str(parent["id"]), None, status="completed")
+            await _terminalize_lead(workspace_id, str(parent["id"]), "completed", correlation_id)
         return
 
     each_target = str(each_edge["target_node_id"])
@@ -426,16 +445,27 @@ async def _race_fan_out(workspace_id: str, parent: dict, race_node: dict, correl
     losing siblings are cancelled. Reuses the same lineage columns
     (parent_lead_id / origin_node_id) as for_each so the join machinery is shared.
 
-    Idempotent on redelivery: a parent already parked at this race node with a
-    non-null fanout_total has already fanned out — no-op."""
+    RACE-1: idempotency is an ATOMIC CLAIM, identical to _fan_out's. The old
+    in-memory guard (re-read the row, check status=='waiting') was a TOCTOU: the
+    caller's unconditional _advance_lead had just flipped the parent back to
+    'active' on every redelivery — so the guard never matched, every redelivery
+    fanned out a second set of arms, AND the trample broke the join's first-
+    arm-wins claim (which requires status='waiting'): once trampled, NO arm
+    could ever win and the parent hung forever. The claim (fanout_total 0 → -1,
+    one winner via RETURNING) + the caller no longer pre-advancing fan-out
+    targets fixes both."""
     race_id = str(race_node["id"])
-    if (
-        str(parent.get("current_node_id") or "") == race_id
-        and (parent.get("status") or "") == "waiting"
-        and parent.get("fanout_total") is not None
-        and parent.get("fanout_total") > 0
-    ):
-        log.info("race_fan_out skipped: lead %s already raced at %s (redelivery)", parent.get("id"), race_id)
+    parent_id = str(parent["id"])
+    async with system_scope():
+        claimed = await fetch_one(
+            "UPDATE omni_leads SET fanout_total=-1, current_node_id=$1, status='waiting', "
+            "updated_at=NOW() WHERE id=$2 AND workspace_id=$3 AND fanout_total=0 RETURNING id",
+            race_id,
+            parent_id,
+            workspace_id,
+        )
+    if not claimed:
+        log.info("race_fan_out skipped: lead %s already claimed/raced at %s (redelivery/concurrent)", parent_id, race_id)
         return
 
     # Only the branch_* arms are race participants (the `timeout` handle is the
@@ -445,16 +475,23 @@ async def _race_fan_out(workspace_id: str, parent: dict, race_node: dict, correl
         if str(e["source_handle"]).startswith("branch_")
     ]
     if not arms:
-        # Misconfigured race with no arms — route the parent to timeout (or leaf).
+        # Misconfigured race with no arms — release the claim sentinel so a
+        # future fan-out node can claim, then route to timeout (or terminal).
+        async with system_scope():
+            await execute(
+                "UPDATE omni_leads SET fanout_total=0, fanout_done=0, updated_at=NOW() "
+                "WHERE id=$1 AND workspace_id=$2",
+                parent_id,
+                workspace_id,
+            )
         timeout_edge = await _outgoing_edge(workspace_id, race_id, "timeout")
         if timeout_edge:
-            await _advance_and_fire(workspace_id, str(parent["id"]), str(timeout_edge["target_node_id"]), correlation_id)
+            await _advance_and_fire(workspace_id, parent_id, str(timeout_edge["target_node_id"]), correlation_id)
         else:
-            await _advance_lead(workspace_id, str(parent["id"]), None, status="completed")
+            await _terminalize_lead(workspace_id, parent_id, "completed", correlation_id)
         log.warning("race %s has no branch_* arms; parent routed to timeout/leaf", race_id)
         return
 
-    parent_id = str(parent["id"])
     async with system_scope():
         await execute(
             "UPDATE omni_leads SET current_node_id=$1, status='waiting', fanout_total=$2, "
@@ -506,88 +543,232 @@ async def _race_fan_out(workspace_id: str, parent: dict, race_node: dict, correl
     log.info("raced lead %s -> %d parallel arms at %s (timeout %dh)", parent_id, len(arms), race_id, timeout_hours)
 
 
-async def _join_arrive(workspace_id: str, child: dict, correlation_id: str | None) -> None:
-    """A child lead reached a flow.join. End the child, bump the parent's
-    fanout_done, and release the parent down the for_each `done` edge once all
-    children have arrived (fanout_done == fanout_total)."""
-    parent_id = child.get("parent_lead_id")
-    origin_node_id = child.get("origin_node_id")
-    # JOIN-IDEMPOTENCY (E2E-001): end the child atomically and gate everything
-    # below on whether THIS call is the one that completed it. Kafka is
-    # at-least-once, so the same child's join-arrival transition can be
-    # redelivered; without this guard each redelivery bumped the parent's
-    # fanout_done again (observed fanout_done=64 against fanout_total=1),
-    # releasing the barrier early and tearing the parent down to flow.end before
-    # the real children finished. Counting DISTINCT children (one increment per
-    # child, ever) is the correct barrier semantics.
+async def _terminalize_lead(
+    workspace_id: str,
+    lead_id: str,
+    status: str,
+    correlation_id: str | None,
+    *,
+    join_arrival: bool = False,
+) -> bool:
+    """Move a lead to a terminal status ATOMICALLY and account it at its
+    parent's fan-out barrier (Decision B / SM-5).
+
+    The UPDATE's status-predicate is the once-only claim: exactly one call ever
+    terminalizes a lead, no matter how many times its transition is redelivered.
+    Only the claiming call COUNTS at the barrier; a redelivered (already
+    terminal) call still re-attempts the barrier RELEASE check with count=False
+    — that recovers a worker crash between the increment and the release (the
+    uncommitted offset redelivers the child's transition; recount would corrupt,
+    but a release re-check is claim-gated and idempotent).
+
+    Every terminal path must come through here — leaf completion, node errors,
+    goal/end, dead-on-arrival — because a fan-out child that goes terminal
+    ANYWHERE other than flow.join used to vanish without decrementing the join
+    barrier, hanging its parent in 'waiting' forever (SM-5: guaranteed under
+    any child failure). Nested fan-outs cascade naturally: a parent terminalized
+    here notifies ITS parent's barrier in turn."""
     async with system_scope():
-        claimed = await fetch_one(
-            "UPDATE omni_leads SET current_node_id=NULL, status='completed', updated_at=NOW() "
-            "WHERE id=$1 AND workspace_id=$2 AND status<>'completed' RETURNING id",
-            str(child["id"]),
+        row = await fetch_one(
+            "UPDATE omni_leads SET status=$1, current_node_id=NULL, updated_at=NOW() "
+            "WHERE id=$2 AND workspace_id=$3 AND status NOT IN "
+            "('completed','errored','cancelled','converted','ended') "
+            "RETURNING parent_lead_id, origin_node_id",
+            status,
+            lead_id,
             workspace_id,
         )
-    if not claimed:
-        return  # this child already arrived + was counted — redelivery no-op
-    if not parent_id:
-        return  # a join with no upstream for_each/race — child just ends
+    if row:
+        if row.get("parent_lead_id") and row.get("origin_node_id"):
+            await _barrier_arrive(
+                workspace_id,
+                str(row["parent_lead_id"]),
+                str(row["origin_node_id"]),
+                str(lead_id),
+                correlation_id,
+                join_arrival=join_arrival,
+                count=True,
+            )
+        return True
+    # Already terminal — redelivery. Re-attempt the release check only.
+    async with system_scope():
+        prior = await fetch_one(
+            "SELECT parent_lead_id, origin_node_id FROM omni_leads WHERE id=$1 AND workspace_id=$2",
+            lead_id,
+            workspace_id,
+        )
+    if prior and prior.get("parent_lead_id") and prior.get("origin_node_id"):
+        await _barrier_arrive(
+            workspace_id,
+            str(prior["parent_lead_id"]),
+            str(prior["origin_node_id"]),
+            str(lead_id),
+            correlation_id,
+            join_arrival=join_arrival,
+            count=False,
+        )
+    return False
 
-    # The origin node decides the barrier semantics: flow.race releases on the
-    # FIRST arrival (and cancels the losers); flow.for_each waits for ALL.
-    origin = await _node_row(workspace_id, str(origin_node_id)) if origin_node_id else None
+
+async def _barrier_arrive(
+    workspace_id: str,
+    parent_id: str,
+    origin_node_id: str,
+    child_id: str,
+    correlation_id: str | None,
+    *,
+    join_arrival: bool,
+    count: bool,
+) -> None:
+    """Account one child's terminalization at the parent's fan-out barrier.
+
+    Origin semantics: flow.race releases on the FIRST join-arrival (and cancels
+    the losers); flow.for_each waits for ALL children — counting failures too,
+    or one errored child hangs the barrier forever (SM-5).
+
+    Every parent UPDATE here is pinned to ``current_node_id=origin_node_id``:
+    the barrier may only mutate a parent that is still parked at THIS fan-out
+    node. Without the pin, a ghost redelivery from an earlier fan-out could
+    increment (or release!) a barrier the same lead opened at a LATER node —
+    possible now that counters reset on release to support sequential fan-outs.
+
+    Release claims reset fanout_total/fanout_done to 0 (the _fan_out/_race
+    claim's 'unclaimed' sentinel) — without the reset, a lead that finished one
+    fan-out could never claim a second one (SEQ-FANOUT: every sequential
+    for_each after the first silently never fanned out)."""
+    origin = await _node_row(workspace_id, origin_node_id)
     origin_type = (origin or {}).get("node_type")
 
     if origin_type == "flow.race":
-        # First-arm-wins. Atomically claim the win: only the first arrival flips
-        # the parent out of 'waiting'. RETURNING gates the race so a second
-        # arriving sibling sees no row and no-ops (idempotent under redelivery).
-        async with system_scope():
-            parent = await fetch_one(
-                "UPDATE omni_leads SET status='active', fanout_done = fanout_done + 1, "
-                "updated_at=NOW() WHERE id=$1 AND workspace_id=$2 AND status='waiting' RETURNING *",
-                str(parent_id),
-                workspace_id,
-            )
-        if not parent:
-            return  # a sibling already won (or parent gone) — this loser just ended above
-        # Cancel the still-running losing siblings (other children of this race).
-        async with system_scope():
-            await execute(
-                "UPDATE omni_leads SET status='cancelled', current_node_id=NULL, updated_at=NOW() "
-                "WHERE workspace_id=$1 AND parent_lead_id=$2 AND origin_node_id=$3 "
-                "AND id<>$4 AND status NOT IN ('completed','cancelled')",
-                workspace_id,
-                str(parent_id),
-                str(origin_node_id),
-                str(child["id"]),
-            )
-        done_edge = await _outgoing_edge(workspace_id, str(origin_node_id), "done")
-        if not done_edge:
-            await _advance_lead(workspace_id, str(parent["id"]), None, status="completed")
-            log.info("race won by %s; parent %s released (no done edge) -> completed", child["id"], parent["id"])
+        if join_arrival:
+            # First-arm-wins: atomic claim — only the first arrival flips the
+            # parent out of 'waiting'. Redelivered/late arrivals see no row.
+            async with system_scope():
+                parent = await fetch_one(
+                    "UPDATE omni_leads SET status='active', fanout_total=0, fanout_done=0, "
+                    "updated_at=NOW() WHERE id=$1 AND workspace_id=$2 AND status='waiting' "
+                    "AND current_node_id=$3 RETURNING id",
+                    parent_id,
+                    workspace_id,
+                    origin_node_id,
+                )
+            if not parent:
+                return  # a sibling already won (or race resolved) — loser just ended
+            async with system_scope():
+                await execute(
+                    "UPDATE omni_leads SET status='cancelled', current_node_id=NULL, updated_at=NOW() "
+                    "WHERE workspace_id=$1 AND parent_lead_id=$2 AND origin_node_id=$3 "
+                    "AND id<>$4 AND status NOT IN ('completed','errored','cancelled','converted','ended')",
+                    workspace_id,
+                    parent_id,
+                    origin_node_id,
+                    child_id,
+                )
+            done_edge = await _outgoing_edge(workspace_id, origin_node_id, "done")
+            if done_edge:
+                await _advance_and_fire(workspace_id, parent_id, str(done_edge["target_node_id"]), correlation_id)
+                log.info("race won by %s; parent %s -> %s, siblings cancelled", child_id, parent_id, done_edge["target_node_id"])
+            else:
+                await _terminalize_lead(workspace_id, parent_id, "completed", correlation_id)
+                log.info("race won by %s; parent %s released (no done edge) -> completed", child_id, parent_id)
             return
-        await _advance_and_fire(workspace_id, str(parent["id"]), str(done_edge["target_node_id"]), correlation_id)
-        log.info("race won by %s; parent %s -> %s, siblings cancelled", child["id"], parent["id"], done_edge["target_node_id"])
+        # A race arm that ended WITHOUT reaching the join (errored / leaf /
+        # cancelled-elsewhere). It can't win — but it must still be accounted,
+        # or a race whose every arm fails waits for the (up to 168h) timeout.
+        if count:
+            async with system_scope():
+                row = await fetch_one(
+                    "UPDATE omni_leads SET fanout_done=fanout_done+1, updated_at=NOW() "
+                    "WHERE id=$1 AND workspace_id=$2 AND status='waiting' AND current_node_id=$3 "
+                    "RETURNING fanout_done, fanout_total",
+                    parent_id,
+                    workspace_id,
+                    origin_node_id,
+                )
+        else:
+            async with system_scope():
+                row = await fetch_one(
+                    "SELECT fanout_done, fanout_total FROM omni_leads "
+                    "WHERE id=$1 AND workspace_id=$2 AND status='waiting' AND current_node_id=$3",
+                    parent_id,
+                    workspace_id,
+                    origin_node_id,
+                )
+        total = (row or {}).get("fanout_total") or 0
+        if not row or total <= 0 or (row.get("fanout_done") or 0) < total:
+            return
+        # Every arm ended, none won — escape via the operator's timeout edge,
+        # else the race itself failed.
+        async with system_scope():
+            claimed = await fetch_one(
+                "UPDATE omni_leads SET status='active', fanout_total=0, fanout_done=0, "
+                "updated_at=NOW() WHERE id=$1 AND workspace_id=$2 AND status='waiting' "
+                "AND current_node_id=$3 RETURNING id",
+                parent_id,
+                workspace_id,
+                origin_node_id,
+            )
+        if not claimed:
+            return
+        timeout_edge = await _outgoing_edge(workspace_id, origin_node_id, "timeout")
+        if timeout_edge:
+            await _advance_and_fire(workspace_id, parent_id, str(timeout_edge["target_node_id"]), correlation_id)
+            log.warning("race %s: all arms ended without a winner; parent %s -> timeout edge", origin_node_id, parent_id)
+        else:
+            await _terminalize_lead(workspace_id, parent_id, "errored", correlation_id)
+            log.error("race %s: all arms failed and no timeout edge wired; parent %s errored", origin_node_id, parent_id)
         return
 
-    # flow.for_each barrier: wait for ALL children.
+    # flow.for_each barrier: wait for ALL children (successes AND failures).
+    if count:
+        async with system_scope():
+            row = await fetch_one(
+                "UPDATE omni_leads SET fanout_done=fanout_done+1, updated_at=NOW() "
+                "WHERE id=$1 AND workspace_id=$2 AND current_node_id=$3 "
+                "RETURNING fanout_done, fanout_total",
+                parent_id,
+                workspace_id,
+                origin_node_id,
+            )
+    else:
+        async with system_scope():
+            row = await fetch_one(
+                "SELECT fanout_done, fanout_total FROM omni_leads "
+                "WHERE id=$1 AND workspace_id=$2 AND current_node_id=$3",
+                parent_id,
+                workspace_id,
+                origin_node_id,
+            )
+    total = (row or {}).get("fanout_total") or 0
+    if not row or total <= 0 or (row.get("fanout_done") or 0) < total:
+        return  # barrier not yet satisfied (or parent gone/moved on)
     async with system_scope():
-        parent = await fetch_one(
-            "UPDATE omni_leads SET fanout_done = fanout_done + 1, updated_at=NOW() "
-            "WHERE id=$1 AND workspace_id=$2 RETURNING *",
-            str(parent_id),
+        claimed = await fetch_one(
+            "UPDATE omni_leads SET status='active', fanout_total=0, fanout_done=0, "
+            "updated_at=NOW() WHERE id=$1 AND workspace_id=$2 AND status='waiting' "
+            "AND current_node_id=$3 RETURNING id",
+            parent_id,
             workspace_id,
+            origin_node_id,
         )
-    if not parent or (parent.get("fanout_done") or 0) < (parent.get("fanout_total") or 0):
-        return  # barrier not yet satisfied (or parent gone)
+    if not claimed:
+        return  # already released (redelivered final arrival)
+    done_edge = await _outgoing_edge(workspace_id, origin_node_id, "done")
+    if done_edge:
+        await _advance_and_fire(workspace_id, parent_id, str(done_edge["target_node_id"]), correlation_id)
+        log.info("join released parent %s -> %s", parent_id, done_edge["target_node_id"])
+    else:
+        await _terminalize_lead(workspace_id, parent_id, "completed", correlation_id)
+        log.info("join released parent %s (no done edge) -> completed", parent_id)
 
-    done_edge = await _outgoing_edge(workspace_id, str(origin_node_id), "done")
-    if not done_edge:
-        await _advance_lead(workspace_id, str(parent["id"]), None, status="completed")
-        log.info("join released parent %s (no done edge) -> completed", parent["id"])
-        return
-    await _advance_and_fire(workspace_id, str(parent["id"]), str(done_edge["target_node_id"]), correlation_id)
-    log.info("join released parent %s -> %s", parent["id"], done_edge["target_node_id"])
+
+async def _join_arrive(workspace_id: str, child: dict, correlation_id: str | None) -> None:
+    """A child lead reached a flow.join. End the child and account it at the
+    parent's barrier. All once-only/idempotency/crash-recovery semantics live
+    in _terminalize_lead/_barrier_arrive (JOIN-IDEMPOTENCY, E2E-001: counting
+    DISTINCT children — one increment per child, ever — is the barrier
+    contract; redeliveries re-attempt only the claim-gated release)."""
+    await _terminalize_lead(workspace_id, str(child["id"]), "completed", correlation_id, join_arrival=True)
 
 
 # Fixed-duration unit table for flow.delay (mirrors the node's own table).
@@ -683,12 +864,17 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
     Condition/flow nodes return a handle with no muscle hop -> we publish a
     synthetic result so the orchestrator emits the next transition.
     """
+    # SPINE-1 backstop: mint the run identity HERE if it never existed, so every
+    # event/ctx/synthetic this fire produces shares ONE correlation_id. Without
+    # a single mint point, each node's own `ctx.correlation_id or uuid4()`
+    # fallback fired independently and fan-out children fragmented the trace.
+    correlation_id = correlation_id or str(uuid.uuid4())
     node_type = node["node_type"]
     try:
         _manifest, execute_fn = noderegistry.get(node_type)
     except KeyError:
         log.warning("target node type %r not in registry; stopping lead", node_type)
-        await _advance_lead(workspace_id, str(lead["id"]), None, status="errored")
+        await _terminalize_lead(workspace_id, str(lead["id"]), "errored", correlation_id)
         return
 
     # CONTRACT-006: surface the contact's most recent inbound (reply) timestamp
@@ -783,6 +969,31 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
     )
     result = await execute_fn(ctx)
 
+    # Decision B (SM-2): a node that reports an error must NOT advance past its
+    # own failure. Nodes signal local failure via result.error (e.g. add_tag's
+    # TAG_MISSING_CONTACT, create_contact's CONTACT_REQUIRES_EMAIL_OR_LINKEDIN,
+    # wait_until's invalid window) — previously this field was never inspected
+    # here, so the lead sailed on as if the node succeeded and the error was
+    # logged nowhere. Route the operator's on_error edge if wired; otherwise
+    # terminalize 'errored' (which also accounts a fan-out child at its parent's
+    # barrier instead of hanging it). The node's events are intentionally NOT
+    # published on the error path — an errored node's side-effects don't ship.
+    if result.error:
+        err_edge = await _outgoing_edge(workspace_id, str(node["id"]), "on_error")
+        if err_edge:
+            log.warning(
+                "node %s (%s) errored for lead %s: %s — routing on_error edge",
+                node["id"], node_type, lead["id"], result.error,
+            )
+            await _advance_and_fire(workspace_id, str(lead["id"]), str(err_edge["target_node_id"]), correlation_id)
+        else:
+            log.error(
+                "node %s (%s) errored for lead %s: %s — no on_error edge; lead errored",
+                node["id"], node_type, lead["id"], result.error,
+            )
+            await _terminalize_lead(workspace_id, str(lead["id"]), "errored", correlation_id)
+        return
+
     # Publish any intent events the node emitted (channels/sources/http_call).
     if result.events:
         envelopes = []
@@ -866,7 +1077,10 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
     # synthetic result is emitted (there is no outgoing edge to follow).
     if node_type in ("flow.goal", "flow.end"):
         terminal_status = "converted" if node_type == "flow.goal" else "ended"
-        await _advance_lead(workspace_id, str(lead["id"]), None, status=terminal_status)
+        # _terminalize (not a bare status write): a fan-out CHILD reaching
+        # goal/end must still arrive at its parent's join barrier (SM-5), and
+        # the claim makes redelivered goal-fires idempotent.
+        await _terminalize_lead(workspace_id, str(lead["id"]), terminal_status, correlation_id)
         log.info("lead %s reached %s -> status=%s", lead["id"], node_type, terminal_status)
         return
     # CMP9/CMP10: flow.delay / flow.wait_until must actually HOLD the lead. They
@@ -897,7 +1111,7 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
             [e.get("event_type") for e in result.events],
             lead["id"],
         )
-        await _advance_lead(workspace_id, str(lead["id"]), None, status="errored")
+        await _terminalize_lead(workspace_id, str(lead["id"]), "errored", correlation_id)
 
 
 async def _emit_synthetic_result(
@@ -1006,6 +1220,31 @@ async def _apply_lead_mutations(workspace_id: str, lead_id: str, mutations: dict
                 workspace_id,
             )
 
+    # CONTRACT-3: persist the Unipile handlers' session/marker mutations. The
+    # muscle returns lead_mutations like {chat_id|ig_chat_id|tg_chat_id: "<id>"}
+    # when send_chat opens a NEW chat, plus marker flips (invited_at /
+    # inmail_sent_at: "now") — keys that mirrored columns on the LEGACY leads
+    # table. omni_leads has no such columns, and this function used to ignore
+    # every key but custom_fields/add_tag/remove_tag, silently dropping them:
+    # the opened chat_id never persisted, so EVERY subsequent message opened
+    # another brand-new chat instead of continuing the thread. Store them in
+    # custom_fields (idempotent jsonb merge); channel nodes read them back from
+    # there when rendering the next send's payload.
+    markers: dict[str, str] = {}
+    for k in ("chat_id", "ig_chat_id", "tg_chat_id", "provider_id", "invited_at", "inmail_sent_at"):
+        v = mutations.get(k)
+        if isinstance(v, str) and v:
+            markers[k] = datetime.now(UTC).isoformat() if v == "now" else v
+    if markers:
+        async with system_scope():
+            await execute(
+                "UPDATE omni_leads SET custom_fields = COALESCE(custom_fields,'{}'::jsonb) || $1::jsonb, "
+                "updated_at = NOW() WHERE id=$2 AND workspace_id=$3",
+                json.dumps(markers),
+                lead_id,
+                workspace_id,
+            )
+
 
 async def handle_transition(t: dict) -> None:
     lead_id = t.get("lead_id")
@@ -1013,7 +1252,10 @@ async def handle_transition(t: dict) -> None:
     source_node_id = t.get("source_node_id")
     meta = t.get("metadata") or {}
     echoed_workspace_id = meta.get("workspace_id")
-    correlation_id = meta.get("correlation_id")
+    # SPINE-1: mint the run identity ONCE per transition if upstream lost it —
+    # everything this handling touches (fired nodes, fan-out children,
+    # synthetics) shares one correlation_id instead of each minting its own.
+    correlation_id = meta.get("correlation_id") or str(uuid.uuid4())
     lead_mutations = meta.get("lead_mutations") or {}
     if not (lead_id and source_node_id):
         return
@@ -1024,7 +1266,10 @@ async def handle_transition(t: dict) -> None:
     # value as a cross-check. A mismatch means a tenancy bug or a tampered
     # result; refuse the transition rather than acting in the echoed tenant.
     async with system_scope():
-        row = await fetch_one("SELECT workspace_id FROM omni_leads WHERE id=$1", lead_id)
+        row = await fetch_one(
+            "SELECT workspace_id, status, parent_lead_id, origin_node_id FROM omni_leads WHERE id=$1",
+            lead_id,
+        )
     workspace_id = str(row["workspace_id"]) if row else None
     if not workspace_id:
         log.warning("transition for unknown lead=%s; dropping", lead_id)
@@ -1038,6 +1283,34 @@ async def handle_transition(t: dict) -> None:
         )
         return
 
+    # Decision A: the terminal-state guard. A finished lead (completed/errored/
+    # cancelled/converted/ended) must never be advanced, re-fired, or resurrected
+    # by a late or redelivered transition — Kafka at-least-once and the Flink
+    # AT_LEAST_ONCE sink make such deliveries routine. Without this, __retry__
+    # re-fired errored leads (SM-1) and in-flight muscle results resurrected
+    # cancelled race losers (SM-6). One carve-out: a terminal CHILD's redelivered
+    # transition still re-attempts its parent's claim-gated barrier RELEASE
+    # (count=False — never recounts). That is the crash-recovery path: a worker
+    # dying between the barrier increment and the release leaves the offset
+    # uncommitted, so the redelivery is exactly what recovers the release.
+    if (row.get("status") or "") in TERMINAL_STATUSES:
+        if row.get("parent_lead_id") and row.get("origin_node_id"):
+            tgt = await _target_node(workspace_id, str(source_node_id), handle)
+            await _barrier_arrive(
+                workspace_id,
+                str(row["parent_lead_id"]),
+                str(row["origin_node_id"]),
+                str(lead_id),
+                correlation_id,
+                join_arrival=bool(tgt and tgt.get("node_type") == "flow.join"),
+                count=False,
+            )
+        log.info(
+            "transition for terminal lead %s (status=%s, handle=%s) dropped",
+            lead_id, row.get("status"), handle,
+        )
+        return
+
     # Apply any column mutations the muscle returned (e.g. a source handler
     # writing custom_fields[companies]) before deciding where to go next, so a
     # for_each or downstream node sees the freshly merged data.
@@ -1047,11 +1320,28 @@ async def handle_transition(t: dict) -> None:
     # FLINK-001: the orchestrator emits handle="__retry__" after a retriable
     # failure's backoff timer fires. This is NOT an edge — re-fire the SAME node
     # the lead failed on (source_node_id) so the command is genuinely redriven.
+    # RETRY-DUP: the retry transition itself is at-least-once; an unguarded
+    # re-fire would dispatch the SAME muscle command twice (duplicate send). The
+    # (command_id, attempt) marker claim makes each retry fire exactly once.
     if handle == "__retry__":
+        marker = f"{meta.get('command_id')}:{meta.get('retry_attempt')}"
+        async with system_scope():
+            claimed = await fetch_one(
+                "UPDATE omni_leads SET custom_fields = jsonb_set(COALESCE(custom_fields,'{}'::jsonb), "
+                "'{_retry_marker}', to_jsonb($1::text), true), updated_at=NOW() "
+                "WHERE id=$2 AND workspace_id=$3 "
+                "AND (custom_fields->>'_retry_marker') IS DISTINCT FROM $1 RETURNING id",
+                marker,
+                lead_id,
+                workspace_id,
+            )
+        if not claimed:
+            log.info("retry %s for lead %s already redriven; dropping duplicate", marker, lead_id)
+            return
         node = await _node_row(workspace_id, source_node_id)
         lead, contact = await _lead_with_contact(workspace_id, lead_id)
         if node and lead:
-            log.info("redriving lead %s at node %s (retry)", lead_id, source_node_id)
+            log.info("redriving lead %s at node %s (retry %s)", lead_id, source_node_id, marker)
             await _fire_node(workspace_id, lead, contact, node, correlation_id)
         else:
             log.warning("retry for lead %s: node/lead gone; dropping", lead_id)
@@ -1061,6 +1351,9 @@ async def handle_transition(t: dict) -> None:
     # arm if the parent is STILL parked at the race (no arm won). A winner already
     # flipped the parent to 'active' and advanced it, so a late timeout is a stale
     # no-op. Also cancel any still-running arms when the timeout actually fires.
+    # SM-4: no intermediate `active + current_node_id=NULL` write here — the
+    # positional claim below moves the parent waiting→active→target atomically,
+    # so a crash mid-timeout leaves a state a redelivery can resume from.
     if handle == "timeout":
         async with system_scope():
             prow = await fetch_one(
@@ -1080,17 +1373,27 @@ async def handle_transition(t: dict) -> None:
             await execute(
                 "UPDATE omni_leads SET status='cancelled', current_node_id=NULL, updated_at=NOW() "
                 "WHERE workspace_id=$1 AND parent_lead_id=$2 AND origin_node_id=$3 "
-                "AND status NOT IN ('completed','cancelled')",
+                "AND status NOT IN ('completed','errored','cancelled','converted','ended')",
                 workspace_id,
                 lead_id,
                 str(source_node_id),
             )
-        await _advance_lead(workspace_id, lead_id, None, status="active")
+        # Release the race's barrier counters so a later fan-out can claim.
+        async with system_scope():
+            await execute(
+                "UPDATE omni_leads SET fanout_total=0, fanout_done=0, updated_at=NOW() "
+                "WHERE id=$1 AND workspace_id=$2",
+                lead_id,
+                workspace_id,
+            )
 
     target = await _target_node(workspace_id, source_node_id, handle)
     if not target:
-        # Leaf reached on this handle — the lead's journey is done.
-        await _advance_lead(workspace_id, lead_id, None, status="completed")
+        # Leaf reached on this handle — the lead's journey is done. Terminalize
+        # (claim + barrier accounting): a fan-out CHILD completing at a leaf
+        # must still arrive at its parent's join barrier (SM-5's sibling hole —
+        # an arm that never reaches flow.join used to hang the parent forever).
+        await _terminalize_lead(workspace_id, lead_id, "completed", correlation_id)
         log.info("lead %s reached leaf at node %s/%s", lead_id, source_node_id, handle)
         return
 
@@ -1106,21 +1409,48 @@ async def handle_transition(t: dict) -> None:
             log.info("lead %s arrived at join %s", lead_id, target["id"])
         return
 
-    await _advance_lead(workspace_id, lead_id, str(target["id"]))
+    # RACE-1 (the trample): fan-out targets must NOT be pre-advanced. The old
+    # unconditional _advance_lead here flipped a parked ('waiting') parent back
+    # to 'active' on every redelivery — which both bypassed the race's
+    # idempotency guard (double fan-out) and broke the join's first-arm-wins
+    # claim (it requires status='waiting'; once trampled, no arm could ever
+    # win). for_each/race own their parking via atomic claims.
+    if target_type == "flow.for_each":
+        lead, _contact = await _lead_with_contact(workspace_id, lead_id)
+        if lead:
+            await _fan_out(workspace_id, lead, target, correlation_id)
+        return
+
+    if target_type == "flow.race":
+        lead, _contact = await _lead_with_contact(workspace_id, lead_id)
+        if lead:
+            await _race_fan_out(workspace_id, lead, target, correlation_id)
+        return
+
+    # Normal advance: a POSITIONAL CLAIM, not a blind UPDATE. The lead only
+    # moves if it still sits where this transition expects (the source node) —
+    # a redelivered or Flink-re-emitted transition for a lead that already
+    # advanced claims nothing and is dropped, so the target node fires exactly
+    # once per real advance (no duplicate intent → no duplicate muscle send).
+    # This is the consumer-side defusal of the unkeyed transitions sink (RACE-7).
+    async with system_scope():
+        claimed = await fetch_one(
+            "UPDATE omni_leads SET current_node_id=$1, status='active', updated_at=NOW() "
+            "WHERE id=$2 AND workspace_id=$3 AND current_node_id IS NOT DISTINCT FROM $4 "
+            "RETURNING id",
+            str(target["id"]),
+            lead_id,
+            workspace_id,
+            str(source_node_id),
+        )
+    if not claimed:
+        log.info(
+            "stale/duplicate transition for lead %s (%s/%s -> %s) dropped — lead has moved on",
+            lead_id, source_node_id, handle, target["id"],
+        )
+        return
     lead, contact = await _lead_with_contact(workspace_id, lead_id)
     if not lead:
-        return
-
-    # flow.for_each: interior fan-out. Don't fire it as an ordinary node —
-    # spawn one child lead per element of the parent's collection.
-    if target_type == "flow.for_each":
-        await _fan_out(workspace_id, lead, target, correlation_id)
-        return
-
-    # flow.race: parallel fan-out. Spawn one child per branch_N edge; the parent
-    # parks until the FIRST child re-converges at a flow.join (first-arm-wins).
-    if target_type == "flow.race":
-        await _race_fan_out(workspace_id, lead, target, correlation_id)
         return
 
     await _fire_node(workspace_id, lead, contact, target, correlation_id)
