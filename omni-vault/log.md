@@ -1362,3 +1362,9 @@ serper.py uncommitted diff is whitespace-only (not a real anomaly).
 - Deploy surface analyzed file-by-file and retargeted (commit cdb5d05): v2-only (15 services, legacy plane dropped), 127.0.0.1-bound infra ports (Docker-bypasses-UFW fix), persistent redpanda volume, nginx /deploy block, single-dir webhook.
 - Full chain verified: CI deploy job → webhook (5 steps, 37s) → health green, Flink job self-resubmitted, LE cert + renewal hook live.
 - Updated [[deploy-pipeline]].
+
+## 2026-06-12 — CONTRACT-2 closed: channel payload-rendering layer built. Ledger at 0 OPEN
+
+- app/execution/render.py renders templates + bundle config + attendee identity + chat-session reuse into every channel command payload (the Python→Rust contract that starved all sends).
+- 10 functional regression tests; audit suite 46/46. findings.json: 115 findings, 0 OPEN.
+- Updated [[logic-integrity-ledger]].

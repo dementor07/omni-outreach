@@ -3,17 +3,27 @@ title: Logic-Integrity Ledger — Trace-Based Audit of the v2 Spine
 category: decisions
 tags: [integrity, logic-bugs, concurrency, state-machine, contracts, pre-clean-start, fable-input]
 sources: [4-parallel-trace-agents, phase-out-non-v2]
-updated: 2026-06-11
+updated: 2026-06-12
 ---
 
 # Logic-Integrity Ledger
 
-> **STATUS 2026-06-11 — SURGERY COMPLETE.** Fable executed Decisions A–D directly on the
-> spine (one pass, full context). 14 of 15 findings FIXED, each bound by a regression test
-> in `audit/tests/test_spine_integrity.py` (36/36 green, full ruff clean). The direct read
-> found **5 bugs the trace agents missed** — see "Found during surgery" below. The single
-> remaining OPEN item is **CONTRACT-2** (channel payload rendering — feature-grade, fully
-> specced in findings.json, belongs to the execution phase).
+> **STATUS 2026-06-12 — LEDGER CLOSED. 15/15 FIXED, zero OPEN findings (115 total).**
+> CONTRACT-2 (the last open item) is done: `app/execution/render.py` is the channel
+> payload-rendering layer, called from `commands.build_command` — the one seam where
+> lead + contact + node payload + connection bundle coexist. It renders `*_template`
+> fields into body/subject/title, copies non-secret sender/transport config from the
+> connection bundle (`unipile_account_id`/`unipile_base`; SMTP fields for email —
+> `smtp_password` stays behind the credential ref), resolves per-channel attendee
+> identity (WhatsApp phone→JID, IG/TG usernames from contact custom_fields, LinkedIn
+> via provider_id), and reuses CONTRACT-3-persisted chat sessions. Node-provided values
+> always win; non-channel commands pass through untouched. Regression:
+> `audit/tests/test_payload_rendering.py` (10 tests; audit suite 46/46 green).
+>
+> Earlier status (2026-06-11) — SURGERY COMPLETE: Fable executed Decisions A–D directly
+> on the spine (one pass, full context), 14/15 findings FIXED, each bound by a regression
+> test in `audit/tests/test_spine_integrity.py`. The direct read found **5 bugs the trace
+> agents missed** — see "Found during surgery" below.
 >
 > **The implemented contract, in one breath:** terminal statuses are a declared set guarded
 > once at the transition entry; every state move is an atomic, predicate-gated CLAIM

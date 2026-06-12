@@ -22,6 +22,7 @@ from typing import Any
 
 from app.core.events import ChannelType
 from app.db import fetch_one, system_scope
+from app.execution.render import render_channel_payload
 from app.services import bus
 from app.services.encryption import decrypt
 
@@ -76,8 +77,8 @@ _CHANNEL_PROVIDER: dict[ChannelType, str] = {
 }
 
 
-async def _mint_credential_ref(workspace_id: str, connection_name: str | None, channel: str) -> str | None:
-    """Resolve a workspace connection by name into a one-shot credential ref.
+async def _load_connection_bundle(workspace_id: str, connection_name: str | None) -> dict[str, Any] | None:
+    """Decrypt a workspace connection's credential bundle by name.
     Returns None when the node declares no connection (e.g. inline webhook)."""
     if not connection_name:
         return None
@@ -90,7 +91,13 @@ async def _mint_credential_ref(workspace_id: str, connection_name: str | None, c
     if not row:
         log.warning("[dispatch] no connection %r for workspace %s", connection_name, workspace_id)
         return None
-    bundle = json.loads(decrypt(row["credentials_encrypted"]))
+    return json.loads(decrypt(row["credentials_encrypted"]))
+
+
+async def _mint_credential_ref(bundle: dict[str, Any] | None, channel: str) -> str | None:
+    """Persist the bundle as a one-shot credential ref the muscle redeems."""
+    if bundle is None:
+        return None
     # mint_credential_ref persists the encrypted bundle and returns the ref.
     from app.routers.internal import mint_credential_ref
 
@@ -146,7 +153,13 @@ async def build_command(
     correlation_id: str | None = None,
 ) -> dict[str, Any]:
     """Assemble the ActionCommand envelope the muscle consumes."""
-    credential_ref = await _mint_credential_ref(workspace_id, connection_name, channel.value)
+    bundle = await _load_connection_bundle(workspace_id, connection_name)
+    credential_ref = await _mint_credential_ref(bundle, channel.value)
+    # CONTRACT-2: fulfil the Rust handlers' self-contained-payload contract —
+    # render *_template fields, copy non-secret transport/sender config from
+    # the connection bundle, resolve the per-channel attendee identity, and
+    # reuse persisted chat sessions. Without this every channel send starved.
+    payload = render_channel_payload(channel, payload, lead=lead, contact=contact, bundle=bundle)
     return {
         "command_id": str(uuid.uuid4()),
         "task_id": str(uuid.uuid4()),

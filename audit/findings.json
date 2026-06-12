@@ -1554,12 +1554,12 @@
       "file": "backend/app/nodes/channels/",
       "line": 0,
       "severity": "CRITICAL",
-      "status": "OPEN",
+      "status": "FIXED",
       "title": "Channel nodes never render their payload contract: no body, no attendee identity, no unipile_account_id - every channel send is starved",
       "evidence": "The Rust handlers require payload.body (email.rs:20, unipile send_chat), payload.attendee_identifier or chat_id (send_chat), and payload.unipile_account_id - but EVERY channel node (whatsapp/instagram/telegram/linkedin/email) emits only *_template fields, unrendered, with no attendee identity and no account id. No component anywhere renders {{contact.x}} templates. The feature audit's 'channels DONE' verdict covered the Rust side only; the Python->Rust payload contract is unfulfilled end-to-end, so sends fail on missing account/body or empty attendee. Re-diagnosis of the original CONTRACT-1 (which blamed _lead_context).",
       "recommendation": "Build the channel payload-rendering layer: a shared template renderer ({{contact.*}}/{{lead.custom_fields.*}}), per-channel attendee resolution (whatsapp: phone->JID; instagram/telegram: usernames from contact custom_fields; chat reuse via lead custom_fields chat ids persisted by CONTRACT-3's fix), and unipile_account_id sourcing from the connection record. Render in the channel nodes (the design contract per models.rs: payload arrives self-contained).",
-      "fix": "",
-      "last_run": "2026-06-11"
+      "fix": "FIXED: built app/execution/render.py \u2014 the channel payload-rendering layer. render_channel_payload (called from commands.build_command, the one seam with lead+contact+bundle) renders *_template fields ({{contact.x}}/{{lead.custom_fields.x}} dotted paths) into body/subject/title, copies non-secret sender/transport config from the connection bundle (unipile_account_id+unipile_base; smtp_host/port/username/use_tls/from for email \u2014 smtp_password stays behind the credential ref), resolves per-channel attendee identity (whatsapp phone->JID, instagram/telegram usernames from contact custom_fields, linkedin via provider_id), and reuses CONTRACT-3-persisted chat sessions (chat_id/ig_chat_id/tg_chat_id). Node-provided values always win; non-channel commands pass through untouched. Regression: audit/tests/test_payload_rendering.py (10 tests).",
+      "last_run": "2026-06-12"
     },
     {
       "id": "CONTRACT-3",
