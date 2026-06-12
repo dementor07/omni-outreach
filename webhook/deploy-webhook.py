@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
-"""Minimal deploy webhook for omni-outreach.
+"""Minimal deploy webhook for omni-outreach (v2-only box layout).
 
 POST /deploy
   Authorization: Bearer <DEPLOY_SECRET>
 
-Runs:  git pull origin master
-       docker compose up -d --build --remove-orphans
-       docker compose exec -T backend alembic upgrade head
+Single checkout at PROJECT_DIR (default /home/omni-v2) on the
+phase-out-non-v2 branch. The legacy app plane is never deployed —
+docker-compose.yml contributes only the shared infra services
+(db, redpanda, redis, flink-jobmanager, flink-taskmanager) under the
+`omni-outreach` project name, which owns the omni-outreach_default
+network that docker-compose.v2.yml joins as external.
+
+Runs:  git pull origin phase-out-non-v2
+       docker compose -p omni-outreach up -d <infra services>
+       docker compose -p omni-v2 -f docker-compose.v2.yml up -d --build --remove-orphans
+       docker compose -p omni-v2 ... exec -T backend-v2 alembic upgrade head
+       docker image prune -f
 """
 
 import hmac
@@ -24,44 +33,46 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 DEPLOY_SECRET: str = os.environ["DEPLOY_SECRET"]
-PROJECT_DIR: str = os.environ.get("PROJECT_DIR", "/home/omni-outreach")
+PROJECT_DIR: str = os.environ.get("PROJECT_DIR", "/home/omni-v2")
+DEPLOY_BRANCH: str = os.environ.get("DEPLOY_BRANCH", "phase-out-non-v2")
 PORT: int = int(os.environ.get("PORT", "9000"))
+
+# The only services taken from docker-compose.yml — the legacy app plane
+# (backend, projector, frontend, execution-engine, journey-orchestrator,
+# flink-sql-runner) is intentionally never started on this box.
+INFRA_SERVICES: tuple[str, ...] = (
+    "db",
+    "redpanda",
+    "redis",
+    "flink-jobmanager",
+    "flink-taskmanager",
+)
 
 
 def _run_deploy() -> tuple[bool, str]:
-    # Step 1: Deploy shared infra (omni-outreach)
-    infra_steps = [
-        ["git", "pull", "origin", "master"],
-        ["docker", "compose", "up", "-d", "--build", "--remove-orphans"],
-    ]
-    for step in infra_steps:
-        log.info("Running infra step: %s", " ".join(step))
-        result = subprocess.run(
-            step, cwd="/home/omni-outreach", capture_output=True, text=True, timeout=900
-        )
-        if result.returncode != 0:
-            msg = (result.stderr or result.stdout)[:1000]
-            log.error("Infra step failed: %s", msg)
-            return False, f"Infra failed: {msg}"
-        log.info("Done infra step: %s", " ".join(step))
-
-    # Step 2: Deploy v2 app stack (omni-v2)
-    v2_steps = [
-        ["git", "pull", "origin", "phase-out-non-v2"],
-        ["docker", "compose", "-f", "docker-compose.v2.yml", "-p", "omni-v2", "up", "-d", "--build", "--remove-orphans"],
-        ["docker", "compose", "-f", "docker-compose.v2.yml", "-p", "omni-v2", "exec", "-T", "backend-v2", "alembic", "upgrade", "head"],
+    steps = [
+        ["git", "pull", "origin", DEPLOY_BRANCH],
+        # Infra: explicit service list, no --remove-orphans (would tear down
+        # nothing today, but guards against compose ever touching unlisted
+        # services). --build because the flink images build from ./backend-flink.
+        ["docker", "compose", "-p", "omni-outreach", "up", "-d", "--build", *INFRA_SERVICES],
+        # v2 app stack on the shared network.
+        ["docker", "compose", "-f", "docker-compose.v2.yml", "-p", "omni-v2",
+         "up", "-d", "--build", "--remove-orphans"],
+        ["docker", "compose", "-f", "docker-compose.v2.yml", "-p", "omni-v2",
+         "exec", "-T", "backend-v2", "alembic", "upgrade", "head"],
         ["docker", "image", "prune", "-f"],
     ]
-    for step in v2_steps:
-        log.info("Running v2 step: %s", " ".join(step))
+    for step in steps:
+        log.info("Running step: %s", " ".join(step))
         result = subprocess.run(
-            step, cwd="/home/omni-v2", capture_output=True, text=True, timeout=900
+            step, cwd=PROJECT_DIR, capture_output=True, text=True, timeout=900
         )
         if result.returncode != 0:
             msg = (result.stderr or result.stdout)[:1000]
-            log.error("v2 step failed: %s", msg)
-            return False, f"v2 failed: {msg}"
-        log.info("Done v2 step: %s", " ".join(step))
+            log.error("Step failed: %s", msg)
+            return False, f"deploy failed at {' '.join(step[:4])}: {msg}"
+        log.info("Done step: %s", " ".join(step))
 
     return True, "ok"
 

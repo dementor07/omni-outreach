@@ -58,7 +58,9 @@ services:
     networks:
       - omni-outreach_default
     ports:
-      - "8001:8000"
+      # Host-side debug access only — nginx reaches backend-v2 in-network.
+      # Never publish on 0.0.0.0: Docker's iptables rules bypass UFW.
+      - "127.0.0.1:8001:8000"
     restart: unless-stopped
 
   projector-v2:
@@ -181,9 +183,14 @@ services:
     container_name: omni-v2-frontend
     networks:
       - omni-outreach_default
+    # v2 is the only stack on the Contabo box — it owns 80/443 directly
+    # (the 8080/8443 offsets existed to coexist with the legacy frontend).
     ports:
-      - "8080:80"
-      - "8443:443"
+      - "80:80"
+      - "443:443"
+    # Lets nginx proxy /deploy to the deploy-webhook daemon on the host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./certs:/etc/nginx/certs:ro
       - ./acme:/var/www/certbot

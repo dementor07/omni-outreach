@@ -11,8 +11,14 @@ services:
       - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
       - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
       - --memory 1G
+    # The event log is the durable source of truth — without a volume it
+    # evaporated on every container recreate.
+    volumes:
+      - redpandadata:/var/lib/redpanda/data
+    # 127.0.0.1 binding: published Docker ports bypass UFW (iptables DOCKER
+    # chain runs before ufw rules) — 0.0.0.0 here means internet-exposed.
     ports:
-      - "19092:19092"
+      - "127.0.0.1:19092:19092"
 
   # --- The Memory (State & Cache) ---
   redis:
@@ -21,7 +27,7 @@ services:
     volumes:
       - redisdata:/data
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
 
   db:
     image: postgres:16-alpine
@@ -32,7 +38,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
 
   # --- The Muscle (Rust Execution) ---
   execution-engine:
@@ -54,7 +60,7 @@ services:
     build:
       context: ./backend-flink
     ports:
-      - "8081:8081"
+      - "127.0.0.1:8081:8081"
     command: jobmanager
     environment:
       - |
@@ -182,3 +188,6 @@ volumes:
   redisdata:
     external: true
     name: omni-outreach_redisdata
+  redpandadata:
+    external: true
+    name: omni-outreach_redpandadata

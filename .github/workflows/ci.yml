@@ -105,7 +105,7 @@ jobs:
             --max-time 300 \
             -X POST \
             -H "Authorization: Bearer $DEPLOY_WEBHOOK_SECRET" \
-            https://srv1575227.hstgr.cloud/deploy
+            https://13-140-169-62.sslip.io/deploy
 
       - name: Report skipped deploy
         if: steps.deploy_config.outputs.ready != 'true'
