@@ -1,146 +1,127 @@
 ---
-title: Deploy Pipeline (CI → Webhook → VPS)
+title: Deploy Pipeline (CI → Webhook → Contabo VPS)
 category: operations
-tags: [deploy, ci, webhook, systemd, docker, ufw]
-updated: 2026-05-16
+tags: [deploy, ci, webhook, systemd, docker, ufw, contabo]
+updated: 2026-06-12
 related: [[system-overview]], [[ci-watcher]], [[chrome-devtools-mcp-loop]]
 ---
 
 # Deploy Pipeline
 
-End-to-end deploy path from a `git push origin master` to a running container on `srv1575227.hstgr.cloud`. Verified against the live VPS on 2026-05-16.
+End-to-end deploy path from a `git push origin phase-out-non-v2` to running containers on
+the Contabo box. Verified live (full CI → webhook → redeploy → health-green chain) on
+2026-06-12.
+
+> **History:** the original pipeline targeted Hostinger `srv1575227.hstgr.cloud`
+> (145.223.21.222), which died ~2026-06-10 with all data. The replacement is a Contabo
+> Cloud VPS 20 (6 vCPU / 12 GB / 193 GB, Ubuntu 24.04) provisioned from scratch as a
+> **lean v2-only box** — the legacy app plane is never deployed.
 
 ## High-level flow
 
 ```
-git push origin master
+git push origin phase-out-non-v2
    │
    ▼
 GitHub Actions (.github/workflows/ci.yml)
    │  lint → test → build → deploy
    │
-   ▼  curl -X POST https://srv1575227.hstgr.cloud/deploy
-nginx (frontend container)
-   │  proxies /deploy → http://host.docker.internal:9000/deploy
+   ▼  curl -X POST https://13-140-169-62.sslip.io/deploy
+nginx (omni-v2-frontend container, /deploy location block)
+   │  proxies → http://host.docker.internal:9000/deploy  (extra_hosts host-gateway)
    │
    ▼
-deploy-webhook systemd service (VPS host, port 9000)
+deploy-webhook systemd service (host, port 9000)
    │  validates Bearer token (hmac.compare_digest)
-   │  responds 202 Accepted IMMEDIATELY
-   │  spawns daemon thread for actual work
-   │
-   ▼
-Deploy thread:
-   1. git pull origin master         (cwd=/home/omni-outreach)
-   2. docker compose up -d --build --remove-orphans
-   3. docker compose exec -T backend alembic upgrade head
+   │  responds 202 Accepted IMMEDIATELY (nginx restarts mid-deploy)
+   │  spawns daemon thread:
+   │    1. git pull origin phase-out-non-v2          (cwd=/home/omni-v2)
+   │    2. docker compose -p omni-outreach up -d --build \
+   │         db redpanda redis flink-jobmanager flink-taskmanager   ← infra ONLY
+   │    3. docker compose -f docker-compose.v2.yml -p omni-v2 \
+   │         up -d --build --remove-orphans
+   │    4. … exec -T backend-v2 alembic upgrade head
+   │    5. docker image prune -f
 ```
 
-## CI pipeline (`.github/workflows/ci.yml`)
+Measured warm-cache redeploy: ~37 s end-to-end (step 2 ≈ 12 s, step 3 ≈ 21 s).
 
-Four sequential jobs. A failure in any earlier job aborts the rest. Average run time: lint ~10s, test ~30s, build ~90s, deploy ~5min (most of which is the VPS-side docker rebuild).
+## Box layout (single checkout, two compose projects)
 
-| Job | Command | Why |
-|---|---|---|
-| **lint** | `ruff check backend/` | Catches `F821` undefined-name, import sort, whitespace. Two real production bugs caught here in May 2026 (`execute` import in `routers/queue.py`, `re` import in `services/job_search.py`). |
-| **test** | `pytest backend/tests/` | Ephemeral Postgres 16 + Redis 7 services seeded from `schema.sql`. Smoke covers `/health`, `/auth/login`, unauthorized access checks. `/health` is allowed to report `degraded` if Redis is partially wired. |
-| **build** | `docker build` for backend + frontend | Pure validation — images are rebuilt fresh on the VPS during the deploy. Catches Dockerfile drift / missing dependencies. |
-| **deploy** | `curl -sf --max-time 300 -X POST -H "Authorization: Bearer $DEPLOY_WEBHOOK_SECRET" https://srv1575227.hstgr.cloud/deploy` | Fires only on `master` push when `DEPLOY_WEBHOOK_SECRET` repo secret is set. 5-min curl timeout. |
+- `/home/omni-v2` — the ONLY checkout, branch `phase-out-non-v2`.
+- Project `omni-outreach` — **5 infra services only** (db, redpanda, redis,
+  flink-jobmanager, flink-taskmanager) from `docker-compose.yml`. Owns the
+  `omni-outreach_default` network. The legacy app plane (backend, projector, frontend,
+  execution-engine, journey-orchestrator, flink-sql-runner) is intentionally never
+  started — every one is superseded by a v2 counterpart, and journey-orchestrator would
+  double-submit the same orchestrator.py the v2 stack submits.
+- Project `omni-v2` — the 10 v2 services from `docker-compose.v2.yml` (backend, projector,
+  dispatcher, transitions, muscle, orchestrator, camoufox, searxng, frontend, topics-init).
+  `frontend-v2` owns 80/443 directly (the old 8080/8443 offsets existed only to coexist
+  with the legacy frontend).
+- External volumes: `omni-outreach_{pgdata,redisdata,redpandadata}`. The redpanda volume
+  is NEW on this box — previously the "durable" event log evaporated on container recreate.
+- `.env` at `/home/omni-v2/.env` (mode 600): the 8 core vars; `FRONTEND_URL=https://13-140-169-62.sslip.io`.
+  Connector API keys live in DB `connections` rows, not env.
 
-**Failure mode caught 2026-05-12 → 2026-05-14**: CI was red on `ruff check` for two days. Every commit during the window was *committed and pushed* but never deployed — the `build` job never ran because `lint` died, the `deploy` job never ran because `build` was skipped. Backend container last-rebuilt timestamp on the VPS was the canonical signal that something was wrong (`docker ps` showing "Up 4 days" when the last commit was 2 hours ago).
+## Security posture (fixes over the old box)
 
-**Lesson**: never push on top of red CI. The signal exists; ignoring it strands work on master without anyone knowing.
+- **All infra ports bind 127.0.0.1** (5432/6379/19092/8081). Docker's iptables DOCKER
+  chain runs before UFW, so a `0.0.0.0` published port is internet-exposed regardless of
+  firewall rules — on the Hostinger box Postgres was publicly reachable with the leaked
+  password. `backend-v2`'s debug port 8001 is also localhost-only.
+- UFW: 22/80/443 from anywhere; 9000 only from 172.16.0.0/12 (Docker bridge subnets).
+- Secrets were NOT rotated (user decision 2026-06-12) — DB/Redis/SECRET_KEY still the
+  git-history-leaked values. Rotation remains an open follow-up.
+- DEPLOY_SECRET was freshly minted (the old one died with the Hostinger box; GitHub
+  secrets are write-only). Lives in `/etc/default/deploy-webhook` (600) + GitHub repo
+  secret `DEPLOY_WEBHOOK_SECRET`.
+
+## TLS
+
+- Public host: `13-140-169-62.sslip.io` (wildcard DNS → 13.140.169.62).
+- Let's Encrypt cert via `certbot certonly --webroot -w /home/omni-v2/acme` (the
+  `acme/` volume is mounted into nginx at `/var/www/certbot` for the HTTP-01 challenge).
+- Renewal deploy-hook at `/etc/letsencrypt/renewal-hooks/deploy/omni-certs.sh` copies
+  fullchain/privkey into `/home/omni-v2/certs/` and restarts `omni-v2-frontend`.
+- Bootstrap order matters: nginx refuses to start without cert files, so provisioning
+  drops a 30-day self-signed pair first, then swaps in LE once port 80 serves.
 
 ## Webhook service
 
-`deploy-webhook.service` (systemd unit at `/etc/systemd/system/deploy-webhook.service`):
+- Source: `webhook/deploy-webhook.py` (single-dir v2-only flow; `PROJECT_DIR`,
+  `DEPLOY_BRANCH`, `PORT` env-tunable). Installed copy: `/usr/local/bin/deploy-webhook.py`
+  — still manually synced (open follow-up, unchanged from the old box).
+- Unit: `/etc/systemd/system/deploy-webhook.service`, env in `/etc/default/deploy-webhook`.
+- The 202-Accepted-then-thread pattern is retained: step 3 restarts nginx, which would
+  break the CI curl mid-response otherwise.
 
-```ini
-[Unit]
-Description=Omni-Outreach Deploy Webhook
-After=network.target docker.service
-Wants=docker.service
+## Self-healing properties verified 2026-06-12
 
-[Service]
-Type=simple
-ExecStart=/usr/bin/python3 /usr/local/bin/deploy-webhook.py
-Environment=DEPLOY_SECRET=<rotated periodically; matches GitHub repo secret>
-Environment=PROJECT_DIR=/home/omni-outreach
-Environment=PORT=9000
-Restart=always
-RestartSec=5
+- Redeploy recreates flink-jobmanager → registered Flink job is wiped → `orchestrator-v2`
+  re-submits on its own restart; "Omni SOTA Orchestrator v0.2 (DAG-aware)" came back
+  RUNNING unaided.
+- `topics-init` re-runs idempotently (rpk create || true).
+- `alembic upgrade head` is a no-op when already at head (030 as of provisioning).
 
-[Install]
-WantedBy=multi-user.target
-```
+## Provisioning gotchas (learned the hard way)
 
-Source: `webhook/deploy-webhook.py` in the repo, copied to `/usr/local/bin/deploy-webhook.py` on the VPS. Plain stdlib (`http.server.BaseHTTPServer`), no Flask, no FastAPI. ~80 lines.
-
-**Verification**:
-
-```bash
-ssh -i ~/.ssh/omni_deploy root@145.223.21.222 'systemctl status deploy-webhook --no-pager'
-```
-
-Should show `Active: active (running)` and the `python3 /usr/local/bin/deploy-webhook.py` cgroup leaf.
-
-## The 202-Accepted pattern (critical)
-
-```python
-def do_POST(self):
-    # ... token validation ...
-    log.info("Deploy triggered")
-    self._respond(202, {"status": "accepted"})           # ← respond BEFORE deploy
-    threading.Thread(target=_run_deploy, daemon=True).start()
-```
-
-Why: step 2 (`docker compose up -d --build --remove-orphans`) **restarts the nginx container**. The CI's curl is going through nginx → host. If we waited for the deploy to finish before responding, nginx restarts mid-response → broken pipe → curl exits with code 56 → CI deploy job fails. The 202-early pattern decouples the response from the work.
-
-The earlier SSH-based deploy (`appleboy/ssh-action`) was retired because Hostinger's upstream blocks GitHub Actions IP ranges → SSH timeouts. HTTPS on 443 always works.
-
-## VPS networking
-
-- **UFW** (`ufw status verbose` 2026-05-16):
-  - 22/tcp anywhere — SSH
-  - 80/tcp anywhere — HTTP (redirects to HTTPS)
-  - 443/tcp anywhere — HTTPS
-  - 9000 from `172.17.0.0/16` (legacy docker0)
-  - 9000 from `172.18.0.0/16` / `172.19.0.0/16` / `172.20.0.0/16` (Docker Compose bridge subnets)
-- **`host.docker.internal`** — set via `extra_hosts: ["host.docker.internal:host-gateway"]` on the `frontend` service in `docker-compose.yml`. Lets the nginx container resolve the host machine.
-- **Reachability sanity check**: `curl -sS https://srv1575227.hstgr.cloud/deploy -H 'Authorization: Bearer wrong' -w '\nHTTP=%{http_code} TIME=%{time_total}s\n'` should return `403` in ~250ms. If it hangs or returns 5xx, the webhook chain is broken (nginx down, host-gateway broken, webhook service crashed).
-
-## Race conditions
-
-**Two consecutive deploys can starve each other**. If `git push` happens twice within ~3min:
-1. First deploy starts `docker compose up --build`, which restarts the `frontend` container.
-2. Second deploy POSTs to `/deploy` during the restart → nginx is briefly unreachable → curl exit code 28 (timeout). The CI deploy job fails on the second commit.
-3. The first deploy still finishes successfully; the second commit's changes still land because step 1 (`git pull`) picks up *both* commits.
-
-**Operational practice**: when pushing multiple commits in quick succession, watch for one of the CI deploy jobs failing with curl-28. The code is deployed, but the CI surface lies.
-
-## DNS reality (2026-05-16)
-
-- **`srv1575227.hstgr.cloud`** — A record at `145.223.21.222` (IPv4) + `2a02:4780:12:dae1::1` (IPv6). Let's Encrypt cert covers this domain. **Only working public endpoint.**
-- **`omnioutreach.space`** — NXDOMAIN. Configured as an nginx `server_name` alias but no DNS A record provisioned. Do not link to it. Documented in [[omni-api-naming]] don't-use list.
-
-## Domain → file map
-
-- `webhook/deploy-webhook.py` — source of the webhook daemon.
-- `/etc/systemd/system/deploy-webhook.service` — systemd unit on the VPS.
-- `/usr/local/bin/deploy-webhook.py` — installed copy of the webhook (manually synced from the repo).
-- `frontend/nginx.conf` — `/deploy` location block + proxy to `host.docker.internal:9000`.
-- `.github/workflows/ci.yml` — CI definition.
+- **PowerShell BOM:** appending the SSH key from a Windows PowerShell one-liner wrote a
+  UTF-8 BOM + CRLF into `authorized_keys`; sshd silently rejects the line. Write remote
+  files via `ssh` + `printf`, verify with `cat -A`.
+- CI's deploy curl has no `-k` — a valid (non-self-signed) cert is a hard dependency of
+  the deploy job, not a nicety.
+- `gh run rerun <id> --failed` re-runs just the deploy job to e2e-test the webhook chain
+  without a code push.
 
 ## Open follow-ups
 
-- **Webhook source isn't auto-synced.** Edits to `webhook/deploy-webhook.py` in the repo don't reach `/usr/local/bin/deploy-webhook.py` on the VPS until someone manually `scp`s it. Worth automating.
-- **DEPLOY_SECRET is in the systemd unit file** (plaintext, not in a secrets manager). UNIX file perms on `/etc/systemd/system/*.service` are 644 by default — root-readable only, but still worth rotating into `/etc/default/deploy-webhook` with 600 perms.
-- **No automatic database backup before deploy.** A bad migration can corrupt prod with no rollback path. Adding `pg_dump` as a pre-step (step 0) would be cheap insurance.
-- **No alerting on deploy failure.** The CI surface is the only signal. A failed deploy that no one notices = silently-out-of-date prod.
+- Rotate the leaked DB/Redis/SECRET_KEY values (deferred by user 2026-06-12).
+- Webhook source auto-sync (`/usr/local/bin` copy is manual).
+- No pre-deploy `pg_dump`; no alerting on deploy failure (both carried over).
 
 ## Related Pages
 
 - [[system-overview]] — broader infra context.
 - [[ci-watcher]] — how to wait on CI completion from this terminal.
-- [[chrome-devtools-mcp-loop]] — how to verify the deploy landed visually.
-- [[omni-api-naming]] — `omnioutreach.space` NXDOMAIN trap.
+- [[logic-integrity-ledger]] — the spine contract this box runs (b99dfcb).

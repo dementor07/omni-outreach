@@ -1355,3 +1355,10 @@ channel deserializes safe; a new muscle channel is a 5-edit coupling
 (Python enum + NODE_CHANNEL + Rust enum + dispatch arm + handler); array
 config fields confirmed on 7 nodes (list[str]) + 2 (list[int]); the
 serper.py uncommitted diff is whitespace-only (not a real anomaly).
+
+## 2026-06-12 — Contabo box live: lean v2-only deploy pipeline verified e2e
+
+- Hostinger VPS replaced by Contabo 13.140.169.62 (13-140-169-62.sslip.io), provisioned from scratch.
+- Deploy surface analyzed file-by-file and retargeted (commit cdb5d05): v2-only (15 services, legacy plane dropped), 127.0.0.1-bound infra ports (Docker-bypasses-UFW fix), persistent redpanda volume, nginx /deploy block, single-dir webhook.
+- Full chain verified: CI deploy job → webhook (5 steps, 37s) → health green, Flink job self-resubmitted, LE cert + renewal hook live.
+- Updated [[deploy-pipeline]].
