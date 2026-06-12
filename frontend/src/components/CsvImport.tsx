@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { Upload, FileText, ArrowRight, Check, X, AlertTriangle } from 'lucide-react'
+import { Upload, ArrowRight, Check, AlertTriangle } from 'lucide-react'
 import { useImportLeads } from '../hooks/useLeads'
 import { useToast } from './Toast'
 

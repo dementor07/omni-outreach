@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react'
-import { 
-  Plus, Trash2, ChevronUp, ChevronDown, Linkedin, Mail, MessageSquare, 
-  Smartphone, Phone, Clock, Zap, Save, Tag, MinusCircle, GitBranch, 
-  StopCircle, Webhook, MessageCircle, Brain, Route, Database, 
-  Flame, UserCheck, Settings2, Globe
+import {
+  Trash2, ChevronUp, ChevronDown, Linkedin, Mail, MessageSquare,
+  Phone, Clock, Zap, Save, Tag, GitBranch,
+  StopCircle, Webhook, MessageCircle, Brain, Database,
+  Flame, UserCheck, Settings2,
 } from 'lucide-react'
 import { Node, Edge } from '@xyflow/react'
 import { NodeType } from '../hooks/useSequenceSteps'
@@ -14,12 +14,6 @@ import Button from './Button'
 import Card from './Card'
 import { Select } from './FilterBar'
 import { clsx } from 'clsx'
-
-interface SequentialStep {
-  id: string
-  type: NodeType
-  delay_days: number
-}
 
 interface Props {
   nodes: Node[]
@@ -433,7 +427,6 @@ function VoiceNodeConfig({
     commit(next)
   }
 
-  const inputCls = "w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 outline-none focus:border-brand-400 focus:ring-4 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:ring-brand-900/20"
   const labelCls = "mb-2 block text-[11px] font-bold uppercase tracking-widest text-slate-400"
 
   return (

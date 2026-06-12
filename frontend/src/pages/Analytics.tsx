@@ -17,7 +17,7 @@ export default function Analytics() {
   const leads = leadsQ.data ?? []
   const deals = dealsQ.data ?? []
   const threads = threadsQ.data ?? []
-  const scores = scoresQ.data ?? []
+  const scores = useMemo(() => scoresQ.data ?? [], [scoresQ.data])
 
   // Funnel: leads → replied → converted → deals → won. "Converted" is the
   // flow.goal outcome (lead.status === 'converted'), distinct from a deal win.

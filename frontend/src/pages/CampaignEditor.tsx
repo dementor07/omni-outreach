@@ -46,7 +46,10 @@ const CATEGORY_VISUAL: Record<string, CategoryVisual> = {
 }
 
 function visualFor(category: string): CategoryVisual {
-  return CATEGORY_VISUAL[category] ?? CATEGORY_VISUAL.SOURCE
+  // NodeCategory is a lowercase StrEnum on the wire ("source", "ai", …);
+  // normalize so every category gets its own accent instead of silently
+  // falling back to the SOURCE visuals.
+  return CATEGORY_VISUAL[category?.toUpperCase()] ?? CATEGORY_VISUAL.SOURCE
 }
 
 // A short, human config summary shown on the node body so cards aren't identical.
@@ -532,11 +535,13 @@ export default function CampaignEditor() {
                   <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">Design your outreach workflow.</p>
                 </div>
                 <div className="flex bg-slate-100 rounded-lg p-1 dark:bg-slate-800">
-                  <button 
+                  <button
+                    type="button"
                     onClick={() => setViewMode('canvas')} 
                     className={clsx('px-3 py-1 text-xs font-semibold rounded-md transition-colors', viewMode === 'canvas' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200')}
                   >Canvas</button>
-                  <button 
+                  <button
+                    type="button"
                     onClick={() => setViewMode('linear')} 
                     className={clsx('px-3 py-1 text-xs font-semibold rounded-md transition-colors', viewMode === 'linear' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200')}
                   >Linear</button>

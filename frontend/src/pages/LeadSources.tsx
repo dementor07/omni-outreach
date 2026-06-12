@@ -13,7 +13,8 @@ export default function LeadSources() {
   const nodesQ = useQuery({ queryKey: ['node-manifests'], queryFn: nodes.list })
   const connsQ = useQuery({ queryKey: ['connections'], queryFn: () => integrations.list() })
 
-  const sourceNodes = (nodesQ.data ?? []).filter((m) => m.category === 'SOURCE')
+  // NodeCategory is lowercase on the wire ("source") — compare case-insensitively.
+  const sourceNodes = (nodesQ.data ?? []).filter((m) => m.category.toUpperCase() === 'SOURCE')
   const connectedProviders = new Set((connsQ.data ?? []).map((c) => c.provider))
   const hasNaukri = sourceNodes.some((s) => s.type === 'source.naukri')
 

@@ -99,7 +99,7 @@ class ErrorBoundaryInner extends Component<ErrorBoundaryInnerProps, ErrorBoundar
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     this.setState({ errorInfo })
     if (typeof console !== 'undefined') {
-      // eslint-disable-next-line no-console
+       
       console.error('[ErrorBoundary]', error, errorInfo.componentStack)
     }
   }

@@ -29,7 +29,7 @@ export default function Inbox() {
   const [search, setSearch] = useState('')
   const [classFilter, setClassFilter] = useState<ClassFilter>('all')
 
-  const threads = threadsQ.data ?? []
+  const threads = useMemo(() => threadsQ.data ?? [], [threadsQ.data])
   const byChannel = useMemo(() => groupByChannel(threads), [threads])
   const totalThreads = threads.length
 

@@ -71,6 +71,8 @@ export default function Topbar({ onToggleSidebar }: TopbarProps) {
     window.location.reload()
   }
 
+  // mount-only by design: re-running on every checkApi identity would re-ping the API each render
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { checkApi() }, [])
 
   const dot = apiOk ? 'bg-emerald-500' : apiOk === false ? 'bg-rose-500' : 'bg-slate-300'

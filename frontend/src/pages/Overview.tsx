@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   Users, Contact as ContactIcon, KanbanSquare, Inbox as InboxIcon,
-  Megaphone, Sparkles, Plus, TrendingUp, Flame, BarChart3,
+  Megaphone, Sparkles, Plus, TrendingUp, Flame,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { projections, inbox, canvas, ai, type Deal, type LeadScore } from '../api/v2'
@@ -27,7 +27,8 @@ export default function Overview() {
 
   const contacts = contactsQ.data ?? []
   const leads = leadsQ.data ?? []
-  const deals = dealsQ.data ?? []
+  // Stable reference so the openPipeline memo doesn't recompute every render.
+  const deals = useMemo(() => dealsQ.data ?? [], [dealsQ.data])
   const threads = threadsQ.data ?? []
   const campaigns = campaignsQ.data ?? []
   const scores = scoresQ.data ?? []
