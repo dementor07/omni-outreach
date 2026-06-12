@@ -32,6 +32,10 @@ export const auth = {
   me: () => api.get<MeResponse>('/auth/me').then((r) => r.data),
   login: (email: string, password: string) =>
     api.post<{ access_token: string }>('/auth/login', { email, password }).then((r) => r.data),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    api
+      .post<void>('/auth/change-password', { current_password: currentPassword, new_password: newPassword })
+      .then(() => undefined),
 }
 
 // ── Workspaces ───────────────────────────────────────────────────────────────
@@ -42,10 +46,22 @@ export interface Workspace {
   created_at: ISODate
 }
 
+export interface WorkspaceMember {
+  user_id: UUID
+  email: string
+  role: string
+}
+
 export const workspaces = {
   list: () => api.get<Workspace[]>('/workspaces').then((r) => r.data),
   create: (name: string) => api.post<Workspace>('/workspaces', { name }).then((r) => r.data),
-  switch: (id: UUID) => api.post<{ ok: true }>(`/workspaces/${id}/switch`).then((r) => r.data),
+  switch: (id: UUID) =>
+    api
+      .post<{ workspace_id: UUID; access_token: string; token_type: string }>(`/workspaces/${id}/switch`)
+      .then((r) => r.data),
+  rename: (id: UUID, name: string) =>
+    api.patch<Workspace>(`/workspaces/${id}`, { name }).then((r) => r.data),
+  members: (id: UUID) => api.get<WorkspaceMember[]>(`/workspaces/${id}/members`).then((r) => r.data),
 }
 
 // ── Nodes (manifest registry) ────────────────────────────────────────────────

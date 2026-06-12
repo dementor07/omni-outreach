@@ -13,13 +13,13 @@ import '@xyflow/react/dist/style.css'
 import { clsx } from 'clsx'
 import {
   ArrowLeft, Search, GitBranch, Save, Undo2, Redo2, Maximize2, Minimize2, Plus,
-  Database, Send, Bot, Clock, UserCheck, MessageSquare, Mail, Phone, Linkedin,
-  AtSign, Sparkles, FileSpreadsheet, Webhook, ListChecks, Globe, Tag as TagIcon,
-  Users, Settings as SettingsIcon, Trash2,
-  MessageCircle, Instagram, Shuffle, Target, Octagon, Flame, Play,
+  Database, Send, Bot, Clock, UserCheck,
+  Sparkles, Webhook, ListChecks,
+  Users, Settings as SettingsIcon, Trash2, Play,
   type LucideIcon,
 } from 'lucide-react'
 import { canvas, nodes as nodesApi, projections, type NodeManifest, type WorkflowStatus } from '../api/v2'
+import { nodeIcon } from '../utils/nodeIcons'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
@@ -43,17 +43,6 @@ const CATEGORY_VISUAL: Record<string, CategoryVisual> = {
   CRM:       { icon: UserCheck,  accent: 'text-indigo-600',  tint: 'bg-indigo-50 dark:bg-indigo-950/40',   ring: 'border-indigo-200 dark:border-indigo-900',   mini: '#6366f1' },
   SINK:      { icon: Webhook,    accent: 'text-orange-600',  tint: 'bg-orange-50 dark:bg-orange-950/40',   ring: 'border-orange-200 dark:border-orange-900',   mini: '#f97316' },
   TRANSFORM: { icon: ListChecks, accent: 'text-teal-600',    tint: 'bg-teal-50 dark:bg-teal-950/40',       ring: 'border-teal-200 dark:border-teal-900',       mini: '#14b8a6' },
-}
-
-const NODE_TYPE_ICON: Record<string, LucideIcon> = {
-  'channel.email': Mail, 'channel.sms': MessageSquare, 'channel.voice': Phone,
-  'channel.linkedin': Linkedin, 'channel.slack': AtSign, 'channel.webhook_out': Webhook,
-  'channel.whatsapp': MessageCircle, 'channel.telegram': Send, 'channel.instagram': Instagram,
-  'source.csv': FileSpreadsheet, 'source.sheets': FileSpreadsheet, 'source.webhook_in': Webhook,
-  'source.producthunt': Globe, 'crm.update_deal': TagIcon,
-  'crm.add_tag': TagIcon, 'crm.remove_tag': TagIcon, 'crm.hot_lead_alert': Flame,
-  'condition.has_tag': TagIcon,
-  'flow.split': Shuffle, 'flow.goal': Target, 'flow.end': Octagon, 'flow.wait_until': Clock,
 }
 
 function visualFor(category: string): CategoryVisual {
@@ -120,7 +109,7 @@ function createsForEachCycle(
 function OmniNode({ data, selected }: NodeProps<OmniRfNode>) {
   const { manifest, config } = data
   const v = visualFor(manifest.category)
-  const Icon = NODE_TYPE_ICON[manifest.type] ?? v.icon
+  const Icon = nodeIcon(manifest, v.icon)
   const summary = configSummary(config)
   const schema = manifest.config_schema as { required?: string[] }
   const required = schema.required ?? []
@@ -465,7 +454,9 @@ export default function CampaignEditor() {
           </Panel>
 
           {rfNodes.length === 0 && (
-            <Panel position="top-center" className="pointer-events-none mt-24">
+            // bottom-center keeps the hint clear of the top-right toolbar at
+            // any canvas width (it used to overlap the Save/Run buttons).
+            <Panel position="bottom-center" className="pointer-events-none mb-10">
               <div className="rounded-2xl border border-dashed border-slate-300 bg-white/80 px-6 py-5 text-center shadow-sm dark:border-slate-700 dark:bg-slate-900/80">
                 <GitBranch size={20} className="mx-auto text-slate-300" />
                 <p className="mt-2 text-sm font-semibold text-slate-700 dark:text-slate-200">Empty canvas</p>
@@ -743,7 +734,7 @@ function NodePalette({ manifests, loading, onAdd }: { manifests: NodeManifest[];
                 <p className={clsx('px-2 pb-1 text-[9px] font-bold uppercase tracking-[0.18em]', v.accent)}>{category}</p>
                 <div className="space-y-0.5">
                   {items.map((m) => {
-                    const Icon = NODE_TYPE_ICON[m.type] ?? v.icon
+                    const Icon = nodeIcon(m, v.icon)
                     return (
                       <button
                         key={m.type}

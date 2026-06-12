@@ -4,7 +4,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.auth import create_access_token, get_current_user, hash_password, verify_password
-from app.db import fetch_one, system_scope
+from app.db import execute, fetch_one, system_scope
 from app.services.workspaces import ensure_default_workspace, list_user_workspaces
 
 router = APIRouter()
@@ -64,6 +64,35 @@ async def login(request: Request, body: LoginRequest):
         "access_token": create_access_token(user_id, workspace_id),
         "token_type": "bearer",
     }
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.post("/change-password", status_code=204)
+@limiter.limit("5/hour")
+async def change_password(
+    request: Request,
+    body: ChangePasswordRequest,
+    user_id: str = Depends(get_current_user),
+) -> None:
+    """Rotate the authenticated user's password after re-verifying the
+    current one. 204 on success; existing JWTs stay valid until expiry."""
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=422, detail="New password must be at least 8 characters")
+    async with system_scope():
+        user = await fetch_one("SELECT password_hash FROM users WHERE id=$1", user_id)
+        if not user or not user["password_hash"] or not verify_password(
+            body.current_password, user["password_hash"]
+        ):
+            raise HTTPException(status_code=403, detail="Current password is incorrect")
+        await execute(
+            "UPDATE users SET password_hash=$1 WHERE id=$2",
+            hash_password(body.new_password),
+            user_id,
+        )
 
 
 @router.get("/me")

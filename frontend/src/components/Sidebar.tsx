@@ -3,10 +3,11 @@ import {
   LayoutDashboard, Megaphone, Inbox, ListTodo, UserCheck,
   Users, Building2, KanbanSquare, Contact,
   BarChart3, Activity, Sparkles,
-  Plug, Database, FileText, ShieldOff, Settings, LogOut, Zap,
+  Plug, Database, FileText, ShieldOff, Settings, LogOut,
   ChevronRight,
 } from 'lucide-react'
 import { clsx } from 'clsx'
+import Logo, { LogoMark } from './Logo'
 
 type NavItem = { to: string; label: string; icon: React.ElementType }
 type NavGroup = { label: string | null; items: NavItem[] }
@@ -76,16 +77,8 @@ export default function Sidebar({ collapsed = false }: SidebarProps) {
       )}
     >
       {/* Logo lockup */}
-      <div className={clsx('flex items-center gap-2.5 border-b border-slate-100 px-4 py-4 dark:border-slate-800', collapsed && 'justify-center px-0')}>
-        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-brand-500 text-white shadow-sm shadow-brand-500/30">
-          <Zap size={15} fill="currentColor" />
-        </div>
-        {!collapsed && (
-          <div className="min-w-0">
-            <div className="text-sm font-bold tracking-tight text-slate-900 dark:text-white">Omni</div>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">Control plane</div>
-          </div>
-        )}
+      <div className={clsx('flex items-center border-b border-slate-100 px-4 py-4 dark:border-slate-800', collapsed && 'justify-center px-0')}>
+        {collapsed ? <LogoMark size={30} /> : <Logo size={32} />}
       </div>
 
       {/* Nav */}
