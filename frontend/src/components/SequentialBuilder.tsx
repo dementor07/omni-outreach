@@ -85,7 +85,7 @@ export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate
       .map(n => ({
         id: n.id,
         type: n.type as NodeType,
-        delay_days: (n.data as any)?.delay_days || 0
+        delay_days: ((n.data as Record<string, unknown>)?.delay_days as number) || 0
       }))
   }, [nodes])
 
@@ -172,7 +172,7 @@ export default function SequentialBuilder({ nodes, edges, onSave, onEditTemplate
     onSave(newNodes, newEdges)
   }
 
-  const updateStep = (id: string, data: any) => {
+  const updateStep = (id: string, data: Record<string, unknown>) => {
     const newNodes = nodes.map(n => {
       if (n.id === id) {
         return { ...n, data: { ...n.data, ...data } }

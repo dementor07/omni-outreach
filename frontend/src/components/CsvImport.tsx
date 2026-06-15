@@ -101,7 +101,7 @@ export default function CsvImport({ campaignId, onComplete, onCancel }: CsvImpor
     const leads = getMappedLeads()
     if (!leads.length) { toast.error('No valid leads to import'); return }
     try {
-      const res = await importLeads.mutateAsync({ campaignId, leads: leads as any })
+      const res = await importLeads.mutateAsync({ campaignId, leads })
       setResult(res)
       setStep('done')
     } catch {
@@ -211,7 +211,7 @@ export default function CsvImport({ campaignId, onComplete, onCancel }: CsvImpor
                 {getMappedLeads().slice(0, 5).map((lead, i) => (
                   <tr key={i} className="border-b border-slate-100">
                     {LEAD_FIELDS.filter((f) => mapping[f.key]).map((f) => (
-                      <td key={f.key} className="px-3 py-2 text-slate-700 truncate max-w-[200px]">{(lead as any)[f.key] || '—'}</td>
+                      <td key={f.key} className="px-3 py-2 text-slate-700 truncate max-w-[200px]">{lead[f.key as keyof typeof lead] || '—'}</td>
                     ))}
                   </tr>
                 ))}

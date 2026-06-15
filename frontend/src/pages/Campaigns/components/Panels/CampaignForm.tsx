@@ -1,9 +1,19 @@
-import React from 'react'
+import React, { FormEvent } from 'react'
 import { Clock, Zap } from 'lucide-react'
 import { inputClassName } from '../Sidebar/Common'
+import type { CampaignPayload } from '../../types'
 
-export function CampaignForm({ form, onChange, onSubmit, busy, submitLabel }: any) {
-  const update = (key: string, val: any) => onChange({ ...form, [key]: val })
+interface CampaignFormProps {
+  form: CampaignPayload
+  onChange: (form: CampaignPayload) => void
+  onSubmit: (e: FormEvent) => void
+  busy: boolean
+  submitLabel: string
+}
+
+export function CampaignForm({ form, onChange, onSubmit, busy, submitLabel }: CampaignFormProps) {
+  const update = <K extends keyof CampaignPayload>(key: K, val: CampaignPayload[K]) =>
+    onChange({ ...form, [key]: val })
   return (
     <form className="space-y-6" onSubmit={onSubmit}>
       <input value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="Campaign Name" className={inputClassName} required />

@@ -18,7 +18,7 @@ import {
   Users, Settings as SettingsIcon, Trash2, Play,
   type LucideIcon,
 } from 'lucide-react'
-import { canvas, nodes as nodesApi, projections, type NodeManifest, type WorkflowStatus } from '../api/v2'
+import { canvas, nodes as nodesApi, projections, type Lead, type NodeManifest, type WorkflowStatus } from '../api/v2'
 import { nodeIcon } from '../utils/nodeIcons'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
@@ -585,10 +585,10 @@ export default function CampaignEditor() {
               </div>
               <DataTable
                 columns={[
-                  { key: 'status', header: 'Status', render: (row: any) => <Badge label={row.status || 'active'} asStatus dot /> },
-                  { key: 'contact_id', header: 'Contact', render: (row: any) => <span className="font-mono text-xs text-slate-500">{row.contact_id?.slice(0, 8) ?? '—'}</span> },
-                  { key: 'current_node_id', header: 'Current step', render: (row: any) => <span className="font-mono text-xs text-slate-500">{row.current_node_id?.slice(0, 8) ?? '—'}</span> },
-                  { key: 'created_at', header: 'Enrolled', render: (row: any) => new Date(row.created_at).toLocaleDateString() },
+                  { key: 'status', header: 'Status', render: (row: Lead) => <Badge label={row.status || 'active'} asStatus dot /> },
+                  { key: 'contact_id', header: 'Contact', render: (row: Lead) => <span className="font-mono text-xs text-slate-500">{row.contact_id?.slice(0, 8) ?? '—'}</span> },
+                  { key: 'current_node_id', header: 'Current step', render: (row: Lead) => <span className="font-mono text-xs text-slate-500">{row.current_node_id?.slice(0, 8) ?? '—'}</span> },
+                  { key: 'created_at', header: 'Enrolled', render: (row: Lead) => new Date(row.created_at).toLocaleDateString() },
                 ]}
                 rows={leadsQuery.data ?? []}
                 loading={leadsQuery.isLoading}

@@ -54,7 +54,7 @@ export interface SequenceNode {
   node_type: NodeType
   position_x: number
   position_y: number
-  data: any
+  data: Record<string, unknown>
   created_at: string
 }
 
@@ -82,7 +82,7 @@ export interface SaveGraphPayload {
     node_type: NodeType
     position_x: number
     position_y: number
-    data?: any
+    data?: Record<string, unknown>
   }[]
   edges: {
     source_node_id: string

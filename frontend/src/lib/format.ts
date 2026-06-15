@@ -1,8 +1,15 @@
+interface NamedRow {
+  first_name?: string | null
+  last_name?: string | null
+  linkedin_url?: string | null
+  email?: string | null
+}
+
 /** Full display name from a lead/message row */
-export function fullName(row: any): string {
+export function fullName(row: NamedRow | null | undefined): string {
   if (!row) return 'Unknown'
   const n = [row.first_name, row.last_name].filter(Boolean).join(' ').trim()
-  return n || (row.linkedin_url as string) || (row.email as string) || 'Unknown'
+  return n || row.linkedin_url || row.email || 'Unknown'
 }
 
 /** Human-readable relative timestamp */
