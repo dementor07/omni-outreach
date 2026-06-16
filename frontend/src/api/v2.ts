@@ -71,6 +71,23 @@ export const suppression = {
   remove: (id: UUID) => api.delete<void>(`/suppression/${id}`).then(() => undefined),
 }
 
+// ── Analytics (lead-gen efficiency + cost rollup) ─────────────────────────────
+export interface AnalyticsSummary {
+  runs: number
+  companies_collected: number
+  companies_qualified: number
+  companies_rejected: number
+  people_found: number
+  people_verified: number
+  leads_created: number
+  serper_calls: number
+  claude_calls: number
+  claude_input_tokens: number
+  claude_output_tokens: number
+  total_cost: number
+  last_run_at: ISODate | null
+}
+
 export const workspaces = {
   list: () => api.get<Workspace[]>('/workspaces').then((r) => r.data),
   create: (name: string) => api.post<Workspace>('/workspaces', { name }).then((r) => r.data),
@@ -326,6 +343,7 @@ export const projections = {
         params: workflowId ? { workflow_id: workflowId } : undefined,
       })
       .then((r) => r.data),
+  analytics: () => api.get<AnalyticsSummary>('/projections/analytics').then((r) => r.data),
 }
 
 // ── Inbox ────────────────────────────────────────────────────────────────────

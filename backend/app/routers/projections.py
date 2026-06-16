@@ -233,3 +233,62 @@ def _lead_out(row: dict[str, Any], columns: list[lead_columns.ColumnSpec]) -> Le
         stage=stage,
         fields=fields,
     )
+
+
+# ── T2: lead-gen efficiency + cost analytics ─────────────────────────────────
+# omni_pipeline_metrics is written per-run by the projector but was never
+# exposed. This aggregates it for the workspace so the Analytics page can show
+# real funnel volumes and AI/Serper cost. RLS binds the tenant.
+class AnalyticsSummary(BaseModel):
+    runs: int
+    companies_collected: int
+    companies_qualified: int
+    companies_rejected: int
+    people_found: int
+    people_verified: int
+    leads_created: int
+    serper_calls: int
+    claude_calls: int
+    claude_input_tokens: int
+    claude_output_tokens: int
+    total_cost: float
+    last_run_at: datetime | None
+
+
+@router.get("/analytics", response_model=AnalyticsSummary, summary="Lead-gen efficiency + cost rollup")
+async def analytics_summary(_: AuthContext = Depends(get_current_workspace)) -> AnalyticsSummary:
+    row = await fetch_all(
+        """
+        SELECT
+            COUNT(*)                              AS runs,
+            COALESCE(SUM(companies_collected), 0) AS companies_collected,
+            COALESCE(SUM(companies_qualified), 0) AS companies_qualified,
+            COALESCE(SUM(companies_rejected), 0)  AS companies_rejected,
+            COALESCE(SUM(people_found), 0)        AS people_found,
+            COALESCE(SUM(people_verified), 0)     AS people_verified,
+            COALESCE(SUM(leads_created), 0)       AS leads_created,
+            COALESCE(SUM(serper_calls), 0)        AS serper_calls,
+            COALESCE(SUM(claude_calls), 0)        AS claude_calls,
+            COALESCE(SUM(claude_input_tokens), 0) AS claude_input_tokens,
+            COALESCE(SUM(claude_output_tokens), 0) AS claude_output_tokens,
+            COALESCE(SUM(total_cost), 0)          AS total_cost,
+            MAX(started_at)                       AS last_run_at
+        FROM omni_pipeline_metrics
+        """
+    )
+    r = dict(row[0]) if row else {}
+    return AnalyticsSummary(
+        runs=int(r.get("runs") or 0),
+        companies_collected=int(r.get("companies_collected") or 0),
+        companies_qualified=int(r.get("companies_qualified") or 0),
+        companies_rejected=int(r.get("companies_rejected") or 0),
+        people_found=int(r.get("people_found") or 0),
+        people_verified=int(r.get("people_verified") or 0),
+        leads_created=int(r.get("leads_created") or 0),
+        serper_calls=int(r.get("serper_calls") or 0),
+        claude_calls=int(r.get("claude_calls") or 0),
+        claude_input_tokens=int(r.get("claude_input_tokens") or 0),
+        claude_output_tokens=int(r.get("claude_output_tokens") or 0),
+        total_cost=float(r.get("total_cost") or 0),
+        last_run_at=r.get("last_run_at"),
+    )
