@@ -29,8 +29,8 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from app.config import settings
-from app.db import fetch_one, system_scope
-from app.services import bus
+from app.db import execute, fetch_all, fetch_one, system_scope
+from app.services import bus, reply_classifier
 
 router = APIRouter()
 
@@ -160,3 +160,127 @@ async def receive_webhook(
     await bus._producer.send_and_wait(bus.TRANSITIONS_TOPIC, value=transition, key=lead_id)  # type: ignore[union-attr]
 
     return {"accepted": True, "contact_id": contact_id, "lead_id": lead_id}
+
+
+@router.post(
+    "/reply/{workspace_id}",
+    status_code=202,
+    summary="Receive an inbound reply (Unipile / email) — classify + wake the lead",
+    description=(
+        "Unauthenticated inbound reply webhook. Resolves the contact by "
+        "email/linkedin, classifies the reply intent (B2: single LLM call + "
+        "keyword fallback), records message.received with classification, "
+        "auto-suppresses on unsubscribe, and wakes any lead waiting on that "
+        "contact via a 'replied' transition. Returns 202."
+    ),
+)
+async def receive_reply(
+    workspace_id: uuid.UUID,
+    request: Request,
+    x_omni_signature: str | None = Header(None),
+) -> dict:
+    raw = await request.body()
+    # HMAC required — inbound replies carry real recipient data.
+    if not _verify_hmac(raw, x_omni_signature):
+        raise HTTPException(status_code=401, detail="invalid or missing webhook signature")
+    try:
+        body = await request.json()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="body must be valid JSON") from e
+
+    ws = str(workspace_id)
+    channel = (body.get("channel") or "email").strip()
+    text = body.get("body") or body.get("text") or ""
+    email = (body.get("email") or "").strip().lower() or None
+    linkedin_url = (body.get("linkedin_url") or "").strip() or None
+    if not email and not linkedin_url:
+        raise HTTPException(status_code=422, detail="reply needs an email or linkedin_url to resolve the contact")
+
+    # Resolve the contact within the workspace. system_scope: no JWT here, so
+    # bind the tenant explicitly via the path workspace_id.
+    async with system_scope():
+        if email:
+            contact = await fetch_one(
+                "SELECT id FROM omni_contacts WHERE workspace_id=$1 AND lower(email)=$2 LIMIT 1",
+                ws, email,
+            )
+        else:
+            contact = await fetch_one(
+                "SELECT id FROM omni_contacts WHERE workspace_id=$1 AND linkedin_url=$2 LIMIT 1",
+                ws, linkedin_url,
+            )
+    if not contact:
+        # Nothing to attach the reply to — accept but no-op (idempotent for retries).
+        return {"accepted": True, "matched": False}
+    contact_id = str(contact["id"])
+    correlation_id = str(uuid.uuid4())
+
+    # B2 — classify intent (one LLM call, keyword fallback).
+    intent, confidence, reason, source = await reply_classifier.classify_reply(ws, text)
+
+    # message.received — the projector persists it with classification/confidence.
+    await bus.publish_event(
+        workspace_id=ws,
+        event_type="message.received",
+        entity_type="message",
+        entity_id=str(uuid.uuid4()),
+        payload={
+            "contact_id": contact_id,
+            "channel": channel,
+            "subject": body.get("subject"),
+            "body": text,
+            "classification": intent,
+            "confidence": confidence,
+            "metadata": {"reason": reason, "classifier_source": source},
+        },
+        correlation_id=correlation_id,
+    )
+
+    # T1 tie-in — an unsubscribe auto-writes the suppression list so this contact
+    # is never messaged again on any channel.
+    if intent == "unsubscribe":
+        async with system_scope():
+            if email:
+                await execute(
+                    "INSERT INTO omni_suppression_list (workspace_id, kind, value, reason, source) "
+                    "VALUES ($1, 'email', $2, 'reply unsubscribe', 'unsubscribe') "
+                    "ON CONFLICT (workspace_id, kind, value) DO NOTHING",
+                    ws, email,
+                )
+            if linkedin_url:
+                await execute(
+                    "INSERT INTO omni_suppression_list (workspace_id, kind, value, reason, source) "
+                    "VALUES ($1, 'linkedin', $2, 'reply unsubscribe', 'unsubscribe') "
+                    "ON CONFLICT (workspace_id, kind, value) DO NOTHING",
+                    ws, linkedin_url.lower(),
+                )
+
+    # SM-8 reply→wake-up — wake any lead for this contact that is parked
+    # 'waiting' at a node, off the 'replied' handle so a condition.replied /
+    # flow.race branch can react. The transition worker resolves the edge.
+    async with system_scope():
+        waiting = await fetch_all(
+            "SELECT id, current_node_id FROM omni_leads "
+            "WHERE workspace_id=$1 AND contact_id=$2 AND status='waiting' AND current_node_id IS NOT NULL",
+            ws, contact_id,
+        )
+    for lead in waiting:
+        transition = {
+            "lead_id": str(lead["id"]),
+            "source_node_id": str(lead["current_node_id"]),
+            "handle": "replied",
+            "event_type": "transition",
+            "metadata": {"workspace_id": ws, "correlation_id": correlation_id, "reply_intent": intent},
+            "occurred_at": datetime.now(UTC).isoformat(),
+        }
+        await bus._producer.send_and_wait(bus.TRANSITIONS_TOPIC, value=transition, key=str(lead["id"]))  # type: ignore[union-attr]
+
+    return {
+        "accepted": True,
+        "matched": True,
+        "contact_id": contact_id,
+        "intent": intent,
+        "confidence": confidence,
+        "source": source,
+        "woke_leads": len(waiting),
+    }
