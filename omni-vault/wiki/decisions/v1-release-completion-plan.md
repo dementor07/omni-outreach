@@ -47,6 +47,26 @@ probed against the live box) found:
 **Revised v1 surface = (a) delete the dead legacy frontend, (b) build the genuine
 ledger features still open: T1, T2, B1, B2, B3, B4, B7, T3, B5, B6.**
 
+## B1/B2/B3 design decisions (2026-06-16, after research)
+- **B2 reply classifier — single bounded LLM call + keyword fallback, NOT LangGraph.**
+  Researched the industry-pro pattern (LangChain agents-from-scratch, Vadim's production
+  write-up): the consensus for production reply-intent is a single schema-constrained LLM
+  call embedded in the existing dataflow, fail-open to a keyword heuristic, with provenance
+  (`source=llm|keyword_fallback`). Multi-agent/LangGraph orchestration is the thing the pros
+  warn AGAINST for one classification step — and we already own the orchestration spine. So:
+  one Anthropic call → `{intent: positive|question|objection|unsubscribe|neutral,
+  confidence, reason}`; deterministic keyword fallback (unsubscribe/stop always caught) when
+  no Anthropic connection or on error; classify in the projector's `message.received` path,
+  write the existing `classification`/`confidence` columns, then EMIT a transition so a
+  waiting lead reacts (also closes SM-8 reply→wake-up). Unsubscribe intent auto-writes the
+  suppression list (source='unsubscribe') — ties B2 to T1.
+- **B1 AI draft-review — extend the approvals queue.** human_approval already parks the lead
+  with the rendered message; add an editable `draft` field + PATCH /approvals/{id}/draft so
+  the operator edits copy in place, approve sends the edited version. Reuses park/resume.
+- **B3 inbox reply — send on the thread's channel + AI-suggested draft.** ThreadPane compose
+  box dispatches a real outbound via the muscle send path (DNC re-checked), plus a "suggest"
+  button that pre-fills an AI draft (depends on B1/Anthropic compose).
+
 ## Dependency-ordered phases
 1. **Phase 1 — CLASS A wiring** (W1, W3, W2 clickable leads, W4 pagination): pure frontend glue.
 2. **Phase 2 — read endpoints** (T2 analytics router, W5 notifications backend+table): backend + UI surface.
