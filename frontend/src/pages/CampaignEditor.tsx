@@ -13,13 +13,11 @@ import '@xyflow/react/dist/style.css'
 import { clsx } from 'clsx'
 import {
   ArrowLeft, Search, GitBranch, Save, Undo2, Redo2, Maximize2, Minimize2, Plus,
-  Database, Send, Bot, Clock, UserCheck,
-  Sparkles, Webhook, ListChecks,
   Users, Settings as SettingsIcon, Trash2, Play,
-  type LucideIcon,
 } from 'lucide-react'
 import { canvas, nodes as nodesApi, projections, type Lead, type NodeManifest, type WorkflowStatus } from '../api/v2'
 import { nodeIcon } from '../utils/nodeIcons'
+import { visualFor } from '../utils/nodeVisuals'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
@@ -31,26 +29,8 @@ import Tabs from '../components/Tabs'
 import DataTable from '../components/DataTable'
 import SequentialBuilder from '../components/SequentialBuilder'
 
-// ── Category → icon + accent ─────────────────────────────────────────────────
-interface CategoryVisual { icon: LucideIcon; accent: string; tint: string; ring: string; mini: string }
-const CATEGORY_VISUAL: Record<string, CategoryVisual> = {
-  SOURCE:    { icon: Database,   accent: 'text-sky-600',     tint: 'bg-sky-50 dark:bg-sky-950/40',         ring: 'border-sky-200 dark:border-sky-900',         mini: '#0ea5e9' },
-  ENRICH:    { icon: Sparkles,   accent: 'text-violet-600',  tint: 'bg-violet-50 dark:bg-violet-950/40',   ring: 'border-violet-200 dark:border-violet-900',   mini: '#8b5cf6' },
-  AI:        { icon: Bot,        accent: 'text-fuchsia-600', tint: 'bg-fuchsia-50 dark:bg-fuchsia-950/40', ring: 'border-fuchsia-200 dark:border-fuchsia-900', mini: '#d946ef' },
-  CHANNEL:   { icon: Send,       accent: 'text-emerald-600', tint: 'bg-emerald-50 dark:bg-emerald-950/40', ring: 'border-emerald-200 dark:border-emerald-900', mini: '#10b981' },
-  CONDITION: { icon: GitBranch,  accent: 'text-amber-600',   tint: 'bg-amber-50 dark:bg-amber-950/40',     ring: 'border-amber-200 dark:border-amber-900',     mini: '#f59e0b' },
-  FLOW:      { icon: Clock,      accent: 'text-rose-600',    tint: 'bg-rose-50 dark:bg-rose-950/40',       ring: 'border-rose-200 dark:border-rose-900',       mini: '#f43f5e' },
-  CRM:       { icon: UserCheck,  accent: 'text-indigo-600',  tint: 'bg-indigo-50 dark:bg-indigo-950/40',   ring: 'border-indigo-200 dark:border-indigo-900',   mini: '#6366f1' },
-  SINK:      { icon: Webhook,    accent: 'text-orange-600',  tint: 'bg-orange-50 dark:bg-orange-950/40',   ring: 'border-orange-200 dark:border-orange-900',   mini: '#f97316' },
-  TRANSFORM: { icon: ListChecks, accent: 'text-teal-600',    tint: 'bg-teal-50 dark:bg-teal-950/40',       ring: 'border-teal-200 dark:border-teal-900',       mini: '#14b8a6' },
-}
-
-function visualFor(category: string): CategoryVisual {
-  // NodeCategory is a lowercase StrEnum on the wire ("source", "ai", …);
-  // normalize so every category gets its own accent instead of silently
-  // falling back to the SOURCE visuals.
-  return CATEGORY_VISUAL[category?.toUpperCase()] ?? CATEGORY_VISUAL.SOURCE
-}
+// Category → icon + accent now lives in utils/nodeVisuals (shared with the
+// linear SequentialBuilder so a node looks identical in either view).
 
 // A short, human config summary shown on the node body so cards aren't identical.
 function configSummary(config: Record<string, unknown>): string | null {
@@ -385,8 +365,23 @@ export default function CampaignEditor() {
     e.dataTransfer.dropEffect = 'move'
   }, [])
 
-  function doUndo() { const h = undo(); if (h) { setRfNodes(h.nodes as OmniRfNode[]); setRfEdges(h.edges); setDirty(true) } }
-  function doRedo() { const h = redo(); if (h) { setRfNodes(h.nodes as OmniRfNode[]); setRfEdges(h.edges); setDirty(true) } }
+  const doUndo = useCallback(() => { const h = undo(); if (h) { setRfNodes(h.nodes as OmniRfNode[]); setRfEdges(h.edges); setDirty(true) } }, [undo, setRfNodes, setRfEdges])
+  const doRedo = useCallback(() => { const h = redo(); if (h) { setRfNodes(h.nodes as OmniRfNode[]); setRfEdges(h.edges); setDirty(true) } }, [redo, setRfNodes, setRfEdges])
+
+  // Ctrl/Cmd+Z = undo, Ctrl/Cmd+Shift+Z or Ctrl+Y = redo. Ignored while typing
+  // in an input/textarea/contenteditable so node-config fields keep native undo.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey)) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      const key = e.key.toLowerCase()
+      if (key === 'z' && !e.shiftKey) { e.preventDefault(); doUndo() }
+      else if ((key === 'z' && e.shiftKey) || key === 'y') { e.preventDefault(); doRedo() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [doUndo, doRedo])
 
   if (!id) return null
   const wf = detailQuery.data?.workflow
@@ -556,17 +551,15 @@ export default function CampaignEditor() {
                     <SequentialBuilder
                       nodes={rfNodes}
                       edges={rfEdges}
-                      onSave={(n, e) => {
-                         if (n === rfNodes && e === rfEdges) {
-                           saveMut.mutate()
-                         } else {
-                           setRfNodes(n as OmniRfNode[])
-                           setRfEdges(e)
-                           setDirty(true)
-                           pushState(n as OmniRfNode[], e)
-                         }
+                      manifests={manifestsQuery.data ?? []}
+                      onChange={(n, e) => {
+                        setRfNodes(n)
+                        setRfEdges(e)
+                        setDirty(true)
+                        pushState(n, e)
                       }}
-                      onEditTemplate={(id) => setSelectedNodeId(id)}
+                      onSave={() => saveMut.mutate()}
+                      onEditNode={(id) => setSelectedNodeId(id)}
                       isSaving={saveMut.isPending}
                     />
                   </div>
