@@ -52,6 +52,25 @@ export interface WorkspaceMember {
   role: string
 }
 
+// ── Suppression list (DNC) ────────────────────────────────────────────────────
+export type SuppressionKind = 'email' | 'domain' | 'phone' | 'linkedin'
+
+export interface SuppressionRule {
+  id: UUID
+  kind: SuppressionKind
+  value: string
+  reason: string | null
+  source: string
+  created_at: ISODate
+}
+
+export const suppression = {
+  list: () => api.get<SuppressionRule[]>('/suppression').then((r) => r.data),
+  create: (kind: SuppressionKind, value: string, reason?: string) =>
+    api.post<SuppressionRule>('/suppression', { kind, value, reason }).then((r) => r.data),
+  remove: (id: UUID) => api.delete<void>(`/suppression/${id}`).then(() => undefined),
+}
+
 export const workspaces = {
   list: () => api.get<Workspace[]>('/workspaces').then((r) => r.data),
   create: (name: string) => api.post<Workspace>('/workspaces', { name }).then((r) => r.data),

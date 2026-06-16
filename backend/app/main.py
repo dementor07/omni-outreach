@@ -36,6 +36,7 @@ from app.routers import (
     oauth_producthunt,
     projections,
     sources,
+    suppression,
     webhooks_in,
     workspaces,
 )
@@ -140,6 +141,7 @@ app.include_router(integrations.router, prefix="/integrations", tags=["integrati
 app.include_router(inbox.router, prefix="/inbox", tags=["inbox"])
 app.include_router(ai_studio.router, prefix="/ai", tags=["ai"])
 app.include_router(approvals.router, prefix="/approvals", tags=["approvals"])
+app.include_router(suppression.router, prefix="/suppression", tags=["suppression"])
 
 # Inbound webhooks (source.webhook_in runtime). UNAUTHENTICATED by design —
 # external systems POST here; trust comes from the opaque ids + optional HMAC.
