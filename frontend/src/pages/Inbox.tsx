@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { clsx } from 'clsx'
-import { Inbox as InboxIcon, MessageSquare, Dot, CheckCircle2, ChevronLeft } from 'lucide-react'
+import { Inbox as InboxIcon, MessageSquare, Dot, CheckCircle2, ChevronLeft, Sparkles, Send } from 'lucide-react'
 import { inbox, type InboxThread } from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
@@ -11,6 +11,7 @@ import Avatar from '../components/Avatar'
 import EmptyState from '../components/EmptyState'
 import ChannelIcon, { CHANNEL_META } from '../components/ChannelIcon'
 import { FilterBar, SearchInput, Toggle } from '../components/FilterBar'
+import { useToast } from '../components/Toast'
 import { timeAgo } from '../lib/format'
 
 type ClassFilter = 'all' | 'positive' | 'objection' | 'unsubscribe'
@@ -124,6 +125,7 @@ export default function Inbox() {
             contactId={contactId}
             messages={threadQ.data ?? []}
             loading={threadQ.isLoading}
+            lastChannel={visible.find((t) => t.contact_id === contactId)?.last_channel ?? null}
             onBack={() => navigate('/inbox')}
           />
         </div>
@@ -234,11 +236,13 @@ function ThreadPane({
   contactId,
   messages,
   loading,
+  lastChannel,
   onBack,
 }: {
   contactId: string
   messages: import('../api/v2').InboxMessage[]
   loading: boolean
+  lastChannel: string | null
   onBack: () => void
 }) {
   return (
@@ -270,7 +274,78 @@ function ThreadPane({
           messages.map((m) => <MessageBubble key={m.id} m={m} />)
         )}
       </div>
+      <ReplyComposer contactId={contactId} channel={lastChannel} />
     </Card>
+  )
+}
+
+// ── Reply composer (B3): AI-suggested draft + DNC-checked send ───────────────
+function ReplyComposer({ contactId, channel }: { contactId: string; channel: string | null }) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [draft, setDraft] = useState('')
+  const [source, setSource] = useState<string | null>(null)
+
+  const suggestMut = useMutation({
+    mutationFn: () => inbox.suggest(contactId),
+    onSuccess: (res) => {
+      setDraft(res.draft)
+      setSource(res.source)
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not draft a reply'),
+  })
+
+  const sendMut = useMutation({
+    mutationFn: () => inbox.reply(contactId, { body: draft.trim(), channel: channel ?? undefined }),
+    onSuccess: (res) => {
+      setDraft('')
+      setSource(null)
+      toast.success(`Reply queued on ${res.channel}`)
+      qc.invalidateQueries({ queryKey: ['inbox-thread', contactId] })
+      qc.invalidateQueries({ queryKey: ['inbox-threads'] })
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not send reply'),
+  })
+
+  const channelLabel = channel ? (CHANNEL_META[channel]?.label ?? channel) : 'channel'
+
+  return (
+    <div className="border-t border-slate-100 p-3 dark:border-slate-800">
+      <textarea
+        value={draft}
+        onChange={(e) => { setDraft(e.target.value); if (source) setSource(null) }}
+        rows={3}
+        placeholder={`Write a reply on ${channelLabel}…`}
+        className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-brand-900/40"
+      />
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => suggestMut.mutate()}
+            disabled={suggestMut.isPending}
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            <Sparkles size={13} />
+            {suggestMut.isPending ? 'Drafting…' : 'AI suggest'}
+          </button>
+          {source && (
+            <span className="text-[11px] text-slate-400">
+              {source === 'llm' ? 'AI draft — review before sending' : 'Template draft — personalize it'}
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => sendMut.mutate()}
+          disabled={!draft.trim() || sendMut.isPending}
+          className="inline-flex items-center gap-1.5 rounded-md bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Send size={13} />
+          {sendMut.isPending ? 'Sending…' : 'Send'}
+        </button>
+      </div>
+    </div>
   )
 }
 

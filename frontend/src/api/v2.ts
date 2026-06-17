@@ -369,10 +369,25 @@ export interface InboxMessage {
   occurred_at: ISODate
 }
 
+export interface ReplySuggestion {
+  draft: string
+  source: string // 'llm' | 'template'
+}
+
+export interface ReplyAccepted {
+  status: string
+  channel: string
+  correlation_id: UUID
+}
+
 export const inbox = {
   threads: (limit = 50) => api.get<InboxThread[]>('/inbox/threads', { params: { limit } }).then((r) => r.data),
   thread: (contactId: UUID, limit = 200) =>
     api.get<InboxMessage[]>(`/inbox/threads/${contactId}`, { params: { limit } }).then((r) => r.data),
+  suggest: (contactId: UUID) =>
+    api.post<ReplySuggestion>(`/inbox/threads/${contactId}/suggest`).then((r) => r.data),
+  reply: (contactId: UUID, body: { body: string; subject?: string; channel?: string }) =>
+    api.post<ReplyAccepted>(`/inbox/threads/${contactId}/reply`, body).then((r) => r.data),
 }
 
 // ── Integrations (connections) ───────────────────────────────────────────────
