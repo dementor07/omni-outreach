@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Building2, Globe, Layers } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Building2, Globe, Layers, Trash2 } from 'lucide-react'
 import { projections, type Company } from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import StatCard from '../components/StatCard'
@@ -9,12 +9,30 @@ import Avatar from '../components/Avatar'
 import Badge from '../components/Badge'
 import EmptyState from '../components/EmptyState'
 import { FilterBar, SearchInput } from '../components/FilterBar'
+import { useToast } from '../components/Toast'
 
 export default function Companies() {
+  const qc = useQueryClient()
+  const toast = useToast()
   const { data: companies = [], isLoading } = useQuery({
     queryKey: ['companies'],
     queryFn: () => projections.companies(500),
   })
+
+  const delMut = useMutation({
+    mutationFn: projections.deleteCompany,
+    onSuccess: () => {
+      toast.success('Company deleted')
+      qc.invalidateQueries({ queryKey: ['companies'] })
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not delete company'),
+  })
+
+  function onDelete(c: Company) {
+    if (window.confirm(`Delete ${c.name}? This can't be undone.`)) {
+      delMut.mutate(c.id)
+    }
+  }
 
   const [search, setSearch] = useState('')
   const filtered = useMemo(() => filterCompanies(companies, search), [companies, search])
@@ -46,16 +64,32 @@ export default function Companies() {
         <Card><EmptyState icon={Building2} title={search ? 'No matches' : 'No companies yet'} description={search ? 'Try a different search.' : 'Companies appear when enrichment or imports create them.'} /></Card>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((c) => <CompanyCard key={c.id} c={c} />)}
+          {filtered.map((c) => <CompanyCard key={c.id} c={c} onDelete={onDelete} deleting={delMut.isPending} />)}
         </div>
       )}
     </div>
   )
 }
 
-function CompanyCard({ c }: { c: Company }) {
+interface CompanyCardProps {
+  c: Company
+  onDelete: (c: Company) => void
+  deleting: boolean
+}
+
+function CompanyCard({ c, onDelete, deleting }: CompanyCardProps) {
   return (
-    <Card padding="md">
+    <Card padding="md" className="group relative">
+      <button
+        type="button"
+        onClick={() => onDelete(c)}
+        disabled={deleting}
+        title="Delete company"
+        aria-label="Delete company"
+        className="absolute right-2 top-2 rounded p-1.5 text-slate-400 opacity-0 transition-colors hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100 dark:hover:bg-rose-900/30"
+      >
+        <Trash2 size={15} />
+      </button>
       <div className="flex items-start gap-3">
         <Avatar name={c.name} size={40} />
         <div className="min-w-0 flex-1">

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { Contact as ContactIcon, Mail, Building2, AtSign, Users } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Contact as ContactIcon, Mail, Building2, AtSign, Users, Trash2 } from 'lucide-react'
 import { projections, type Contact } from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import StatCard from '../components/StatCard'
@@ -10,14 +10,33 @@ import Avatar from '../components/Avatar'
 import Badge from '../components/Badge'
 import EmptyState from '../components/EmptyState'
 import { FilterBar, SearchInput } from '../components/FilterBar'
+import { useToast } from '../components/Toast'
 import { fullName } from '../lib/format'
 
 export default function Contacts() {
   const navigate = useNavigate()
+  const qc = useQueryClient()
+  const toast = useToast()
   const { data: contacts = [], isLoading } = useQuery({
     queryKey: ['contacts'],
     queryFn: () => projections.contacts(500),
   })
+
+  const delMut = useMutation({
+    mutationFn: projections.deleteContact,
+    onSuccess: () => {
+      toast.success('Contact deleted')
+      qc.invalidateQueries({ queryKey: ['contacts'] })
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not delete contact'),
+  })
+
+  function onDelete(e: React.MouseEvent, c: Contact) {
+    e.stopPropagation()
+    if (window.confirm(`Delete ${fullName(c) || c.email || 'this contact'}? This can't be undone.`)) {
+      delMut.mutate(c.id)
+    }
+  }
 
   const [search, setSearch] = useState('')
   const filtered = useMemo(() => filterContacts(contacts, search), [contacts, search])
@@ -61,6 +80,7 @@ export default function Contacts() {
                   <th className="px-4 py-2.5 font-medium">Company</th>
                   <th className="px-4 py-2.5 font-medium">Source</th>
                   <th className="px-4 py-2.5 font-medium">Updated</th>
+                  <th className="px-4 py-2.5 font-medium sr-only">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -68,7 +88,7 @@ export default function Contacts() {
                   <tr
                     key={c.id}
                     onClick={() => navigate(`/contacts/${c.id}`)}
-                    className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900/50"
+                    className="group cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900/50"
                   >
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-2.5">
@@ -83,6 +103,18 @@ export default function Contacts() {
                     <td className="px-4 py-2.5 text-slate-600 dark:text-slate-300">{c.company ?? '—'}</td>
                     <td className="px-4 py-2.5">{c.source ? <Badge label={c.source} variant="neutral" size="xs" /> : '—'}</td>
                     <td className="px-4 py-2.5 text-slate-400">{new Date(c.updated_at).toLocaleDateString()}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      <button
+                        type="button"
+                        onClick={(e) => onDelete(e, c)}
+                        disabled={delMut.isPending}
+                        title="Delete contact"
+                        aria-label="Delete contact"
+                        className="rounded p-1.5 text-slate-400 opacity-0 transition-colors hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100 dark:hover:bg-rose-900/30"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

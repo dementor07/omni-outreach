@@ -532,9 +532,46 @@ async def _project_lead_outcome(env: dict[str, Any]) -> None:
     )
 
 
+# Entity deletion: a `<entity>.deleted` event removes the projection row. This
+# keeps the read side write-free (mutation = event) while giving the CRM a real
+# delete. The event stays in events_archive (audit), only the projection drops.
+# Companies cascade their KG side-tables (aliases + cached people) so a re-run
+# rediscovers them cleanly instead of hitting a stale `known` cache.
+_DELETE_TABLE = {
+    "contact": ("omni_contacts",),
+    "company": ("omni_companies", "omni_company_aliases", "omni_people_cache"),
+    "deal": ("omni_deals",),
+    "lead": ("omni_leads",),
+}
+
+
+async def _project_delete(env: dict[str, Any]) -> None:
+    entity = env["entity_type"]
+    tables = _DELETE_TABLE.get(entity)
+    if not tables or not env.get("entity_id"):
+        return
+    primary, *cascades = tables
+    # cascade side-tables first (FK-free, keyed by company_id), then the row.
+    for tbl in cascades:
+        col = "company_id" if entity == "company" else "id"
+        await execute(
+            f"DELETE FROM {tbl} WHERE {col} = $1 AND workspace_id = $2",
+            env["entity_id"],
+            env["workspace_id"],
+        )
+    await execute(
+        f"DELETE FROM {primary} WHERE id = $1 AND workspace_id = $2",
+        env["entity_id"],
+        env["workspace_id"],
+    )
+
+
 async def _apply_projection(env: dict[str, Any]) -> None:
     et = env["event_type"]
     entity = env["entity_type"]
+    if et.endswith(".deleted") and env.get("entity_id"):
+        await _project_delete(env)
+        return
     if et in ("message.received", "message.sent"):
         await _project_message(env)
         return

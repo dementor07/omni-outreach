@@ -371,6 +371,9 @@ export const projections = {
     api.get<Deal[]>('/projections/deals', { params }).then((r) => r.data),
   leads: (params: { workflow_id?: UUID; limit?: number } = {}) =>
     api.get<Lead[]>('/projections/leads', { params }).then((r) => r.data),
+  deleteContact: (id: UUID) => api.delete<void>(`/projections/contacts/${id}`).then(() => undefined),
+  deleteCompany: (id: UUID) => api.delete<void>(`/projections/companies/${id}`).then(() => undefined),
+  deleteLead: (id: UUID) => api.delete<void>(`/projections/leads/${id}`).then(() => undefined),
   leadColumns: (workflowId?: UUID) =>
     api
       .get<LeadColumnsResponse>('/projections/leads/columns', {

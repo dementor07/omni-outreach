@@ -13,14 +13,34 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.auth import AuthContext, get_current_workspace
-from app.db import fetch_all
+from app.db import fetch_all, fetch_one
 from app.execution import lead_columns
+from app.services.bus import publish_event
 
 router = APIRouter()
+
+
+async def _delete_entity(ctx: AuthContext, *, table: str, entity_type: str, entity_id: uuid.UUID) -> None:
+    """Delete a CRM projection row by publishing a ``<entity>.deleted`` event.
+
+    The read side never writes (mutation = event): the projector applies the
+    deletion (and cascades company KG side-tables). 404 if the row isn't in this
+    workspace so a stale id can't silently no-op. RLS already scopes the lookup."""
+    row = await fetch_one(f"SELECT id FROM {table} WHERE id = $1", entity_id)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"{entity_type} not found")
+    await publish_event(
+        workspace_id=ctx.workspace_id,
+        event_type=f"{entity_type}.deleted",
+        entity_type=entity_type,
+        entity_id=str(entity_id),
+        payload={"deleted_by": ctx.user_id},
+        actor_user_id=ctx.user_id,
+    )
 
 
 class ContactOut(BaseModel):
@@ -102,10 +122,24 @@ async def list_contacts(_: AuthContext = Depends(get_current_workspace), limit: 
     return [ContactOut.model_validate(r) for r in rows]
 
 
+@router.delete("/contacts/{contact_id}", status_code=204, summary="Delete a contact")
+async def delete_contact(
+    contact_id: uuid.UUID, ctx: AuthContext = Depends(get_current_workspace)
+) -> None:
+    await _delete_entity(ctx, table="omni_contacts", entity_type="contact", entity_id=contact_id)
+
+
 @router.get("/companies", response_model=list[CompanyOut], summary="List companies in this workspace")
 async def list_companies(_: AuthContext = Depends(get_current_workspace), limit: int = Query(100, ge=1, le=500)) -> list[CompanyOut]:
     rows = await fetch_all("SELECT * FROM omni_companies ORDER BY updated_at DESC LIMIT $1", limit)
     return [CompanyOut.model_validate(r) for r in rows]
+
+
+@router.delete("/companies/{company_id}", status_code=204, summary="Delete a company")
+async def delete_company(
+    company_id: uuid.UUID, ctx: AuthContext = Depends(get_current_workspace)
+) -> None:
+    await _delete_entity(ctx, table="omni_companies", entity_type="company", entity_id=company_id)
 
 
 @router.get("/deals", response_model=list[DealOut], summary="List deals (Kanban source)")
@@ -184,6 +218,13 @@ async def list_leads(
 
     columns = lead_columns.derive_columns(await _workflow_node_types(workflow_id))
     return [_lead_out(dict(r), columns) for r in rows]
+
+
+@router.delete("/leads/{lead_id}", status_code=204, summary="Delete a lead")
+async def delete_lead(
+    lead_id: uuid.UUID, ctx: AuthContext = Depends(get_current_workspace)
+) -> None:
+    await _delete_entity(ctx, table="omni_leads", entity_type="lead", entity_id=lead_id)
 
 
 def _lead_out(row: dict[str, Any], columns: list[lead_columns.ColumnSpec]) -> LeadOut:
