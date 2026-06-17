@@ -46,6 +46,10 @@ class WorkflowUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=200)
     status: Literal["draft", "active", "paused", "archived"] | None = None
     timezone: str | None = Field(None, max_length=64)
+    # B6 campaign schedule window. Outbound sends hold until start_at and stop
+    # after end_at; both null = always-on.
+    start_at: datetime | None = None
+    end_at: datetime | None = None
 
 
 class NodeCreate(BaseModel):
@@ -94,6 +98,8 @@ class WorkflowOut(BaseModel):
     name: str
     status: str
     timezone: str
+    start_at: datetime | None = None
+    end_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -156,7 +162,7 @@ async def get_workflow(workflow_id: uuid.UUID, _: AuthContext = Depends(get_curr
     )
 
 
-@router.patch("/workflows/{workflow_id}", response_model=WorkflowOut, summary="Update a workflow's name, status, or timezone")
+@router.patch("/workflows/{workflow_id}", response_model=WorkflowOut, summary="Update a workflow's name, status, timezone, or schedule window")
 async def update_workflow(
     workflow_id: uuid.UUID,
     body: WorkflowUpdate,

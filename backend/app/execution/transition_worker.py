@@ -26,6 +26,7 @@ import logging
 import signal
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from aiokafka import AIOKafkaConsumer
 
@@ -797,6 +798,21 @@ async def _workflow_timezone(workspace_id: str, workflow_id: str | None) -> str:
     return (row or {}).get("timezone") or "UTC"
 
 
+async def _workflow_schedule(workspace_id: str, workflow_id: str | None) -> tuple[Any, Any]:
+    """(start_at, end_at) for a workflow — both may be None (always-on, B6)."""
+    if not workflow_id:
+        return None, None
+    async with system_scope():
+        row = await fetch_one(
+            "SELECT start_at, end_at FROM omni_workflows WHERE id=$1 AND workspace_id=$2",
+            workflow_id,
+            workspace_id,
+        )
+    if not row:
+        return None, None
+    return row.get("start_at"), row.get("end_at")
+
+
 async def _compute_flow_delay_seconds(workspace_id: str, node: dict) -> float:
     """Seconds a flow.delay / flow.wait_until node should hold the lead.
 
@@ -1004,6 +1020,39 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
             await _terminalize_lead(workspace_id, str(lead["id"]), "errored", correlation_id)
         return
 
+    # B6 — campaign schedule window at the outbound-send seam. A workflow may
+    # carry start_at/end_at; an outbound send before start_at is HELD until then
+    # (via the orchestrator processing-time timer — the same Flink timer
+    # flow.delay uses), and after end_at the lead ENDS (campaign over). Both NULL
+    # = always-on. Internal/non-send nodes are never gated. Evaluated before DNC
+    # so a held send doesn't even reach the suppression query.
+    if node_type in _OUTBOUND_SEND_CHANNELS:
+        workflow_id = str(node.get("workflow_id") or lead.get("workflow_id") or "") or None
+        start_at, end_at = await _workflow_schedule(workspace_id, workflow_id)
+        now = datetime.now(UTC)
+        if end_at is not None and now >= end_at:
+            log.info("lead %s: campaign %s ended (end_at=%s) — no send", lead["id"], workflow_id, end_at)
+            await _terminalize_lead(workspace_id, str(lead["id"]), "ended", correlation_id)
+            return
+        if start_at is not None and now < start_at:
+            hold_seconds = (start_at - now).total_seconds()
+            log.info("lead %s: campaign %s not started — holding %.0fs to start_at", lead["id"], workflow_id, hold_seconds)
+            # Park 'waiting' and schedule a delayed __retry__ that RE-FIRES this
+            # same channel node once start_at passes (re-evaluating this gate,
+            # which then falls through to the real send). The __retry__ dedupe
+            # marker is keyed on (node, start_at) so a redelivered hold collapses
+            # but a later genuine retry is unaffected.
+            await _advance_lead(workspace_id, str(lead["id"]), str(node["id"]), status="waiting")
+            await _emit_synthetic_result(
+                workspace_id, str(lead["id"]), str(node["id"]), "__retry__",
+                correlation_id, delay_seconds=hold_seconds,
+                extra_metadata={
+                    "command_id": f"sched-hold:{node['id']}",
+                    "retry_attempt": int(start_at.timestamp()),
+                },
+            )
+            return
+
     # T1 — DNC enforcement at the outbound-send seam. Before any channel intent
     # ships, re-check the recipient against the workspace suppression list. A
     # suppressed contact must never be messaged on ANY channel (unsubscribe /
@@ -1165,6 +1214,7 @@ async def _emit_synthetic_result(
     handle: str,
     correlation_id: str | None,
     delay_seconds: float = 0.0,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> None:
     """For non-muscle nodes, publish an ExecutionResult-shaped envelope to
     outreach.results so the Flink orchestrator emits the next transition.
@@ -1172,7 +1222,23 @@ async def _emit_synthetic_result(
     ``delay_seconds`` > 0 schedules the transition for later via the
     orchestrator's processing-time timer (the same mechanism flow.delay uses).
     The orchestrator only delays ``sent`` results, so a delayed synthetic uses
-    status='sent'; an immediate one uses 'skipped' (ran, no side effect)."""
+    status='sent'; an immediate one uses 'skipped' (ran, no side effect).
+    ``extra_metadata`` is merged into the result metadata — used by the B6
+    schedule-hold to carry the (command_id, retry_attempt) the __retry__ re-fire
+    path dedupes on."""
+    metadata = {
+        "workspace_id": workspace_id,
+        "node_id": node_id,
+        "next_handle": handle,
+        "accumulated_delay_seconds": delay_seconds,
+        # DATAFLOW-001: carry the run identity forward. Without this the
+        # orchestrator emits the next transition with correlation_id=None and
+        # the downstream node mints a fresh id (`ctx.correlation_id or uuid4`),
+        # forking the trace at every condition/flow/synthetic hop.
+        "correlation_id": correlation_id,
+    }
+    if extra_metadata:
+        metadata.update(extra_metadata)
     result = {
         "command_id": str(uuid.uuid4()),
         "task_id": str(uuid.uuid4()),
@@ -1181,17 +1247,7 @@ async def _emit_synthetic_result(
         "error": None,
         "is_retriable": False,
         "telemetry": {},
-        "metadata": {
-            "workspace_id": workspace_id,
-            "node_id": node_id,
-            "next_handle": handle,
-            "accumulated_delay_seconds": delay_seconds,
-            # DATAFLOW-001: carry the run identity forward. Without this the
-            # orchestrator emits the next transition with correlation_id=None and
-            # the downstream node mints a fresh id (`ctx.correlation_id or uuid4`),
-            # forking the trace at every condition/flow/synthetic hop.
-            "correlation_id": correlation_id,
-        },
+        "metadata": metadata,
         "event_type": "result_task",
         "occurred_at": datetime.now(UTC).isoformat(),
     }

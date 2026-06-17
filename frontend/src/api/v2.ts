@@ -207,6 +207,8 @@ export interface Workflow {
   name: string
   status: WorkflowStatus
   timezone: string
+  start_at: ISODate | null
+  end_at: ISODate | null
   created_at: ISODate
   updated_at: ISODate
 }
@@ -250,7 +252,7 @@ export const canvas = {
   create: (name: string, timezone = 'UTC') =>
     api.post<Workflow>('/canvas/workflows', { name, timezone }).then((r) => r.data),
   get: (id: UUID) => api.get<WorkflowDetail>(`/canvas/workflows/${id}`).then((r) => r.data),
-  update: (id: UUID, body: Partial<Pick<Workflow, 'name' | 'status' | 'timezone'>>) =>
+  update: (id: UUID, body: Partial<Pick<Workflow, 'name' | 'status' | 'timezone' | 'start_at' | 'end_at'>>) =>
     api.patch<Workflow>(`/canvas/workflows/${id}`, body).then((r) => r.data),
   archive: (id: UUID) => api.delete(`/canvas/workflows/${id}`).then(() => undefined),
 

@@ -596,6 +596,8 @@ export default function CampaignEditor() {
                 name={wf?.name ?? ''}
                 status={wf?.status ?? 'draft'}
                 timezone={wf?.timezone ?? 'UTC'}
+                startAt={wf?.start_at ?? null}
+                endAt={wf?.end_at ?? null}
                 onSaved={() => qc.invalidateQueries({ queryKey: ['workflow', id] })}
               />
             </Card>
@@ -606,24 +608,53 @@ export default function CampaignEditor() {
   )
 }
 
-function WorkflowSettings({ workflowId, name, status, timezone, onSaved }: { workflowId?: string; name: string; status: WorkflowStatus; timezone: string; onSaved: () => void }) {
+// ISO <-> the value a <input type="datetime-local"> expects (local, no tz/secs).
+function isoToLocalInput(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+function localInputToIso(local: string): string | null {
+  if (!local) return null
+  const d = new Date(local)
+  return Number.isNaN(d.getTime()) ? null : d.toISOString()
+}
+
+function WorkflowSettings({ workflowId, name, status, timezone, startAt, endAt, onSaved }: { workflowId?: string; name: string; status: WorkflowStatus; timezone: string; startAt: string | null; endAt: string | null; onSaved: () => void }) {
   const [draftName, setDraftName] = useState(name)
   const [draftStatus, setDraftStatus] = useState<WorkflowStatus>(status)
   const [draftTz, setDraftTz] = useState(timezone)
-  useEffect(() => { setDraftName(name); setDraftStatus(status); setDraftTz(timezone) }, [name, status, timezone])
+  const [draftStart, setDraftStart] = useState(isoToLocalInput(startAt))
+  const [draftEnd, setDraftEnd] = useState(isoToLocalInput(endAt))
+  useEffect(() => {
+    setDraftName(name); setDraftStatus(status); setDraftTz(timezone)
+    setDraftStart(isoToLocalInput(startAt)); setDraftEnd(isoToLocalInput(endAt))
+  }, [name, status, timezone, startAt, endAt])
 
   const mut = useMutation({
-    mutationFn: () => canvas.update(workflowId!, { name: draftName.trim(), status: draftStatus, timezone: draftTz }),
+    mutationFn: () => {
+      const body: Parameters<typeof canvas.update>[1] = { name: draftName.trim(), status: draftStatus, timezone: draftTz }
+      const startIso = localInputToIso(draftStart)
+      const endIso = localInputToIso(draftEnd)
+      if (startIso) body.start_at = startIso
+      if (endIso) body.end_at = endIso
+      return canvas.update(workflowId!, body)
+    },
     onSuccess: onSaved,
   })
-  const dirty = draftName.trim() !== name || draftStatus !== status || draftTz !== timezone
+  const dirty =
+    draftName.trim() !== name || draftStatus !== status || draftTz !== timezone ||
+    draftStart !== isoToLocalInput(startAt) || draftEnd !== isoToLocalInput(endAt)
   const fieldCls = 'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-800'
+  const scheduleInvalid = !!draftStart && !!draftEnd && new Date(draftEnd) <= new Date(draftStart)
 
   return (
     <div className="max-w-lg space-y-5">
       <div>
         <h2 className="text-[15px] font-semibold text-slate-900 dark:text-white">Campaign settings</h2>
-        <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">Name, lifecycle status, and scheduling timezone.</p>
+        <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">Name, lifecycle status, scheduling timezone, and send window.</p>
       </div>
       <label className="block">
         <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Name</span>
@@ -642,7 +673,22 @@ function WorkflowSettings({ workflowId, name, status, timezone, onSaved }: { wor
         <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Timezone</span>
         <input value={draftTz} onChange={(e) => setDraftTz(e.target.value)} placeholder="UTC" className={fieldCls} />
       </label>
-      <Button variant="primary" size="md" icon={Save} onClick={() => mut.mutate()} isLoading={mut.isPending} disabled={!dirty || !draftName.trim()}>
+      <div>
+        <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Send window <span className="font-normal normal-case text-slate-400">(optional)</span></span>
+        <p className="mb-2 text-[12px] text-slate-500 dark:text-slate-400">Outbound sends hold until the start and stop after the end. Leave blank for always-on.</p>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="mb-1 block text-[11px] text-slate-500">Starts</span>
+            <input type="datetime-local" value={draftStart} onChange={(e) => setDraftStart(e.target.value)} aria-label="Campaign start" className={fieldCls} />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[11px] text-slate-500">Ends</span>
+            <input type="datetime-local" value={draftEnd} onChange={(e) => setDraftEnd(e.target.value)} aria-label="Campaign end" className={fieldCls} />
+          </label>
+        </div>
+        {scheduleInvalid && <p className="mt-1.5 text-[12px] text-rose-600">End must be after start.</p>}
+      </div>
+      <Button variant="primary" size="md" icon={Save} onClick={() => mut.mutate()} isLoading={mut.isPending} disabled={!dirty || !draftName.trim() || scheduleInvalid}>
         Save settings
       </Button>
     </div>
