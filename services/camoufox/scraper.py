@@ -101,7 +101,15 @@ async def fetch_jobs(
                 all_jobs.extend(mapped)
                 await page.wait_for_timeout(_SETTLE_MS)
         finally:
-            await page.close()
+            # Guard the close: when the browser transport has already died
+            # (Camoufox/Playwright "handler is closed"), page.close() itself
+            # raises and would mask the scrape result / crash the request. The
+            # page is gone anyway — swallow it and let the caller recycle the
+            # browser. Whatever pages we captured before the death still return.
+            try:
+                await page.close()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("page.close() after scrape failed (browser transport dead?): %s", exc)
 
     if browser is not None:
         await _scrape(browser)

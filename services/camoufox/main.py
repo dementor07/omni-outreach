@@ -41,9 +41,38 @@ _TEAM_PATHS = ("/team", "/about", "/about-us", "/leadership", "/our-team", "/peo
 _camoufox = None
 
 
+def _browser_alive(b) -> bool:
+    """True only if the browser's Playwright transport is still connected.
+
+    A Camoufox/Playwright browser whose underlying transport has died
+    (``WriteUnixTransport closed`` / "handler is closed") still looks like an
+    object but every ``new_page()`` raises. ``is_connected()`` is the honest
+    liveness signal; treat any error reading it as dead."""
+    if b is None:
+        return False
+    try:
+        return bool(b.is_connected())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 async def get_browser():
+    """Return a live persistent browser, recreating it if the transport died.
+
+    Previously this returned the cached instance unconditionally, so once the
+    transport died (a known Camoufox flake mid-scrape) EVERY subsequent scrape
+    failed with "handler is closed" until a manual container restart — while
+    /health still reported 200. Now a dead browser is torn down and relaunched
+    on demand, so the service self-heals between requests."""
     global _camoufox
-    if _camoufox is None:
+    if not _browser_alive(_camoufox):
+        if _camoufox is not None:
+            log.warning("Camoufox browser transport is dead — recycling")
+            try:
+                await _camoufox.__aexit__(None, None, None)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("error tearing down dead browser (ignored): %s", exc)
+            _camoufox = None
         log.info("Starting persistent Camoufox browser")
         _camoufox = await AsyncCamoufox(headless=True).__aenter__()
     return _camoufox
@@ -137,7 +166,12 @@ class CrawlTeamResponse(BaseModel):
 # ── Endpoints ───────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "camoufox"}
+    # Report the real browser liveness, not just "the HTTP server is up". The
+    # old unconditional 200 hid a dead browser transport (scrapes 502'd while
+    # health stayed green). get_browser() self-heals on the next scrape, so a
+    # dead read is informational — but it's now visible.
+    alive = _browser_alive(_camoufox)
+    return {"status": "ok", "service": "camoufox", "browser": "alive" if alive else "recycling"}
 
 
 @app.post("/scrape", response_model=ScrapeResponse)
