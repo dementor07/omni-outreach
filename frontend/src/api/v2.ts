@@ -448,6 +448,25 @@ export const events = {
   }) => api.post<OmniEvent>('/events', body).then((r) => r.data),
 }
 
+// ── Approvals (human-in-the-loop queue, CONTRACT-005) ────────────────────────
+export interface Approval {
+  id: UUID
+  lead_id: UUID
+  node_id: UUID | null
+  prompt: string
+  draft: string | null
+  status: string
+  created_at: ISODate
+}
+
+export const approvals = {
+  list: () => api.get<Approval[]>('/approvals').then((r) => r.data),
+  updateDraft: (id: UUID, draft: string) =>
+    api.patch(`/approvals/${id}/draft`, { draft }).then((r) => r.data),
+  resolve: (id: UUID, handle: 'approved' | 'rejected') =>
+    api.post(`/approvals/${id}/resolve`, { handle }).then((r) => r.data),
+}
+
 // ── AI (scores + AI Studio jobs) ─────────────────────────────────────────────
 export type LeadTier = 'hot' | 'warm' | 'cold'
 

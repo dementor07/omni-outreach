@@ -194,8 +194,8 @@ async def _project_approval(env: dict[str, Any]) -> None:
         await execute(
             """
             INSERT INTO omni_approvals (id, workspace_id, lead_id, node_id, prompt,
-                               status, correlation_id)
-            VALUES ($1, $2, $3, $4, $5, 'pending', $6)
+                               draft, status, correlation_id)
+            VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)
             ON CONFLICT (id) DO NOTHING
             """,
             env["entity_id"],
@@ -203,7 +203,21 @@ async def _project_approval(env: dict[str, Any]) -> None:
             p.get("lead_id") or env["entity_id"],
             p.get("node_id"),
             p.get("prompt") or "",
+            p.get("draft"),
             env.get("correlation_id"),
+        )
+    elif et == "approval.draft_updated":
+        # B1: operator edited the AI draft before approving. Only a still-pending
+        # approval's draft is mutable; a resolved one is frozen.
+        await execute(
+            """
+            UPDATE omni_approvals
+               SET draft = $1
+             WHERE id = $2 AND workspace_id = $3 AND status = 'pending'
+            """,
+            p.get("draft") or "",
+            env["entity_id"],
+            env["workspace_id"],
         )
     elif et == "approval.resolved":
         await execute(
@@ -515,8 +529,9 @@ async def _apply_projection(env: dict[str, Any]) -> None:
         if et == "ai.score.completed" and env.get("entity_id"):
             await _project_lead_score(env)
         return
-    # CONTRACT-005: approvals queue (request -> resolved), keyed by lead id.
-    if et in ("approval.requested", "approval.resolved") and env.get("entity_id"):
+    # CONTRACT-005: approvals queue (request -> draft-edit -> resolved), keyed
+    # by lead id. B1 adds approval.draft_updated for AI draft-review.
+    if et in ("approval.requested", "approval.draft_updated", "approval.resolved") and env.get("entity_id"):
         await _project_approval(env)
         return
     # Pipeline cost/usage metrics (per source run). entity_id = run_id.
