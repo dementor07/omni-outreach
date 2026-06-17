@@ -1107,8 +1107,25 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
         # _terminalize (not a bare status write): a fan-out CHILD reaching
         # goal/end must still arrive at its parent's join barrier (SM-5), and
         # the claim makes redelivered goal-fires idempotent.
-        await _terminalize_lead(workspace_id, str(lead["id"]), terminal_status, correlation_id)
+        claimed = await _terminalize_lead(workspace_id, str(lead["id"]), terminal_status, correlation_id)
         log.info("lead %s reached %s -> status=%s", lead["id"], node_type, terminal_status)
+        # B7: a conversion is an event worth surfacing on its own — emit
+        # lead.converted so the operator is told without having to wire a
+        # crm.hot_lead_alert by hand. Gated on `claimed` so a redelivered
+        # goal-fire never double-alerts (the claim is the idempotency key).
+        if node_type == "flow.goal" and claimed:
+            await bus.publish_event(
+                workspace_id=workspace_id,
+                event_type="lead.converted",
+                entity_type="lead",
+                entity_id=str(lead["id"]),
+                payload={
+                    "contact_id": str(lead.get("contact_id")) if lead.get("contact_id") else None,
+                    "workflow_id": str(lead.get("workflow_id")) if lead.get("workflow_id") else None,
+                    "node_id": str(node["id"]),
+                },
+                correlation_id=correlation_id,
+            )
         return
     # CMP9/CMP10: flow.delay / flow.wait_until must actually HOLD the lead. They
     # advance on the same handle as a projection-only node, but with a non-zero
