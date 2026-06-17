@@ -1368,3 +1368,14 @@ serper.py uncommitted diff is whitespace-only (not a real anomaly).
 - app/execution/render.py renders templates + bundle config + attendee identity + chat-session reuse into every channel command payload (the Python→Rust contract that starved all sends).
 - 10 functional regression tests; audit suite 46/46. findings.json: 115 findings, 0 OPEN.
 - Updated [[logic-integrity-ledger]].
+
+## 2026-06-17 — v1 feature-complete: full MUST+SHOULD cut shipped + verified live
+
+- Built, tested, deployed, and live-verified the entire v1 completion cut on `phase-out-non-v2`:
+  T1 (DNC-at-send), T2 (analytics rollup), T3 (email open/click tracking), B1 (AI draft-review
+  in approvals), B2 (reply ingestion+classify+wake-up), B3 (inbox reply compose+AI suggest),
+  B5 (template library), B6 (Flink-timer campaign send window), B7 (conversion alert + activity feed).
+- 5 new migrations (031–035, linear single-head). 100/100 audit tests; ruff+tsc+eslint+build clean.
+- CI green, box accepted deploy; live probes confirm new routes + T3 redirect end-to-end + fresh frontend bundle.
+- Also fixed a congruity bug: Approvals page bypassed the resolve endpoint (never un-parked the lead) — rebuilt on the real client.
+- See [[v1-release-completion-plan]] for the per-feature shipped record. DEFERRED to v1.1: P1–P7, Latka, W1 mount, W5 notifications.

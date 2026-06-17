@@ -77,3 +77,26 @@ ledger features still open: T1, T2, B1, B2, B3, B4, B7, T3, B5, B6.**
 
 Each item lands as its own green commit (ruff + tsc + eslint + audit suite). New backend
 behavior gets a regression test in audit/tests/. New tables get an alembic migration.
+
+## SHIPPED — full MUST+SHOULD cut deployed + verified live (2026-06-17)
+
+The entire cut is built, tested, deployed to the Contabo box (13.140.169.62), and
+verified past the network boundary. Commits on `phase-out-non-v2`:
+- **T1** DNC-at-send (bcddc37) — suppression re-checked at the outbound seam; `suppressed` terminal status.
+- **T2** analytics rollup (3ec6c0f) — `/projections/analytics` lead-gen efficiency + cost.
+- **B2** reply ingestion + classify + wake-up (452a8fa) — single Haiku call, keyword fail-open, auto-suppress unsubscribe, closes SM-8.
+- **B7** conversion alert + human-readable activity feed (c5ff8ff) — `lead.converted` on the flow.goal claim; ActivityPage EVENT_META labels.
+- **B3** inbox reply compose + AI-suggested draft (c2511f6) — `/inbox/threads/{id}/suggest` + `/reply`; rides the muscle spine, DNC re-checked (409 on suppressed).
+- **B1** AI draft-review in approvals (7e28c61) — `omni_approvals.draft` (migration 032), PATCH `/approvals/{id}/draft` (event-sourced, frozen once resolved), human_approval surfaces upstream ai_draft. Also fixed a congruity bug: the Approvals page bypassed the resolve endpoint (published `approval.resolved` via raw events API) so approving never un-parked the lead — rebuilt on the real client.
+- **B5** template library (838b3bc) — `omni_templates` (migration 033, RLS), full CRUD router + card-grid/modal page replacing the stub.
+- **T3** email open/click tracking (4d33118) — pure HMAC-signed token + `inject_tracking` (pixel + link rewrite at render time), public `/track/open|click` endpoints (open-redirect-safe), `omni_email_tracking` (migration 034), engagement in Analytics.
+- **B6** campaign send window via the Flink timer (7052fcb) — `omni_workflows.start_at/end_at` (migration 035); gate in `_fire_node` before DNC: after end_at the lead ENDS, before start_at it's HELD via a delayed `__retry__` synthetic that re-fires the channel node once the start passes. Settings UI "Send window".
+
+**Verification:** 100/100 audit tests green; ruff + tsc + eslint + vite build all clean;
+migration chain linear single-head (030→035); app boots with all routes. CI (lint→test→
+build→deploy) green, box accepted the deploy webhook. Live probes: `/api/health` ok
+(api/db/redis/nodes); new routes present in the live OpenAPI; `/api/track/open/x.gif`→200
+GIF; `/api/track/click/badtoken?u=<b64>`→302 to the decoded URL; `/api/templates`→401
+(mounted + auth-gated, was 404); frontend served a fresh hashed bundle. **v1 feature-complete.**
+
+DEFERRED to v1.1 (unchanged): P1–P7, Latka, W1 CsvImport mount, W5 notifications backend.
