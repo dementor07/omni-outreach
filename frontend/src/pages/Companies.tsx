@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Building2, Globe, Layers, Trash2 } from 'lucide-react'
+import { Building2, Globe, Layers, Trash2, Download } from 'lucide-react'
 import { projections, type Company } from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import StatCard from '../components/StatCard'
@@ -10,6 +10,14 @@ import Badge from '../components/Badge'
 import EmptyState from '../components/EmptyState'
 import { FilterBar, SearchInput } from '../components/FilterBar'
 import { useToast } from '../components/Toast'
+import { downloadCsv, type CsvColumn } from '../lib/csv'
+
+const CSV_COLUMNS: CsvColumn<Company>[] = [
+  { header: 'Name', value: (c) => c.name },
+  { header: 'Domain', value: (c) => c.domain },
+  { header: 'Industry', value: (c) => c.industry },
+  { header: 'Size', value: (c) => c.size },
+]
 
 export default function Companies() {
   const qc = useQueryClient()
@@ -39,6 +47,15 @@ export default function Companies() {
   const withDomain = companies.filter((c) => c.domain).length
   const industries = new Set(companies.map((c) => c.industry).filter(Boolean)).size
 
+  function exportCsv() {
+    if (!filtered.length) {
+      toast.error('Nothing to export')
+      return
+    }
+    downloadCsv('companies', filtered, CSV_COLUMNS)
+    toast.success(`Exported ${filtered.length} compan${filtered.length === 1 ? 'y' : 'ies'}`)
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -46,6 +63,17 @@ export default function Companies() {
         eyebrow="CRM"
         title="Companies"
         description="Accounts in your CRM — the organisations your contacts belong to."
+        meta={
+          companies.length > 0 ? (
+            <button
+              type="button"
+              onClick={exportCsv}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-100 px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
+            >
+              <Download size={13} /> Export CSV
+            </button>
+          ) : null
+        }
       />
 
       <section className="grid gap-3 sm:grid-cols-3">
