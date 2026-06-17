@@ -351,6 +351,27 @@ async def _project_message(env: dict[str, Any]) -> None:
     )
 
 
+async def _project_email_tracking(env: dict[str, Any]) -> None:
+    """T3: append-only open/click log. Keyed on the EVENT id (like messages) so
+    redelivery is idempotent — every hit is its own row."""
+    p = env.get("payload") or {}
+    await execute(
+        """
+        INSERT INTO omni_email_tracking (id, workspace_id, lead_id, contact_id,
+                                         event_type, url, occurred_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (id) DO NOTHING
+        """,
+        env["id"],
+        env["workspace_id"],
+        p.get("lead_id"),
+        p.get("contact_id"),
+        p.get("kind") or ("click" if env["event_type"] == "email.clicked" else "open"),
+        p.get("url"),
+        datetime.fromisoformat(env["occurred_at"]),
+    )
+
+
 def _score_to_tier(score: int) -> str:
     """Map a 0-100 ICP score to a hot/warm/cold tier (HubSpot-style)."""
     if score >= 70:
@@ -516,6 +537,10 @@ async def _apply_projection(env: dict[str, Any]) -> None:
     entity = env["entity_type"]
     if et in ("message.received", "message.sent"):
         await _project_message(env)
+        return
+    # T3: email engagement (open/click) — append-only tracking log.
+    if et in ("email.opened", "email.clicked"):
+        await _project_email_tracking(env)
         return
     # H1: terminal lead outcomes (conversion vs dead-end) carry detail the
     # generic lead projector would drop. Handle before the entity dispatch.

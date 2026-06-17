@@ -252,6 +252,8 @@ class AnalyticsSummary(BaseModel):
     claude_input_tokens: int
     claude_output_tokens: int
     total_cost: float
+    email_opens: int
+    email_clicks: int
     last_run_at: datetime | None
 
 
@@ -277,6 +279,16 @@ async def analytics_summary(_: AuthContext = Depends(get_current_workspace)) -> 
         """
     )
     r = dict(row[0]) if row else {}
+    # T3: email engagement rollup — opens/clicks across the workspace.
+    eng = await fetch_all(
+        """
+        SELECT
+            COALESCE(SUM((event_type = 'open')::int), 0)  AS email_opens,
+            COALESCE(SUM((event_type = 'click')::int), 0) AS email_clicks
+        FROM omni_email_tracking
+        """
+    )
+    e = dict(eng[0]) if eng else {}
     return AnalyticsSummary(
         runs=int(r.get("runs") or 0),
         companies_collected=int(r.get("companies_collected") or 0),
@@ -290,5 +302,7 @@ async def analytics_summary(_: AuthContext = Depends(get_current_workspace)) -> 
         claude_input_tokens=int(r.get("claude_input_tokens") or 0),
         claude_output_tokens=int(r.get("claude_output_tokens") or 0),
         total_cost=float(r.get("total_cost") or 0),
+        email_opens=int(e.get("email_opens") or 0),
+        email_clicks=int(e.get("email_clicks") or 0),
         last_run_at=r.get("last_run_at"),
     )

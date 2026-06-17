@@ -20,6 +20,11 @@ class Settings(BaseSettings):
         return v
 
     frontend_url: str = "http://localhost:5173"  # CORS origin
+    # Canonical externally-reachable base URL (no trailing slash). Used to build
+    # email open-pixel / click-redirect URLs (T3) that recipients' mail clients
+    # must resolve back to this server. Defaults to frontend_url when unset so
+    # dev works out of the box; set PUBLIC_BASE_URL to the prod host in prod.
+    public_base_url: str = ""
 
     unipile_base: str = ""
     unipile_api_key: str = ""
@@ -99,6 +104,10 @@ class Settings(BaseSettings):
         if self.database_url:
             return self.database_url.replace("postgresql+asyncpg://", "postgresql://")
         return f"postgresql://outreach:{urllib.parse.quote(self.db_password, safe='')}@db/outreach"
+
+    def get_public_base_url(self) -> str:
+        """External base URL for tracking links (T3). Falls back to frontend_url."""
+        return (self.public_base_url or self.frontend_url).rstrip("/")
 
     def get_redis_url(self) -> str:
         import urllib.parse

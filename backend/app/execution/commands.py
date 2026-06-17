@@ -20,10 +20,12 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from app.config import settings
 from app.core.events import ChannelType
 from app.db import fetch_one, system_scope
 from app.execution.render import render_channel_payload
 from app.services import bus
+from app.services.email_tracking import make_token
 from app.services.encryption import decrypt
 
 log = logging.getLogger(__name__)
@@ -155,11 +157,27 @@ async def build_command(
     """Assemble the ActionCommand envelope the muscle consumes."""
     bundle = await _load_connection_bundle(workspace_id, connection_name)
     credential_ref = await _mint_credential_ref(bundle, channel.value)
+    # T3: for email, mint a signed open/click tracking token so render injects
+    # the pixel + link rewrites. Keyed to this workspace/lead/contact so the
+    # public endpoints can attribute a hit without trusting the caller.
+    tracking_base: str | None = None
+    tracking_token: str | None = None
+    if channel == ChannelType.EMAIL:
+        tracking_base = settings.get_public_base_url()
+        tracking_token = make_token(
+            settings.secret_key,
+            workspace_id=workspace_id,
+            lead_id=str(lead["id"]) if lead.get("id") else None,
+            contact_id=str(contact.get("id")) if contact and contact.get("id") else None,
+        )
     # CONTRACT-2: fulfil the Rust handlers' self-contained-payload contract —
     # render *_template fields, copy non-secret transport/sender config from
     # the connection bundle, resolve the per-channel attendee identity, and
     # reuse persisted chat sessions. Without this every channel send starved.
-    payload = render_channel_payload(channel, payload, lead=lead, contact=contact, bundle=bundle)
+    payload = render_channel_payload(
+        channel, payload, lead=lead, contact=contact, bundle=bundle,
+        tracking_base=tracking_base, tracking_token=tracking_token,
+    )
     return {
         "command_id": str(uuid.uuid4()),
         "task_id": str(uuid.uuid4()),

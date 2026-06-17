@@ -38,6 +38,7 @@ from app.routers import (
     sources,
     suppression,
     templates,
+    tracking,
     webhooks_in,
     workspaces,
 )
@@ -148,6 +149,10 @@ app.include_router(templates.router, prefix="/templates", tags=["templates"])
 # Inbound webhooks (source.webhook_in runtime). UNAUTHENTICATED by design —
 # external systems POST here; trust comes from the opaque ids + optional HMAC.
 app.include_router(webhooks_in.router, prefix="/webhooks", tags=["webhooks"])
+
+# Email open/click tracking (T3). UNAUTHENTICATED — a recipient's mail client
+# fetches these; trust comes from the HMAC-signed token, not a session.
+app.include_router(tracking.router, prefix="/track", tags=["tracking"])
 
 
 @app.get("/health")

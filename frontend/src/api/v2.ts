@@ -115,6 +115,8 @@ export interface AnalyticsSummary {
   claude_input_tokens: number
   claude_output_tokens: number
   total_cost: number
+  email_opens: number
+  email_clicks: number
   last_run_at: ISODate | null
 }
 

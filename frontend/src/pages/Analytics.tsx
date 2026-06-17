@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { BarChart3, TrendingUp, Send, MessageSquare, Building2, Users, DollarSign, Sparkles } from 'lucide-react'
+import { BarChart3, TrendingUp, Send, MessageSquare, Building2, Users, DollarSign, Sparkles, MailOpen } from 'lucide-react'
 import { clsx } from 'clsx'
 import { projections, inbox, ai } from '../api/v2'
 import PageHeader from '../components/PageHeader'
@@ -116,10 +116,11 @@ export default function Analytics() {
           {!effQ.data || effQ.data.runs === 0 ? (
             <EmptyState icon={DollarSign} title="No source runs yet" description="Run a lead-gen source (Naukri, Serper, …) to see funnel volumes and AI/Serper cost." />
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <StatCard label="Companies collected" value={effQ.data.companies_collected.toLocaleString()} icon={Building2} accent="brand" hint={`${effQ.data.companies_qualified} qualified · ${effQ.data.companies_rejected} rejected`} />
               <StatCard label="People found" value={effQ.data.people_found.toLocaleString()} icon={Users} accent="violet" hint={`${effQ.data.people_verified} verified`} />
               <StatCard label="Leads created" value={effQ.data.leads_created.toLocaleString()} icon={TrendingUp} accent="emerald" hint={`${effQ.data.runs} runs`} />
+              <StatCard label="Email engagement" value={`${effQ.data.email_opens.toLocaleString()} opens`} icon={MailOpen} accent="brand" hint={`${effQ.data.email_clicks.toLocaleString()} clicks`} />
               <StatCard label="Total cost" value={`$${effQ.data.total_cost.toFixed(2)}`} icon={DollarSign} accent="amber" hint={`${effQ.data.serper_calls} Serper · ${effQ.data.claude_calls} Claude calls`} />
               <StatCard label="Claude tokens" value={(effQ.data.claude_input_tokens + effQ.data.claude_output_tokens).toLocaleString()} icon={Sparkles} accent="violet" hint={`${effQ.data.claude_input_tokens.toLocaleString()} in · ${effQ.data.claude_output_tokens.toLocaleString()} out`} />
             </div>

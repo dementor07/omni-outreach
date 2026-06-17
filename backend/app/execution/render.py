@@ -24,6 +24,7 @@ import re
 from typing import Any
 
 from app.core.events import ChannelType
+from app.services.email_tracking import inject_tracking
 
 _VAR_RE = re.compile(r"\{\{\s*([A-Za-z0-9_.]+)\s*\}\}")
 
@@ -131,6 +132,8 @@ def render_channel_payload(
     lead: dict[str, Any],
     contact: dict[str, Any] | None,
     bundle: dict[str, Any] | None,
+    tracking_base: str | None = None,
+    tracking_token: str | None = None,
 ) -> dict[str, Any]:
     """Return a NEW payload fulfilling the Rust handler contract.
 
@@ -138,7 +141,9 @@ def render_channel_payload(
       (subject/body/title) unless the node already provided one
     - Unipile channels: sender account + base from the connection bundle,
       chat-session reuse from lead.custom_fields, per-channel attendee
-    - email: non-secret SMTP transport fields from the bundle
+    - email: non-secret SMTP transport fields from the bundle; when
+      ``tracking_base`` + ``tracking_token`` are supplied (T3), the rendered
+      body gets an open pixel + click-redirect link rewrites
     Non-channel commands (sources/ai/crm) are returned unchanged.
     """
     if channel not in _RENDERED_CHANNELS:
@@ -190,5 +195,9 @@ def render_channel_payload(
                 out[key] = bundle[key]
         if not out.get("from"):
             out["from"] = bundle.get("from") or bundle.get("smtp_username") or ""
+        # T3: inject open pixel + click tracking into the rendered HTML body.
+        # Opt-in per send: only when the caller supplied a signed token + base.
+        if tracking_base and tracking_token and out.get("body"):
+            out["body"] = inject_tracking(str(out["body"]), base=tracking_base, token=tracking_token)
 
     return out
