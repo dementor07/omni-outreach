@@ -71,6 +71,36 @@ export const suppression = {
   remove: (id: UUID) => api.delete<void>(`/suppression/${id}`).then(() => undefined),
 }
 
+// ── Templates (shared message library, B5) ────────────────────────────────────
+export type TemplateChannel = 'email' | 'linkedin' | 'sms' | 'whatsapp' | 'instagram' | 'telegram' | 'voice'
+
+export interface MessageTemplate {
+  id: UUID
+  name: string
+  channel: TemplateChannel
+  category: string | null
+  subject: string | null
+  body: string
+  created_at: ISODate
+  updated_at: ISODate
+}
+
+export interface TemplateInput {
+  name: string
+  channel: TemplateChannel
+  category?: string | null
+  subject?: string | null
+  body: string
+}
+
+export const templates = {
+  list: () => api.get<MessageTemplate[]>('/templates').then((r) => r.data),
+  create: (input: TemplateInput) => api.post<MessageTemplate>('/templates', input).then((r) => r.data),
+  update: (id: UUID, input: Partial<TemplateInput>) =>
+    api.patch<MessageTemplate>(`/templates/${id}`, input).then((r) => r.data),
+  remove: (id: UUID) => api.delete<void>(`/templates/${id}`).then(() => undefined),
+}
+
 // ── Analytics (lead-gen efficiency + cost rollup) ─────────────────────────────
 export interface AnalyticsSummary {
   runs: number
