@@ -107,3 +107,18 @@
 .blink {
   animation: blink 1.6s ease-in-out infinite;
 }
+
+/* Canvas edge flow — marches the dashed overlay from source to target so the
+   campaign graph reads as a live pipeline. dasharray is "6 9" (15 total), so
+   animating dashoffset by -15 makes one seamless cycle. */
+@keyframes omni-edge-flow {
+  to {
+    stroke-dashoffset: -15;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .react-flow__edge path[style*="omni-edge-flow"] {
+    animation: none !important;
+  }
+}

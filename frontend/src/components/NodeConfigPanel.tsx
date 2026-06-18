@@ -3,6 +3,7 @@ import { X, Trash2, Save } from 'lucide-react'
 import { clsx } from 'clsx'
 import type { NodeManifest } from '../api/v2'
 import Button from './Button'
+import Select from './Select'
 
 /** A single field derived from a JSON-Schema property. */
 interface SchemaField {
@@ -207,10 +208,14 @@ function Field({ field, value, onChange }: { field: SchemaField; value: unknown;
       </span>
       {field.description && <p className="mb-1 mt-0.5 text-[11px] leading-tight text-slate-400">{field.description}</p>}
       {field.type === 'enum' ? (
-        <select value={String(value ?? field.default ?? '')} onChange={(e) => onChange(e.target.value)} className={clsx(inputCls, 'mt-0.5')}>
-          <option value="" disabled>Select…</option>
-          {field.enumValues?.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
-        </select>
+        <Select
+          className="mt-0.5"
+          size="sm"
+          ariaLabel={field.name}
+          value={String(value ?? field.default ?? '')}
+          onChange={(v) => onChange(v)}
+          options={(field.enumValues ?? []).map((opt) => ({ value: opt, label: opt }))}
+        />
       ) : field.isLong ? (
         <textarea
           rows={4}

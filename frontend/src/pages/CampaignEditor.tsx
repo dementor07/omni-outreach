@@ -165,7 +165,20 @@ function OmniEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targ
     <>
       {/* Wide invisible hit path so the edge is easy to select/click. */}
       <path d={edgePath} fill="none" stroke="transparent" strokeWidth={18} className="react-flow__edge-interaction" />
-      <BaseEdge path={edgePath} markerEnd={markerEnd} style={{ strokeWidth: selected ? 2.5 : 2, stroke: selected ? '#6366f1' : '#94a3b8' }} />
+      {/* Base rail. */}
+      <BaseEdge path={edgePath} markerEnd={markerEnd} style={{ strokeWidth: selected ? 3 : 2, stroke: selected ? '#6366f1' : '#cbd5e1' }} />
+      {/* Animated flow overlay: a dashed stroke marching source->target so the
+          canvas reads as a live pipeline, not a static diagram. Brand-coloured
+          and slightly thicker when selected. */}
+      <path
+        d={edgePath}
+        fill="none"
+        stroke={selected ? '#6366f1' : '#818cf8'}
+        strokeWidth={selected ? 2.5 : 1.75}
+        strokeLinecap="round"
+        strokeDasharray="6 9"
+        style={{ animation: 'omni-edge-flow 0.9s linear infinite', opacity: selected ? 0.95 : 0.7 }}
+      />
       {selected && (
         <EdgeLabelRenderer>
           <div style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, pointerEvents: 'all' }} className="nodrag nopan">

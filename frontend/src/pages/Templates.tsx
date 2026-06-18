@@ -8,6 +8,7 @@ import Button from '../components/Button'
 import Badge from '../components/Badge'
 import EmptyState from '../components/EmptyState'
 import ChannelIcon from '../components/ChannelIcon'
+import Select from '../components/Select'
 import { useToast } from '../components/Toast'
 import { timeAgo } from '../lib/format'
 
@@ -172,9 +173,13 @@ function TemplateEditor({
               </label>
               <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
                 Channel
-                <select className={`mt-1 ${inputClass}`} value={input.channel} onChange={(e) => set({ channel: e.target.value as TemplateChannel })}>
-                  {CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
+                <Select
+                  className="mt-1"
+                  ariaLabel="Channel"
+                  value={input.channel}
+                  onChange={(v) => set({ channel: v as TemplateChannel })}
+                  options={CHANNELS.map((c) => ({ value: c, label: c }))}
+                />
               </label>
             </div>
             <div className="grid grid-cols-2 gap-3">

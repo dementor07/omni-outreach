@@ -8,6 +8,7 @@ import Card from '../components/Card'
 import Button from '../components/Button'
 import Badge from '../components/Badge'
 import EmptyState from '../components/EmptyState'
+import Select from '../components/Select'
 import { useToast } from '../components/Toast'
 
 const KIND_META: Record<SuppressionKind, { label: string; icon: typeof Mail; placeholder: string }> = {
@@ -61,13 +62,14 @@ export default function Blacklist() {
 
       <Card className="p-4">
         <form onSubmit={submit} className="flex flex-wrap items-end gap-3">
-          <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+          <label className="flex w-36 flex-col gap-1 text-xs font-medium text-slate-500">
             Type
-            <select aria-label="Suppression type" value={kind} onChange={(e) => setKind(e.target.value as SuppressionKind)} className={inputClass}>
-              {(Object.keys(KIND_META) as SuppressionKind[]).map((k) => (
-                <option key={k} value={k}>{KIND_META[k].label}</option>
-              ))}
-            </select>
+            <Select
+              ariaLabel="Suppression type"
+              value={kind}
+              onChange={(v) => setKind(v as SuppressionKind)}
+              options={(Object.keys(KIND_META) as SuppressionKind[]).map((k) => ({ value: k, label: KIND_META[k].label }))}
+            />
           </label>
           <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-xs font-medium text-slate-500">
             Value
