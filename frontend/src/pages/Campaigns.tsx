@@ -1,17 +1,21 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Megaphone, GitBranch } from 'lucide-react'
+import { Plus, Megaphone, GitBranch, Sparkles, Rocket } from 'lucide-react'
 import { canvas, type Workflow } from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import Badge from '../components/Badge'
 import EmptyState from '../components/EmptyState'
+import { useToast } from '../components/Toast'
 
 export default function Campaigns() {
   const qc = useQueryClient()
+  const navigate = useNavigate()
+  const toast = useToast()
   const { data: campaigns = [], isLoading } = useQuery({ queryKey: ['workflows'], queryFn: canvas.list })
+  const { data: templates = [] } = useQuery({ queryKey: ['campaign-templates'], queryFn: canvas.templates })
 
   const [showCreate, setShowCreate] = useState(false)
   const [name, setName] = useState('')
@@ -22,6 +26,17 @@ export default function Campaigns() {
       setName('')
       setShowCreate(false)
     },
+  })
+  // Cold-start fix: instantiate a ready-to-run starter graph and jump straight
+  // into the editor, instead of dropping the user onto a blank canvas.
+  const fromTemplate = useMutation({
+    mutationFn: (templateId: string) => canvas.createFromTemplate(templateId),
+    onSuccess: (detail) => {
+      qc.invalidateQueries({ queryKey: ['workflows'] })
+      setShowCreate(false)
+      navigate(`/campaigns/${detail.workflow.id}`)
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not create from template'),
   })
 
   return (
@@ -39,7 +54,38 @@ export default function Campaigns() {
       />
 
       {showCreate && (
-        <Card padding="md">
+        <Card padding="md" className="space-y-4">
+          {templates.length > 0 && (
+            <div>
+              <p className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                <Sparkles size={13} /> Start from a template
+              </p>
+              <div className="space-y-2">
+                {templates.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    disabled={fromTemplate.isPending}
+                    onClick={() => fromTemplate.mutate(t.id)}
+                    className="flex w-full items-start gap-3 rounded-xl border border-slate-200 p-3 text-left transition-colors hover:border-brand-300 hover:bg-brand-50/40 disabled:opacity-60 dark:border-slate-700 dark:hover:border-brand-700 dark:hover:bg-brand-900/10"
+                  >
+                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600 dark:bg-brand-900/30 dark:text-brand-300">
+                      <Rocket size={16} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold text-slate-900 dark:text-white">{t.name}</span>
+                      <span className="block text-xs text-slate-500">{t.summary}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <div className="mt-4 flex items-center gap-3">
+                <span className="h-px flex-1 bg-slate-100 dark:bg-slate-800" />
+                <span className="text-[11px] font-medium uppercase tracking-wider text-slate-400">or start blank</span>
+                <span className="h-px flex-1 bg-slate-100 dark:bg-slate-800" />
+              </div>
+            </div>
+          )}
           <div className="flex items-center gap-3">
             <input
               autoFocus
