@@ -101,6 +101,68 @@ export const templates = {
   remove: (id: UUID) => api.delete<void>(`/templates/${id}`).then(() => undefined),
 }
 
+// ── Campaign objectives (the goal a workflow pursues) ─────────────────────────
+// Mirrors backend/app/routers/objectives.py. One objective per workflow; the
+// objective_controller widens the audience + re-runs until reached or the
+// bounds envelope is spent.
+export type ObjectiveMetric = 'contacts' | 'meetings_booked' | 'replies' | 'companies' | 'qualified_leads'
+export type ObjectiveStatus = 'pursuing' | 'reached' | 'exhausted' | 'paused'
+
+export interface ObjectiveAudience {
+  keywords?: string[]
+  location?: string
+  titles?: string[]
+  [k: string]: unknown
+}
+
+export interface ObjectiveBounds {
+  max_iterations?: number
+  max_spend_usd?: number
+  deadline?: string
+  [k: string]: unknown
+}
+
+/** Live pursuit telemetry the controller writes back on each run completion. */
+export interface ObjectiveProgress {
+  current?: number
+  iterations_used?: number
+  spend_usd?: number
+  last_action?: string
+  last_evaluated_at?: ISODate
+  [k: string]: unknown
+}
+
+export interface ObjectiveInput {
+  metric: ObjectiveMetric
+  target: number
+  audience: ObjectiveAudience
+  bounds: ObjectiveBounds
+}
+
+export interface Objective {
+  id: UUID
+  workflow_id: UUID
+  metric: ObjectiveMetric
+  target: number
+  audience: ObjectiveAudience
+  bounds: ObjectiveBounds
+  progress: ObjectiveProgress
+  status: ObjectiveStatus
+  created_at: ISODate
+  updated_at: ISODate
+}
+
+export const objectives = {
+  get: (workflowId: UUID) =>
+    api.get<Objective | null>(`/objectives/${workflowId}`).then((r) => r.data),
+  set: (workflowId: UUID, input: ObjectiveInput) =>
+    api.put<Objective>(`/objectives/${workflowId}`, input).then((r) => r.data),
+  clear: (workflowId: UUID) =>
+    api.delete<void>(`/objectives/${workflowId}`).then(() => undefined),
+  togglePause: (workflowId: UUID) =>
+    api.post<Objective>(`/objectives/${workflowId}/pause`).then((r) => r.data),
+}
+
 // ── Analytics (lead-gen efficiency + cost rollup) ─────────────────────────────
 export interface AnalyticsSummary {
   runs: number

@@ -13,7 +13,7 @@ import '@xyflow/react/dist/style.css'
 import { clsx } from 'clsx'
 import {
   ArrowLeft, Search, GitBranch, Save, Undo2, Redo2, Maximize2, Minimize2, Plus,
-  Users, Settings as SettingsIcon, Trash2, Play,
+  Users, Settings as SettingsIcon, Trash2, Play, Target,
 } from 'lucide-react'
 import { canvas, nodes as nodesApi, projections, type Lead, type NodeManifest, type WorkflowStatus } from '../api/v2'
 import { nodeIcon } from '../utils/nodeIcons'
@@ -28,6 +28,7 @@ import { useCanvasHistory } from '../hooks/useCanvasHistory'
 import Tabs from '../components/Tabs'
 import DataTable from '../components/DataTable'
 import SequentialBuilder from '../components/SequentialBuilder'
+import ObjectivePanel from '../components/ObjectivePanel'
 
 // Category → icon + accent now lives in utils/nodeVisuals (shared with the
 // linear SequentialBuilder so a node looks identical in either view).
@@ -528,6 +529,7 @@ export default function CampaignEditor() {
         onChange={(v) => setActiveTab(v)}
         items={[
           { value: 'sequence', label: 'Sequence', icon: GitBranch },
+          { value: 'goal', label: 'Goal', icon: Target },
           { value: 'leads', label: 'Leads', icon: Users },
           { value: 'settings', label: 'Settings', icon: SettingsIcon },
         ]}
@@ -581,6 +583,24 @@ export default function CampaignEditor() {
             </div>
           )}
           
+          {activeTab === 'goal' && (
+            <Card padding="lg" className="h-full overflow-auto">
+              <div className="mb-4">
+                <h2 className="text-[15px] font-semibold text-slate-900 dark:text-white">Campaign objective</h2>
+                <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">
+                  Declare the outcome this campaign pursues. The engine sources, screens, and widens the audience on its own — re-running until the target is reached or your safety bounds are spent.
+                </p>
+              </div>
+              <div className="max-w-2xl">
+                {id ? (
+                  <ObjectivePanel workflowId={id} />
+                ) : (
+                  <p className="text-sm text-slate-500">Save the campaign first to set a goal.</p>
+                )}
+              </div>
+            </Card>
+          )}
+
           {activeTab === 'leads' && (
             <Card padding="lg" className="flex h-full flex-col overflow-hidden">
               <div className="mb-4">
