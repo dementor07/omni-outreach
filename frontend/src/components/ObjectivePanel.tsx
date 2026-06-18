@@ -26,7 +26,6 @@ const METRIC_OPTIONS: { value: ObjectiveMetric; label: string; hint: string }[] 
   { value: 'qualified_leads', label: 'Qualified leads', hint: 'Leads that passed screening' },
   { value: 'companies', label: 'Companies sourced', hint: 'Accounts resolved into the CRM' },
   { value: 'replies', label: 'Replies received', hint: 'Inbound responses to outreach' },
-  { value: 'meetings_booked', label: 'Meetings booked', hint: 'Calendar conversions' },
 ]
 
 const METRIC_LABEL: Record<ObjectiveMetric, string> = Object.fromEntries(

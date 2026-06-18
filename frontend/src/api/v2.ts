@@ -105,7 +105,10 @@ export const templates = {
 // Mirrors backend/app/routers/objectives.py. One objective per workflow; the
 // objective_controller widens the audience + re-runs until reached or the
 // bounds envelope is spent.
-export type ObjectiveMetric = 'contacts' | 'meetings_booked' | 'replies' | 'companies' | 'qualified_leads'
+// Only metrics the engine can honestly measure from a campaign's own lineage
+// (mirrors objective_controller.MEASURABLE_METRICS). No meetings_booked yet —
+// no campaign-scoped calendar/deal signal exists, so offering it would be a lie.
+export type ObjectiveMetric = 'contacts' | 'qualified_leads' | 'companies' | 'replies'
 export type ObjectiveStatus = 'pursuing' | 'reached' | 'exhausted' | 'paused'
 
 export interface ObjectiveAudience {

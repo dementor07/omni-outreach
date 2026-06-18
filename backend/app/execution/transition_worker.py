@@ -601,21 +601,33 @@ async def _terminalize_lead(
                 count=True,
             )
         elif row.get("workflow_id"):
-            # OBJECTIVE HOOK (Slice 2b): a ROOT/run-lead just completed (no
-            # parent_lead_id = it's the campaign's seed, not a fan-out child).
-            # That's one full sourcing pass done — let the objective controller
-            # measure progress and, if short within bounds, re-seed a fresh run.
-            # Gated on the once-only claim (we're inside `if row:`), so it fires
-            # exactly once per completion, never on Kafka redelivery. Best-effort:
-            # a controller error must never wedge the terminalize claim.
+            # A ROOT/run-lead just completed (no parent_lead_id = it's the
+            # campaign's seed, not a fan-out child) — one full sourcing pass is
+            # done. EMIT A FACT and stop: the goal-pursuit control loop lives in
+            # a dedicated consumer (app.execution.objective_worker), NOT inline
+            # here. The transition worker must not run a feedback loop inside its
+            # once-only terminalize claim — that's the safety-critical hot path.
+            # Emitting onto omni.events makes the loop event-sourced (durable,
+            # replayable, archived for tracing) instead of a synchronous
+            # side-effect that a crash could lose. Gated on the claim, so the
+            # fact fires exactly once per completion. Best-effort publish: a bus
+            # hiccup must never wedge the claim (the projection is already
+            # committed; the worst case is one run isn't re-evaluated).
             try:
-                from app.services import objective_controller
-
-                await objective_controller.evaluate_on_completion(
-                    workspace_id, str(row["workflow_id"])
+                await bus.publish_event(
+                    workspace_id=workspace_id,
+                    event_type="campaign.run.completed",
+                    entity_type="lead",
+                    entity_id=str(lead_id),
+                    payload={
+                        "workflow_id": str(row["workflow_id"]),
+                        "root_lead_id": str(lead_id),
+                        "terminal_status": status,
+                    },
+                    correlation_id=correlation_id,
                 )
             except Exception:  # noqa: BLE001
-                log.exception("objective controller failed for workflow %s", row.get("workflow_id"))
+                log.exception("failed to emit campaign.run.completed for workflow %s", row.get("workflow_id"))
         return True
     # Already terminal — redelivery. Re-attempt the release check only.
     async with system_scope():

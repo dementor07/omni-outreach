@@ -22,7 +22,11 @@ from app.db import execute, fetch_one
 
 router = APIRouter()
 
-Metric = Literal["contacts", "meetings_booked", "replies", "companies", "qualified_leads"]
+# Only metrics the engine can HONESTLY measure from a campaign's own lineage
+# (see objective_controller.MEASURABLE_METRICS). meetings_booked is intentionally
+# absent — there's no campaign-scoped calendar/deal signal yet, so offering it
+# would let an operator set a goal the engine silently scores 0 forever.
+Metric = Literal["contacts", "qualified_leads", "companies", "replies"]
 Status = Literal["pursuing", "reached", "exhausted", "paused"]
 
 

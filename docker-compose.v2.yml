@@ -161,6 +161,30 @@ services:
       disable: true
     restart: unless-stopped
 
+  # Objective worker: the goal-pursuit control loop. Consumes
+  # campaign.run.completed (emitted by the transition worker when a campaign's
+  # root run-lead terminalizes), measures the workflow's lineage-scoped progress,
+  # decides reached/widen/exhausted, and re-seeds the workflow via the shared
+  # run path on a widen. Off the transition worker's safety-critical hot path.
+  objective-v2:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+    container_name: omni-v2-objective
+    command: python -m app.execution.objective_worker
+    env_file:
+      - .env
+    environment:
+      <<: *secret-env
+      # Re-seed publishes source intents that the dispatcher turns into muscle
+      # commands, so it shares the muscle secret like the other workers.
+      MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
+    networks:
+      - omni-outreach_default
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
   # Submits the pyflink orchestrator job (outreach.results -> outreach.transitions)
   # to the shared Flink jobmanager from the master stack. Idempotent enough:
   # if the job is already registered a duplicate submit fails and we tail; the

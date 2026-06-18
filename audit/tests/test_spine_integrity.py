@@ -25,6 +25,9 @@ REPO = Path(__file__).resolve().parents[2]
 TW_SRC = (REPO / "backend/app/execution/transition_worker.py").read_text(encoding="utf-8")
 CANVAS_SRC = (REPO / "backend/app/routers/canvas.py").read_text(encoding="utf-8")
 DISPATCH_SRC = (REPO / "backend/app/execution/dispatcher.py").read_text(encoding="utf-8")
+# Seed-and-fire was extracted from run_workflow into the shared run module; the
+# SM-3 invariant (error-before-publish) now lives in seed_and_run.
+RUN_SRC = (REPO / "backend/app/execution/run.py").read_text(encoding="utf-8")
 
 
 def _func_body(src: str, name: str) -> str:
@@ -184,19 +187,18 @@ def test_barrier_updates_are_pinned_to_origin_node():
 
 
 def test_run_workflow_errors_before_publishing():
-    """REGRESSION SM-3: run_workflow must check the entry node's error BEFORE
-    publishing its events, and must terminalize the seed lead (not leave it
-    stranded 'active' at the entry node forever)."""
-    m = re.search(r"async def run_workflow\(.*?(?=^@router|\Z)", CANVAS_SRC, re.M | re.S)
-    assert m, "run_workflow not found"
-    body = m.group(0)
+    """REGRESSION SM-3: the seed-and-fire path must check the entry node's error
+    BEFORE publishing its events, and must terminalize the seed lead (not leave
+    it stranded 'active' at the entry node forever). This logic lives in the
+    shared seed_and_run (reused by /run and the objective re-seed)."""
+    body = _func_body(RUN_SRC, "seed_and_run")
     err_at = body.find("if result.error:")
     pub_at = body.find("for ev in result.events:")
     assert err_at != -1 and pub_at != -1 and err_at < pub_at, (
-        "run_workflow must check result.error before publishing events"
+        "seed_and_run must check result.error before publishing events"
     )
     assert "SET status='errored'" in body[err_at:pub_at], (
-        "run_workflow error path must terminalize the seed lead"
+        "seed_and_run error path must terminalize the seed lead"
     )
 
 
