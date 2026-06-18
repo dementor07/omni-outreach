@@ -1,48 +1,32 @@
-"""B2 — reply intent classification.
+"""B2 — reply intent classification (control-plane, synchronous, pure).
 
-Industry-pro pattern (researched 2026-06-16; LangChain agents-from-scratch +
-production write-ups): a single, bounded, schema-constrained LLM call embedded
-in the existing dataflow, FAIL-OPEN to a deterministic keyword heuristic, with
-provenance tracked (`source` = "llm" | "keyword"). NOT a multi-agent/LangGraph
-orchestration — we already own the orchestration spine; adding a framework for
-one classification step is the over-engineering the sources warn against.
+BOUNDARY (see rust-python-boundary-audit): the LLM call belongs in the muscle,
+not in the FastAPI request worker. The Rust `ai.classify` handler
+(handlers/transform.rs) now owns the Anthropic call. This module is the
+synchronous, pure, no-I/O part that the inbound-reply webhook needs *inline*:
 
-Output intents (what the reply→wake-up routing + suppression key on):
-  positive    — interested / wants to talk / books time
-  question    — asking for info, not yet committed
-  objection    — pushback / not now / wrong person
-  unsubscribe — opt-out / stop / remove me  (also auto-suppresses, T1)
-  neutral     — auto-reply, OOO, anything else
+  - opt-out detection MUST be synchronous (a compliance guarantee can't wait for
+    an async muscle round-trip), and it's deterministic anyway — no LLM needed;
+  - the keyword heuristic gives an immediate, good-enough intent so
+    `message.received` is emitted with a classification on the spot.
 
-`classify_reply` decrypts the workspace's `anthropic` connection and makes ONE
-Haiku call; any failure (no connection, timeout, malformed) falls back to
-keyword rules. Unsubscribe keywords are ALWAYS caught deterministically even
-when the LLM path is used, so opt-outs can never be missed.
+The nuanced LLM refinement (positive/question/objection) is dispatched to the
+muscle's `ai.classify` channel as a follow-up when an event-driven reply node
+exists; until then the keyword verdict stands. This removes the request-path
+Anthropic call (the audit's 🔴 violation) with zero compliance regression.
+
+Output intents: positive | question | objection | unsubscribe | neutral.
 """
 
 from __future__ import annotations
 
-import json
-import logging
-import re
 from typing import Literal
-
-import httpx
-
-from app.db import fetch_one
-from app.services.encryption import decrypt
-
-log = logging.getLogger(__name__)
 
 Intent = Literal["positive", "question", "objection", "unsubscribe", "neutral"]
 INTENTS: tuple[Intent, ...] = ("positive", "question", "objection", "unsubscribe", "neutral")
 
-ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_VERSION = "2023-06-01"
-DEFAULT_MODEL = "claude-haiku-4-5-20251001"
-
-# Deterministic opt-out detection — ALWAYS applied first so an unsubscribe is
-# never missed regardless of the LLM path.
+# Deterministic opt-out detection — ALWAYS applied so an unsubscribe is never
+# missed. This is the compliance-critical path and is intentionally LLM-free.
 _UNSUB_PATTERNS = (
     "unsubscribe", "opt out", "opt-out", "remove me", "stop emailing",
     "take me off", "do not contact", "don't contact", "no longer interested",
@@ -53,95 +37,19 @@ _OBJECTION = ("not interested", "no thanks", "not now", "wrong person", "already
 _QUESTION = ("how much", "what is", "can you", "do you", "?", "pricing", "price")
 
 
-def _keyword_classify(body: str) -> tuple[Intent, float]:
-    """Deterministic fallback. Returns (intent, confidence)."""
+def classify_reply(body: str) -> tuple[Intent, float, str, str]:
+    """Pure, synchronous keyword classification. Returns
+    (intent, confidence, reason, source). source is always "keyword" here; the
+    "llm" source is produced by the Rust ai.classify handler on the muscle path.
+
+    Opt-out wins first and unconditionally — the compliance guarantee."""
     text = (body or "").lower()
     if any(p in text for p in _UNSUB_PATTERNS):
-        return "unsubscribe", 0.95
+        return "unsubscribe", 0.95, "opt-out keyword", "keyword"
     if any(p in text for p in _OBJECTION):
-        return "objection", 0.6
+        return "objection", 0.6, "objection keyword", "keyword"
     if any(p in text for p in _POSITIVE):
-        return "positive", 0.6
+        return "positive", 0.6, "positive keyword", "keyword"
     if any(p in text for p in _QUESTION):
-        return "question", 0.55
-    return "neutral", 0.4
-
-
-def _force_unsubscribe(body: str) -> bool:
-    text = (body or "").lower()
-    return any(p in text for p in _UNSUB_PATTERNS)
-
-
-async def _anthropic_key(workspace_id: str) -> str | None:
-    row = await fetch_one(
-        "SELECT credentials_encrypted FROM omni_connections "
-        "WHERE workspace_id=$1 AND provider='anthropic' "
-        "ORDER BY connected_at DESC LIMIT 1",
-        workspace_id,
-    )
-    if not row:
-        return None
-    try:
-        bundle = json.loads(decrypt(row["credentials_encrypted"]))
-    except Exception:  # noqa: BLE001
-        return None
-    return bundle.get("api_key") or bundle.get("apiKey")
-
-
-_PROMPT = (
-    "Classify the INTENT of this reply to a sales/outreach message. "
-    "Respond with ONLY a compact JSON object: "
-    '{"intent": one of ["positive","question","objection","unsubscribe","neutral"], '
-    '"confidence": 0.0-1.0, "reason": "<=120 chars}. '
-    "positive=interested/wants to talk; question=asking for info; "
-    "objection=pushback/not now/wrong person; unsubscribe=opt-out/stop; "
-    "neutral=auto-reply/OOO/other. Reply body:\n\n"
-)
-
-
-async def classify_reply(
-    workspace_id: str, body: str
-) -> tuple[Intent, float, str, str]:
-    """Returns (intent, confidence, reason, source). source ∈ {llm, keyword}.
-
-    Fail-open: any LLM problem degrades to the keyword heuristic. An
-    unsubscribe keyword always wins regardless of the LLM verdict."""
-    api_key = await _anthropic_key(workspace_id)
-    if not api_key:
-        intent, conf = _keyword_classify(body)
-        return intent, conf, "no anthropic connection", "keyword"
-
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                ANTHROPIC_URL,
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": ANTHROPIC_VERSION,
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": DEFAULT_MODEL,
-                    "max_tokens": 200,
-                    "messages": [{"role": "user", "content": _PROMPT + (body or "")[:4000]}],
-                },
-            )
-        if resp.status_code != 200:
-            raise RuntimeError(f"anthropic HTTP {resp.status_code}")
-        text = resp.json()["content"][0]["text"]
-        # The model may wrap JSON in prose/fences — extract the object.
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        data = json.loads(match.group(0) if match else text)
-        intent = data.get("intent")
-        if intent not in INTENTS:
-            raise ValueError(f"bad intent {intent!r}")
-        confidence = max(0.0, min(1.0, float(data.get("confidence", 0.5))))
-        reason = str(data.get("reason", ""))[:200]
-        # Deterministic opt-out override — never miss an unsubscribe.
-        if _force_unsubscribe(body) and intent != "unsubscribe":
-            return "unsubscribe", 0.95, "keyword opt-out override", "llm"
-        return intent, confidence, reason, "llm"
-    except Exception as e:  # noqa: BLE001
-        log.warning("reply classify fell back to keyword: %s", e)
-        intent, conf = _keyword_classify(body)
-        return intent, conf, f"llm fallback: {e}", "keyword"
+        return "question", 0.55, "question keyword", "keyword"
+    return "neutral", 0.4, "no signal", "keyword"

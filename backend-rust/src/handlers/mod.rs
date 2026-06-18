@@ -47,6 +47,7 @@ pub async fn dispatch(command: &ActionCommand) -> ExecutionResult {
         ChannelType::HttpCall => http_call::handle_http_call(command).await,
         ChannelType::Apify => apify::handle_apify(command).await,
         ChannelType::AiScreen => ai_screen::handle_ai_screen(command).await,
+        ChannelType::AiClassify => transform::handle_ai_classify(command).await,
         ChannelType::SerperPeople => serper_people::handle_serper_people(command).await,
         ChannelType::Naukri => naukri::handle_naukri(command).await,
         ChannelType::Indeed => indeed::handle_indeed(command).await,

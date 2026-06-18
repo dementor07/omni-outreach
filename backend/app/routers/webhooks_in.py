@@ -215,8 +215,10 @@ async def receive_reply(
     contact_id = str(contact["id"])
     correlation_id = str(uuid.uuid4())
 
-    # B2 — classify intent (one LLM call, keyword fallback).
-    intent, confidence, reason, source = await reply_classifier.classify_reply(ws, text)
+    # B2 — classify intent synchronously (pure keyword; opt-out always caught).
+    # The LLM refinement lives in the muscle's ai.classify handler, off the
+    # request path (rust-python-boundary-audit).
+    intent, confidence, reason, source = reply_classifier.classify_reply(text)
 
     # message.received — the projector persists it with classification/confidence.
     await bus.publish_event(

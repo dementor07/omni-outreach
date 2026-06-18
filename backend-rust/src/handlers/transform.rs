@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
 const DEFAULT_MODEL: &str = "claude-haiku-4-5-20251001";
 
-async fn anthropic_text(api_key: &str, system: &str, user: &str, max_tokens: u32) -> Result<String, String> {
+pub(crate) async fn anthropic_text(api_key: &str, system: &str, user: &str, max_tokens: u32) -> Result<String, String> {
     let body = json!({
         "model": DEFAULT_MODEL,
         "max_tokens": max_tokens,
@@ -43,7 +43,7 @@ async fn anthropic_text(api_key: &str, system: &str, user: &str, max_tokens: u32
     Ok(v["content"][0]["text"].as_str().unwrap_or("").trim().to_string())
 }
 
-async fn anthropic_key(command: &ActionCommand) -> Result<String, String> {
+pub(crate) async fn anthropic_key(command: &ActionCommand) -> Result<String, String> {
     let cref = command
         .credential_ref
         .as_ref()
@@ -148,5 +148,122 @@ pub async fn handle_ai_compose(command: &ActionCommand) -> ExecutionResult {
             json!({"extra_data_set": {target_variable: text}}),
         ),
         Err(e) => common::fail(command, e, true),
+    }
+}
+
+// ── reply intent classification (B2, ported from Python reply_classifier) ────
+//
+// One bounded Claude call → {positive|question|objection|unsubscribe|neutral},
+// FAIL-OPEN to a deterministic keyword heuristic. An unsubscribe keyword ALWAYS
+// wins regardless of the model verdict, so an opt-out can never be missed. Same
+// contract as the old Python service, but on the muscle path: it no longer
+// blocks an API worker and reuses the command ledger + credential-ref machinery.
+
+const UNSUB_PATTERNS: &[&str] = &[
+    "unsubscribe", "opt out", "opt-out", "remove me", "stop emailing",
+    "take me off", "do not contact", "don't contact", "no longer interested",
+    "stop contacting",
+];
+const POSITIVE: &[&str] = &["interested", "let's talk", "lets talk", "book", "schedule", "call me", "sounds good", "tell me more", "sign up"];
+const OBJECTION: &[&str] = &["not interested", "no thanks", "not now", "wrong person", "already have", "too expensive", "not a fit"];
+const QUESTION: &[&str] = &["how much", "what is", "can you", "do you", "?", "pricing", "price"];
+
+const INTENTS: &[&str] = &["positive", "question", "objection", "unsubscribe", "neutral"];
+
+fn force_unsubscribe(body: &str) -> bool {
+    let t = body.to_lowercase();
+    UNSUB_PATTERNS.iter().any(|p| t.contains(p))
+}
+
+/// Deterministic fallback. Returns (intent, confidence).
+fn keyword_classify(body: &str) -> (&'static str, f64) {
+    let t = body.to_lowercase();
+    if UNSUB_PATTERNS.iter().any(|p| t.contains(p)) {
+        return ("unsubscribe", 0.95);
+    }
+    if OBJECTION.iter().any(|p| t.contains(p)) {
+        return ("objection", 0.6);
+    }
+    if POSITIVE.iter().any(|p| t.contains(p)) {
+        return ("positive", 0.6);
+    }
+    if QUESTION.iter().any(|p| t.contains(p)) {
+        return ("question", 0.55);
+    }
+    ("neutral", 0.4)
+}
+
+const CLASSIFY_SYSTEM: &str =
+    "Classify the INTENT of a reply to a sales/outreach message. Respond with ONLY a \
+     compact JSON object: {\"intent\": one of \
+     [\"positive\",\"question\",\"objection\",\"unsubscribe\",\"neutral\"], \
+     \"confidence\": 0.0-1.0, \"reason\": \"<=120 chars\"}. \
+     positive=interested/wants to talk; question=asking for info; \
+     objection=pushback/not now/wrong person; unsubscribe=opt-out/stop; \
+     neutral=auto-reply/OOO/other.";
+
+fn classify_result(
+    command: &ActionCommand,
+    intent: &str,
+    confidence: f64,
+    reason: &str,
+    source: &str,
+) -> ExecutionResult {
+    common::ok(
+        command,
+        json!({"intent": intent, "confidence": confidence, "reason": reason, "source": source}),
+        Some("ai.classify.completed"),
+        json!({"custom_fields": {"classification": intent, "classify_confidence": confidence}}),
+    )
+}
+
+pub async fn handle_ai_classify(command: &ActionCommand) -> ExecutionResult {
+    let body = common::s(command, "body");
+    if body.is_empty() {
+        return common::fail(command, "AI_CLASSIFY_BODY_MISSING", false);
+    }
+
+    // No credential → straight to the keyword heuristic (fail-open).
+    let api_key = match anthropic_key(command).await {
+        Ok(k) => k,
+        Err(_) => {
+            let (intent, conf) = keyword_classify(&body);
+            return classify_result(command, intent, conf, "no anthropic connection", "keyword");
+        }
+    };
+
+    let truncated: String = body.chars().take(4000).collect();
+    let result = anthropic_text(&api_key, CLASSIFY_SYSTEM, &truncated, 200).await;
+    credentials::release(command.credential_ref.as_deref().unwrap_or("")).await;
+
+    match result {
+        Ok(text) => {
+            // The model may wrap JSON in prose/fences — extract the object.
+            let parsed = text
+                .find('{')
+                .and_then(|i| text.rfind('}').map(|j| &text[i..=j]))
+                .and_then(|slice| serde_json::from_str::<Value>(slice).ok());
+            match parsed {
+                Some(v) if INTENTS.contains(&v["intent"].as_str().unwrap_or("")) => {
+                    let mut intent = v["intent"].as_str().unwrap_or("neutral").to_string();
+                    let confidence = v["confidence"].as_f64().unwrap_or(0.5).clamp(0.0, 1.0);
+                    let reason = v["reason"].as_str().unwrap_or("").chars().take(200).collect::<String>();
+                    // Deterministic opt-out override — never miss an unsubscribe.
+                    if force_unsubscribe(&body) && intent != "unsubscribe" {
+                        intent = "unsubscribe".to_string();
+                        return classify_result(command, &intent, 0.95, "keyword opt-out override", "llm");
+                    }
+                    classify_result(command, &intent, confidence, &reason, "llm")
+                }
+                _ => {
+                    let (intent, conf) = keyword_classify(&body);
+                    classify_result(command, intent, conf, "llm parse fallback", "keyword")
+                }
+            }
+        }
+        Err(e) => {
+            let (intent, conf) = keyword_classify(&body);
+            classify_result(command, intent, conf, &format!("llm fallback: {e}"), "keyword")
+        }
     }
 }

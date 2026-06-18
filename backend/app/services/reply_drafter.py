@@ -1,32 +1,52 @@
 """B3 — AI-suggested reply draft for the inbox.
 
-Same industry-pro shape as `reply_classifier` (researched 2026-06-16): a single,
-bounded, schema-light LLM call (Anthropic Haiku) embedded in the request path,
-FAIL-OPEN to a deterministic templated draft, with provenance (`source` =
-"llm" | "template"). The operator always edits before sending — this only
-removes the blank-page problem, it is never an auto-send.
+BOUNDARY (rust-python-boundary-audit): this is the PREVIEW class, like
+`naukri_preview` — an explicit, user-triggered, single, synchronous call: the
+operator clicks "suggest" and waits for one draft string. It is NOT volume or
+per-entity hot-path work, so it stays in Python; routing it through the async
+muscle would mean holding the HTTP request open polling Kafka for the result —
+strictly worse UX for zero throughput gain. (The automated, per-reply classifier
+WAS hot-path and was moved off the request path; this interactive single-shot
+draft is the documented exemption.)
 
-`suggest_reply` decrypts the workspace's `anthropic` connection and makes ONE
-Haiku call given the recent thread context + the inbound message's classified
-intent; any failure (no connection, timeout, malformed) falls back to a
-short intent-shaped template so the compose box is never empty.
+One bounded Anthropic Haiku call given the recent thread context + the inbound
+message's classified intent; FAIL-OPEN to a short intent-shaped template so the
+compose box is never empty. The operator always edits before sending.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
 import httpx
 
-from app.services.reply_classifier import (
-    ANTHROPIC_URL,
-    ANTHROPIC_VERSION,
-    DEFAULT_MODEL,
-    _anthropic_key,
-)
+from app.db import fetch_one
+from app.services.encryption import decrypt
 
 log = logging.getLogger(__name__)
+
+ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_VERSION = "2023-06-01"
+DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+
+
+async def _anthropic_key(workspace_id: str) -> str | None:
+    """Decrypt the workspace's anthropic connection api_key, or None."""
+    row = await fetch_one(
+        "SELECT credentials_encrypted FROM omni_connections "
+        "WHERE workspace_id=$1 AND provider='anthropic' "
+        "ORDER BY connected_at DESC LIMIT 1",
+        workspace_id,
+    )
+    if not row:
+        return None
+    try:
+        bundle = json.loads(decrypt(row["credentials_encrypted"]))
+    except Exception:  # noqa: BLE001
+        return None
+    return bundle.get("api_key") or bundle.get("apiKey")
 
 # Deterministic fallback drafts — keyed by the inbound reply's classified
 # intent so the suggestion is at least intent-appropriate when the LLM path is

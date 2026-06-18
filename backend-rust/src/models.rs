@@ -65,6 +65,11 @@ pub enum ChannelType {
     /// policies live in the node config, not in the worker.
     #[serde(rename = "ai_screen")]
     AiScreen,
+    /// Anthropic Claude reply-intent classification (B2). One bounded call ->
+    /// {positive|question|objection|unsubscribe|neutral}, fail-open to a keyword
+    /// heuristic, opt-out always caught. Used by the inbound-reply path.
+    #[serde(rename = "ai_classify")]
+    AiClassify,
     /// Per-company Serper multi-pattern LinkedIn profile search. Loops 2
     /// patterns × N roles, dedupes URLs, caps at max_per_company. Used by
     /// `source.serper_people`.
@@ -113,6 +118,7 @@ impl ChannelType {
             ChannelType::HttpCall => "http_call",
             ChannelType::Apify => "apify",
             ChannelType::AiScreen => "ai_screen",
+            ChannelType::AiClassify => "ai_classify",
             ChannelType::SerperPeople => "serper_people",
             ChannelType::Naukri => "naukri",
             ChannelType::Indeed => "indeed",

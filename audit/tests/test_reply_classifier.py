@@ -1,10 +1,12 @@
-"""B2 regression — reply intent classification (single LLM call + keyword fallback).
+"""B2 regression — reply intent classification.
 
-Per the researched industry pattern: a bounded LLM call fail-open to a
-deterministic keyword heuristic, with provenance. These cover the pure keyword
-path (which is also the LLM-unavailable fallback) + the wire-in invariants that
-the inbound reply webhook classifies, auto-suppresses unsubscribes, and emits a
-reply→wake-up transition.
+The LLM call was moved OFF the Python request path into the Rust muscle's
+`ai.classify` handler (rust-python-boundary-audit). The Python side is now a
+pure, synchronous keyword classifier the inbound webhook calls inline — opt-out
+detection MUST be synchronous (compliance) and is deterministic anyway. These
+cover the pure keyword path + the wire-in invariants (webhook classifies,
+auto-suppresses unsubscribes, wakes waiting leads) + the boundary invariant
+(no Anthropic HTTP call left in Python; the Rust handler owns it).
 
 Run from backend/:
   PYTHONPATH=. DB_PASSWORD=testpass SECRET_KEY=test-secret-key-not-for-production \
@@ -15,34 +17,58 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.services.reply_classifier import INTENTS, _force_unsubscribe, _keyword_classify
+from app.services.reply_classifier import INTENTS, classify_reply
 
 BACKEND = Path(__file__).resolve().parents[2] / "backend"
+REPO = BACKEND.parent
 
 
-# ── keyword classifier (the fail-open path) ──────────────────────────────────
+# ── pure keyword classifier (synchronous, no I/O) ────────────────────────────
 
 def test_unsubscribe_always_detected():
     for body in ("Please unsubscribe me", "STOP emailing me", "remove me from your list", "do not contact"):
-        intent, conf = _keyword_classify(body)
+        intent, conf, _reason, source = classify_reply(body)
         assert intent == "unsubscribe" and conf >= 0.9
-        assert _force_unsubscribe(body)
+        assert source == "keyword"
 
 
 def test_positive_objection_question_neutral():
-    assert _keyword_classify("This sounds good, let's talk")[0] == "positive"
-    assert _keyword_classify("Not interested, thanks")[0] == "objection"
-    assert _keyword_classify("How much does it cost?")[0] == "question"
-    assert _keyword_classify("Out of office until Monday")[0] == "neutral"
+    assert classify_reply("This sounds good, let's talk")[0] == "positive"
+    assert classify_reply("Not interested, thanks")[0] == "objection"
+    assert classify_reply("How much does it cost?")[0] == "question"
+    assert classify_reply("Out of office until Monday")[0] == "neutral"
 
 
 def test_intents_contract():
     assert INTENTS == ("positive", "question", "objection", "unsubscribe", "neutral")
 
 
-def test_force_unsubscribe_is_independent_of_sentiment():
-    # an opt-out buried in otherwise-positive text must still force unsubscribe
-    assert _force_unsubscribe("Loved it but please remove me from your list")
+def test_classify_reply_is_synchronous_and_pure():
+    # No coroutine, no args beyond the body — it must be safe to call inline in
+    # the request path. (A coroutine here would mean the LLM call crept back.)
+    import inspect
+
+    assert not inspect.iscoroutinefunction(classify_reply), "classify_reply must stay synchronous"
+
+
+# ── boundary: the Anthropic call lives in Rust, not Python ───────────────────
+
+def test_no_anthropic_http_in_python_classifier():
+    src = (BACKEND / "app" / "services" / "reply_classifier.py").read_text(encoding="utf-8")
+    assert "api.anthropic.com" not in src, "the LLM call must NOT be in the Python classifier"
+    assert "httpx" not in src, "no network client belongs in the request-path classifier"
+
+
+def test_rust_ai_classify_handler_exists():
+    # The muscle owns the LLM classification now — ChannelType + handler wired.
+    models = (REPO / "backend-rust" / "src" / "models.rs").read_text(encoding="utf-8")
+    transform = (REPO / "backend-rust" / "src" / "handlers" / "transform.rs").read_text(encoding="utf-8")
+    moddisp = (REPO / "backend-rust" / "src" / "handlers" / "mod.rs").read_text(encoding="utf-8")
+    assert 'rename = "ai_classify"' in models, "AiClassify ChannelType must exist"
+    assert "pub async fn handle_ai_classify" in transform, "the Rust handler must exist"
+    assert "AiClassify => transform::handle_ai_classify" in moddisp, "dispatch must route ai_classify"
+    # opt-out can never be missed even on the LLM path (deterministic override).
+    assert "force_unsubscribe" in transform
 
 
 # ── wire-in: the inbound reply webhook ───────────────────────────────────────
