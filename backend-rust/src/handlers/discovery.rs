@@ -1,33 +1,26 @@
-//! Agency / company discovery source — "Auto-Pilot Target Mining".
+//! Company-discovery sources — one handler module, FOUR first-class channels.
 //!
-//! Finds companies matching an ICP and writes them to
-//! `lead_mutations.custom_fields[<companies_key>]` in the SAME company-row
-//! shape `naukri::extract_companies` produces — so the existing interior
-//! pipeline (`flow.for_each(companies)` -> `crm.resolve_company` ->
-//! `source.serper_people` -> verify -> screen -> `crm.create_contact`) consumes
-//! the output unchanged regardless of where the companies came from.
+//! Each source is a distinct product with its own setup story, so each is its
+//! own node + ChannelType (no `provider` toggle bundling them):
+//!   - `source.searxng`       free self-hosted meta-search dorks (no key)
+//!   - `source.serper_search` Serper paid Google API dorks (api_key)
+//!   - `source.apollo`        Apollo organization-search API (api_key, optional)
+//!   - `source.clutch`        Clutch directory scrape via Camoufox (no key)
 //!
-//! Three providers (the per-node customization edge), selected by `provider`:
-//!   - `search`  — Serper (paid) or SearXNG (free) Google dorks against agency
-//!                 directories, e.g. `site:clutch.co lead generation agency`.
-//!                 Reuses the exact search path serper_people uses.
-//!   - `apollo`  — Apollo organization search API (mixed_companies). Needs an
-//!                 Apollo connection; with no credential it returns a clean
-//!                 `empty`/skip handle so the node ships before a key exists.
-//!   - `clutch`  — Camoufox headless scrape of a Clutch directory category page
-//!                 (`/scrape_directory`), extracting agency name + website.
+//! All four produce the SAME company-row shape `naukri::extract_companies`
+//! produces and write it to `lead_mutations.custom_fields[<companies_key>]`,
+//! so the interior pipeline (`flow.for_each(companies)` -> `crm.resolve_company`
+//! -> people-discovery -> verify -> screen -> `crm.create_contact`) consumes the
+//! output unchanged. The parsing helpers are shared internally; only the public
+//! entry points and the credential story differ per source.
 //!
-//! Payload contract (set by `source.agency`):
-//!   - `provider`       "search" | "apollo" | "clutch"   (default "search")
-//!   - `query`          str — directory dork (search) / Apollo q_keywords / unused (clutch)
+//! Shared payload contract (set by each source node):
+//!   - `query`          str — directory dork (searxng/serper) / Apollo keyword
 //!   - `directory_url`  str — Clutch category URL (clutch only)
 //!   - `titles`         list[str] — propagated onto each company for downstream people-discovery
 //!   - `max_results`    int — cap on companies returned
 //!   - `companies_key`  custom_fields key to write
-//!   - `searxng_url`    str — SearXNG base (search provider, optional)
-//!
-//! Credential: `api_key` on the Serper/Apollo connection bundle (search w/ Serper
-//! + apollo). SearXNG and Clutch need none.
+//!   - `searxng_url`    str — SearXNG base (searxng only, optional)
 
 use crate::credentials;
 use crate::handlers::common;
@@ -60,45 +53,59 @@ fn camoufox_secret() -> Option<String> {
     std::env::var("CAMOUFOX_SHARED_SECRET").ok().filter(|s| !s.is_empty())
 }
 
-pub async fn handle_agency(command: &ActionCommand) -> ExecutionResult {
-    let provider = {
-        let p = common::s(command, "provider");
-        if p.is_empty() { "search".to_string() } else { p }
-    };
+// ── Public entry points: one per source channel ─────────────────────────────
+
+pub async fn handle_searxng(command: &ActionCommand) -> ExecutionResult {
+    let (max_results, companies_key, titles) = common_inputs(command);
+    match discover_searxng(command, max_results, &titles).await {
+        Ok(companies) => finalize(command, "searxng", companies, &companies_key),
+        Err(result) => *result,
+    }
+}
+
+pub async fn handle_serper_search(command: &ActionCommand) -> ExecutionResult {
+    let (max_results, companies_key, titles) = common_inputs(command);
+    match discover_serper(command, max_results, &titles).await {
+        Ok(companies) => finalize(command, "serper", companies, &companies_key),
+        Err(result) => *result,
+    }
+}
+
+pub async fn handle_apollo(command: &ActionCommand) -> ExecutionResult {
+    let (max_results, companies_key, titles) = common_inputs(command);
+    match discover_apollo(command, max_results, &titles).await {
+        Ok(companies) => finalize(command, "apollo", companies, &companies_key),
+        Err(result) => *result,
+    }
+}
+
+pub async fn handle_clutch(command: &ActionCommand) -> ExecutionResult {
+    let (max_results, companies_key, titles) = common_inputs(command);
+    match discover_clutch(command, max_results, &titles).await {
+        Ok(companies) => finalize(command, "clutch", companies, &companies_key),
+        Err(result) => *result,
+    }
+}
+
+fn common_inputs(command: &ActionCommand) -> (usize, String, Vec<String>) {
     let max_results = command.payload["max_results"].as_i64().unwrap_or(25).clamp(1, 200) as usize;
     let companies_key = {
         let k = common::s(command, "companies_key");
         if k.is_empty() { "companies".to_string() } else { k }
     };
-    // Titles flow through to each company so serper_people knows who to look for.
     let titles: Vec<String> = command.payload["titles"]
         .as_array()
         .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
+    (max_results, companies_key, titles)
+}
 
-    let companies: Vec<Value> = match provider.as_str() {
-        "apollo" => match discover_apollo(command, max_results, &titles).await {
-            Ok(c) => c,
-            Err(result) => return *result,
-        },
-        "clutch" => match discover_clutch(command, max_results, &titles).await {
-            Ok(c) => c,
-            Err(result) => return *result,
-        },
-        _ => match discover_search(command, max_results, &titles).await {
-            Ok(c) => c,
-            Err(result) => return *result,
-        },
-    };
-
-    let mutations = json!({ "custom_fields": { companies_key.clone(): companies.clone() } });
+fn finalize(command: &ActionCommand, source: &str, companies: Vec<Value>, companies_key: &str) -> ExecutionResult {
+    let mutations = json!({ "custom_fields": { companies_key: companies.clone() } });
     let mut result = common::ok(
         command,
-        json!({
-            "provider": provider,
-            "companies_extracted": companies.len(),
-        }),
-        Some("source.agency.completed"),
+        json!({ "source": source, "companies_extracted": companies.len() }),
+        Some("source.discovery.completed"),
         mutations,
     );
     let handle = if companies.is_empty() { "empty" } else { "default" };
@@ -122,40 +129,41 @@ fn company_row(name: &str, url: &str, industry: &str, description: &str, titles:
         "experience": "",
         "source_url": url,
         "source": source,
-        // Carry the ICP titles so downstream serper_people searches the right roles.
+        // Carry the ICP titles so downstream people-discovery searches the right roles.
         "titles": titles,
     })
 }
 
-// ── search provider (Serper / SearXNG dorks) ─────────────────────────────────
+/// Turn search hits (url, title) into deduped company rows.
+fn hits_to_companies(hits: Vec<(String, String)>, max_results: usize, titles: &[String], source: &str) -> Vec<Value> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out: Vec<Value> = Vec::new();
+    for (url, title) in hits {
+        if out.len() >= max_results {
+            break;
+        }
+        let name = clean_agency_name(&title);
+        let domain = root_domain(&url);
+        let key = if domain.is_empty() { name.to_lowercase() } else { domain };
+        if name.is_empty() || !seen.insert(key) {
+            continue;
+        }
+        out.push(company_row(&name, &url, "Marketing & Advertising", &title, titles, source));
+    }
+    out
+}
 
-async fn discover_search(
+// ── searxng (free, keyless) ──────────────────────────────────────────────────
+
+async fn discover_searxng(
     command: &ActionCommand,
     max_results: usize,
     titles: &[String],
 ) -> Result<Vec<Value>, Box<ExecutionResult>> {
     let query = common::s(command, "query");
     if query.trim().is_empty() {
-        return Err(Box::new(common::fail(command, "AGENCY_QUERY_MISSING", false)));
+        return Err(Box::new(common::fail(command, "SEARXNG_QUERY_MISSING", false)));
     }
-    // Sub-provider: serper (paid, needs key) | searxng (free).
-    let sub = {
-        let s = common::s(command, "search_provider");
-        if s.is_empty() { "serper".to_string() } else { s }
-    };
-    let cred_ref = command.credential_ref.clone();
-    let api_key = if sub == "searxng" {
-        String::new()
-    } else {
-        match &cred_ref {
-            Some(r) if !r.is_empty() => match credentials::redeem_field(r, "api_key").await {
-                Ok(Some(k)) => k,
-                Ok(None) => return Err(Box::new(common::fail(command, "AGENCY_SERPER_NO_API_KEY", false))),
-                Err(e) => return Err(Box::new(common::fail(command, format!("AGENCY_SERPER_CRED_{e}"), true))),
-            },
-            _ => return Err(Box::new(common::fail(command, "AGENCY_SERPER_CRED_MISSING", false))),
-        }
-    };
     let searxng_url = {
         let u = common::s(command, "searxng_url");
         if !u.is_empty() {
@@ -164,35 +172,38 @@ async fn discover_search(
             std::env::var("SEARXNG_URL").unwrap_or_else(|_| "http://searxng:8080".to_string())
         }
     };
+    let hits = search_searxng(&searxng_url, &query).await;
+    Ok(hits_to_companies(hits, max_results, titles, "searxng"))
+}
 
-    let hits = if sub == "searxng" {
-        search_searxng(&searxng_url, &query).await
-    } else {
-        search_serper(&api_key, &query).await
+// ── serper (paid Google API) ─────────────────────────────────────────────────
+
+async fn discover_serper(
+    command: &ActionCommand,
+    max_results: usize,
+    titles: &[String],
+) -> Result<Vec<Value>, Box<ExecutionResult>> {
+    let query = common::s(command, "query");
+    if query.trim().is_empty() {
+        return Err(Box::new(common::fail(command, "SERPER_QUERY_MISSING", false)));
+    }
+    let cred_ref = command.credential_ref.clone();
+    let api_key = match &cred_ref {
+        Some(r) if !r.is_empty() => match credentials::redeem_field(r, "api_key").await {
+            Ok(Some(k)) => k,
+            Ok(None) => return Err(Box::new(common::fail(command, "SERPER_NO_API_KEY", false))),
+            Err(e) => return Err(Box::new(common::fail(command, format!("SERPER_CRED_{e}"), true))),
+        },
+        _ => return Err(Box::new(common::fail(command, "SERPER_CRED_MISSING", false))),
     };
+    let hits = search_serper(&api_key, &query).await;
     if let Some(r) = &cred_ref {
         credentials::release(r).await;
     }
-
-    let mut seen: HashSet<String> = HashSet::new();
-    let mut out: Vec<Value> = Vec::new();
-    for (url, title) in hits {
-        if out.len() >= max_results {
-            break;
-        }
-        // Derive an agency name from the result title (strip directory chrome).
-        let name = clean_agency_name(&title);
-        let domain = root_domain(&url);
-        let key = if domain.is_empty() { name.to_lowercase() } else { domain.clone() };
-        if name.is_empty() || !seen.insert(key) {
-            continue;
-        }
-        out.push(company_row(&name, &url, "Marketing & Advertising", &title, titles, "agency_search"));
-    }
-    Ok(out)
+    Ok(hits_to_companies(hits, max_results, titles, "serper"))
 }
 
-// ── apollo provider (organization search REST) ───────────────────────────────
+// ── apollo (organization search REST) ────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct ApolloOrg {
@@ -272,14 +283,14 @@ async fn discover_apollo(
                 }
                 let s = r.status();
                 let retriable = s.is_server_error();
-                return Err(Box::new(common::fail(command, format!("AGENCY_APOLLO_HTTP_{}", s.as_u16()), retriable)));
+                return Err(Box::new(common::fail(command, format!("APOLLO_HTTP_{}", s.as_u16()), retriable)));
             }
             Err(e) => {
                 if let Some(rf) = &cred_ref {
                     credentials::release(rf).await;
                 }
                 tracing::warn!(error = %e, "apollo request failed");
-                return Err(Box::new(common::fail(command, "AGENCY_APOLLO_NETWORK_ERROR", true)));
+                return Err(Box::new(common::fail(command, "APOLLO_NETWORK_ERROR", true)));
             }
         }
     };
@@ -302,7 +313,7 @@ async fn discover_apollo(
     Ok(out)
 }
 
-// ── clutch provider (Camoufox directory scrape) ──────────────────────────────
+// ── clutch (Camoufox directory scrape) ───────────────────────────────────────
 
 #[derive(Deserialize)]
 struct DirectoryEntry {
@@ -344,18 +355,18 @@ async fn discover_clutch(
         Ok(r) => {
             let s = r.status();
             let retriable = s.is_server_error() || s.as_u16() == 429;
-            return Err(Box::new(common::fail(command, format!("AGENCY_CLUTCH_HTTP_{}", s.as_u16()), retriable)));
+            return Err(Box::new(common::fail(command, format!("CLUTCH_HTTP_{}", s.as_u16()), retriable)));
         }
         Err(e) => {
             tracing::warn!(error = %e, "clutch camoufox request failed");
-            return Err(Box::new(common::fail(command, "AGENCY_CLUTCH_NETWORK_ERROR", true)));
+            return Err(Box::new(common::fail(command, "CLUTCH_NETWORK_ERROR", true)));
         }
     };
     let parsed: DirectoryResponse = match resp.json().await {
         Ok(p) => p,
         Err(e) => {
             tracing::warn!(error = %e, "clutch camoufox parse failed");
-            return Err(Box::new(common::fail(command, "AGENCY_CLUTCH_PARSE_ERROR", true)));
+            return Err(Box::new(common::fail(command, "CLUTCH_PARSE_ERROR", true)));
         }
     };
 
@@ -376,7 +387,7 @@ async fn discover_clutch(
     Ok(out)
 }
 
-// ── search helpers (mirrors serper_people's implementations) ─────────────────
+// ── search helpers (mirror serper_people's implementations) ──────────────────
 
 async fn search_serper(api_key: &str, pattern: &str) -> Vec<(String, String)> {
     let body = json!({"q": pattern, "num": 20});
@@ -412,11 +423,11 @@ async fn search_serper(api_key: &str, pattern: &str) -> Vec<(String, String)> {
                 continue;
             }
             Ok(r) => {
-                tracing::warn!(status = %r.status(), "agency serper failed");
+                tracing::warn!(status = %r.status(), "discovery serper failed");
                 return Vec::new();
             }
             Err(e) => {
-                tracing::warn!(error = %e, "agency serper request failed");
+                tracing::warn!(error = %e, "discovery serper request failed");
                 return Vec::new();
             }
         }
@@ -449,11 +460,11 @@ async fn search_searxng(base_url: &str, pattern: &str) -> Vec<(String, String)> 
                 .unwrap_or_default()
         }
         Ok(r) => {
-            tracing::warn!(status = %r.status(), "agency searxng failed");
+            tracing::warn!(status = %r.status(), "discovery searxng failed");
             Vec::new()
         }
         Err(e) => {
-            tracing::warn!(error = %e, "agency searxng request failed");
+            tracing::warn!(error = %e, "discovery searxng request failed");
             Vec::new()
         }
     }

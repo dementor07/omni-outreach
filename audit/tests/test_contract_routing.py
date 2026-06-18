@@ -49,7 +49,6 @@ from app.nodes import NodeCategory, SideEffect, discover, manifests  # noqa: E40
 # resolved by a different mechanism than node_type lookup. These are the
 # explicitly-wired exceptions; anything else must be in NODE_CHANNEL.
 LOCALLY_RESOLVED = {
-    "source.serper",      # emits http_call.requested -> dispatcher routes via payload.channel
     "source.csv",         # self-contained: does its own fetch, emits projection events
     "source.webhook_in",  # passive declaration (listener lives in an HTTP route)
 }

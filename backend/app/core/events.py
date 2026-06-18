@@ -53,7 +53,12 @@ class ChannelType(StrEnum):
     SERPER_PEOPLE = "serper_people"  # Multi-pattern per-company Serper LinkedIn search
     NAUKRI = "naukri"  # Camoufox-driven Naukri.com job scrape (source.naukri)
     INDEED = "indeed"  # Apify-driven Indeed.com job scrape (source.indeed)
-    AGENCY = "agency"  # Agency/company discovery: search/apollo/clutch (source.agency)
+    # Company-discovery sources — each a distinct product, its own channel.
+    SEARXNG = "searxng"  # Free SearXNG meta-search dorks (source.searxng)
+    SERPER_SEARCH = "serper_search"  # Serper paid Google API dorks (source.serper_search)
+    APOLLO = "apollo"  # Apollo organization-search API (source.apollo)
+    CLUTCH = "clutch"  # Clutch directory scrape via Camoufox (source.clutch)
+    SEARXNG_PEOPLE = "searxng_people"  # Free SearXNG per-company people search (source.searxng_people)
 
 
 class EventType(StrEnum):

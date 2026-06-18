@@ -80,11 +80,15 @@ _NODE_COLUMNS: dict[str, tuple[ColumnSpec, ...]] = {
         ColumnSpec("role_count", "Roles", "item.role_count", "number"),
         ColumnSpec("source_url", "Posting", "item.source_url", "url"),
     ),
-    "source.agency": (
-        ColumnSpec("company_name", "Agency", "item.company_name", "text"),
-        ColumnSpec("company_url", "Website", "item.company_url", "url"),
-        ColumnSpec("industry", "Industry", "item.industry", "text"),
-    ),
+    # Company-discovery sources all land the same agency/company columns.
+    **{
+        src: (
+            ColumnSpec("company_name", "Company", "item.company_name", "text"),
+            ColumnSpec("company_url", "Website", "item.company_url", "url"),
+            ColumnSpec("industry", "Industry", "item.industry", "text"),
+        )
+        for src in ("source.searxng", "source.serper_search", "source.apollo", "source.clutch")
+    },
     "crm.resolve_company": (
         ColumnSpec("signal_score", "Signal", "company_resolution.signal_score", "number"),
         ColumnSpec("screening", "Screening", "company_resolution.screening_status", "badge"),
@@ -136,9 +140,13 @@ _PIPELINE_ORDER: tuple[str, ...] = (
     "source.naukri",
     "source.linkedin_jobs",
     "source.indeed",
-    "source.agency",
+    "source.searxng",
+    "source.serper_search",
+    "source.apollo",
+    "source.clutch",
     "crm.resolve_company",
     "source.serper_people",
+    "source.searxng_people",
     "condition.verify_person",
     "ai.screen_person",
     "crm.create_contact",

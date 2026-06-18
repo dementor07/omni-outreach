@@ -87,12 +87,25 @@ pub enum ChannelType {
     /// by `source.indeed`.
     #[serde(rename = "indeed")]
     Indeed,
-    /// Agency / company discovery ("Auto-Pilot Target Mining"). One handler,
-    /// three providers (search dorks / Apollo org search / Clutch Camoufox
-    /// scrape); all write the company-row list to
-    /// `lead_mutations.custom_fields[companies_key]`. Used by `source.agency`.
-    #[serde(rename = "agency")]
-    Agency,
+    // Company-discovery sources. Each is a distinct product (own setup/credential),
+    // so each is its own channel — NOT a `provider` toggle on one node. All four
+    // write the company-row list to `lead_mutations.custom_fields[companies_key]`
+    // via the shared handlers::discovery module.
+    /// Free self-hosted SearXNG meta-search dorks (no credential). source.searxng.
+    #[serde(rename = "searxng")]
+    Searxng,
+    /// Serper paid Google API dorks (api_key). source.serper_search.
+    #[serde(rename = "serper_search")]
+    SerperSearch,
+    /// Apollo organization-search API (api_key, optional). source.apollo.
+    #[serde(rename = "apollo")]
+    Apollo,
+    /// Clutch directory scrape via Camoufox (no credential). source.clutch.
+    #[serde(rename = "clutch")]
+    Clutch,
+    /// Free SearXNG per-company people search (no credential). source.searxng_people.
+    #[serde(rename = "searxng_people")]
+    SearxngPeople,
     /// Any channel value the worker doesn't recognise. Deserializes here
     /// instead of failing the whole command at parse time, so dispatch can
     /// return a clean, debuggable error.
@@ -128,7 +141,11 @@ impl ChannelType {
             ChannelType::SerperPeople => "serper_people",
             ChannelType::Naukri => "naukri",
             ChannelType::Indeed => "indeed",
-            ChannelType::Agency => "agency",
+            ChannelType::Searxng => "searxng",
+            ChannelType::SerperSearch => "serper_search",
+            ChannelType::Apollo => "apollo",
+            ChannelType::Clutch => "clutch",
+            ChannelType::SearxngPeople => "searxng_people",
             ChannelType::Unknown => "unknown",
         }
     }

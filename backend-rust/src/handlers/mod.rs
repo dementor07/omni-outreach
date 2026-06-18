@@ -5,11 +5,11 @@
 //! deployed ahead of the worker) and returns a clean error instead of
 //! silently dropping the command.
 
-pub mod agency;
 pub mod ai_screen;
 pub mod alert;
 pub mod apify;
 pub mod common;
+pub mod discovery;
 pub mod email;
 pub mod enrich;
 pub mod http_call;
@@ -49,10 +49,17 @@ pub async fn dispatch(command: &ActionCommand) -> ExecutionResult {
         ChannelType::Apify => apify::handle_apify(command).await,
         ChannelType::AiScreen => ai_screen::handle_ai_screen(command).await,
         ChannelType::AiClassify => transform::handle_ai_classify(command).await,
+        // People discovery: two distinct nodes (serper paid / searxng free), one
+        // shared multi-pattern handler that reads the provider the node emits.
         ChannelType::SerperPeople => serper_people::handle_serper_people(command).await,
+        ChannelType::SearxngPeople => serper_people::handle_serper_people(command).await,
         ChannelType::Naukri => naukri::handle_naukri(command).await,
         ChannelType::Indeed => indeed::handle_indeed(command).await,
-        ChannelType::Agency => agency::handle_agency(command).await,
+        // Company discovery: four distinct source channels, shared handler module.
+        ChannelType::Searxng => discovery::handle_searxng(command).await,
+        ChannelType::SerperSearch => discovery::handle_serper_search(command).await,
+        ChannelType::Apollo => discovery::handle_apollo(command).await,
+        ChannelType::Clutch => discovery::handle_clutch(command).await,
         ChannelType::Unknown => {
             common::fail(command, format!("UNKNOWN_CHANNEL_{}", command.channel.as_str()), false)
         }

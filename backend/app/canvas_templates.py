@@ -61,10 +61,8 @@ _AGENCY_MINING = CampaignTemplate(
     name="Auto-Pilot: Agency Mining",
     summary="Discover B2B lead-gen agencies (free, keyless), find their founders, verify, and add to the CRM. Wire your outbound sequence onto the result.",
     nodes=(
-        TemplateNode("src", "source.agency", 0, 200, {
-            "provider": "search",
+        TemplateNode("src", "source.searxng", 0, 200, {
             "query": "site:clutch.co lead generation agency",
-            "search_provider": "searxng",
             "titles": list(_AGENCY_TITLES),
             "max_results": 25,
             "companies_key": "companies",
@@ -73,8 +71,7 @@ _AGENCY_MINING = CampaignTemplate(
             "items_key": "companies", "item_field": "item", "max_items": 25,
         }),
         TemplateNode("resolve", "crm.resolve_company", 640, 200, {"item_field": "item"}),
-        TemplateNode("people", "source.serper_people", 960, 200, {
-            "provider": "searxng",
+        TemplateNode("people", "source.searxng_people", 960, 200, {
             "company_field": "item",
             "titles": list(_AGENCY_TITLES),
             "max_per_company": 3,

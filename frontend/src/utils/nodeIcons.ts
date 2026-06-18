@@ -61,7 +61,12 @@ const ICON_BY_TYPE: Record<string, LucideIcon> = {
   'source.indeed': Briefcase,
   'source.linkedin_jobs': Linkedin,
   'source.serper_people': Users,
-  'source.agency': Target,
+  'source.searxng_people': Users,
+  // Company-discovery sources — each its own product.
+  'source.searxng': Search,
+  'source.serper_search': Search,
+  'source.apollo': Target,
+  'source.clutch': Building2,
   'channel.telegram': Send,
   'channel.slack': Slack,
   'ai.compose': Sparkles,

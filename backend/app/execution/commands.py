@@ -58,10 +58,16 @@ NODE_CHANNEL: dict[str, ChannelType] = {
     "source.naukri": ChannelType.NAUKRI,
     # Apify-driven Indeed.com jobs source (curious_coder/indeed-scraper actor).
     "source.indeed": ChannelType.INDEED,
-    # Per-company Serper search (multi-pattern x titles, dedupe).
+    # Per-company people search (multi-pattern x titles, dedupe) — two distinct
+    # nodes (paid Serper / free SearXNG), shared Rust handler.
     "source.serper_people": ChannelType.SERPER_PEOPLE,
-    # Agency/company discovery — Auto-Pilot Target Mining (search/apollo/clutch).
-    "source.agency": ChannelType.AGENCY,
+    "source.searxng_people": ChannelType.SEARXNG_PEOPLE,
+    # Company discovery — Auto-Pilot Target Mining. Four distinct sources, each
+    # its own product/setup, NOT a provider toggle (handlers/discovery.rs).
+    "source.searxng": ChannelType.SEARXNG,
+    "source.serper_search": ChannelType.SERPER_SEARCH,
+    "source.apollo": ChannelType.APOLLO,
+    "source.clutch": ChannelType.CLUTCH,
     # Every declarative HTTP node (sources built via http_node) routes to the
     # generic handler. The dispatcher detects these by the emitted intent
     # carrying channel="http_call".
