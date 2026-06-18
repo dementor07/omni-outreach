@@ -87,6 +87,12 @@ pub enum ChannelType {
     /// by `source.indeed`.
     #[serde(rename = "indeed")]
     Indeed,
+    /// Agency / company discovery ("Auto-Pilot Target Mining"). One handler,
+    /// three providers (search dorks / Apollo org search / Clutch Camoufox
+    /// scrape); all write the company-row list to
+    /// `lead_mutations.custom_fields[companies_key]`. Used by `source.agency`.
+    #[serde(rename = "agency")]
+    Agency,
     /// Any channel value the worker doesn't recognise. Deserializes here
     /// instead of failing the whole command at parse time, so dispatch can
     /// return a clean, debuggable error.
@@ -122,6 +128,7 @@ impl ChannelType {
             ChannelType::SerperPeople => "serper_people",
             ChannelType::Naukri => "naukri",
             ChannelType::Indeed => "indeed",
+            ChannelType::Agency => "agency",
             ChannelType::Unknown => "unknown",
         }
     }

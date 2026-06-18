@@ -19,6 +19,7 @@ routers with one shape.
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from datetime import datetime
@@ -146,6 +147,76 @@ async def create_workflow(body: WorkflowCreate, ctx: AuthContext = Depends(get_c
         body.timezone,
     )
     return WorkflowOut.model_validate(row)
+
+
+class TemplateInstantiate(BaseModel):
+    template_id: str = Field(min_length=1, max_length=120)
+    name: str | None = Field(None, min_length=1, max_length=200)
+    timezone: str = Field("UTC", max_length=64)
+
+
+@router.get("/templates", summary="List starter campaign templates")
+async def list_campaign_templates(_: AuthContext = Depends(get_current_workspace)) -> list[dict[str, str]]:
+    from app.canvas_templates import list_templates
+
+    return list_templates()
+
+
+@router.post(
+    "/workflows/from-template",
+    response_model=WorkflowDetail,
+    status_code=201,
+    summary="Create a workflow pre-seeded from a starter template (cold-start fix)",
+)
+async def create_from_template(
+    body: TemplateInstantiate, ctx: AuthContext = Depends(get_current_workspace)
+) -> WorkflowDetail:
+    from app.canvas_templates import TEMPLATES
+
+    tpl = TEMPLATES.get(body.template_id)
+    if not tpl:
+        raise HTTPException(status_code=404, detail=f"unknown template {body.template_id!r}")
+
+    # Assign fresh UUIDs, mapping each template node key -> real id so edges
+    # resolve. One transaction: workflow + nodes + edges (mirrors save_graph).
+    key_to_id = {n.key: uuid.uuid4() for n in tpl.nodes}
+    async with acquire() as conn:
+        async with conn.transaction():
+            wf = await conn.fetchrow(
+                "INSERT INTO omni_workflows (workspace_id, name, timezone) VALUES ($1, $2, $3) RETURNING *",
+                ctx.workspace_id, body.name or tpl.name, body.timezone,
+            )
+            wf_id = wf["id"]
+            for n in tpl.nodes:
+                await conn.execute(
+                    """
+                    INSERT INTO omni_workflow_nodes
+                      (id, workspace_id, workflow_id, node_type, position_x, position_y, config)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+                    """,
+                    key_to_id[n.key], ctx.workspace_id, wf_id, n.node_type,
+                    n.position_x, n.position_y, json.dumps(n.config),
+                )
+            for e in tpl.edges:
+                src, tgt = key_to_id.get(e.source), key_to_id.get(e.target)
+                if not src or not tgt:
+                    continue
+                await conn.execute(
+                    """
+                    INSERT INTO omni_workflow_edges
+                      (id, workspace_id, workflow_id, source_node_id, target_node_id, source_handle, target_handle)
+                    VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)
+                    """,
+                    ctx.workspace_id, wf_id, src, tgt, e.source_handle, e.target_handle,
+                )
+            nodes = await conn.fetch("SELECT * FROM omni_workflow_nodes WHERE workflow_id = $1", wf_id)
+            edges = await conn.fetch("SELECT * FROM omni_workflow_edges WHERE workflow_id = $1", wf_id)
+
+    return WorkflowDetail(
+        workflow=WorkflowOut.model_validate(dict(wf)),
+        nodes=[NodeOut.model_validate(dict(n)) for n in nodes],
+        edges=[EdgeOut.model_validate(dict(e)) for e in edges],
+    )
 
 
 @router.get("/workflows/{workflow_id}", response_model=WorkflowDetail, summary="Fetch a workflow with all its nodes and edges")

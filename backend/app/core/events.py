@@ -53,6 +53,7 @@ class ChannelType(StrEnum):
     SERPER_PEOPLE = "serper_people"  # Multi-pattern per-company Serper LinkedIn search
     NAUKRI = "naukri"  # Camoufox-driven Naukri.com job scrape (source.naukri)
     INDEED = "indeed"  # Apify-driven Indeed.com job scrape (source.indeed)
+    AGENCY = "agency"  # Agency/company discovery: search/apollo/clutch (source.agency)
 
 
 class EventType(StrEnum):

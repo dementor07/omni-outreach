@@ -5,6 +5,7 @@
 //! deployed ahead of the worker) and returns a clean error instead of
 //! silently dropping the command.
 
+pub mod agency;
 pub mod ai_screen;
 pub mod alert;
 pub mod apify;
@@ -51,6 +52,7 @@ pub async fn dispatch(command: &ActionCommand) -> ExecutionResult {
         ChannelType::SerperPeople => serper_people::handle_serper_people(command).await,
         ChannelType::Naukri => naukri::handle_naukri(command).await,
         ChannelType::Indeed => indeed::handle_indeed(command).await,
+        ChannelType::Agency => agency::handle_agency(command).await,
         ChannelType::Unknown => {
             common::fail(command, format!("UNKNOWN_CHANNEL_{}", command.channel.as_str()), false)
         }

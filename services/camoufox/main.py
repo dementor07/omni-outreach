@@ -163,6 +163,23 @@ class CrawlTeamResponse(BaseModel):
     pages_crawled: list[str]
 
 
+class DirectoryRequest(BaseModel):
+    url: str  # a directory category page, e.g. https://clutch.co/agencies/lead-generation
+    max_results: int = 25
+
+
+class DirectoryEntry(BaseModel):
+    name: str
+    url: str = ""
+    description: str = ""
+
+
+class DirectoryResponse(BaseModel):
+    status: str
+    data: list[DirectoryEntry]
+    count: int
+
+
 # ── Endpoints ───────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
@@ -295,6 +312,68 @@ async def crawl_team(req: CrawlTeamRequest, x_internal_secret: str | None = Head
                         break
         log.info("Team crawl of %s: %d people across %d pages", base, len(people), len(crawled))
         return CrawlTeamResponse(people=list(people.values()), pages_crawled=crawled)
+    finally:
+        await page.close()
+
+
+@app.post("/scrape_directory", response_model=DirectoryResponse)
+async def scrape_directory(req: DirectoryRequest, x_internal_secret: str | None = Header(None)):
+    """Render a B2B agency directory category page (e.g. Clutch) and extract the
+    listed companies' names + outbound website URLs.
+
+    Clutch (and similar directories) render provider cards client-side, so a
+    plain HTTP fetch sees an empty shell — Camoufox renders the full DOM. We
+    target Clutch's provider-row markup first, then fall back to a tolerant
+    heading + outbound-link heuristic so a CSS change doesn't zero the scrape."""
+    _require_secret(x_internal_secret)
+    browser = await get_browser()
+    page = await browser.new_page()
+    try:
+        log.info("Scraping directory: %s", req.url)
+        await page.goto(req.url, wait_until="domcontentloaded", timeout=30000)
+        await page.wait_for_timeout(2500)
+        # Trigger lazy-loaded cards by scrolling the page a few times.
+        for _ in range(4):
+            await page.mouse.wheel(0, 4000)
+            await page.wait_for_timeout(800)
+        html = await page.content()
+        soup = BeautifulSoup(html, "lxml")
+
+        entries: dict[str, DirectoryEntry] = {}
+
+        # 1. Clutch provider rows (primary path).
+        for li in soup.select("li.provider-row, li.provider, div.provider-info"):
+            title_link = li.select_one(".provider__title-link, a.company_title, h3 a, h3")
+            if not title_link:
+                continue
+            name = title_link.get_text(strip=True)
+            website = ""
+            site = li.select_one('a.website-link__item, a[data-link-type="profile-visit-website"], a[rel*="nofollow"]')
+            if site and site.get("href"):
+                website = str(site.get("href")).split("?")[0]
+            if name and len(name) <= 120:
+                entries.setdefault(name.lower(), DirectoryEntry(name=name, url=website))
+
+        # 2. Fallback heuristic — outbound links whose anchor text reads like a
+        #    company name, when the provider-row markup didn't match.
+        if not entries:
+            for a in soup.select("a[href]"):
+                href = str(a.get("href", ""))
+                text = a.get_text(strip=True)
+                if (
+                    href.startswith("http")
+                    and "clutch.co" not in href
+                    and 2 <= len(text) <= 60
+                    and " " not in href.split("://", 1)[-1].split("/", 1)[0]
+                ):
+                    entries.setdefault(text.lower(), DirectoryEntry(name=text, url=href.split("?")[0]))
+
+        data = list(entries.values())[: req.max_results]
+        log.info("Directory scrape: %d agencies from %s", len(data), req.url)
+        return DirectoryResponse(status="success", data=data, count=len(data))
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Directory scrape failed for %s", req.url)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     finally:
         await page.close()
 

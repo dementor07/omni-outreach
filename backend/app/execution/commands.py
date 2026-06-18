@@ -60,6 +60,8 @@ NODE_CHANNEL: dict[str, ChannelType] = {
     "source.indeed": ChannelType.INDEED,
     # Per-company Serper search (multi-pattern x titles, dedupe).
     "source.serper_people": ChannelType.SERPER_PEOPLE,
+    # Agency/company discovery — Auto-Pilot Target Mining (search/apollo/clutch).
+    "source.agency": ChannelType.AGENCY,
     # Every declarative HTTP node (sources built via http_node) routes to the
     # generic handler. The dispatcher detects these by the emitted intent
     # carrying channel="http_call".

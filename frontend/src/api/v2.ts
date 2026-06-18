@@ -309,10 +309,21 @@ export interface RunResponse {
   events_published: number
 }
 
+export interface CampaignTemplateInfo {
+  id: string
+  name: string
+  summary: string
+}
+
 export const canvas = {
   list: () => api.get<Workflow[]>('/canvas/workflows').then((r) => r.data),
   create: (name: string, timezone = 'UTC') =>
     api.post<Workflow>('/canvas/workflows', { name, timezone }).then((r) => r.data),
+  templates: () => api.get<CampaignTemplateInfo[]>('/canvas/templates').then((r) => r.data),
+  createFromTemplate: (templateId: string, name?: string, timezone = 'UTC') =>
+    api
+      .post<WorkflowDetail>('/canvas/workflows/from-template', { template_id: templateId, name, timezone })
+      .then((r) => r.data),
   get: (id: UUID) => api.get<WorkflowDetail>(`/canvas/workflows/${id}`).then((r) => r.data),
   update: (id: UUID, body: Partial<Pick<Workflow, 'name' | 'status' | 'timezone' | 'start_at' | 'end_at'>>) =>
     api.patch<Workflow>(`/canvas/workflows/${id}`, body).then((r) => r.data),

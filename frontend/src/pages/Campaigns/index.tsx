@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Plus, Rocket, ChevronRight } from 'lucide-react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { Plus, Rocket, ChevronRight, Sparkles } from 'lucide-react'
 
 // Layout & UI Components
 import Badge from '../../components/Badge'
@@ -8,6 +9,8 @@ import Button from '../../components/Button'
 import PageHeader from '../../components/PageHeader'
 import Card from '../../components/Card'
 import Modal from '../../components/Modal'
+import { useToast } from '../../components/Toast'
+import { canvas } from '../../api/v2'
 
 // Hooks
 import { useCreateCampaign, useListCampaigns } from '../../hooks/useCampaigns'
@@ -39,10 +42,21 @@ const defaultCampaignForm: CampaignPayload = {
  */
 export default function Campaigns() {
   const navigate = useNavigate()
+  const toast = useToast()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const campaignsQuery = useListCampaigns()
   const createCampaign = useCreateCampaign()
+
+  const templatesQuery = useQuery({ queryKey: ['campaign-templates'], queryFn: canvas.templates })
+  const fromTemplate = useMutation({
+    mutationFn: (templateId: string) => canvas.createFromTemplate(templateId),
+    onSuccess: (detail) => {
+      setCreateOpen(false)
+      navigate(`/campaigns/${detail.workflow.id}`)
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not create from template'),
+  })
 
   const [createOpen, setCreateOpen] = useState(false)
   const [form, setForm] = useState<CampaignPayload>(defaultCampaignForm)
@@ -101,6 +115,39 @@ export default function Campaigns() {
       </section>
 
       <Modal title="Create Campaign" open={createOpen} onClose={() => setCreateOpen(false)}>
+        {/* Cold-start fix: start from a ready-to-run template instead of a blank
+            canvas. Picking one instantiates the graph and jumps to the editor. */}
+        {(templatesQuery.data?.length ?? 0) > 0 && (
+          <div className="mb-5">
+            <p className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              <Sparkles size={13} /> Start from a template
+            </p>
+            <div className="space-y-2">
+              {templatesQuery.data!.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  disabled={fromTemplate.isPending}
+                  onClick={() => fromTemplate.mutate(t.id)}
+                  className="flex w-full items-start gap-3 rounded-xl border border-slate-200 p-3 text-left transition-colors hover:border-brand-300 hover:bg-brand-50/40 disabled:opacity-60 dark:border-slate-700 dark:hover:border-brand-700 dark:hover:bg-brand-900/10"
+                >
+                  <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600 dark:bg-brand-900/30 dark:text-brand-300">
+                    <Rocket size={16} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-slate-900 dark:text-white">{t.name}</span>
+                    <span className="block text-xs text-slate-500">{t.summary}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 flex items-center gap-3">
+              <span className="h-px flex-1 bg-slate-100 dark:bg-slate-800" />
+              <span className="text-[11px] font-medium uppercase tracking-wider text-slate-400">or start blank</span>
+              <span className="h-px flex-1 bg-slate-100 dark:bg-slate-800" />
+            </div>
+          </div>
+        )}
         <CampaignForm
           form={form}
           onChange={setForm}

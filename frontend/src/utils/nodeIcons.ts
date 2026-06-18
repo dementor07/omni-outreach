@@ -61,6 +61,7 @@ const ICON_BY_TYPE: Record<string, LucideIcon> = {
   'source.indeed': Briefcase,
   'source.linkedin_jobs': Linkedin,
   'source.serper_people': Users,
+  'source.agency': Target,
   'channel.telegram': Send,
   'channel.slack': Slack,
   'ai.compose': Sparkles,
