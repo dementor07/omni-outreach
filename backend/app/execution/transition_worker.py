@@ -584,7 +584,7 @@ async def _terminalize_lead(
             "UPDATE omni_leads SET status=$1, current_node_id=NULL, updated_at=NOW() "
             "WHERE id=$2 AND workspace_id=$3 AND status NOT IN "
             "('completed','errored','cancelled','converted','ended') "
-            "RETURNING parent_lead_id, origin_node_id",
+            "RETURNING parent_lead_id, origin_node_id, workflow_id",
             status,
             lead_id,
             workspace_id,
@@ -600,6 +600,22 @@ async def _terminalize_lead(
                 join_arrival=join_arrival,
                 count=True,
             )
+        elif row.get("workflow_id"):
+            # OBJECTIVE HOOK (Slice 2b): a ROOT/run-lead just completed (no
+            # parent_lead_id = it's the campaign's seed, not a fan-out child).
+            # That's one full sourcing pass done — let the objective controller
+            # measure progress and, if short within bounds, re-seed a fresh run.
+            # Gated on the once-only claim (we're inside `if row:`), so it fires
+            # exactly once per completion, never on Kafka redelivery. Best-effort:
+            # a controller error must never wedge the terminalize claim.
+            try:
+                from app.services import objective_controller
+
+                await objective_controller.evaluate_on_completion(
+                    workspace_id, str(row["workflow_id"])
+                )
+            except Exception:  # noqa: BLE001
+                log.exception("objective controller failed for workflow %s", row.get("workflow_id"))
         return True
     # Already terminal — redelivery. Re-attempt the release check only.
     async with system_scope():

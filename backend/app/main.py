@@ -34,6 +34,7 @@ from app.routers import (
     nodes,
     oauth,
     oauth_producthunt,
+    objectives,
     projections,
     sources,
     suppression,
@@ -145,6 +146,7 @@ app.include_router(ai_studio.router, prefix="/ai", tags=["ai"])
 app.include_router(approvals.router, prefix="/approvals", tags=["approvals"])
 app.include_router(suppression.router, prefix="/suppression", tags=["suppression"])
 app.include_router(templates.router, prefix="/templates", tags=["templates"])
+app.include_router(objectives.router, prefix="/objectives", tags=["objectives"])
 
 # Inbound webhooks (source.webhook_in runtime). UNAUTHENTICATED by design —
 # external systems POST here; trust comes from the opaque ids + optional HMAC.
