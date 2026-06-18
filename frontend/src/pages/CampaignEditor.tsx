@@ -18,7 +18,6 @@ import {
 import { canvas, nodes as nodesApi, projections, type Lead, type NodeManifest, type WorkflowStatus } from '../api/v2'
 import { nodeIcon } from '../utils/nodeIcons'
 import { visualFor } from '../utils/nodeVisuals'
-import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
 import Button from '../components/Button'
@@ -254,12 +253,19 @@ export default function CampaignEditor() {
       position: { x: n.position_x, y: n.position_y },
       data: { manifest: manifestByType.get(n.node_type) ?? fallbackManifest(n.node_type), config: n.config },
     }))
+    // Handle ids MUST match what OmniNode actually renders, or React Flow
+    // silently drops the edge (it can't resolve the endpoint). The node renders
+    // its single source handle with id="default" and multi-output handles with
+    // id=<handle name>; its target handle has NO id (null). So: pass the source
+    // handle through verbatim (incl. "default"), and force the target to null.
+    // (The old code nulled "default" sources + kept non-default targets, which
+    // dropped every loaded edge — visible as a wired graph showing zero edges.)
     const wired: Edge[] = detailQuery.data.edges.map((e) => ({
       id: e.id,
       source: e.source_node_id,
       target: e.target_node_id,
-      sourceHandle: e.source_handle === 'default' ? null : e.source_handle,
-      targetHandle: e.target_handle === 'default' ? null : e.target_handle,
+      sourceHandle: e.source_handle || 'default',
+      targetHandle: null,
       type: 'omni',
     }))
     setRfNodes(placed)
@@ -501,50 +507,46 @@ export default function CampaignEditor() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-130px)] flex-col gap-4">
-      <PageHeader
-        screenLabel="Campaign builder"
-        eyebrow="Campaign builder"
-        title={wf?.name ?? 'Campaign'}
-        description="Manage your multi-channel outreach flows and lead pipelines."
-        actions={
-          <Link to="/campaigns" className="inline-flex h-9 items-center gap-2 rounded-lg px-3.5 text-sm font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800">
-            <ArrowLeft size={15} /> Back to campaigns
+    <div className="flex h-[calc(100vh-90px)] flex-col gap-2" data-screen-label="Campaign builder">
+      {/* Compact editor header — a single slim bar (back + name + status + tabs),
+          not the tall PageHeader the scrolling pages use. The editor is a
+          fixed-viewport canvas tool, so every row above the canvas is height
+          stolen from the graph. */}
+      <div className="flex items-center justify-between gap-3 border-b border-slate-200/80 pb-2 dark:border-slate-800">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <Link to="/campaigns" title="Back to campaigns" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800">
+            <ArrowLeft size={16} />
           </Link>
-        }
-        meta={
-          wf && (
-            <div className="flex items-center gap-2">
-              <Badge variant={wf.status === 'active' ? 'success' : wf.status === 'paused' ? 'warning' : 'neutral'} label={wf.status} dot />
-              <span className="text-[11px] text-slate-500">{wf.timezone}</span>
-              <span className="text-slate-300">·</span>
-              <span className="text-[11px] text-slate-500">{rfNodes.length} nodes · {rfEdges.length} edges</span>
+          <h1 className="truncate text-[17px] font-semibold tracking-tight text-slate-900 dark:text-white">{wf?.name ?? 'Campaign'}</h1>
+          {wf && (
+            <div className="flex shrink-0 items-center gap-2">
+              <Badge variant={wf.status === 'active' ? 'success' : wf.status === 'paused' ? 'warning' : 'neutral'} label={wf.status} dot size="xs" />
+              <span className="hidden text-[11px] text-slate-400 sm:inline">{wf.timezone} · {rfNodes.length} nodes · {rfEdges.length} edges</span>
               {dirty && <Badge variant="warning" label="unsaved" size="xs" />}
             </div>
-          )
-        }
-      />
-
-      <Tabs
-        value={activeTab}
-        onChange={(v) => setActiveTab(v)}
-        items={[
-          { value: 'sequence', label: 'Sequence', icon: GitBranch },
-          { value: 'goal', label: 'Goal', icon: Target },
-          { value: 'leads', label: 'Leads', icon: Users },
-          { value: 'settings', label: 'Settings', icon: SettingsIcon },
-        ]}
-      />
+          )}
+        </div>
+        <div className="shrink-0">
+          <Tabs
+            value={activeTab}
+            onChange={(v) => setActiveTab(v)}
+            items={[
+              { value: 'sequence', label: 'Sequence', icon: GitBranch },
+              { value: 'goal', label: 'Goal', icon: Target },
+              { value: 'leads', label: 'Leads', icon: Users },
+              { value: 'settings', label: 'Settings', icon: SettingsIcon },
+            ]}
+          />
+        </div>
+      </div>
 
       <div className="flex-1 overflow-hidden">
         <main className="relative h-full overflow-hidden">
           {activeTab === 'sequence' && (
             <div className="flex h-full flex-col">
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <h2 className="text-[15px] font-semibold text-slate-900 dark:text-white">Sequence builder</h2>
-                  <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">Design your outreach workflow.</p>
-                </div>
+              {/* Compact toolbar row — the tab already says "Sequence", so the
+                  big heading + subtitle were just stealing canvas height. */}
+              <div className="mb-2 flex items-center justify-end">
                 <div className="flex bg-slate-100 rounded-lg p-1 dark:bg-slate-800">
                   <button
                     type="button"
@@ -760,7 +762,9 @@ function fallbackManifest(type: string): NodeManifest {
 // ── In-canvas palette ────────────────────────────────────────────────────────
 function NodePalette({ manifests, loading, onAdd }: { manifests: NodeManifest[]; loading: boolean; onAdd: (m: NodeManifest) => void }) {
   const [filter, setFilter] = useState('')
-  const [open, setOpen] = useState(true)
+  // Default COLLAPSED to the slim rail so the canvas gets the full width on load
+  // (the palette is only needed while adding nodes). Expand on demand.
+  const [open, setOpen] = useState(false)
 
   const grouped = useMemo(() => {
     const filtered = filter
@@ -790,7 +794,7 @@ function NodePalette({ manifests, loading, onAdd }: { manifests: NodeManifest[];
   }
 
   return (
-    <div className="flex h-full w-64 flex-shrink-0 flex-col overflow-hidden border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+    <div className="absolute left-0 top-0 z-30 flex h-full w-64 flex-col overflow-hidden border-r border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2.5 dark:border-slate-800">
         <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Add node</p>
         <button type="button" onClick={() => setOpen(false)} title="Collapse palette" className="text-slate-300 hover:text-slate-500"><Minimize2 size={12} /></button>
