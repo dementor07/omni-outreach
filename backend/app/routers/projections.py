@@ -8,6 +8,7 @@ Mutation = publishing an event.
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
 from decimal import Decimal
@@ -17,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.auth import AuthContext, get_current_workspace
-from app.db import fetch_all, fetch_one
+from app.db import fetch_all, fetch_one, system_scope
 from app.execution import lead_columns
 from app.services.bus import publish_event
 
@@ -225,6 +226,179 @@ async def delete_lead(
     lead_id: uuid.UUID, ctx: AuthContext = Depends(get_current_workspace)
 ) -> None:
     await _delete_entity(ctx, table="omni_leads", entity_type="lead", entity_id=lead_id)
+
+
+# ── Lead journey (per-lead reconstruction of the distributed run) ─────────────
+# A lead's story is normally scattered across dispatcher/muscle/Flink/transitions
+# /projector. app/tools/trace.py stitches it back from correlation_id; this is
+# the same reconstruction exposed as an HTTP read, but lead-scoped: a lead does
+# not carry its correlation_id directly, so we find it via the lead's archived
+# events (entity_id = lead_id), then assemble timeline + lineage + AI cost.
+class JourneyEvent(BaseModel):
+    occurred_at: datetime
+    event_type: str
+    node_id: uuid.UUID | None
+    node_label: str | None  # human node_type, e.g. "verify_person", not a UUID
+
+
+class LineageLead(BaseModel):
+    id: uuid.UUID
+    identity: str
+    status: str
+    stage: str
+
+
+class JourneyCost(BaseModel):
+    total_usd: float
+    by_kind: dict[str, float]
+    calls: int
+
+
+class LeadJourneyOut(BaseModel):
+    lead: LeadOut
+    parent: LineageLead | None
+    children: list[LineageLead]
+    timeline: list[JourneyEvent]
+    cost: JourneyCost
+    status_reason: str
+
+
+def _lineage_lead(row: dict[str, Any]) -> LineageLead:
+    cf = row.get("custom_fields") or {}
+    if isinstance(cf, str):
+        cf = json.loads(cf)
+    identity = lead_columns.lead_identity(cf, None, str(row["id"]))
+    stage = lead_columns.lead_stage(cf, has_contact=row.get("contact_id") is not None)
+    return LineageLead(id=row["id"], identity=identity, status=row["status"], stage=stage)
+
+
+# Human, status-specific explanation of where a lead is and why. Pure derivation
+# over the lead row + its fan-out node type + last event — so the drawer answers
+# "why is this stuck?" instead of just showing a status word.
+def _status_reason(lead: dict[str, Any], origin_type: str | None, last_event: str | None) -> str:
+    status = lead.get("status") or "active"
+    if status == "waiting":
+        total = lead.get("fanout_total") or 0
+        done = lead.get("fanout_done") or 0
+        if total and total > 0:
+            kind = "branches" if origin_type == "flow.race" else "child leads"
+            return f"Parked at a {origin_type or 'fan-out'} node — waiting for {done}/{total} {kind} to finish."
+        return "Parked (waiting for a delay/approval/schedule window before the next step)."
+    if status == "errored":
+        return "A node failed and no on-error path was wired; the lead stopped here."
+    if status == "suppressed":
+        return "Recipient is on the suppression list (unsubscribe / do-not-contact) — no message was sent."
+    if status == "converted":
+        return "Reached a goal node — counted as a conversion."
+    if status == "ended":
+        return "Reached the end of its sequence (or the campaign's end date passed)."
+    if status == "cancelled":
+        return "Cancelled — a sibling branch won a race, or the run was stopped."
+    if status == "completed":
+        return "Finished its sequence with nothing left to do."
+    # active
+    if last_event:
+        return f"In flight — last action: {last_event}."
+    return "In flight."
+
+
+@router.get(
+    "/leads/{lead_id}/journey",
+    response_model=LeadJourneyOut,
+    summary="Reconstruct one lead's full journey: timeline, lineage, cost, why-stuck",
+)
+async def lead_journey(
+    lead_id: uuid.UUID, _: AuthContext = Depends(get_current_workspace)
+) -> LeadJourneyOut:
+    async with system_scope():
+        lead = await fetch_one(
+            """
+            SELECT l.id, l.contact_id, l.workflow_id, l.current_node_id, l.status,
+                   l.custom_fields, l.created_at, l.updated_at,
+                   l.parent_lead_id, l.origin_node_id, l.fanout_total, l.fanout_done,
+                   c.first_name AS c_first_name, c.last_name AS c_last_name,
+                   c.email AS c_email, c.company AS c_company, c.headline AS c_headline,
+                   c.linkedin_url AS c_linkedin_url, c.phone AS c_phone
+            FROM omni_leads l
+            LEFT JOIN omni_contacts c ON c.id = l.contact_id AND c.workspace_id = l.workspace_id
+            WHERE l.id = $1
+            """,
+            lead_id,
+        )
+    if not lead:
+        raise HTTPException(status_code=404, detail="lead not found")
+    lead = dict(lead)
+
+    # Timeline: every archived event whose entity is this lead, oldest first,
+    # with the node UUID resolved to its human node_type. (idx on entity.)
+    async with system_scope():
+        events = await fetch_all(
+            """
+            SELECT a.occurred_at, a.event_type, a.payload, a.correlation_id,
+                   n.node_type AS node_label
+            FROM omni_events_archive a
+            LEFT JOIN omni_workflow_nodes n
+                   ON n.id = NULLIF(a.payload->>'node_id', '')::uuid
+            WHERE a.entity_type = 'lead' AND a.entity_id = $1
+            ORDER BY a.occurred_at ASC, a.kafka_offset ASC
+            """,
+            lead_id,
+        )
+        # Lineage — parent (if a fan-out child) + direct children (fan-out).
+        parent_row = None
+        if lead.get("parent_lead_id"):
+            parent_row = await fetch_one(
+                "SELECT id, status, contact_id, custom_fields FROM omni_leads WHERE id = $1",
+                lead["parent_lead_id"],
+            )
+        children = await fetch_all(
+            "SELECT id, status, contact_id, custom_fields FROM omni_leads "
+            "WHERE parent_lead_id = $1 ORDER BY created_at ASC LIMIT 200",
+            lead_id,
+        )
+        # The fan-out node's type (drives the waiting status_reason wording).
+        origin_type = None
+        if lead.get("origin_node_id"):
+            origin = await fetch_one(
+                "SELECT node_type FROM omni_workflow_nodes WHERE id = $1", lead["origin_node_id"]
+            )
+            origin_type = (origin or {}).get("node_type")
+
+    # Cost: AI jobs for every correlation_id this lead's events touched.
+    cids = {str(e["correlation_id"]) for e in events if e.get("correlation_id")}
+    by_kind: dict[str, float] = {}
+    calls = 0
+    if cids:
+        async with system_scope():
+            jobs = await fetch_all(
+                "SELECT kind, cost_usd FROM omni_ai_jobs WHERE correlation_id = ANY($1::uuid[])",
+                list(cids),
+            )
+        for j in jobs:
+            calls += 1
+            by_kind[j["kind"]] = round(by_kind.get(j["kind"], 0.0) + float(j.get("cost_usd") or 0), 6)
+    cost = JourneyCost(total_usd=round(sum(by_kind.values()), 6), by_kind=by_kind, calls=calls)
+
+    timeline = [
+        JourneyEvent(
+            occurred_at=e["occurred_at"],
+            event_type=e["event_type"],
+            node_id=(e["payload"] or {}).get("node_id"),
+            node_label=e.get("node_label"),
+        )
+        for e in events
+    ]
+    last_event = timeline[-1].event_type if timeline else None
+
+    columns = lead_columns.derive_columns(await _workflow_node_types(lead.get("workflow_id")))
+    return LeadJourneyOut(
+        lead=_lead_out(lead, columns),
+        parent=_lineage_lead(dict(parent_row)) if parent_row else None,
+        children=[_lineage_lead(dict(c)) for c in children],
+        timeline=timeline,
+        cost=cost,
+        status_reason=_status_reason(lead, origin_type, last_event),
+    )
 
 
 def _lead_out(row: dict[str, Any], columns: list[lead_columns.ColumnSpec]) -> LeadOut:

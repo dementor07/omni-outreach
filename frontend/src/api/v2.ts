@@ -426,6 +426,36 @@ export interface LeadColumnsResponse {
   columns: LeadColumn[]
 }
 
+// ── Lead journey (per-lead reconstruction of the distributed run) ─────────────
+export interface JourneyEvent {
+  occurred_at: ISODate
+  event_type: string
+  node_id: UUID | null
+  node_label: string | null
+}
+
+export interface LineageLead {
+  id: UUID
+  identity: string
+  status: string
+  stage: LeadStage
+}
+
+export interface JourneyCost {
+  total_usd: number
+  by_kind: Record<string, number>
+  calls: number
+}
+
+export interface LeadJourney {
+  lead: Lead
+  parent: LineageLead | null
+  children: LineageLead[]
+  timeline: JourneyEvent[]
+  cost: JourneyCost
+  status_reason: string
+}
+
 export const projections = {
   contacts: (limit = 100) => api.get<Contact[]>('/projections/contacts', { params: { limit } }).then((r) => r.data),
   companies: (limit = 100) => api.get<Company[]>('/projections/companies', { params: { limit } }).then((r) => r.data),
@@ -436,6 +466,7 @@ export const projections = {
   deleteContact: (id: UUID) => api.delete<void>(`/projections/contacts/${id}`).then(() => undefined),
   deleteCompany: (id: UUID) => api.delete<void>(`/projections/companies/${id}`).then(() => undefined),
   deleteLead: (id: UUID) => api.delete<void>(`/projections/leads/${id}`).then(() => undefined),
+  leadJourney: (id: UUID) => api.get<LeadJourney>(`/projections/leads/${id}/journey`).then((r) => r.data),
   leadColumns: (workflowId?: UUID) =>
     api
       .get<LeadColumnsResponse>('/projections/leads/columns', {
