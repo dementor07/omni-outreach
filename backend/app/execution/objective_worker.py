@@ -125,6 +125,13 @@ async def _persist(workspace_id: str, objective_id: str, status: str, progress: 
 async def run() -> None:
     await init_pool(settings.database_url)
     await bus.init_producer()
+    # Re-seed fires the entry node via run.seed_and_run, which needs the node
+    # registry populated — discover the nodes at startup (same as the transition
+    # worker). Without this the registry is empty and get('source.searxng')
+    # raises KeyError, so a widen can measure+decide but never re-run.
+    import app.nodes as noderegistry
+
+    noderegistry.discover()
     consumer = AIOKafkaConsumer(
         EVENTS_TOPIC,
         bootstrap_servers=settings.kafka_brokers,

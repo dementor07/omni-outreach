@@ -134,6 +134,11 @@ def test_objective_worker_consumes_the_fact_and_reuses_run_path():
     # re-seed goes through the SHARED run path, not a copied seed-and-fire
     assert "runner.seed_and_run" in worker
     assert "INSERT INTO omni_leads" not in worker, "worker must not hand-roll lead seeding"
+    # REGRESSION (live-caught): the worker re-fires the entry node, so it MUST
+    # discover the node registry at startup — otherwise get('source.*') raises
+    # KeyError and a widen can decide but never re-run. The API process discovers
+    # in main.py; a worker process that fires nodes must do it itself.
+    assert "noderegistry.discover()" in worker, "worker must discover nodes before firing them"
 
 
 def test_measure_is_lineage_scoped_not_global():
