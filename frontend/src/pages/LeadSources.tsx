@@ -8,6 +8,7 @@ import Badge from '../components/Badge'
 import Button from '../components/Button'
 import DataTable from '../components/DataTable'
 import EmptyState from '../components/EmptyState'
+import Select from '../components/Select'
 
 export default function LeadSources() {
   const nodesQ = useQuery({ queryKey: ['node-manifests'], queryFn: nodes.list })
@@ -122,13 +123,13 @@ function NaukriPreviewPanel() {
         </label>
         <label className="flex flex-col gap-1 text-xs font-medium text-slate-600 dark:text-slate-400">
           Pages
-          <select
-            value={maxPages}
-            onChange={(e) => setMaxPages(Number(e.target.value))}
-            className="h-9 w-20 rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-          >
-            {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
+          <Select
+            className="w-20"
+            ariaLabel="Pages to scrape"
+            value={String(maxPages)}
+            onChange={(v) => setMaxPages(Number(v))}
+            options={[1, 2, 3, 4, 5].map((n) => ({ value: String(n), label: String(n) }))}
+          />
         </label>
         <Button type="submit" variant="primary" icon={Search} isLoading={preview.isPending} disabled={!canRun}>
           Preview

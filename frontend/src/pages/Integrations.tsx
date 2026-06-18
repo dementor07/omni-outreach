@@ -7,6 +7,7 @@ import Card from '../components/Card'
 import Button from '../components/Button'
 import Badge from '../components/Badge'
 import EmptyState from '../components/EmptyState'
+import Select from '../components/Select'
 
 const KNOWN_PROVIDERS = [
   'apollo', 'hunter', 'proxycurl', 'sheets', 'producthunt',
@@ -114,15 +115,13 @@ function AddConnection({ onCancel, onDone }: { onCancel: () => void; onDone: () 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="block">
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Provider</span>
-          <select
+          <Select
+            className="mt-1"
+            ariaLabel="Provider"
             value={provider}
-            onChange={(e) => setProvider(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-          >
-            {KNOWN_PROVIDERS.map((p) => (
-              <option key={p} value={p}>{p}</option>
-            ))}
-          </select>
+            onChange={setProvider}
+            options={KNOWN_PROVIDERS.map((p) => ({ value: p, label: p }))}
+          />
         </label>
         <label className="block">
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Name (unique per provider)</span>

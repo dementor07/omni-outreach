@@ -29,6 +29,7 @@ import Tabs from '../components/Tabs'
 import DataTable from '../components/DataTable'
 import SequentialBuilder from '../components/SequentialBuilder'
 import ObjectivePanel from '../components/ObjectivePanel'
+import Select from '../components/Select'
 
 // Category → icon + accent now lives in utils/nodeVisuals (shared with the
 // linear SequentialBuilder so a node looks identical in either view).
@@ -695,12 +696,17 @@ function WorkflowSettings({ workflowId, name, status, timezone, startAt, endAt, 
       </label>
       <label className="block">
         <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Status</span>
-        <select value={draftStatus} onChange={(e) => setDraftStatus(e.target.value as WorkflowStatus)} className={fieldCls}>
-          <option value="draft">Draft</option>
-          <option value="active">Active</option>
-          <option value="paused">Paused</option>
-          <option value="archived">Archived</option>
-        </select>
+        <Select
+          ariaLabel="Workflow status"
+          value={draftStatus}
+          onChange={(v) => setDraftStatus(v as WorkflowStatus)}
+          options={[
+            { value: 'draft', label: 'Draft' },
+            { value: 'active', label: 'Active' },
+            { value: 'paused', label: 'Paused' },
+            { value: 'archived', label: 'Archived' },
+          ]}
+        />
       </label>
       <label className="block">
         <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Timezone</span>

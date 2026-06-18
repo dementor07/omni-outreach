@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import { Upload, ArrowRight, Check, AlertTriangle } from 'lucide-react'
 import { useImportLeads } from '../hooks/useLeads'
 import { useToast } from './Toast'
+import Select from './Select'
 
 const LEAD_FIELDS = [
   { key: 'linkedin_url', label: 'LinkedIn URL', required: true },
@@ -159,16 +160,14 @@ export default function CsvImport({ campaignId, onComplete, onCancel }: CsvImpor
                   {'required' in field && field.required && <span className="text-rose-500">*</span>}
                 </span>
                 <ArrowRight size={12} className="text-slate-300" />
-                <select
+                <Select
+                  className="flex-1"
+                  ariaLabel={`Map ${field.label}`}
+                  placeholder="— skip —"
                   value={mapping[field.key] || ''}
-                  onChange={(e) => setMapping({ ...mapping, [field.key]: e.target.value })}
-                  className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
-                >
-                  <option value="">— skip —</option>
-                  {headers.map((h) => (
-                    <option key={h} value={h}>{h}</option>
-                  ))}
-                </select>
+                  onChange={(v) => setMapping({ ...mapping, [field.key]: v })}
+                  options={[{ value: '', label: '— skip —' }, ...headers.map((h) => ({ value: h, label: h }))]}
+                />
                 {mapping[field.key] && <Check size={14} className="text-emerald-500" />}
               </div>
             ))}
