@@ -4,6 +4,14 @@ import type { ElementType, HTMLAttributes, ReactNode } from 'react'
 interface CardProps extends HTMLAttributes<HTMLElement> {
   as?: ElementType
   padding?: 'none' | 'sm' | 'md' | 'lg'
+  /** Soft layered elevation. Default true — gives cards real depth over the
+   *  gradient-mesh background instead of a flat hairline. Set false for nested
+   *  / inset cards that shouldn't float. */
+  elevated?: boolean
+  /** Clickable lift on hover (use for cards that navigate). */
+  hover?: boolean
+  /** Translucent blurred surface for floating chrome. */
+  glass?: boolean
   children?: ReactNode
 }
 
@@ -11,13 +19,21 @@ export default function Card({
   as: Tag = 'div',
   className = '',
   padding = 'md',
+  elevated = true,
+  hover = false,
+  glass = false,
   children,
   ...rest
 }: CardProps) {
   return (
     <Tag
       className={clsx(
-        'rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900',
+        'rounded-2xl border',
+        glass
+          ? 'glass-panel border-white/40 dark:border-white/10'
+          : 'bg-white border-slate-200/80 dark:border-slate-800 dark:bg-slate-900',
+        elevated && !glass && 'shadow-card',
+        hover && 'lift cursor-pointer',
         padding === 'sm' && 'p-4',
         padding === 'md' && 'p-5',
         padding === 'lg' && 'p-6',

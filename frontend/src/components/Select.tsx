@@ -114,7 +114,7 @@ export default function Select({
             role="listbox"
             id={listboxId}
             style={{ position: 'fixed', left: coords.left, top: coords.top, width: coords.width, zIndex: 80 }}
-            className="max-h-64 overflow-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl ring-1 ring-black/5 animate-in fade-in slide-in-from-top-1 duration-150 dark:border-slate-700 dark:bg-slate-900 dark:ring-white/10"
+            className="glass-panel max-h-64 overflow-auto rounded-xl border border-white/40 p-1 ring-1 ring-black/5 animate-in fade-in slide-in-from-top-1 duration-150 dark:border-white/10 dark:ring-white/10"
           >
             {options.map((o) => {
               const active = o.value === value

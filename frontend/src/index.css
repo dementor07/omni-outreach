@@ -11,18 +11,59 @@
   }
 
   body {
-    @apply bg-slate-50 text-slate-900 font-sans;
+    @apply text-slate-900 font-sans;
+    /* A barely-there warm tint in one corner — enough to keep the page from
+       reading as flat clinical white, not enough to notice as "a gradient".
+       Restraint over spectacle. */
+    background-color: #f8fafc;
+    background-image: radial-gradient(70rem 70rem at 105% -15%, rgb(244 63 94 / 0.035), transparent 55%);
+    background-attachment: fixed;
   }
 
   .dark body,
   body.dark {
-    @apply bg-[rgb(2,6,23)] text-slate-100;
+    @apply text-slate-100;
+    background-color: rgb(2 6 23);
+    background-image: radial-gradient(70rem 70rem at 105% -15%, rgb(244 63 94 / 0.06), transparent 55%);
+    background-attachment: fixed;
   }
 }
 
 @layer components {
   .btn-tactile {
     @apply inline-flex items-center justify-center rounded-lg font-semibold transition-all active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  /* Glass surface — translucent + blurred, for floating chrome (topbar,
+     sidebar). A touch frostier than a plain panel; legibility preserved by the
+     high-ish base opacity. */
+  .glass {
+    @apply bg-white/65 backdrop-blur-xl backdrop-saturate-150 dark:bg-slate-900/55;
+  }
+
+  /* Stronger glass for floating overlays (popovers, menus, modals, the canvas
+     toolbar) — they sit OVER content, so the frost + a faint inner highlight
+     actually read as glass. More blur, a hairline white top edge. */
+  .glass-panel {
+    @apply backdrop-blur-2xl backdrop-saturate-150;
+    background-color: rgb(255 255 255 / 0.72);
+    box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.6), 0 8px 28px -6px rgb(15 23 42 / 0.18);
+  }
+  .dark .glass-panel {
+    background-color: rgb(15 23 42 / 0.72);
+    box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.08), 0 8px 28px -6px rgb(0 0 0 / 0.5);
+  }
+
+  /* Hover-lift — a card that gently rises + deepens its shadow on hover. The
+     workhorse interaction for clickable cards across the app. The shadow is a
+     raw value (not @apply shadow-elevated) so PostCSS resolves it regardless of
+     theme-extension ordering. */
+  .lift {
+    @apply transition-all duration-200 ease-out;
+  }
+  .lift:hover {
+    @apply -translate-y-0.5;
+    box-shadow: 0 4px 10px -3px rgb(15 23 42 / 0.07), 0 10px 24px -8px rgb(15 23 42 / 0.10);
   }
 
   /* React Flow EdgeLabelRenderer — position + transform driven by --elx/--ely CSS vars
@@ -35,13 +76,36 @@
 }
 
 @layer utilities {
+  /* Shimmer skeleton — a moving sheen reads more "loading premium app" than a
+     flat pulse. Falls back gracefully (the base bg is still visible). */
   .skeleton {
-    @apply animate-pulse rounded-lg;
+    @apply relative overflow-hidden rounded-lg;
     background: rgb(241 245 249);
   }
-
+  .skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.55), transparent);
+    animation: shimmer 1.6s infinite;
+  }
   .dark .skeleton {
     background: rgb(30 41 59);
+  }
+  .dark .skeleton::after {
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.06), transparent);
+  }
+
+  /* Page-enter: a soft staggered rise. Apply to a page root; children can add
+     animation-delay inline for a cascade. */
+  .page-enter {
+    animation: fade-in-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton::after { animation: none; }
+    .page-enter { animation: none; }
   }
 }
 

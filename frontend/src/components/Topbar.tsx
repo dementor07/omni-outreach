@@ -94,7 +94,7 @@ export default function Topbar({ onToggleSidebar }: TopbarProps) {
   }
 
   return (
-    <div className="sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white/80 px-4 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/80">
+    <div className="glass sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b border-slate-200/70 px-4 dark:border-slate-800/80">
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="sm" icon={LayoutDashboard} onClick={onToggleSidebar} aria-label="Toggle sidebar" />
         <span className="hidden text-sm font-medium text-slate-500 sm:inline dark:text-slate-400">
@@ -129,7 +129,7 @@ export default function Topbar({ onToggleSidebar }: TopbarProps) {
             <ChevronDown size={11} className="opacity-60" />
           </button>
           {showApi && (
-            <div className="absolute right-0 top-11 z-50 w-80 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="glass-panel absolute right-0 top-11 z-50 w-80 rounded-2xl border border-white/40 p-3 dark:border-white/10">
               <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">API base URL</p>
               <p className="mt-1 px-1 text-[12px] text-slate-500">
                 Where this dashboard talks to your Omni backend.
@@ -168,7 +168,7 @@ export default function Topbar({ onToggleSidebar }: TopbarProps) {
             <Avatar name="You" size={28} />
           </button>
           {showUser && (
-            <div className="absolute right-0 top-11 z-50 w-56 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="glass-panel absolute right-0 top-11 z-50 w-56 overflow-hidden rounded-2xl border border-white/40 dark:border-white/10">
               <div className="border-b border-slate-100 px-3 py-2.5 dark:border-slate-800">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Signed in</p>
               </div>

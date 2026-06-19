@@ -4,7 +4,6 @@ import {
   Users, Building2, KanbanSquare, Contact,
   BarChart3, Activity, Sparkles,
   Plug, Database, FileText, ShieldOff, Settings, LogOut,
-  ChevronRight,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import Logo, { LogoMark } from './Logo'
@@ -72,7 +71,7 @@ export default function Sidebar({ collapsed = false }: SidebarProps) {
   return (
     <aside
       className={clsx(
-        'flex h-screen flex-col border-r border-slate-200 bg-white transition-[width] duration-200 dark:border-slate-800 dark:bg-slate-950',
+        'flex h-screen flex-col border-r border-slate-200/70 bg-white/70 backdrop-blur-xl transition-[width] duration-200 dark:border-slate-800/80 dark:bg-slate-950/70',
         collapsed ? 'w-16' : 'w-60',
       )}
     >
@@ -98,20 +97,23 @@ export default function Sidebar({ collapsed = false }: SidebarProps) {
                   end={to === '/'}
                   className={({ isActive }) =>
                     clsx(
-                      'group relative flex w-full items-center rounded-lg text-sm font-medium transition-colors',
+                      'group relative flex w-full items-center rounded-lg text-sm font-medium transition-colors duration-150',
                       collapsed ? 'h-9 justify-center px-0' : 'gap-2.5 px-2.5 py-1.5',
                       isActive
-                        ? 'bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300'
-                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white',
+                        ? 'bg-slate-100 text-slate-900 dark:bg-slate-800/80 dark:text-white'
+                        : 'text-slate-500 hover:bg-slate-100/70 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-white',
                     )
                   }
                   title={collapsed ? label : undefined}
                 >
                   {({ isActive }) => (
                     <>
-                      <Icon size={16} />
+                      {/* One quiet brand cue: a thin accent rail on the active item. */}
+                      {isActive && !collapsed && (
+                        <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-brand-500" />
+                      )}
+                      <Icon size={16} className={clsx('shrink-0', isActive ? 'text-brand-600 dark:text-brand-400' : '')} />
                       {!collapsed && <span className="flex-1 truncate text-left">{label}</span>}
-                      {isActive && !collapsed && <ChevronRight size={12} className="text-brand-400" />}
                     </>
                   )}
                 </NavLink>
@@ -127,11 +129,11 @@ export default function Sidebar({ collapsed = false }: SidebarProps) {
           to="/settings"
           className={({ isActive }) =>
             clsx(
-              'flex w-full items-center rounded-lg text-sm font-medium transition-colors',
+              'flex w-full items-center rounded-lg text-sm font-medium transition-colors duration-150',
               collapsed ? 'h-9 justify-center px-0' : 'gap-2.5 px-2.5 py-1.5',
               isActive
-                ? 'bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white',
+                ? 'bg-slate-100 text-slate-900 dark:bg-slate-800/80 dark:text-white'
+                : 'text-slate-500 hover:bg-slate-100/70 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-white',
             )
           }
           title="Settings"

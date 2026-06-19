@@ -448,7 +448,7 @@ export default function CampaignEditor() {
 
           {/* Toolbar */}
           <Panel position="top-right" className="flex items-center gap-2">
-            <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white/90 p-0.5 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-900/90">
+            <div className="glass-panel flex items-center gap-0.5 rounded-lg border border-white/40 p-0.5 dark:border-white/10">
               <ToolbarBtn title={fullscreen ? 'Exit full screen' : 'Full screen'} onClick={() => setFullscreen((f) => !f)}>
                 {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
               </ToolbarBtn>
