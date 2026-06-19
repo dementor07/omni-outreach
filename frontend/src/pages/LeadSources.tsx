@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Database, Search, ExternalLink } from 'lucide-react'
 import { nodes, integrations, sources, type NodeManifest, type NaukriPreviewCompany } from '../api/v2'
+import { nodeIcon } from '../utils/nodeIcons'
+import { providerName } from '../utils/providerCatalog'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
@@ -9,6 +11,22 @@ import Button from '../components/Button'
 import DataTable from '../components/DataTable'
 import EmptyState from '../components/EmptyState'
 import Select from '../components/Select'
+
+/* The connection id a source needs, if any — parsed from its `connection:<id>`
+ * capability (the trailing `?` marks an optional credential, e.g. apollo). */
+function sourceConnection(m: NodeManifest): string | null {
+  const cap = m.capabilities.find((c) => c.startsWith('connection:'))
+  return cap ? cap.slice('connection:'.length).replace(/\?$/, '') : null
+}
+
+/* Human name for a source node: the provider's catalog name if it needs a
+ * known connection, else a prettified node type (e.g. "source.csv" → "Csv"). */
+function sourceLabel(m: NodeManifest): string {
+  const conn = sourceConnection(m)
+  if (conn) return providerName(conn)
+  const tail = m.type.split('.')[1] ?? m.type
+  return tail.replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase())
+}
 
 export default function LeadSources() {
   const nodesQ = useQuery({ queryKey: ['node-manifests'], queryFn: nodes.list })
@@ -36,29 +54,35 @@ export default function LeadSources() {
         <Card><EmptyState icon={Database} title="No source nodes registered" description="Source nodes (Apollo, Hunter, Sheets, …) will appear here." /></Card>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {sourceNodes.map((s) => <SourceCard key={s.type} s={s} connected={isConnected(s.type, connectedProviders)} />)}
+          {sourceNodes.map((s) => <SourceCard key={s.type} s={s} connected={isConnected(s, connectedProviders)} />)}
         </div>
       )}
     </div>
   )
 }
 
-function isConnected(nodeType: string, providers: Set<string>): boolean {
-  // node type is like "source.apollo" → provider "apollo"
-  const provider = nodeType.split('.')[1]
-  return provider ? providers.has(provider) : false
+function isConnected(m: NodeManifest, providers: Set<string>): boolean {
+  const conn = sourceConnection(m)
+  // No connection requirement (e.g. CSV, Naukri scrape) → always usable.
+  return conn ? providers.has(conn) : true
 }
 
 function SourceCard({ s, connected }: { s: NodeManifest; connected: boolean }) {
+  const Icon = nodeIcon(s, Database)
+  const needsConnection = sourceConnection(s) !== null
   return (
     <Card padding="md">
       <div className="flex items-start justify-between gap-2">
         <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-50 text-sky-600 dark:bg-sky-900/30">
-          <Database size={16} />
+          <Icon size={16} />
         </span>
-        <Badge label={connected ? 'connected' : 'not connected'} variant={connected ? 'success' : 'neutral'} size="xs" dot />
+        {needsConnection ? (
+          <Badge label={connected ? 'connected' : 'not connected'} variant={connected ? 'success' : 'neutral'} size="xs" dot />
+        ) : (
+          <Badge label="no key needed" variant="info" size="xs" dot />
+        )}
       </div>
-      <p className="mt-3 text-sm font-semibold text-slate-900 dark:text-white">{s.type}</p>
+      <p className="mt-3 text-sm font-semibold text-slate-900 dark:text-white">{sourceLabel(s)}</p>
       <p className="mt-0.5 text-xs text-slate-500">{s.summary}</p>
     </Card>
   )
