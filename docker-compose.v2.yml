@@ -185,6 +185,28 @@ services:
       disable: true
     restart: unless-stopped
 
+  # AI jobs worker: executes ad-hoc AI Studio jobs. Consumes node-less
+  # ai.<kind>.queued (score/compose/classify) that POST /ai/jobs publishes, runs
+  # the model directly (app.services.ai_jobs, same operator-triggered-AI boundary
+  # as reply_drafter), and publishes ai.<kind>.completed/.failed — which the
+  # projector turns into the run log + per-lead scores. NOT the muscle hot path:
+  # ad-hoc jobs have no workflow node, so the dispatcher correctly ignores them.
+  ai-jobs-v2:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+    container_name: omni-v2-ai-jobs
+    command: python -m app.execution.ai_jobs_worker
+    env_file:
+      - .env
+    environment:
+      <<: *secret-env
+    networks:
+      - omni-outreach_default
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
   # Submits the pyflink orchestrator job (outreach.results -> outreach.transitions)
   # to the shared Flink jobmanager from the master stack. Idempotent enough:
   # if the job is already registered a duplicate submit fails and we tail; the
