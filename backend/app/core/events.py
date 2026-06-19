@@ -59,6 +59,7 @@ class ChannelType(StrEnum):
     APOLLO = "apollo"  # Apollo organization-search API (source.apollo)
     CLUTCH = "clutch"  # Clutch directory scrape via Camoufox (source.clutch)
     SEARXNG_PEOPLE = "searxng_people"  # Free SearXNG per-company people search (source.searxng_people)
+    ATS = "ats"  # ATS job-board harvest, 12 source nodes share it (source.greenhouse … source.rippling)
 
 
 class EventType(StrEnum):

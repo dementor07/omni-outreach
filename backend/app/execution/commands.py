@@ -68,6 +68,20 @@ NODE_CHANNEL: dict[str, ChannelType] = {
     "source.serper_search": ChannelType.SERPER_SEARCH,
     "source.apollo": ChannelType.APOLLO,
     "source.clutch": ChannelType.CLUTCH,
+    # ATS job-board sources — 12 distinct nodes, one shared muscle channel
+    # (ChannelType.ATS); the muscle keys on payload.platform. All keyless.
+    "source.greenhouse": ChannelType.ATS,
+    "source.ashby": ChannelType.ATS,
+    "source.smartrecruiters": ChannelType.ATS,
+    "source.bamboohr": ChannelType.ATS,
+    "source.workday": ChannelType.ATS,
+    "source.icims": ChannelType.ATS,
+    "source.lever": ChannelType.ATS,
+    "source.workable": ChannelType.ATS,
+    "source.recruitee": ChannelType.ATS,
+    "source.personio": ChannelType.ATS,
+    "source.rippling": ChannelType.ATS,
+    "source.breezy": ChannelType.ATS,
     # Every declarative HTTP node (sources built via http_node) routes to the
     # generic handler. The dispatcher detects these by the emitted intent
     # carrying channel="http_call".

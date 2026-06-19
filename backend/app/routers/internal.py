@@ -21,7 +21,7 @@ import logging
 import secrets
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 
 from app.config import settings
 from app.db import execute, fetch_one, system_scope
@@ -115,6 +115,21 @@ async def release_credential(ref: str = Path(..., min_length=8, max_length=128))
             ref,
         )
     return {"status": "released"}
+
+
+@router.get("/ats/slugs", dependencies=[Depends(require_muscle)])
+async def ats_slugs(
+    platform: str = Query(..., min_length=1, max_length=40),
+    limit: int = Query(100, ge=1, le=2000),
+    offset: int = Query(0, ge=0),
+) -> dict:
+    """Company slugs for an ATS platform — the muscle's ATS handlers fetch these
+    (then hit each ATS's public job API per slug). Global reference data: no
+    workspace, no tenancy. Deterministic order so paging is stable across runs."""
+    from app.services.ats import store
+
+    slugs = await store.get_slugs(platform, limit=limit, offset=offset)
+    return {"platform": platform, "count": len(slugs), "slugs": slugs}
 
 
 async def sweep_expired_credentials() -> int:

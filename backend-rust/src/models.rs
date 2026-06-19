@@ -106,6 +106,17 @@ pub enum ChannelType {
     /// Free SearXNG per-company people search (no credential). source.searxng_people.
     #[serde(rename = "searxng_people")]
     SearxngPeople,
+    /// ATS job-board harvest. ONE channel shared by 12 first-class source nodes
+    /// (source.greenhouse … source.rippling): each node sets `platform` in its
+    /// payload, and the shared handlers::ats module fetches that platform's
+    /// company slugs (from the global omni_ats_slugs table via the internal API)
+    /// + hits its public job API, writing companies to
+    /// `lead_mutations.custom_fields[companies_key]`. All keyless — same setup for
+    /// every platform — so platform is a parameter, not a credential; one
+    /// ChannelType is correct (mirrors how serper_people/searxng_people share a
+    /// handler). The 12 nodes stay distinct so each shows as a real named product.
+    #[serde(rename = "ats")]
+    Ats,
     /// Any channel value the worker doesn't recognise. Deserializes here
     /// instead of failing the whole command at parse time, so dispatch can
     /// return a clean, debuggable error.
@@ -146,6 +157,7 @@ impl ChannelType {
             ChannelType::Apollo => "apollo",
             ChannelType::Clutch => "clutch",
             ChannelType::SearxngPeople => "searxng_people",
+            ChannelType::Ats => "ats",
             ChannelType::Unknown => "unknown",
         }
     }

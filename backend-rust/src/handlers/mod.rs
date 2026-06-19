@@ -8,6 +8,7 @@
 pub mod ai_screen;
 pub mod alert;
 pub mod apify;
+pub mod ats;
 pub mod common;
 pub mod discovery;
 pub mod email;
@@ -60,6 +61,8 @@ pub async fn dispatch(command: &ActionCommand) -> ExecutionResult {
         ChannelType::SerperSearch => discovery::handle_serper_search(command).await,
         ChannelType::Apollo => discovery::handle_apollo(command).await,
         ChannelType::Clutch => discovery::handle_clutch(command).await,
+        // ATS harvest: 12 distinct source nodes, one handler keyed by `platform`.
+        ChannelType::Ats => ats::handle_ats(command).await,
         ChannelType::Unknown => {
             common::fail(command, format!("UNKNOWN_CHANNEL_{}", command.channel.as_str()), false)
         }

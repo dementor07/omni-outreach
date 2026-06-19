@@ -199,6 +199,45 @@ def test_source_indeed_channel_congruent_python_and_rust():
     assert "pub mod indeed;" in mod_rs
 
 
+_ATS_PLATFORMS = (
+    "greenhouse", "ashby", "smartrecruiters", "bamboohr", "workday", "icims",
+    "lever", "workable", "recruitee", "personio", "rippling", "breezy",
+)
+
+
+def test_ats_sources_congruent_python_and_rust():
+    """REGRESSION (ATS CDX port): all 12 source.<ats> nodes route to
+    ChannelType.ATS in NODE_CHANNEL, the Python enum value is 'ats', and the Rust
+    ChannelType carries #[serde(rename = "ats")] + as_str + a dispatch arm. One
+    shared channel keyed on payload.platform (the 12 nodes are distinct, but the
+    setup is identical/keyless so a single ChannelType is correct — mirrors how
+    serper_people/searxng_people share a handler). Drift here = the intent reaches
+    the muscle and falls into Unknown for every ATS source."""
+    from app.core.events import ChannelType as PyChannel
+
+    assert PyChannel.ATS.value == "ats"
+    for platform in _ATS_PLATFORMS:
+        assert dispatcher.commands.NODE_CHANNEL.get(f"source.{platform}") == PyChannel.ATS, platform
+
+    models_rs = (REPO / "backend-rust/src/models.rs").read_text(encoding="utf-8")
+    assert 'rename = "ats"' in models_rs and "Ats," in models_rs
+    assert 'ChannelType::Ats => "ats"' in models_rs
+    mod_rs = (REPO / "backend-rust/src/handlers/mod.rs").read_text(encoding="utf-8")
+    assert "ChannelType::Ats => ats::handle_ats(command).await" in mod_rs
+    assert "pub mod ats;" in mod_rs
+
+
+def test_ats_nodes_all_register():
+    """All 12 ATS source nodes must register (one file, factory loop). A typo in
+    the factory or a missing platform silently drops a source from the palette."""
+    import app.nodes as noderegistry
+
+    noderegistry.discover()
+    registered = {m.type for m in noderegistry.manifests()}
+    for platform in _ATS_PLATFORMS:
+        assert f"source.{platform}" in registered, platform
+
+
 # ── PEOPLE precision: is_company_mismatch must match the fork's latest logic ───
 def test_is_company_mismatch_matches_fork_logic():
     """REGRESSION: the pre-Claude misattribution fast-path (verify_person calls
