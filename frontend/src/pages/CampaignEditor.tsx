@@ -278,7 +278,7 @@ export default function CampaignEditor() {
     // first node sat clipped at the left edge. Re-fit once the nodes are placed
     // (rAF lets React Flow measure node dimensions first).
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => rfInstance.current?.fitView({ padding: 0.2, duration: 300 }))
+      requestAnimationFrame(() => rfInstance.current?.fitView({ padding: 0.35, duration: 300 }))
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailQuery.data, manifestByType])

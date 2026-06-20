@@ -95,7 +95,7 @@ export default function Inbox() {
       />
 
       <FilterBar>
-        <SearchInput placeholder="Search by snippet or contact id…" value={search} onChange={setSearch} />
+        <SearchInput placeholder="Search messages…" value={search} onChange={setSearch} />
         <Toggle
           value={classFilter}
           onChange={(v) => setClassFilter(v as ClassFilter)}
