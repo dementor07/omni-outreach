@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Sparkles, Gauge, PenLine, Database, Tag, Play, ShieldCheck } from 'lucide-react'
 import { clsx } from 'clsx'
@@ -9,7 +9,16 @@ import Card, { CardHeader } from '../components/Card'
 import Button from '../components/Button'
 import Badge from '../components/Badge'
 import EmptyState from '../components/EmptyState'
+import { useToast } from '../components/Toast'
 import { timeAgo } from '../lib/format'
+
+// A just-launched job we show instantly (optimistic) until the poll returns the
+// real row — so clicking a launcher visibly does something right away.
+interface PendingJob {
+  id: string
+  kind: AiJobKind
+  created_at: string
+}
 
 const KIND_META: Record<AiJobKind, { label: string; icon: React.ElementType; desc: string }> = {
   score: { label: 'Lead scoring', icon: Gauge, desc: 'Rank leads 0–100 against your ICP' },
@@ -29,28 +38,53 @@ const WORKFLOW_ONLY_KINDS: AiJobKind[] = ['compose', 'enrich']
 
 export default function AiStudio() {
   const qc = useQueryClient()
+  const toast = useToast()
   const { data: jobs = [], isLoading } = useQuery({
     queryKey: ['ai-jobs'],
     queryFn: () => ai.jobs({ limit: 100 }),
     refetchInterval: 5000,
   })
 
-  const invalidateSoon = () => setTimeout(() => qc.invalidateQueries({ queryKey: ['ai-jobs'] }), 600)
+  // Optimistic "just launched" rows — shown immediately, dropped once the real
+  // job (same correlation id) shows up in the polled list.
+  const [pending, setPending] = useState<PendingJob[]>([])
+  const refetchNow = () => qc.invalidateQueries({ queryKey: ['ai-jobs'] })
+  const addPending = (kind: AiJobKind, id: string) =>
+    setPending((p) => [{ id, kind, created_at: new Date().toISOString() }, ...p])
 
   const [icp, setIcp] = useState('B2B SaaS, VP Sales or RevOps, 50–500 employees, US/EU')
   const runScore = useMutation({
     mutationFn: () => ai.runJob({ kind: 'score', entity_type: 'lead', config: { icp_description: icp } }),
-    onSuccess: invalidateSoon,
+    onSuccess: (r) => {
+      addPending('score', r.job_id)
+      toast.success('Scoring queued — ranking your active leads. Results land in the run log.')
+      refetchNow()
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Could not start scoring'),
   })
 
   const [replyText, setReplyText] = useState('')
   const runClassify = useMutation({
     mutationFn: () => ai.runJob({ kind: 'classify', entity_type: 'reply', config: { body: replyText } }),
-    onSuccess: () => {
+    onSuccess: (r) => {
+      addPending('classify', r.job_id)
+      toast.success('Reply queued for classification.')
       setReplyText('')
-      invalidateSoon()
+      refetchNow()
     },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Could not classify reply'),
   })
+
+  // Real jobs from the server; show optimistic rows only until the real row
+  // (same job_id) arrives via the poll, then drop them.
+  const realIds = useMemo(() => new Set(jobs.map((j) => j.id)), [jobs])
+  const visiblePending = useMemo(() => pending.filter((p) => !realIds.has(p.id)), [pending, realIds])
+  useEffect(() => {
+    setPending((p) => {
+      const next = p.filter((x) => !realIds.has(x.id))
+      return next.length === p.length ? p : next
+    })
+  }, [realIds])
 
   const done = jobs.filter((j) => j.status === 'done').length
   // A job still 'queued' an hour later isn't in flight — it stalled (e.g. an
@@ -147,7 +181,7 @@ export default function AiStudio() {
         </div>
         {isLoading ? (
           <div className="space-y-2 p-4">{[0, 1, 2].map((i) => <div key={i} className="h-10 skeleton rounded-lg" />)}</div>
-        ) : jobs.length === 0 ? (
+        ) : jobs.length === 0 && visiblePending.length === 0 ? (
           <EmptyState icon={Sparkles} title="No AI runs yet" description="Kick a job above — it'll show here with status, model, and cost." />
         ) : (
           <div className="overflow-x-auto">
@@ -162,6 +196,7 @@ export default function AiStudio() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {visiblePending.map((p) => <PendingRow key={p.id} job={p} />)}
                 {jobs.map((j) => <JobRow key={j.id} job={j} />)}
               </tbody>
             </table>
@@ -192,6 +227,26 @@ function JobRow({ job }: { job: AiJob }) {
         {job.cost_usd ? `$${Number(job.cost_usd).toFixed(4)}` : '—'}
       </td>
       <td className="px-5 py-2.5 text-slate-400">{timeAgo(job.created_at)}</td>
+    </tr>
+  )
+}
+
+// Optimistic row shown the instant a launcher is clicked, before the poll
+// returns the real job — so the action visibly does something immediately.
+function PendingRow({ job }: { job: PendingJob }) {
+  const Icon = KIND_META[job.kind].icon
+  return (
+    <tr className="animate-pulse bg-violet-50/40 dark:bg-violet-950/10">
+      <td className="px-5 py-2.5">
+        <div className="flex items-center gap-2">
+          <Icon size={14} className="text-violet-500" />
+          <span className="font-medium text-slate-900 dark:text-white">{KIND_META[job.kind].label}</span>
+        </div>
+      </td>
+      <td className="px-5 py-2.5"><Badge label="queued" variant="warning" size="xs" dot /></td>
+      <td className="px-5 py-2.5 text-slate-400">—</td>
+      <td className="px-5 py-2.5 text-slate-300">—</td>
+      <td className="px-5 py-2.5 text-slate-400">just now</td>
     </tr>
   )
 }
