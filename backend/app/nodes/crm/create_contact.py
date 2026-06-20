@@ -70,7 +70,12 @@ async def execute(ctx: NodeContext) -> NodeResult:
         # No usable identity from config OR the discovered person — fail-closed
         # so we never emit a nameless, contactless ghost.
         return NodeResult(handle="default", error="CONTACT_REQUIRES_EMAIL_OR_LINKEDIN")
-    contact_id = str(uuid.uuid4())
+    # DEDUP-001: the contact id is DETERMINISTIC — a UUIDv5 of (workspace, natural
+    # key) — so the same person discovered again (re-run, or several leads under
+    # one company) upserts the SAME row instead of duplicating. The projector's
+    # ON CONFLICT (id) upsert then merges fields. Previously this was a fresh
+    # uuid4() per fire, so one person became N rows (Benjamin Kaplan x9).
+    contact_id = _contact_id(ctx.workspace_id, identity["linkedin_url"], identity["email"])
     events: list[dict] = [
         {
             "event_type": "contact.created",
@@ -96,6 +101,33 @@ async def execute(ctx: NodeContext) -> NodeResult:
             }
         )
     return NodeResult(handle="default", events=events, telemetry={"contact_id": contact_id})
+
+
+# Fixed namespace for deterministic contact ids (DEDUP-001). Must never change —
+# changing it would re-mint every contact id and re-duplicate everyone.
+_CONTACT_NS = uuid.UUID("a6f0e3c2-7b1d-4e8a-9c5f-1d2e3f4a5b6c")
+
+
+def _normalize_key(value: str) -> str:
+    """Normalise a natural key so trivial variants collapse to one contact.
+    LinkedIn urls differ by scheme/host (in./au./www.) + trailing slash for the
+    SAME profile, so key on the path's final handle segment."""
+    v = value.strip().lower().rstrip("/")
+    if "linkedin.com/in/" in v:
+        return "li:" + v.rsplit("/in/", 1)[-1]
+    return v
+
+
+def _contact_id(workspace_id: str, linkedin_url: str | None, email: str | None) -> str:
+    """Deterministic contact id from (workspace, natural key). LinkedIn wins over
+    email (it's the stronger identity for discovered people)."""
+    key = None
+    if linkedin_url:
+        key = _normalize_key(str(linkedin_url))
+    elif email:
+        key = "em:" + email.strip().lower()
+    # key is guaranteed non-None: the caller already rejected no-email-no-linkedin.
+    return str(uuid.uuid5(_CONTACT_NS, f"{workspace_id}|{key}"))
 
 
 def _merge_identity(cfg: CreateContactConfig, person: dict) -> dict:
