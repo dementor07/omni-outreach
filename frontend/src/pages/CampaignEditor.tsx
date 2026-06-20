@@ -18,6 +18,7 @@ import {
 import { canvas, nodes as nodesApi, projections, type Lead, type NodeManifest, type WorkflowStatus } from '../api/v2'
 import { nodeIcon } from '../utils/nodeIcons'
 import { visualFor } from '../utils/nodeVisuals'
+import { nodeLabel, handleLabel, categoryLabel } from '../utils/nodeLabel'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
 import Button from '../components/Button'
@@ -112,7 +113,7 @@ function OmniNode({ data, selected }: NodeProps<OmniRfNode>) {
           <Icon size={20} />
         </div>
         <div className="flex-1 overflow-hidden">
-          <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{manifest.type.split('.').slice(1).join('.') || manifest.type}</p>
+          <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{nodeLabel(manifest.type)}</p>
           <p className="truncate text-xs text-slate-500">{summary ?? manifest.summary}</p>
         </div>
       </div>
@@ -132,7 +133,7 @@ function OmniNode({ data, selected }: NodeProps<OmniRfNode>) {
             const danger = h.name === 'on_error' || h.name === 'rejected' || h.name === 'timeout' || h.name === 'empty' || h.name === 'false'
             return (
               <div key={h.name} className="relative flex items-center justify-end pr-1">
-                <span className={clsx('mr-3 text-[10px] font-bold uppercase tracking-widest', danger ? 'text-rose-400' : 'text-emerald-500')}>{h.name}</span>
+                <span className={clsx('mr-3 text-[10px] font-bold uppercase tracking-widest', danger ? 'text-rose-400' : 'text-emerald-500')}>{handleLabel(h.name)}</span>
                 <Handle
                   type="source"
                   position={Position.Right}
@@ -614,9 +615,9 @@ export default function CampaignEditor() {
               </div>
               <DataTable
                 columns={[
+                  { key: 'identity', header: 'Lead', render: (row: Lead) => <span className="font-medium text-slate-900 dark:text-white">{row.identity || '—'}</span> },
+                  { key: 'stage', header: 'Step', render: (row: Lead) => <span className="text-slate-600 dark:text-slate-300">{row.stage || '—'}</span> },
                   { key: 'status', header: 'Status', render: (row: Lead) => <Badge label={row.status || 'active'} asStatus dot /> },
-                  { key: 'contact_id', header: 'Contact', render: (row: Lead) => <span className="font-mono text-xs text-slate-500">{row.contact_id?.slice(0, 8) ?? '—'}</span> },
-                  { key: 'current_node_id', header: 'Current step', render: (row: Lead) => <span className="font-mono text-xs text-slate-500">{row.current_node_id?.slice(0, 8) ?? '—'}</span> },
                   { key: 'created_at', header: 'Enrolled', render: (row: Lead) => new Date(row.created_at).toLocaleDateString() },
                 ]}
                 rows={leadsQuery.data ?? []}
@@ -818,7 +819,7 @@ function NodePalette({ manifests, loading, onAdd }: { manifests: NodeManifest[];
             const v = visualFor(category)
             return (
               <div key={category}>
-                <p className={clsx('px-2 pb-1 text-[9px] font-bold uppercase tracking-[0.18em]', v.accent)}>{category}</p>
+                <p className={clsx('px-2 pb-1 text-[9px] font-bold uppercase tracking-[0.18em]', v.accent)}>{categoryLabel(category)}</p>
                 <div className="space-y-0.5">
                   {items.map((m) => {
                     const Icon = nodeIcon(m, v.icon)
@@ -835,7 +836,7 @@ function NodePalette({ manifests, loading, onAdd }: { manifests: NodeManifest[];
                         <span className={clsx('flex h-5 w-5 flex-shrink-0 items-center justify-center rounded', v.tint, v.accent)}>
                           <Icon size={12} />
                         </span>
-                        <span className="truncate">{m.type.split('.').slice(1).join('.') || m.type}</span>
+                        <span className="truncate">{nodeLabel(m.type)}</span>
                       </button>
                     )
                   })}

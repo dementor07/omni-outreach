@@ -8,8 +8,9 @@ import Card from '../components/Card'
 import Avatar from '../components/Avatar'
 import Badge from '../components/Badge'
 import EmptyState from '../components/EmptyState'
-import { FilterBar, SearchInput } from '../components/FilterBar'
+import { FilterBar, SearchInput, Select } from '../components/FilterBar'
 import { useToast } from '../components/Toast'
+import { useDebounce } from '../hooks/useDebounce'
 import { downloadCsv, type CsvColumn } from '../lib/csv'
 
 const CSV_COLUMNS: CsvColumn<Company>[] = [
@@ -22,9 +23,23 @@ const CSV_COLUMNS: CsvColumn<Company>[] = [
 export default function Companies() {
   const qc = useQueryClient()
   const toast = useToast()
+
+  const [search, setSearch] = useState('')
+  const [domainOnly, setDomainOnly] = useState('') // '', 'yes', 'no'
+  const debouncedSearch = useDebounce(search, 300)
+  const filters = useMemo(
+    () => ({
+      limit: 500,
+      ...(debouncedSearch.trim() ? { q: debouncedSearch.trim() } : {}),
+      ...(domainOnly === 'yes' ? { has_domain: true } : domainOnly === 'no' ? { has_domain: false } : {}),
+    }),
+    [debouncedSearch, domainOnly],
+  )
+  const anyFilter = !!(debouncedSearch.trim() || domainOnly)
+
   const { data: companies = [], isLoading } = useQuery({
-    queryKey: ['companies'],
-    queryFn: () => projections.companies(500),
+    queryKey: ['companies', filters],
+    queryFn: () => projections.companies(filters),
   })
 
   const delMut = useMutation({
@@ -42,8 +57,7 @@ export default function Companies() {
     }
   }
 
-  const [search, setSearch] = useState('')
-  const filtered = useMemo(() => filterCompanies(companies, search), [companies, search])
+  const filtered = companies // server-filtered
   const withDomain = companies.filter((c) => c.domain).length
   const industries = new Set(companies.map((c) => c.industry).filter(Boolean)).size
 
@@ -84,12 +98,26 @@ export default function Companies() {
 
       <FilterBar>
         <SearchInput placeholder="Search by name, domain, industry…" value={search} onChange={setSearch} />
+        <Select value={domainOnly} onChange={setDomainOnly}>
+          <option value="">Domain: any</option>
+          <option value="yes">Has domain</option>
+          <option value="no">No domain</option>
+        </Select>
+        {anyFilter && (
+          <button
+            type="button"
+            onClick={() => { setSearch(''); setDomainOnly('') }}
+            className="h-9 rounded-lg px-3 text-xs font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800"
+          >
+            Clear
+          </button>
+        )}
       </FilterBar>
 
       {isLoading ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{[0, 1, 2].map((i) => <div key={i} className="h-28 skeleton rounded-2xl" />)}</div>
       ) : filtered.length === 0 ? (
-        <Card><EmptyState icon={Building2} title={search ? 'No matches' : 'No companies yet'} description={search ? 'Try a different search.' : 'Companies appear when enrichment or imports create them.'} /></Card>
+        <Card><EmptyState icon={Building2} title={anyFilter ? 'No matches' : 'No companies yet'} description={anyFilter ? 'Try clearing or changing the filters.' : 'Companies appear when enrichment or imports create them.'} /></Card>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((c) => <CompanyCard key={c.id} c={c} onDelete={onDelete} deleting={delMut.isPending} />)}
@@ -137,8 +165,3 @@ function CompanyCard({ c, onDelete, deleting }: CompanyCardProps) {
   )
 }
 
-function filterCompanies(list: Company[], q: string): Company[] {
-  if (!q.trim()) return list
-  const needle = q.toLowerCase()
-  return list.filter((c) => [c.name, c.domain, c.industry].filter(Boolean).join(' ').toLowerCase().includes(needle))
-}

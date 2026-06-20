@@ -2,15 +2,16 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Contact as ContactIcon, Mail, Building2, AtSign, Users, Trash2, Download } from 'lucide-react'
-import { projections, type Contact } from '../api/v2'
+import { projections, canvas, type Contact } from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import StatCard from '../components/StatCard'
 import Card from '../components/Card'
 import Avatar from '../components/Avatar'
 import Badge from '../components/Badge'
 import EmptyState from '../components/EmptyState'
-import { FilterBar, SearchInput } from '../components/FilterBar'
+import { FilterBar, SearchInput, Select } from '../components/FilterBar'
 import { useToast } from '../components/Toast'
+import { useDebounce } from '../hooks/useDebounce'
 import { fullName } from '../lib/format'
 import { downloadCsv, type CsvColumn } from '../lib/csv'
 
@@ -29,14 +30,36 @@ export default function Contacts() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const toast = useToast()
-  const { data: contacts = [], isLoading } = useQuery({
-    queryKey: ['contacts'],
-    queryFn: () => projections.contacts(500),
-  })
 
   const [search, setSearch] = useState('')
+  const [campaign, setCampaign] = useState('') // workflow_id or ''
+  const [source, setSource] = useState('')
+  const [emailOnly, setEmailOnly] = useState('') // '', 'yes', 'no'
+  const debouncedSearch = useDebounce(search, 300)
+
+  const filters = useMemo(
+    () => ({
+      limit: 500,
+      ...(debouncedSearch.trim() ? { q: debouncedSearch.trim() } : {}),
+      ...(campaign ? { workflow_id: campaign } : {}),
+      ...(source ? { source } : {}),
+      ...(emailOnly === 'yes' ? { has_email: true } : emailOnly === 'no' ? { has_email: false } : {}),
+    }),
+    [debouncedSearch, campaign, source, emailOnly],
+  )
+
+  const { data: contacts = [], isLoading } = useQuery({
+    queryKey: ['contacts', filters],
+    queryFn: () => projections.contacts(filters),
+  })
+  // Filter-option sources for the dropdowns.
+  const campaignsQ = useQuery({ queryKey: ['campaigns-list'], queryFn: canvas.list })
+  const sourcesQ = useQuery({ queryKey: ['contact-sources'], queryFn: projections.contactSources })
+
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const filtered = useMemo(() => filterContacts(contacts, search), [contacts, search])
+  // Server already filtered; `filtered` is the rendered set.
+  const filtered = contacts
+  const anyFilter = !!(debouncedSearch.trim() || campaign || source || emailOnly)
 
   // Selection is scoped to what's currently visible — clear stale ids on filter.
   const visibleIds = useMemo(() => new Set(filtered.map((c) => c.id)), [filtered])
@@ -127,7 +150,7 @@ export default function Contacts() {
       />
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total contacts" value={isLoading ? '—' : contacts.length} icon={Users} accent="brand" />
+        <StatCard label={anyFilter ? 'Matching contacts' : 'Total contacts'} value={isLoading ? '—' : contacts.length} icon={Users} accent="brand" />
         <StatCard label="With email" value={isLoading ? '—' : withEmail} icon={Mail} accent="emerald" />
         <StatCard label="With LinkedIn" value={isLoading ? '—' : withLinkedin} icon={AtSign} accent="violet" />
         <StatCard label="With company" value={isLoading ? '—' : withCompany} icon={Building2} accent="amber" />
@@ -135,6 +158,32 @@ export default function Contacts() {
 
       <FilterBar>
         <SearchInput placeholder="Search by name, email, company…" value={search} onChange={setSearch} />
+        <Select value={campaign} onChange={setCampaign}>
+          <option value="">All campaigns</option>
+          {(campaignsQ.data ?? []).map((w) => (
+            <option key={w.id} value={w.id}>{w.name}</option>
+          ))}
+        </Select>
+        <Select value={source} onChange={setSource}>
+          <option value="">All sources</option>
+          {(sourcesQ.data ?? []).map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </Select>
+        <Select value={emailOnly} onChange={setEmailOnly}>
+          <option value="">Email: any</option>
+          <option value="yes">Has email</option>
+          <option value="no">No email</option>
+        </Select>
+        {anyFilter && (
+          <button
+            type="button"
+            onClick={() => { setSearch(''); setCampaign(''); setSource(''); setEmailOnly('') }}
+            className="h-9 rounded-lg px-3 text-xs font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800"
+          >
+            Clear
+          </button>
+        )}
       </FilterBar>
 
       {/* Bulk action bar — appears only when something is selected. */}
@@ -167,7 +216,7 @@ export default function Contacts() {
         {isLoading ? (
           <div className="space-y-2 p-4">{[0, 1, 2, 3].map((i) => <div key={i} className="h-12 skeleton rounded-lg" />)}</div>
         ) : filtered.length === 0 ? (
-          <EmptyState icon={ContactIcon} title={search ? 'No matches' : 'No contacts yet'} description={search ? 'Try a different search.' : 'Contacts appear once a workflow or import creates them.'} />
+          <EmptyState icon={ContactIcon} title={anyFilter ? 'No matches' : 'No contacts yet'} description={anyFilter ? 'Try clearing or changing the filters.' : 'Contacts appear once a workflow or import creates them.'} />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
@@ -248,10 +297,3 @@ export default function Contacts() {
   )
 }
 
-function filterContacts(list: Contact[], q: string): Contact[] {
-  if (!q.trim()) return list
-  const needle = q.toLowerCase()
-  return list.filter((c) =>
-    [c.first_name, c.last_name, c.email, c.company, c.headline].filter(Boolean).join(' ').toLowerCase().includes(needle),
-  )
-}

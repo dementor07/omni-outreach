@@ -470,9 +470,33 @@ export interface LeadJourney {
   status_reason: string
 }
 
+export interface ContactFilters {
+  q?: string
+  source?: string
+  workflow_id?: UUID
+  has_email?: boolean
+  limit?: number
+}
+
+export interface CompanyFilters {
+  q?: string
+  industry?: string
+  has_domain?: boolean
+  limit?: number
+}
+
 export const projections = {
-  contacts: (limit = 100) => api.get<Contact[]>('/projections/contacts', { params: { limit } }).then((r) => r.data),
-  companies: (limit = 100) => api.get<Company[]>('/projections/companies', { params: { limit } }).then((r) => r.data),
+  contacts: (filters: ContactFilters | number = 100) => {
+    // Back-compat: a bare number is treated as the limit.
+    const params = typeof filters === 'number' ? { limit: filters } : filters
+    return api.get<Contact[]>('/projections/contacts', { params }).then((r) => r.data)
+  },
+  contact: (id: UUID) => api.get<Contact>(`/projections/contacts/${id}`).then((r) => r.data),
+  contactSources: () => api.get<string[]>('/projections/contacts/sources').then((r) => r.data),
+  companies: (filters: CompanyFilters | number = 100) => {
+    const params = typeof filters === 'number' ? { limit: filters } : filters
+    return api.get<Company[]>('/projections/companies', { params }).then((r) => r.data)
+  },
   deals: (params: { stage?: string; limit?: number } = {}) =>
     api.get<Deal[]>('/projections/deals', { params }).then((r) => r.data),
   leads: (params: { workflow_id?: UUID; limit?: number } = {}) =>

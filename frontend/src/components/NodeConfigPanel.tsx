@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { X, Trash2, Save } from 'lucide-react'
 import { clsx } from 'clsx'
 import type { NodeManifest } from '../api/v2'
+import { nodeLabel, categoryLabel } from '../utils/nodeLabel'
 import Button from './Button'
 import Select from './Select'
 
@@ -115,8 +116,8 @@ export default function NodeConfigPanel({
       {/* Header */}
       <div className="flex items-start justify-between gap-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
         <div className="min-w-0">
-          <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-brand-500">{manifest.category}</p>
-          <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{manifest.type}</p>
+          <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-brand-500">{categoryLabel(manifest.category)}</p>
+          <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{nodeLabel(manifest.type)}</p>
           <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-500">{manifest.summary}</p>
         </div>
         <button

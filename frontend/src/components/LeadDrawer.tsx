@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { X, GitBranch, DollarSign, Clock, ExternalLink, Loader2, CornerDownRight, ArrowUp } from 'lucide-react'
 import { clsx } from 'clsx'
 import { projections, type LineageLead } from '../api/v2'
+import { nodeLabel } from '../utils/nodeLabel'
 import Badge from './Badge'
 import { timeAgo } from '../lib/format'
 
@@ -192,10 +193,10 @@ function LineageRow({ lead, relation, onClick }: { lead: LineageLead; relation: 
   )
 }
 
-// Turn a node_type ("condition.verify_person") into a readable step label.
+// Turn a node_type ("condition.verify_person") into a readable step label —
+// the shared curated human name.
 function humanizeNode(nodeType: string): string {
-  const leaf = nodeType.includes('.') ? nodeType.split('.').slice(1).join('.') : nodeType
-  return leaf.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  return nodeLabel(nodeType)
 }
 
 // Fallback for events with no resolvable node (e.g. lead.converted).

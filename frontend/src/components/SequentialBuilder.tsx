@@ -5,6 +5,7 @@ import { clsx } from 'clsx'
 import type { NodeManifest } from '../api/v2'
 import { nodeIcon } from '../utils/nodeIcons'
 import { visualFor } from '../utils/nodeVisuals'
+import { nodeLabel as nodeLabelFor } from '../utils/nodeLabel'
 import Badge from './Badge'
 import Button from './Button'
 import Card from './Card'
@@ -31,10 +32,10 @@ interface Props {
   isSaving?: boolean
 }
 
-// The label shown on a step = the manifest type's leaf, title-cased.
+// The label shown on a step — the shared human node name (curated, falls back
+// to a prettified type tail for unknown types).
 function nodeLabel(manifest: NodeManifest): string {
-  const leaf = manifest.type.split('.').slice(1).join('.') || manifest.type
-  return leaf.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  return nodeLabelFor(manifest.type)
 }
 
 // Chain the nodes head-to-tail by array order via their 'default'/first handle.

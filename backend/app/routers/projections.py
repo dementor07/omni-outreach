@@ -117,10 +117,71 @@ class LeadColumnsResponse(BaseModel):
     columns: list[LeadColumnOut]
 
 
-@router.get("/contacts", response_model=list[ContactOut], summary="List contacts in this workspace")
-async def list_contacts(_: AuthContext = Depends(get_current_workspace), limit: int = Query(100, ge=1, le=500)) -> list[ContactOut]:
-    rows = await fetch_all("SELECT * FROM omni_contacts ORDER BY updated_at DESC LIMIT $1", limit)
+@router.get("/contacts", response_model=list[ContactOut], summary="List contacts, with filters")
+async def list_contacts(
+    _: AuthContext = Depends(get_current_workspace),
+    q: str | None = Query(None, description="Search across name, email, company, title"),
+    source: str | None = Query(None, description="Filter by acquisition source (e.g. naukri, greenhouse)"),
+    workflow_id: uuid.UUID | None = Query(None, description="Only contacts enrolled in this campaign (via a lead)"),
+    has_email: bool | None = Query(None, description="True = only contacts with an email"),
+    limit: int = Query(100, ge=1, le=500),
+) -> list[ContactOut]:
+    clauses: list[str] = []
+    args: list[Any] = []
+
+    if q and q.strip():
+        args.append(f"%{q.strip()}%")
+        i = len(args)
+        clauses.append(
+            f"(c.first_name ILIKE ${i} OR c.last_name ILIKE ${i} OR c.email ILIKE ${i} "
+            f"OR c.company ILIKE ${i} OR c.headline ILIKE ${i})"
+        )
+    if source:
+        args.append(source)
+        clauses.append(f"c.source = ${len(args)}")
+    if has_email is True:
+        clauses.append("c.email IS NOT NULL AND c.email <> ''")
+    elif has_email is False:
+        clauses.append("(c.email IS NULL OR c.email = '')")
+    if workflow_id:
+        # Contact↔campaign link: a contact belongs to a campaign if a lead for it
+        # carries that workflow_id. EXISTS keeps it a membership test (no fan-out).
+        args.append(workflow_id)
+        clauses.append(
+            f"EXISTS (SELECT 1 FROM omni_leads l WHERE l.contact_id = c.id AND l.workflow_id = ${len(args)})"
+        )
+
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    args.append(limit)
+    rows = await fetch_all(
+        f"SELECT c.* FROM omni_contacts c {where} ORDER BY c.updated_at DESC LIMIT ${len(args)}",
+        *args,
+    )
     return [ContactOut.model_validate(r) for r in rows]
+
+
+# NB: the static /contacts/sources path is declared BEFORE /contacts/{contact_id}
+# so it can never be shadowed by the dynamic segment.
+@router.get(
+    "/contacts/sources",
+    response_model=list[str],
+    summary="Distinct contact sources (for the source filter dropdown)",
+)
+async def contact_sources(_: AuthContext = Depends(get_current_workspace)) -> list[str]:
+    rows = await fetch_all(
+        "SELECT DISTINCT source FROM omni_contacts WHERE source IS NOT NULL AND source <> '' ORDER BY source"
+    )
+    return [r["source"] for r in rows]
+
+
+@router.get("/contacts/{contact_id}", response_model=ContactOut, summary="Fetch one contact")
+async def get_contact(
+    contact_id: uuid.UUID, _: AuthContext = Depends(get_current_workspace)
+) -> ContactOut:
+    row = await fetch_one("SELECT * FROM omni_contacts WHERE id = $1", contact_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="contact not found")
+    return ContactOut.model_validate(row)
 
 
 @router.delete("/contacts/{contact_id}", status_code=204, summary="Delete a contact")
@@ -130,9 +191,32 @@ async def delete_contact(
     await _delete_entity(ctx, table="omni_contacts", entity_type="contact", entity_id=contact_id)
 
 
-@router.get("/companies", response_model=list[CompanyOut], summary="List companies in this workspace")
-async def list_companies(_: AuthContext = Depends(get_current_workspace), limit: int = Query(100, ge=1, le=500)) -> list[CompanyOut]:
-    rows = await fetch_all("SELECT * FROM omni_companies ORDER BY updated_at DESC LIMIT $1", limit)
+@router.get("/companies", response_model=list[CompanyOut], summary="List companies, with filters")
+async def list_companies(
+    _: AuthContext = Depends(get_current_workspace),
+    q: str | None = Query(None, description="Search across name, domain, industry"),
+    industry: str | None = Query(None, description="Filter by industry"),
+    has_domain: bool | None = Query(None, description="True = only companies with a resolved domain"),
+    limit: int = Query(100, ge=1, le=500),
+) -> list[CompanyOut]:
+    clauses: list[str] = []
+    args: list[Any] = []
+    if q and q.strip():
+        args.append(f"%{q.strip()}%")
+        i = len(args)
+        clauses.append(f"(name ILIKE ${i} OR domain ILIKE ${i} OR industry ILIKE ${i})")
+    if industry:
+        args.append(industry)
+        clauses.append(f"industry = ${len(args)}")
+    if has_domain is True:
+        clauses.append("domain IS NOT NULL AND domain <> ''")
+    elif has_domain is False:
+        clauses.append("(domain IS NULL OR domain = '')")
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    args.append(limit)
+    rows = await fetch_all(
+        f"SELECT * FROM omni_companies {where} ORDER BY updated_at DESC LIMIT ${len(args)}", *args
+    )
     return [CompanyOut.model_validate(r) for r in rows]
 
 
