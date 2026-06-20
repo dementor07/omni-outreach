@@ -407,6 +407,16 @@ export interface Deal {
   updated_at: ISODate
 }
 
+export interface Task {
+  id: UUID
+  contact_id: UUID | null
+  title: string
+  due_date: ISODate | null
+  priority: string
+  status: string // 'open' | 'done'
+  created_at: ISODate
+}
+
 // A lead's columns are additive per node, so it carries a computed identity +
 // stage and a flattened ``fields`` bag keyed by the workflow's LeadColumn keys
 // (see GET /projections/leads/columns).
@@ -499,6 +509,10 @@ export const projections = {
   },
   deals: (params: { stage?: string; limit?: number } = {}) =>
     api.get<Deal[]>('/projections/deals', { params }).then((r) => r.data),
+  tasks: (params: { status?: string; limit?: number } = {}) =>
+    api.get<Task[]>('/projections/tasks', { params }).then((r) => r.data),
+  completeTask: (id: UUID, done = true) =>
+    api.post(`/projections/tasks/${id}/complete`, undefined, { params: { done } }).then((r) => r.data),
   leads: (params: { workflow_id?: UUID; limit?: number } = {}) =>
     api.get<Lead[]>('/projections/leads', { params }).then((r) => r.data),
   deleteContact: (id: UUID) => api.delete<void>(`/projections/contacts/${id}`).then(() => undefined),

@@ -114,6 +114,30 @@ export function handleLabel(name: string): string {
   return name.replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase())
 }
 
+const EVENT_LABELS: Record<string, string> = {
+  'contact.created': 'Contact created',
+  'contact.updated': 'Contact updated',
+  'email.sent': 'Email sent',
+  'email.opened': 'Email opened',
+  'email.clicked': 'Email link clicked',
+  'email.replied': 'Replied to email',
+  'message.received': 'Reply received',
+  'lead.created': 'Lead created',
+  'lead.goal_reached': 'Goal reached',
+  'lead.sequence_ended': 'Sequence ended',
+  'deal.created': 'Deal created',
+  'deal.updated': 'Deal updated',
+  'task.created': 'Task created',
+  'approval.requested': 'Approval requested',
+  'approval.resolved': 'Approval resolved',
+}
+
+/** Human label for an event_type, e.g. "email.sent" → "Email sent". */
+export function eventLabel(eventType: string): string {
+  if (EVENT_LABELS[eventType]) return EVENT_LABELS[eventType]
+  return eventType.replace(/[._]/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase())
+}
+
 /** Human label for a node category (UPPER or lower wire value). */
 export function categoryLabel(category: string): string {
   const c = category.toUpperCase()

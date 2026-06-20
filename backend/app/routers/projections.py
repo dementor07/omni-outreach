@@ -227,6 +227,58 @@ async def delete_company(
     await _delete_entity(ctx, table="omni_companies", entity_type="company", entity_id=company_id)
 
 
+class TaskOut(BaseModel):
+    id: uuid.UUID
+    contact_id: uuid.UUID | None
+    title: str
+    due_date: datetime | None
+    priority: str
+    status: str
+    created_at: datetime
+
+
+@router.get("/tasks", response_model=list[TaskOut], summary="List tasks (worklist)")
+async def list_tasks(
+    _: AuthContext = Depends(get_current_workspace),
+    status: str | None = Query(None, description="open | done"),
+    limit: int = Query(200, ge=1, le=1000),
+) -> list[TaskOut]:
+    if status:
+        rows = await fetch_all(
+            "SELECT id, contact_id, title, due_date, priority, status, created_at "
+            "FROM omni_tasks WHERE status = $1 ORDER BY (due_date IS NULL), due_date, created_at DESC LIMIT $2",
+            status,
+            limit,
+        )
+    else:
+        rows = await fetch_all(
+            "SELECT id, contact_id, title, due_date, priority, status, created_at "
+            "FROM omni_tasks ORDER BY (status = 'done'), (due_date IS NULL), due_date, created_at DESC LIMIT $1",
+            limit,
+        )
+    return [TaskOut.model_validate(r) for r in rows]
+
+
+@router.post("/tasks/{task_id}/complete", status_code=202, summary="Mark a task done")
+async def complete_task(
+    task_id: uuid.UUID, ctx: AuthContext = Depends(get_current_workspace), done: bool = Query(True)
+) -> dict[str, str]:
+    """Flip a task open↔done. Mutation = event: publishes task.completed/.reopened
+    which the projector applies to omni_tasks."""
+    row = await fetch_one("SELECT id FROM omni_tasks WHERE id = $1", task_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="task not found")
+    await publish_event(
+        workspace_id=ctx.workspace_id,
+        event_type="task.completed" if done else "task.reopened",
+        entity_type="task",
+        entity_id=str(task_id),
+        payload={"by": ctx.user_id},
+        actor_user_id=ctx.user_id,
+    )
+    return {"status": "done" if done else "open"}
+
+
 @router.get("/deals", response_model=list[DealOut], summary="List deals (Kanban source)")
 async def list_deals(
     _: AuthContext = Depends(get_current_workspace),

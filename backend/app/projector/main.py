@@ -181,6 +181,17 @@ async def _project_task(env: dict[str, Any]) -> None:
     )
 
 
+async def _project_task_status(env: dict[str, Any]) -> None:
+    """``task.completed`` / ``task.reopened`` flip a task's status. Keyed by the
+    task id (entity_id)."""
+    status = "done" if env["event_type"] == "task.completed" else "open"
+    await execute(
+        "UPDATE omni_tasks SET status = $1 WHERE id = $2",
+        status,
+        env["entity_id"],
+    )
+
+
 async def _project_approval(env: dict[str, Any]) -> None:
     """CONTRACT-005: track the approvals queue.
 
@@ -599,6 +610,10 @@ async def _apply_projection(env: dict[str, Any]) -> None:
     # Pipeline cost/usage metrics (per source run). entity_id = run_id.
     if et == "pipeline.metric" and env.get("entity_id"):
         await _project_pipeline_metric(env)
+        return
+    # Task status flips (entity_type 'task' but NOT the create path).
+    if et in ("task.completed", "task.reopened") and env.get("entity_id"):
+        await _project_task_status(env)
         return
     if entity in _PROJECTORS and env.get("entity_id"):
         await _PROJECTORS[entity](env)
