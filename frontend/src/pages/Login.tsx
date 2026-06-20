@@ -40,7 +40,7 @@ export default function Login() {
           <LogoMark size={44} className="shadow-lg" />
           <div className="text-center">
             <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Sign in to Omni</h1>
-            <p className="mt-1 text-sm text-slate-500">Streaming-native B2B outreach</p>
+            <p className="mt-1 text-sm text-slate-500">Multi-channel outreach engine</p>
           </div>
         </div>
 

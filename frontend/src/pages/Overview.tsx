@@ -26,7 +26,13 @@ export default function Overview() {
   const scoresQ = useQuery({ queryKey: ['lead-scores'], queryFn: () => ai.scores({ limit: 200 }) })
 
   const contacts = contactsQ.data ?? []
-  const leads = leadsQ.data ?? []
+  const leads = useMemo(() => leadsQ.data ?? [], [leadsQ.data])
+  // Resolve a scored lead's human identity (the score row only carries lead_id).
+  const identityByLead = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const l of leads) if (l.identity) m.set(l.id, l.identity)
+    return m
+  }, [leads])
   // Stable reference so the openPipeline memo doesn't recompute every render.
   const deals = useMemo(() => dealsQ.data ?? [], [dealsQ.data])
   const threads = threadsQ.data ?? []
@@ -89,8 +95,8 @@ export default function Overview() {
 
         <Card padding="lg">
           <CardHeader
-            title="AI hot leads"
-            description="Highest ICP fit, scored by AI"
+            title="Top scored leads"
+            description="Best ICP fit, scored by AI"
             actions={<Badge label="AI" variant="violet" dot />}
           />
           {scoresQ.isLoading ? (
@@ -98,7 +104,11 @@ export default function Overview() {
           ) : scores.length === 0 ? (
             <EmptyState icon={TrendingUp} title="No scored leads yet" description="Run a scoring job from AI Studio to rank your leads." action={<Button variant="primary" size="sm" icon={Sparkles} onClick={() => navigate('/ai-studio')}>Open AI Studio</Button>} />
           ) : (
-            <div className="space-y-2">{scores.slice(0, 6).map((s) => <ScoreRow key={s.lead_id} s={s} />)}</div>
+            <div className="space-y-2">
+              {[...scores].sort((a, b) => b.score - a.score).slice(0, 6).map((s) => (
+                <ScoreRow key={s.lead_id} s={s} identity={identityByLead.get(s.lead_id)} onClick={() => navigate('/leads')} />
+              ))}
+            </div>
           )}
         </Card>
       </section>
@@ -174,10 +184,14 @@ function PipelineBars({ deals }: { deals: Deal[] }) {
   )
 }
 
-function ScoreRow({ s }: { s: LeadScore }) {
+function ScoreRow({ s, identity, onClick }: { s: LeadScore; identity?: string; onClick?: () => void }) {
   const tone = s.tier === 'hot' ? 'danger' : s.tier === 'warm' ? 'warning' : 'neutral'
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/40 p-2.5 dark:border-slate-800 dark:bg-slate-800/30">
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/40 p-2.5 text-left transition-colors hover:bg-slate-100/60 dark:border-slate-800 dark:bg-slate-800/30 dark:hover:bg-slate-800/60"
+    >
       <div className={clsx(
         'flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-sm font-bold tabular-nums',
         s.tier === 'hot' ? 'bg-rose-50 text-rose-600' : s.tier === 'warm' ? 'bg-amber-50 text-amber-600' : 'bg-slate-100 text-slate-500',
@@ -186,11 +200,11 @@ function ScoreRow({ s }: { s: LeadScore }) {
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
-          Lead {s.lead_id.slice(0, 8)}
+          {identity ?? 'Unresolved lead'}
         </p>
         <p className="truncate text-[11px] text-slate-500">{s.reasons[0] ?? 'No reason recorded'}</p>
       </div>
       <Badge label={s.tier} variant={tone} dot />
-    </div>
+    </button>
   )
 }

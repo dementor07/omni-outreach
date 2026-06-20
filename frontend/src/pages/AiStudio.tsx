@@ -53,7 +53,13 @@ export default function AiStudio() {
   })
 
   const done = jobs.filter((j) => j.status === 'done').length
-  const running = jobs.filter((j) => j.status === 'queued' || j.status === 'running').length
+  // A job still 'queued' an hour later isn't in flight — it stalled (e.g. an
+  // in-workflow screen job recorded before its lifecycle closed). Don't inflate
+  // the "in flight" stat with corpses.
+  const STALE_MS = 60 * 60 * 1000
+  const isStale = (j: AiJob) =>
+    j.status === 'queued' && Date.now() - new Date(j.created_at).getTime() > STALE_MS
+  const running = jobs.filter((j) => (j.status === 'queued' || j.status === 'running') && !isStale(j)).length
 
   return (
     <div className="space-y-6">
@@ -167,8 +173,10 @@ export default function AiStudio() {
 }
 
 function JobRow({ job }: { job: AiJob }) {
+  const stalled = job.status === 'queued' && Date.now() - new Date(job.created_at).getTime() > 60 * 60 * 1000
   const statusTone =
-    job.status === 'done' ? 'success' : job.status === 'failed' ? 'danger' : job.status === 'running' ? 'info' : 'warning'
+    job.status === 'done' ? 'success' : job.status === 'failed' ? 'danger' : job.status === 'running' ? 'info' : stalled ? 'neutral' : 'warning'
+  const statusLabel = stalled ? 'stalled' : job.status
   const Icon = KIND_META[job.kind].icon
   return (
     <tr className="hover:bg-slate-50 dark:hover:bg-slate-900/50">
@@ -178,7 +186,7 @@ function JobRow({ job }: { job: AiJob }) {
           <span className="font-medium text-slate-900 dark:text-white">{KIND_META[job.kind].label}</span>
         </div>
       </td>
-      <td className="px-5 py-2.5"><Badge label={job.status} variant={statusTone} size="xs" dot /></td>
+      <td className="px-5 py-2.5"><Badge label={statusLabel} variant={statusTone} size="xs" dot /></td>
       <td className="px-5 py-2.5 text-slate-500">{job.model ?? '—'}</td>
       <td className={clsx('px-5 py-2.5 tabular-nums', job.cost_usd ? 'text-slate-700 dark:text-slate-300' : 'text-slate-300')}>
         {job.cost_usd ? `$${Number(job.cost_usd).toFixed(4)}` : '—'}

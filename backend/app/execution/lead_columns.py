@@ -188,7 +188,12 @@ def lead_stage(custom_fields: dict[str, Any], has_contact: bool) -> str:
 
 def lead_identity(custom_fields: dict[str, Any], contact: dict[str, Any] | None, lead_id: str) -> str:
     """The best human label for a lead: contact name -> person from item ->
-    company name -> short id. Mirrors lead_stage's progression."""
+    company name -> a meaningful generic. Mirrors lead_stage's progression.
+
+    Never returns a raw UUID slice — "Lead a4e5a352" is noise to an operator. A
+    root run-lead (carries source config, no contact/item yet) reads "Campaign
+    run"; anything else still unresolved reads "Unresolved lead". (lead_id is kept
+    in the signature for callers/back-compat but no longer surfaced to humans.)"""
     if contact:
         name = " ".join(p for p in (contact.get("first_name"), contact.get("last_name")) if p).strip()
         if name:
@@ -201,4 +206,6 @@ def lead_identity(custom_fields: dict[str, Any], contact: dict[str, Any] | None,
             return str(item["name"])
         if item.get("company_name"):
             return str(item["company_name"])
-    return f"Lead {lead_id[:8]}"
+    if custom_fields.get("companies_key") or custom_fields.get("keyword") or custom_fields.get("platform"):
+        return "Campaign run"
+    return "Unresolved lead"
