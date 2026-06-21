@@ -141,6 +141,27 @@ def test_objective_worker_consumes_the_fact_and_reuses_run_path():
     assert "noderegistry.discover()" in worker, "worker must discover nodes before firing them"
 
 
+def test_objective_worker_has_stall_watchdog():
+    """The loop is otherwise PURELY event-driven (wakes only on run.completed),
+    so a re-seed that never completes (hung source, rate-limit, send gate, crashed
+    muscle) would freeze its objective in 'pursuing' forever. A periodic watchdog
+    must re-pursue stale 'pursuing' objectives so a silent freeze becomes a real
+    decision (re-measure → re-seed or exhaust)."""
+    worker = (BACKEND / "app" / "execution" / "objective_worker.py").read_text(encoding="utf-8")
+    assert "_watchdog_sweep" in worker and "_watchdog_loop" in worker, "watchdog must exist"
+    sweep = worker.split("async def _watchdog_sweep", 1)[1].split("async def _watchdog_loop", 1)[0]
+    # it targets STALLED pursuing objectives (status + staleness), not all of them
+    assert "status = 'pursuing'" in sweep
+    assert "updated_at <" in sweep, "must select on staleness, not sweep every objective"
+    # and it recovers by re-pursuing through the SAME pursue() path (re-measure/re-seed)
+    assert "pursue(" in sweep
+    # the watchdog runs concurrently with the consumer, not instead of it
+    run_body = worker.split("async def run(", 1)[1]
+    assert "_watchdog_loop" in run_body and "create_task" in run_body, (
+        "watchdog must run concurrently with the event consumer"
+    )
+
+
 def test_measure_is_lineage_scoped_not_global():
     src = (BACKEND / "app" / "services" / "objective_controller.py").read_text(encoding="utf-8")
     body = src.split("async def measure", 1)[1].split("async def spend", 1)[0]

@@ -33,7 +33,7 @@ import signal
 from aiokafka import AIOKafkaConsumer
 
 from app.config import settings
-from app.db import close_pool, execute, fetch_one, init_pool, system_scope
+from app.db import close_pool, execute, fetch_all, fetch_one, init_pool, system_scope
 from app.services import bus, objective_controller
 
 log = logging.getLogger("objective_worker")
@@ -41,6 +41,18 @@ log = logging.getLogger("objective_worker")
 EVENTS_TOPIC = "omni.events"
 CONSUMER_GROUP = "v2-objective"
 TRIGGER_EVENT = "campaign.run.completed"
+
+# Watchdog — the loop is otherwise PURELY event-driven (it only wakes on
+# campaign.run.completed). A re-seeded run that never completes — a hung source,
+# a rate-limited connection, the send cap/window gate, a crashed muscle — would
+# silently freeze its objective in 'pursuing' forever, with no re-evaluation and
+# no exhaustion. The watchdog periodically re-pursues objectives that have been
+# 'pursuing' with no progress update for longer than STALE_AFTER_S: it re-measures
+# (progress may have moved), and if a widen is still warranted it re-seeds again —
+# turning a silent freeze into a real decision. Idempotent: pursue() is a pure
+# function of measured state, so a redundant sweep just re-measures and re-decides.
+WATCHDOG_INTERVAL_S = 120  # how often the sweep runs
+STALE_AFTER_S = 600        # a 'pursuing' objective idle this long is considered stalled
 
 
 async def handle_event(env: dict) -> None:
@@ -122,6 +134,49 @@ async def _persist(workspace_id: str, objective_id: str, status: str, progress: 
         )
 
 
+async def _watchdog_sweep() -> None:
+    """Re-pursue objectives stuck in 'pursuing' with no update for STALE_AFTER_S.
+
+    The event path only re-evaluates on run-completion, so a re-seed that never
+    completes freezes its objective silently. This finds those (status='pursuing'
+    AND updated_at older than the threshold) and re-pursues each — re-measuring
+    and, if still short within bounds, re-seeding. updated_at is bumped on every
+    _persist, so a healthy looping objective is never stale; only a genuinely
+    stalled one trips this. Cross-tenant read (system-scoped, like the rest of the
+    worker) — pursue() re-asserts workspace scope per objective."""
+    async with system_scope():
+        rows = await fetch_all(
+            "SELECT workspace_id, workflow_id FROM omni_campaign_objectives "
+            "WHERE status = 'pursuing' "
+            "AND updated_at < NOW() - make_interval(secs => $1)",
+            STALE_AFTER_S,
+        )
+    if not rows:
+        return
+    log.info("[objective] watchdog: %d stalled objective(s) — re-pursuing", len(rows))
+    for r in rows:
+        try:
+            await pursue(str(r["workspace_id"]), str(r["workflow_id"]))
+        except Exception:  # noqa: BLE001
+            # One wedged objective must not kill the sweep for the others.
+            log.exception("[objective] watchdog re-pursue failed for workflow %s", r["workflow_id"])
+
+
+async def _watchdog_loop(stop: asyncio.Event) -> None:
+    """Run the stall sweep every WATCHDOG_INTERVAL_S until stop is set."""
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=WATCHDOG_INTERVAL_S)
+        except TimeoutError:
+            pass  # interval elapsed — time to sweep
+        if stop.is_set():
+            return
+        try:
+            await _watchdog_sweep()
+        except Exception:  # noqa: BLE001
+            log.exception("[objective] watchdog sweep errored; continuing")
+
+
 async def run() -> None:
     await init_pool(settings.database_url)
     await bus.init_producer()
@@ -151,9 +206,20 @@ async def run() -> None:
         except NotImplementedError:
             pass
 
+    # The watchdog runs concurrently with the event consumer: the consumer drives
+    # the loop when runs complete; the watchdog catches objectives whose re-seed
+    # stalled and never produced a completion event.
+    watchdog = asyncio.create_task(_watchdog_loop(stop))
+    log.info("[objective] watchdog sweeping every %ds (stale after %ds)", WATCHDOG_INTERVAL_S, STALE_AFTER_S)
     try:
         await bus.consume_forever(consumer, handle_event, name="objective", stop_event=stop, commit=True)
     finally:
+        stop.set()
+        watchdog.cancel()
+        try:
+            await watchdog
+        except asyncio.CancelledError:
+            pass
         await consumer.stop()
         await bus.close_producer()
         await close_pool()
