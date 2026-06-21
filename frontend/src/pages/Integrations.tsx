@@ -331,9 +331,10 @@ function ConnectionRow({ connection, onRemove }: { connection: Connection; onRem
   )
 }
 
-function AccountRow({ account, connectionId }: { account: SendingAccount; connectionId: string }) {
+function AccountRow({ connectionId, account }: { connectionId: string; account: SendingAccount }) {
   const qc = useQueryClient()
   const [editing, setEditing] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [draftCap, setDraftCap] = useState(String(account.daily_cap))
   const [draftStatus, setDraftStatus] = useState<SendingAccountStatus>(account.status)
 
@@ -406,9 +407,37 @@ function AccountRow({ account, connectionId }: { account: SendingAccount; connec
         <button type="button" onClick={() => setEditing(true)} className="p-1 text-slate-400 hover:text-brand-600" title="Edit">
           <Settings size={12} />
         </button>
-        <button type="button" onClick={() => { if(confirm('Remove account?')) delMut.mutate() }} className="p-1 text-slate-400 hover:text-rose-600" title="Remove">
-          <Trash2 size={12} />
-        </button>
+
+        {confirmDelete ? (
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-rose-600">Remove?</span>
+            <button
+              type="button"
+              onClick={() => delMut.mutate()}
+              disabled={delMut.isPending}
+              className="rounded px-2 py-1 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50"
+            >
+              Yes
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(false)}
+              disabled={delMut.isPending}
+              className="rounded px-2 py-1 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200"
+            >
+              No
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            title="Remove account"
+            onClick={() => setConfirmDelete(true)}
+            className="p-1 text-slate-400 hover:text-rose-600"
+          >
+            <Trash2 size={12} />
+          </button>
+        )}
       </div>
     </div>
   )

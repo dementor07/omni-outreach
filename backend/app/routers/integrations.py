@@ -153,6 +153,15 @@ def _linkedin_safe_cap(channel_kind: str, daily_cap: int) -> int:
     return daily_cap
 
 
+@router.get("/accounts", response_model=list[SendingAccountOut], summary="List all accounts across all connections")
+async def list_all_accounts(ctx: AuthContext = Depends(get_current_workspace)) -> list[SendingAccountOut]:
+    rows = await fetch_all(
+        "SELECT * FROM omni_sending_accounts WHERE workspace_id = $1 ORDER BY created_at DESC",
+        ctx.workspace_id,
+    )
+    return [SendingAccountOut.model_validate(r) for r in rows]
+
+
 @router.get("/{connection_id}/accounts", response_model=list[SendingAccountOut], summary="List accounts under one connection")
 async def list_accounts(connection_id: uuid.UUID, _: AuthContext = Depends(get_current_workspace)) -> list[SendingAccountOut]:
     rows = await fetch_all(

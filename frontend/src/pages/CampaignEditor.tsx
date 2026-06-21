@@ -15,7 +15,7 @@ import {
   ArrowLeft, Search, GitBranch, Save, Undo2, Redo2, Maximize2, Minimize2, Plus,
   Users, Settings as SettingsIcon, Trash2, Play, Target,
 } from 'lucide-react'
-import { canvas, nodes as nodesApi, projections, integrations, type Lead, type NodeManifest, type SendingAccount, type WorkflowStatus } from '../api/v2'
+import { canvas, nodes as nodesApi, projections, integrations, type Lead, type NodeManifest, type WorkflowStatus } from '../api/v2'
 import { nodeIcon } from '../utils/nodeIcons'
 import { visualFor } from '../utils/nodeVisuals'
 import { nodeLabel, handleLabel, categoryLabel } from '../utils/nodeLabel'
@@ -833,28 +833,26 @@ function WorkflowPoolSettings({ workflowId }: { workflowId: string }) {
   const qc = useQueryClient()
   const toast = useToast()
 
-  // 1. Fetch pool
   const poolQ = useQuery({
     queryKey: ['workflow', workflowId, 'accounts'],
     queryFn: () => canvas.pool(workflowId)
   })
 
-  // 2. Fetch all connections, then all accounts
-  // In a real app we might have a single /accounts endpoint. Here we map connections.
-  const connsQ = useQuery({
-    queryKey: ['integrations'],
-    queryFn: () => integrations.list()
+  const accsQ = useQuery({
+    queryKey: ['integrations', 'accounts'],
+    queryFn: integrations.allAccounts
   })
 
-  // Hacky but works for this level of UI: fetch accounts for each connection when we have them
-  const [allAccounts, setAllAccounts] = useState<SendingAccount[]>([])
+  const [draftPool, setDraftPool] = useState<Set<string>>(new Set())
+  
   useEffect(() => {
-    if (!connsQ.data) return
-    Promise.all(connsQ.data.map(c => integrations.accounts(c.id).catch(() => [])))
-      .then(lists => setAllAccounts(lists.flat()))
-  }, [connsQ.data])
+    if (poolQ.data) {
+      setDraftPool(new Set(poolQ.data.map(a => a.id)))
+    }
+  }, [poolQ.data])
 
-  const poolIds = new Set((poolQ.data || []).map(a => a.id))
+  const savedPool = new Set((poolQ.data || []).map(a => a.id))
+  const isDirty = draftPool.size !== savedPool.size || Array.from(draftPool).some(id => !savedPool.has(id))
 
   const setMut = useMutation({
     mutationFn: (ids: string[]) => canvas.setPool(workflowId, ids),
@@ -865,26 +863,44 @@ function WorkflowPoolSettings({ workflowId }: { workflowId: string }) {
   })
 
   const toggleAccount = (id: string) => {
-    const next = new Set(poolIds)
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
-    setMut.mutate(Array.from(next))
+    setDraftPool(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
+
+  const allAccounts = accsQ.data || []
 
   return (
     <div>
-      <h3 className="text-[14px] font-semibold text-slate-900 dark:text-white mb-2">Sending Accounts Pool</h3>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-[14px] font-semibold text-slate-900 dark:text-white">Sending Accounts Pool</h3>
+        {isDirty && (
+          <Button 
+            variant="primary" 
+            size="xs" 
+            onClick={() => setMut.mutate(Array.from(draftPool))}
+            isLoading={setMut.isPending}
+          >
+            Save pool
+          </Button>
+        )}
+      </div>
       <p className="text-[12px] text-slate-500 mb-3">Select the accounts this campaign is allowed to send from. If none are selected, it relies on individual node configuration.</p>
       
       <div className="space-y-2 border rounded-md p-3 max-h-64 overflow-auto border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/50">
-        {allAccounts.length === 0 ? (
+        {accsQ.isLoading ? (
+          <p className="text-xs text-slate-400">Loading accounts...</p>
+        ) : allAccounts.length === 0 ? (
           <p className="text-xs text-slate-400">No accounts available across all integrations.</p>
         ) : (
           allAccounts.map(acc => (
             <label key={acc.id} className="flex items-center gap-2 text-sm cursor-pointer">
               <input 
                 type="checkbox" 
-                checked={poolIds.has(acc.id)} 
+                checked={draftPool.has(acc.id)} 
                 onChange={() => toggleAccount(acc.id)}
                 disabled={setMut.isPending}
                 className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"

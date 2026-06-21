@@ -647,6 +647,7 @@ export const integrations = {
     api.get<Connection[]>('/integrations', { params: provider ? { provider } : undefined }).then((r) => r.data),
   create: (body: ConnectionCreate) => api.post<Connection>('/integrations', body).then((r) => r.data),
   remove: (id: UUID) => api.delete(`/integrations/${id}`).then(() => undefined),
+  allAccounts: () => api.get<SendingAccount[]>('/integrations/accounts').then((r) => r.data),
   accounts: (connectionId: UUID) =>
     api.get<SendingAccount[]>(`/integrations/${connectionId}/accounts`).then((r) => r.data),
   addAccount: (connectionId: UUID, body: SendingAccountCreate) =>
