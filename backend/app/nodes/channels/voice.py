@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -19,7 +19,9 @@ from app.nodes import (
 
 
 class VoiceChannelConfig(BaseModel):
-    connection_name: str = Field(description="Retell connection name (Settings → Integrations)")
+    connection_name: str | None = Field(None, description="Retell connection name (Settings → Integrations)")
+    sending_account_id: str | None = None
+    account_pool: Literal["campaign", "round_robin", "single"] | None = None
     retell_agent_id: str = Field(min_length=1, description="The Retell agent that will run the call")
     conversation_flow_id: str | None = Field(None, description="Optional — for Nested Flow agents")
     from_number: str | None = Field(None, description="Override the connection's default outbound number")

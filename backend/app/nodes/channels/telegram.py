@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -18,7 +19,9 @@ from app.nodes import (
 
 
 class TelegramChannelConfig(BaseModel):
-    connection_name: str = Field(description="Telegram bot connection name (Settings → Integrations)")
+    connection_name: str | None = Field(None, description="Telegram bot connection name (Settings → Integrations)")
+    sending_account_id: str | None = None
+    account_pool: Literal["campaign", "round_robin", "single"] | None = None
     body_template: str = Field(min_length=1, max_length=4096, description="Message body; supports {{contact.first_name}} variables")
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -18,7 +19,9 @@ from app.nodes import (
 
 
 class InstagramChannelConfig(BaseModel):
-    connection_name: str = Field(description="Instagram connection name (Settings → Integrations)")
+    connection_name: str | None = Field(None, description="Instagram connection name (Settings → Integrations)")
+    sending_account_id: str | None = None
+    account_pool: Literal["campaign", "round_robin", "single"] | None = None
     body_template: str = Field(min_length=1, max_length=1000, description="DM body; supports {{contact.first_name}} variables")
 
 

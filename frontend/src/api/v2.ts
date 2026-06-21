@@ -274,6 +274,10 @@ export interface Workflow {
   timezone: string
   start_at: ISODate | null
   end_at: ISODate | null
+  daily_cap: number | null
+  earliest_hour: number | null
+  latest_hour: number | null
+  days_of_week: number[] | null
   created_at: ISODate
   updated_at: ISODate
 }
@@ -328,9 +332,13 @@ export const canvas = {
       .post<WorkflowDetail>('/canvas/workflows/from-template', { template_id: templateId, name, timezone })
       .then((r) => r.data),
   get: (id: UUID) => api.get<WorkflowDetail>(`/canvas/workflows/${id}`).then((r) => r.data),
-  update: (id: UUID, body: Partial<Pick<Workflow, 'name' | 'status' | 'timezone' | 'start_at' | 'end_at'>>) =>
+  update: (id: UUID, body: Partial<Pick<Workflow, 'name' | 'status' | 'timezone' | 'start_at' | 'end_at' | 'daily_cap' | 'earliest_hour' | 'latest_hour' | 'days_of_week'>>) =>
     api.patch<Workflow>(`/canvas/workflows/${id}`, body).then((r) => r.data),
   archive: (id: UUID) => api.delete(`/canvas/workflows/${id}`).then(() => undefined),
+  pool: (workflowId: UUID) =>
+    api.get<SendingAccount[]>(`/canvas/workflows/${workflowId}/accounts`).then((r) => r.data),
+  setPool: (workflowId: UUID, sendingAccountIds: UUID[]) =>
+    api.put<SendingAccount[]>(`/canvas/workflows/${workflowId}/accounts`, { sending_account_ids: sendingAccountIds }).then((r) => r.data),
 
   addNode: (
     workflowId: UUID,
@@ -589,11 +597,66 @@ export interface ConnectionCreate {
   metadata?: Record<string, unknown>
 }
 
+export type SendChannelKind = 'email' | 'linkedin' | 'sms' | 'voice' | 'whatsapp' | 'instagram' | 'telegram'
+export type SendingAccountStatus = 'active' | 'paused' | 'warming' | 'banned'
+
+export interface SendingAccount {
+  id: UUID
+  connection_id: UUID
+  provider: string
+  channel_kind: SendChannelKind
+  external_identity: string
+  display_name: string | null
+  daily_cap: number
+  hourly_cap: number
+  sends_today: number
+  sends_this_hour: number
+  status: SendingAccountStatus
+  warmup_target: number | null
+  last_used_at: ISODate | null
+  health: Record<string, unknown>
+  created_at: ISODate
+  updated_at: ISODate
+}
+
+export interface SendingAccountCreate {
+  channel_kind: SendChannelKind
+  external_identity: string
+  display_name?: string | null
+  daily_cap?: number
+  hourly_cap?: number
+  warmup_target?: number | null
+  status?: SendingAccountStatus
+}
+
+export interface SendingAccountUpdate {
+  display_name?: string | null
+  daily_cap?: number
+  hourly_cap?: number
+  warmup_target?: number | null
+  status?: SendingAccountStatus
+}
+
+export interface SyncResult {
+  synced: number
+  accounts: SendingAccount[]
+}
+
 export const integrations = {
   list: (provider?: string) =>
     api.get<Connection[]>('/integrations', { params: provider ? { provider } : undefined }).then((r) => r.data),
   create: (body: ConnectionCreate) => api.post<Connection>('/integrations', body).then((r) => r.data),
   remove: (id: UUID) => api.delete(`/integrations/${id}`).then(() => undefined),
+  accounts: (connectionId: UUID) =>
+    api.get<SendingAccount[]>(`/integrations/${connectionId}/accounts`).then((r) => r.data),
+  addAccount: (connectionId: UUID, body: SendingAccountCreate) =>
+    api.post<SendingAccount>(`/integrations/${connectionId}/accounts`, body).then((r) => r.data),
+  updateAccount: (accountId: UUID, body: SendingAccountUpdate) =>
+    api.patch<SendingAccount>(`/integrations/accounts/${accountId}`, body).then((r) => r.data),
+  removeAccount: (accountId: UUID) =>
+    api.delete(`/integrations/accounts/${accountId}`).then(() => undefined),
+  syncAccounts: (connectionId: UUID) =>
+    api.post<SyncResult>(`/integrations/${connectionId}/accounts/sync`).then((r) => r.data),
 }
 
 // ── Events ───────────────────────────────────────────────────────────────────

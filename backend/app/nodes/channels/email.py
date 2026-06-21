@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -32,7 +33,9 @@ log = logging.getLogger(__name__)
 
 
 class EmailChannelConfig(BaseModel):
-    connection_name: str = Field(description="Name of the email connection (configured on Settings → Integrations)")
+    connection_name: str | None = Field(None, description="Name of the email connection (configured on Settings → Integrations)")
+    sending_account_id: str | None = None
+    account_pool: Literal["campaign", "round_robin", "single"] | None = None
     subject_template: str = Field(description="Subject with {{contact.first_name}}-style variables")
     body_template: str = Field(description="HTML body with {{contact.first_name}}-style variables")
     from_address: EmailStr | None = Field(None, description="Override the connection's default From address")

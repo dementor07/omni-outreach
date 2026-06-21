@@ -24,7 +24,9 @@ from app.nodes import (
 
 
 class LinkedInChannelConfig(BaseModel):
-    connection_name: str = Field(description="Unipile connection name (Settings → Integrations)")
+    connection_name: str | None = Field(None, description="Unipile connection name (Settings → Integrations)")
+    sending_account_id: str | None = None
+    account_pool: Literal["campaign", "round_robin", "single"] | None = None
     mode: Literal["invite", "dm", "profile_view", "inmail"] = Field(description="Which LinkedIn action to perform")
     message_template: str | None = Field(None, description="Required for invite/dm/inmail; supports {{contact.first_name}}-style variables")
     subject_template: str | None = Field(None, description="Required only for inmail")

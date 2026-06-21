@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 
 from app.auth import AuthContext, get_current_workspace
 from app.db import acquire, execute, fetch_all, fetch_one
+from app.routers.integrations import SendingAccountOut
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +50,10 @@ class WorkflowUpdate(BaseModel):
     # after end_at; both null = always-on.
     start_at: datetime | None = None
     end_at: datetime | None = None
+    daily_cap: int | None = Field(None, ge=0)
+    earliest_hour: int | None = Field(None, ge=0, le=23)
+    latest_hour: int | None = Field(None, ge=1, le=24)
+    days_of_week: list[int] | None = None
 
 
 class NodeCreate(BaseModel):
@@ -99,6 +104,10 @@ class WorkflowOut(BaseModel):
     timezone: str
     start_at: datetime | None = None
     end_at: datetime | None = None
+    daily_cap: int | None = None
+    earliest_hour: int | None = None
+    latest_hour: int | None = None
+    days_of_week: list[int] | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -240,7 +249,18 @@ async def update_workflow(
     fields = body.model_dump(exclude_none=True)
     if not fields:
         raise HTTPException(status_code=400, detail="no fields to update")
-    set_sql = ", ".join(f"{k} = ${i + 2}" for i, k in enumerate(fields))
+
+    if "days_of_week" in fields:
+        fields["days_of_week"] = json.dumps(fields["days_of_week"])
+
+    set_clauses = []
+    for i, k in enumerate(fields):
+        if k == "days_of_week":
+            set_clauses.append(f"{k} = ${i + 2}::jsonb")
+        else:
+            set_clauses.append(f"{k} = ${i + 2}")
+
+    set_sql = ", ".join(set_clauses)
     row = await fetch_one(
         f"UPDATE omni_workflows SET {set_sql}, updated_at = NOW() WHERE id = $1 RETURNING *",
         workflow_id,
@@ -254,6 +274,51 @@ async def update_workflow(
 @router.delete("/workflows/{workflow_id}", status_code=204, summary="Archive a workflow")
 async def archive_workflow(workflow_id: uuid.UUID, _: AuthContext = Depends(get_current_workspace)) -> None:
     await execute("UPDATE omni_workflows SET status = 'archived', updated_at = NOW() WHERE id = $1", workflow_id)
+
+
+class PoolUpdate(BaseModel):
+    sending_account_ids: list[uuid.UUID]
+
+
+@router.get("/workflows/{id}/accounts", response_model=list[SendingAccountOut], summary="Fetch pooled accounts for a campaign")
+async def get_workflow_pool(id: uuid.UUID, ctx: AuthContext = Depends(get_current_workspace)) -> list[SendingAccountOut]:
+    rows = await fetch_all(
+        """
+        SELECT a.*
+        FROM omni_sending_accounts a
+        JOIN omni_campaign_sending_accounts p ON a.id = p.sending_account_id
+        WHERE p.workflow_id = $1 AND p.workspace_id = $2
+        """,
+        id, ctx.workspace_id
+    )
+    return [SendingAccountOut.model_validate(r) for r in rows]
+
+
+@router.put("/workflows/{id}/accounts", response_model=list[SendingAccountOut], summary="Replace pooled accounts for a campaign")
+async def update_workflow_pool(id: uuid.UUID, body: PoolUpdate, ctx: AuthContext = Depends(get_current_workspace)) -> list[SendingAccountOut]:
+    async with acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("DELETE FROM omni_campaign_sending_accounts WHERE workflow_id = $1 AND workspace_id = $2", id, ctx.workspace_id)
+            for account_id in body.sending_account_ids:
+                acc = await conn.fetchrow("SELECT id FROM omni_sending_accounts WHERE id = $1", account_id)
+                if not acc:
+                    raise HTTPException(status_code=400, detail=f"invalid sending account id: {account_id}")
+
+                await conn.execute(
+                    "INSERT INTO omni_campaign_sending_accounts (workspace_id, workflow_id, sending_account_id) VALUES ($1, $2, $3)",
+                    ctx.workspace_id, id, account_id
+                )
+
+            rows = await conn.fetch(
+                """
+                SELECT a.*
+                FROM omni_sending_accounts a
+                JOIN omni_campaign_sending_accounts p ON a.id = p.sending_account_id
+                WHERE p.workflow_id = $1 AND p.workspace_id = $2
+                """,
+                id, ctx.workspace_id
+            )
+    return [SendingAccountOut.model_validate(r) for r in rows]
 
 
 # ── Nodes ────────────────────────────────────────────────────────────────────

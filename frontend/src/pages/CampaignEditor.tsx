@@ -15,7 +15,7 @@ import {
   ArrowLeft, Search, GitBranch, Save, Undo2, Redo2, Maximize2, Minimize2, Plus,
   Users, Settings as SettingsIcon, Trash2, Play, Target,
 } from 'lucide-react'
-import { canvas, nodes as nodesApi, projections, type Lead, type NodeManifest, type WorkflowStatus } from '../api/v2'
+import { canvas, nodes as nodesApi, projections, integrations, type Lead, type NodeManifest, type SendingAccount, type WorkflowStatus } from '../api/v2'
 import { nodeIcon } from '../utils/nodeIcons'
 import { visualFor } from '../utils/nodeVisuals'
 import { nodeLabel, handleLabel, categoryLabel } from '../utils/nodeLabel'
@@ -641,6 +641,10 @@ export default function CampaignEditor() {
                 timezone={wf?.timezone ?? 'UTC'}
                 startAt={wf?.start_at ?? null}
                 endAt={wf?.end_at ?? null}
+                dailyCap={wf?.daily_cap ?? null}
+                earliestHour={wf?.earliest_hour ?? null}
+                latestHour={wf?.latest_hour ?? null}
+                daysOfWeek={wf?.days_of_week ?? null}
                 onSaved={() => qc.invalidateQueries({ queryKey: ['workflow', id] })}
               />
             </Card>
@@ -665,20 +669,42 @@ function localInputToIso(local: string): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString()
 }
 
-function WorkflowSettings({ workflowId, name, status, timezone, startAt, endAt, onSaved }: { workflowId?: string; name: string; status: WorkflowStatus; timezone: string; startAt: string | null; endAt: string | null; onSaved: () => void }) {
+function WorkflowSettings({
+  workflowId, name, status, timezone, startAt, endAt, dailyCap, earliestHour, latestHour, daysOfWeek, onSaved
+}: {
+  workflowId?: string; name: string; status: WorkflowStatus; timezone: string;
+  startAt: string | null; endAt: string | null;
+  dailyCap: number | null; earliestHour: number | null; latestHour: number | null; daysOfWeek: number[] | null;
+  onSaved: () => void;
+}) {
   const [draftName, setDraftName] = useState(name)
   const [draftStatus, setDraftStatus] = useState<WorkflowStatus>(status)
   const [draftTz, setDraftTz] = useState(timezone)
   const [draftStart, setDraftStart] = useState(isoToLocalInput(startAt))
   const [draftEnd, setDraftEnd] = useState(isoToLocalInput(endAt))
+  const [draftCap, setDraftCap] = useState(dailyCap == null ? '' : String(dailyCap))
+  const [draftEarliest, setDraftEarliest] = useState(earliestHour == null ? '' : String(earliestHour))
+  const [draftLatest, setDraftLatest] = useState(latestHour == null ? '' : String(latestHour))
+  const [draftDays, setDraftDays] = useState<number[]>(daysOfWeek || [0, 1, 2, 3, 4])
+
   useEffect(() => {
     setDraftName(name); setDraftStatus(status); setDraftTz(timezone)
     setDraftStart(isoToLocalInput(startAt)); setDraftEnd(isoToLocalInput(endAt))
-  }, [name, status, timezone, startAt, endAt])
+    setDraftCap(dailyCap == null ? '' : String(dailyCap))
+    setDraftEarliest(earliestHour == null ? '' : String(earliestHour))
+    setDraftLatest(latestHour == null ? '' : String(latestHour))
+    setDraftDays(daysOfWeek || [0, 1, 2, 3, 4])
+  }, [name, status, timezone, startAt, endAt, dailyCap, earliestHour, latestHour, daysOfWeek])
 
   const mut = useMutation({
     mutationFn: () => {
-      const body: Parameters<typeof canvas.update>[1] = { name: draftName.trim(), status: draftStatus, timezone: draftTz }
+      const body: Parameters<typeof canvas.update>[1] = {
+        name: draftName.trim(), status: draftStatus, timezone: draftTz,
+        daily_cap: draftCap ? parseInt(draftCap, 10) : null,
+        earliest_hour: draftEarliest ? parseInt(draftEarliest, 10) : null,
+        latest_hour: draftLatest ? parseInt(draftLatest, 10) : null,
+        days_of_week: draftDays,
+      }
       const startIso = localInputToIso(draftStart)
       const endIso = localInputToIso(draftEnd)
       if (startIso) body.start_at = startIso
@@ -687,58 +713,190 @@ function WorkflowSettings({ workflowId, name, status, timezone, startAt, endAt, 
     },
     onSuccess: onSaved,
   })
+
   const dirty =
     draftName.trim() !== name || draftStatus !== status || draftTz !== timezone ||
-    draftStart !== isoToLocalInput(startAt) || draftEnd !== isoToLocalInput(endAt)
+    draftStart !== isoToLocalInput(startAt) || draftEnd !== isoToLocalInput(endAt) ||
+    draftCap !== (dailyCap == null ? '' : String(dailyCap)) ||
+    draftEarliest !== (earliestHour == null ? '' : String(earliestHour)) ||
+    draftLatest !== (latestHour == null ? '' : String(latestHour)) ||
+    draftDays.join(',') !== (daysOfWeek || [0,1,2,3,4]).join(',')
+
   const fieldCls = 'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-800'
   const scheduleInvalid = !!draftStart && !!draftEnd && new Date(draftEnd) <= new Date(draftStart)
+  const tzOptions = useMemo(() => {
+    // Intl.supportedValuesOf isn't in this project's TS lib target yet, so probe it
+    // narrowly instead of casting all of Intl to any. Falls back to UTC if absent.
+    const intlWithTz = Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] }
+    const supported = intlWithTz.supportedValuesOf?.('timeZone') ?? ['UTC']
+    return supported.map((tz) => ({ value: tz, label: tz }))
+  }, [])
+
+  const toggleDay = (d: number) => {
+    setDraftDays(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d].sort())
+  }
+  const dayNames = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 
   return (
-    <div className="max-w-lg space-y-5">
+    <div className="max-w-lg space-y-6">
       <div>
         <h2 className="text-[15px] font-semibold text-slate-900 dark:text-white">Campaign settings</h2>
         <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">Name, lifecycle status, scheduling timezone, and send window.</p>
       </div>
+      
       <label className="block">
         <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Name</span>
         <input value={draftName} onChange={(e) => setDraftName(e.target.value)} className={fieldCls} />
       </label>
-      <label className="block">
-        <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Status</span>
-        <Select
-          ariaLabel="Workflow status"
-          value={draftStatus}
-          onChange={(v) => setDraftStatus(v as WorkflowStatus)}
-          options={[
-            { value: 'draft', label: 'Draft' },
-            { value: 'active', label: 'Active' },
-            { value: 'paused', label: 'Paused' },
-            { value: 'archived', label: 'Archived' },
-          ]}
-        />
-      </label>
+      
+      <div className="grid grid-cols-2 gap-3">
+        <label className="block">
+          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Status</span>
+          <Select
+            ariaLabel="Workflow status"
+            value={draftStatus}
+            onChange={(v) => setDraftStatus(v as WorkflowStatus)}
+            options={[
+              { value: 'draft', label: 'Draft' },
+              { value: 'active', label: 'Active' },
+              { value: 'paused', label: 'Paused' },
+              { value: 'archived', label: 'Archived' },
+            ]}
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Daily Cap</span>
+          <input type="number" placeholder="Unlimited" value={draftCap} onChange={(e) => setDraftCap(e.target.value)} className={fieldCls} />
+        </label>
+      </div>
+
       <label className="block">
         <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Timezone</span>
-        <input value={draftTz} onChange={(e) => setDraftTz(e.target.value)} placeholder="UTC" className={fieldCls} />
+        <Select 
+          ariaLabel="Timezone"
+          value={draftTz}
+          onChange={v => setDraftTz(String(v))}
+          options={tzOptions}
+        />
       </label>
+
       <div>
-        <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Send window <span className="font-normal normal-case text-slate-400">(optional)</span></span>
-        <p className="mb-2 text-[12px] text-slate-500 dark:text-slate-400">Outbound sends hold until the start and stop after the end. Leave blank for always-on.</p>
-        <div className="grid grid-cols-2 gap-3">
+        <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Send window</span>
+        <div className="mb-3 flex items-center gap-1">
+          {dayNames.map((n, i) => {
+            const d = i; // Monday=0 … Sunday=6 (matches send_policy.py weekday convention)
+            const active = draftDays.includes(d);
+            return (
+              <button 
+                key={d} type="button" onClick={() => toggleDay(d)}
+                className={`h-7 w-7 rounded-full text-xs font-semibold ${active ? 'bg-brand-500 text-white' : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'}`}
+              >
+                {n}
+              </button>
+            )
+          })}
+        </div>
+        <div className="grid grid-cols-2 gap-3 mb-3">
           <label className="block">
-            <span className="mb-1 block text-[11px] text-slate-500">Starts</span>
-            <input type="datetime-local" value={draftStart} onChange={(e) => setDraftStart(e.target.value)} aria-label="Campaign start" className={fieldCls} />
+            <span className="mb-1 block text-[11px] text-slate-500">Earliest hour (0-23)</span>
+            <input type="number" min="0" max="23" value={draftEarliest} onChange={(e) => setDraftEarliest(e.target.value)} className={fieldCls} placeholder="e.g. 9" />
           </label>
           <label className="block">
-            <span className="mb-1 block text-[11px] text-slate-500">Ends</span>
-            <input type="datetime-local" value={draftEnd} onChange={(e) => setDraftEnd(e.target.value)} aria-label="Campaign end" className={fieldCls} />
+            <span className="mb-1 block text-[11px] text-slate-500">Latest hour (1-24)</span>
+            <input type="number" min="1" max="24" value={draftLatest} onChange={(e) => setDraftLatest(e.target.value)} className={fieldCls} placeholder="e.g. 17" />
           </label>
         </div>
-        {scheduleInvalid && <p className="mt-1.5 text-[12px] text-rose-600">End must be after start.</p>}
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="mb-1 block text-[11px] text-slate-500">Starts (Date)</span>
+            <input type="datetime-local" value={draftStart} onChange={(e) => setDraftStart(e.target.value)} className={fieldCls} />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[11px] text-slate-500">Ends (Date)</span>
+            <input type="datetime-local" value={draftEnd} onChange={(e) => setDraftEnd(e.target.value)} className={fieldCls} />
+          </label>
+        </div>
       </div>
+
       <Button variant="primary" size="md" icon={Save} onClick={() => mut.mutate()} isLoading={mut.isPending} disabled={!dirty || !draftName.trim() || scheduleInvalid}>
         Save settings
       </Button>
+
+      <hr className="my-6 border-slate-200 dark:border-slate-800" />
+      
+      {workflowId && <WorkflowPoolSettings workflowId={workflowId} />}
+    </div>
+  )
+}
+
+function WorkflowPoolSettings({ workflowId }: { workflowId: string }) {
+  const qc = useQueryClient()
+  const toast = useToast()
+
+  // 1. Fetch pool
+  const poolQ = useQuery({
+    queryKey: ['workflow', workflowId, 'accounts'],
+    queryFn: () => canvas.pool(workflowId)
+  })
+
+  // 2. Fetch all connections, then all accounts
+  // In a real app we might have a single /accounts endpoint. Here we map connections.
+  const connsQ = useQuery({
+    queryKey: ['integrations'],
+    queryFn: () => integrations.list()
+  })
+
+  // Hacky but works for this level of UI: fetch accounts for each connection when we have them
+  const [allAccounts, setAllAccounts] = useState<SendingAccount[]>([])
+  useEffect(() => {
+    if (!connsQ.data) return
+    Promise.all(connsQ.data.map(c => integrations.accounts(c.id).catch(() => [])))
+      .then(lists => setAllAccounts(lists.flat()))
+  }, [connsQ.data])
+
+  const poolIds = new Set((poolQ.data || []).map(a => a.id))
+
+  const setMut = useMutation({
+    mutationFn: (ids: string[]) => canvas.setPool(workflowId, ids),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['workflow', workflowId, 'accounts'] })
+      toast.success('Pool updated')
+    }
+  })
+
+  const toggleAccount = (id: string) => {
+    const next = new Set(poolIds)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setMut.mutate(Array.from(next))
+  }
+
+  return (
+    <div>
+      <h3 className="text-[14px] font-semibold text-slate-900 dark:text-white mb-2">Sending Accounts Pool</h3>
+      <p className="text-[12px] text-slate-500 mb-3">Select the accounts this campaign is allowed to send from. If none are selected, it relies on individual node configuration.</p>
+      
+      <div className="space-y-2 border rounded-md p-3 max-h-64 overflow-auto border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/50">
+        {allAccounts.length === 0 ? (
+          <p className="text-xs text-slate-400">No accounts available across all integrations.</p>
+        ) : (
+          allAccounts.map(acc => (
+            <label key={acc.id} className="flex items-center gap-2 text-sm cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={poolIds.has(acc.id)} 
+                onChange={() => toggleAccount(acc.id)}
+                disabled={setMut.isPending}
+                className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+              />
+              <span className="font-medium text-slate-700 dark:text-slate-200">
+                {acc.display_name || acc.external_identity}
+              </span>
+              <Badge label={acc.channel_kind} size="xs" variant="neutral" />
+            </label>
+          ))
+        )}
+      </div>
     </div>
   )
 }

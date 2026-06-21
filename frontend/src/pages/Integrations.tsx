@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Trash2, Check, ArrowLeft, ExternalLink } from 'lucide-react'
-import { integrations, type Connection } from '../api/v2'
+import { Trash2, ArrowLeft, ExternalLink, ChevronDown, ChevronUp, RefreshCw, Plus, Settings, Play, Pause } from 'lucide-react'
+import { integrations, type Connection, type SendingAccount, type SendingAccountStatus, type SendingAccountUpdate, type SendChannelKind } from '../api/v2'
 import {
   PROVIDERS, CATEGORY_LABEL, providerSpec, type ProviderSpec, type ProviderCategory,
 } from '../utils/providerCatalog'
@@ -9,6 +9,8 @@ import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import Badge from '../components/Badge'
+import { useToast } from '../components/Toast'
+import Select from '../components/Select'
 
 const CATEGORY_ORDER: ProviderCategory[] = ['ai', 'email', 'messaging', 'social', 'voice', 'data']
 
@@ -117,20 +119,7 @@ function ProviderTile({
       {connected && (
         <ul className="mt-3 space-y-1 border-t border-slate-100 pt-3 dark:border-slate-800">
           {connections.map((c) => (
-            <li key={c.id} className="flex items-center justify-between gap-2 text-xs">
-              <span className="flex min-w-0 items-center gap-1.5 text-slate-600 dark:text-slate-300">
-                <Check size={13} className="shrink-0 text-emerald-500" />
-                <span className="truncate">{c.name}</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => onRemove(c.id)}
-                className="shrink-0 rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40"
-                aria-label={`Disconnect ${c.name}`}
-              >
-                <Trash2 size={13} />
-              </button>
-            </li>
+            <ConnectionRow key={c.id} connection={c} onRemove={() => onRemove(c.id)} />
           ))}
         </ul>
       )}
@@ -259,3 +248,234 @@ function ConnectFlow({ spec, onBack, onDone }: { spec: ProviderSpec; onBack: () 
 
 // Kept exported in case a node-config surface wants to resolve a provider spec.
 export { providerSpec }
+
+
+function ConnectionRow({ connection, onRemove }: { connection: Connection; onRemove: () => void }) {
+  const [expanded, setExpanded] = useState(false)
+  const qc = useQueryClient()
+  const toast = useToast()
+  
+  const { data: accounts = [], isLoading } = useQuery({
+    queryKey: ['integrations', connection.id, 'accounts'],
+    queryFn: () => integrations.accounts(connection.id),
+    enabled: expanded,
+  })
+
+  const syncMut = useMutation({
+    mutationFn: () => integrations.syncAccounts(connection.id),
+    onSuccess: (res) => {
+      toast.success(`Synced ${res.synced} accounts`)
+      qc.invalidateQueries({ queryKey: ['integrations', connection.id, 'accounts'] })
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Sync failed')
+  })
+
+  const [adding, setAdding] = useState(false)
+
+  return (
+    <li className="flex flex-col gap-1">
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <button type="button" onClick={() => setExpanded(!expanded)} className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white">
+          {expanded ? <ChevronUp size={14} className="shrink-0" /> : <ChevronDown size={14} className="shrink-0" />}
+          <span className="truncate font-medium">{connection.name}</span>
+        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onRemove}
+            className="shrink-0 rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40"
+            aria-label={`Disconnect ${connection.name}`}
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </div>
+      
+      {expanded && (
+        <div className="ml-5 mt-1 space-y-2 rounded-lg border border-slate-100 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-900/50">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Accounts</span>
+            <div className="flex gap-1">
+              {connection.provider === 'unipile' && (
+                <Button variant="secondary" size="xs" onClick={() => syncMut.mutate()} isLoading={syncMut.isPending} icon={RefreshCw}>
+                  Sync
+                </Button>
+              )}
+              <Button variant="secondary" size="xs" onClick={() => setAdding(!adding)} icon={Plus}>
+                Add
+              </Button>
+            </div>
+          </div>
+          
+          {adding && (
+            <AddAccountForm 
+              connectionId={connection.id} 
+              onDone={() => setAdding(false)} 
+              defaultKind={connection.provider === 'unipile' ? 'linkedin' : 'email'} 
+            />
+          )}
+
+          {isLoading && <div className="text-xs text-slate-400">Loading accounts...</div>}
+          {!isLoading && accounts.length === 0 && !adding && (
+            <div className="text-xs text-slate-400">No accounts found.</div>
+          )}
+          
+          <div className="space-y-1">
+            {accounts.map(acc => (
+              <AccountRow key={acc.id} account={acc} connectionId={connection.id} />
+            ))}
+          </div>
+        </div>
+      )}
+    </li>
+  )
+}
+
+function AccountRow({ account, connectionId }: { account: SendingAccount; connectionId: string }) {
+  const qc = useQueryClient()
+  const [editing, setEditing] = useState(false)
+  const [draftCap, setDraftCap] = useState(String(account.daily_cap))
+  const [draftStatus, setDraftStatus] = useState<SendingAccountStatus>(account.status)
+
+  const updateMut = useMutation({
+    mutationFn: (body: SendingAccountUpdate) => integrations.updateAccount(account.id, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['integrations', connectionId, 'accounts'] })
+      setEditing(false)
+    }
+  })
+
+  const delMut = useMutation({
+    mutationFn: () => integrations.removeAccount(account.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['integrations', connectionId, 'accounts'] })
+  })
+
+  const active = account.status === 'active'
+  const banned = account.status === 'banned'
+  const warming = account.status === 'warming'
+
+  const togglePause = () => {
+    updateMut.mutate({ status: active ? 'paused' : 'active' })
+  }
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-2 rounded bg-white p-1.5 shadow-sm dark:bg-slate-800 text-xs">
+        <input 
+          type="number" 
+          value={draftCap} 
+          onChange={e => setDraftCap(e.target.value)} 
+          className="w-16 rounded border border-slate-200 px-1 py-0.5 dark:border-slate-700 dark:bg-slate-900" 
+          placeholder="Cap"
+        />
+        <Select 
+          value={draftStatus} 
+          onChange={v => setDraftStatus(v as SendingAccountStatus)}
+          options={[
+            { value: 'active', label: 'Active' },
+            { value: 'paused', label: 'Paused' },
+            { value: 'warming', label: 'Warming' },
+            { value: 'banned', label: 'Banned' },
+          ]}
+        />
+        <Button variant="primary" size="xs" onClick={() => updateMut.mutate({ daily_cap: parseInt(draftCap, 10) || 0, status: draftStatus })} isLoading={updateMut.isPending}>Save</Button>
+        <Button variant="ghost" size="xs" onClick={() => setEditing(false)}>Cancel</Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="group flex items-center justify-between rounded px-1.5 py-1 hover:bg-slate-100 dark:hover:bg-slate-800/80">
+      <div className="flex items-center gap-2 min-w-0">
+        <Badge 
+          label={account.status} 
+          variant={active ? 'success' : banned ? 'danger' : warming ? 'warning' : 'neutral'} 
+          size="xs" 
+        />
+        <span className="truncate text-xs font-medium text-slate-700 dark:text-slate-200" title={account.external_identity}>
+          {account.display_name || account.external_identity}
+        </span>
+        <span className="text-[10px] text-slate-400">
+          {account.sends_today}/{account.daily_cap === 0 ? '∞' : account.daily_cap} today
+        </span>
+      </div>
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button type="button" onClick={togglePause} className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200" title={active ? "Pause" : "Resume"}>
+          {active ? <Pause size={12} /> : <Play size={12} />}
+        </button>
+        <button type="button" onClick={() => setEditing(true)} className="p-1 text-slate-400 hover:text-brand-600" title="Edit">
+          <Settings size={12} />
+        </button>
+        <button type="button" onClick={() => { if(confirm('Remove account?')) delMut.mutate() }} className="p-1 text-slate-400 hover:text-rose-600" title="Remove">
+          <Trash2 size={12} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function AddAccountForm({ connectionId, onDone, defaultKind }: { connectionId: string; onDone: () => void; defaultKind: SendChannelKind }) {
+  const qc = useQueryClient()
+  const [kind, setKind] = useState<SendChannelKind>(defaultKind)
+  const [extId, setExtId] = useState('')
+  const [name, setName] = useState('')
+  const [cap, setCap] = useState('')
+
+  const mut = useMutation({
+    mutationFn: () => integrations.addAccount(connectionId, {
+      channel_kind: kind,
+      external_identity: extId,
+      display_name: name || null,
+      daily_cap: parseInt(cap, 10) || 0,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['integrations', connectionId, 'accounts'] })
+      onDone()
+    }
+  })
+
+  return (
+    <div className="mb-2 space-y-2 rounded border border-slate-200 bg-white p-2 shadow-sm dark:border-slate-700 dark:bg-slate-800 text-xs">
+      <div className="grid grid-cols-2 gap-2">
+        <input 
+          placeholder="Identity (e.g. email)" 
+          value={extId} 
+          onChange={e => setExtId(e.target.value)}
+          className="rounded border border-slate-200 px-2 py-1 dark:border-slate-700 dark:bg-slate-900"
+        />
+        <input 
+          placeholder="Display name" 
+          value={name} 
+          onChange={e => setName(e.target.value)}
+          className="rounded border border-slate-200 px-2 py-1 dark:border-slate-700 dark:bg-slate-900"
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Select 
+          value={kind}
+          onChange={v => setKind(v as SendChannelKind)}
+          options={[
+            {value: 'email', label: 'Email'},
+            {value: 'linkedin', label: 'LinkedIn'},
+            {value: 'sms', label: 'SMS'},
+            {value: 'voice', label: 'Voice'},
+            {value: 'whatsapp', label: 'WhatsApp'},
+            {value: 'instagram', label: 'Instagram'},
+            {value: 'telegram', label: 'Telegram'},
+          ]}
+        />
+        <input 
+          type="number" 
+          placeholder="Daily cap (0=unlimited)" 
+          value={cap} 
+          onChange={e => setCap(e.target.value)}
+          className="rounded border border-slate-200 px-2 py-1 dark:border-slate-700 dark:bg-slate-900"
+        />
+      </div>
+      <div className="flex justify-end gap-2 pt-1">
+        <Button variant="ghost" size="xs" onClick={onDone}>Cancel</Button>
+        <Button variant="primary" size="xs" disabled={!extId} onClick={() => mut.mutate()} isLoading={mut.isPending}>Add</Button>
+      </div>
+    </div>
+  )
+}
