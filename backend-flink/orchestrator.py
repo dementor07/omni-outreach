@@ -121,6 +121,11 @@ class JourneyProcessFunction(KeyedProcessFunction):
                 # first loses the correlation and the run fragments into many
                 # ids — making end-to-end tracing impossible. (See trace tool.)
                 "correlation_id": _safe_get(data, "metadata", "correlation_id"),
+                # Forward the resolved sending account (stamped by build_command)
+                # so the transition worker can increment THAT account's rate
+                # counter on a confirmed send. None for sends with no per-seat
+                # account (legacy connection_name path) — no counter to bump.
+                "sending_account_id": _safe_get(data, "metadata", "sending_account_id"),
             },
         }
 

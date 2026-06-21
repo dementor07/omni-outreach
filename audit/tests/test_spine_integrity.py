@@ -51,7 +51,10 @@ def test_handle_transition_guards_terminal_leads():
     The entry fetch must read status (and lineage for the barrier carve-out)
     and branch on TERMINAL_STATUSES before any routing."""
     body = _func_body(TW_SRC, "handle_transition")
-    assert "SELECT workspace_id, status, parent_lead_id, origin_node_id FROM omni_leads" in body
+    # The entry fetch must read status + lineage (the barrier carve-out) before
+    # branching. workflow_id was later added for the confirmed-send rate-counter
+    # increment — additive to the same fetch, doesn't weaken the guard.
+    assert "SELECT workspace_id, status, parent_lead_id, origin_node_id, workflow_id FROM omni_leads" in body
     guard_at = body.find("in TERMINAL_STATUSES")
     assert guard_at != -1, "terminal-state guard missing from handle_transition"
     retry_at = body.find('handle == "__retry__"')

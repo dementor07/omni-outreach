@@ -27,6 +27,7 @@ import signal
 import uuid
 from datetime import UTC, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from aiokafka import AIOKafkaConsumer
 
@@ -34,7 +35,7 @@ import app.nodes as noderegistry
 from app.config import settings
 from app.db import close_pool, execute, fetch_all, fetch_one, init_pool, system_scope
 from app.execution import commands
-from app.services import bus, company_kg, suppression
+from app.services import bus, company_kg, send_policy, suppression
 
 log = logging.getLogger("transitions")
 
@@ -841,6 +842,179 @@ async def _workflow_schedule(workspace_id: str, workflow_id: str | None) -> tupl
     return row.get("start_at"), row.get("end_at")
 
 
+async def _workflow_send_controls(workspace_id: str, workflow_id: str | None) -> dict[str, Any]:
+    """The campaign's per-send controls: business-hours window (earliest/latest
+    hour + days_of_week, in the workflow tz), daily cap, and the cap counter
+    (sends_today / day_anchor). All optional — an unconfigured campaign is
+    always-on / uncapped. Read once per send so the gate has a single snapshot."""
+    if not workflow_id:
+        return {}
+    async with system_scope():
+        row = await fetch_one(
+            "SELECT timezone, earliest_hour, latest_hour, days_of_week, "
+            "daily_cap, sends_today, day_anchor "
+            "FROM omni_workflows WHERE id=$1 AND workspace_id=$2",
+            workflow_id, workspace_id,
+        )
+    return dict(row) if row else {}
+
+
+async def _gate_send(
+    workspace_id: str,
+    lead: dict,
+    node: dict,
+    workflow_id: str | None,
+    correlation_id: str | None,
+) -> bool:
+    """Hold or allow an outbound send against the CAMPAIGN's window + daily cap.
+
+    Returns True when the lead was HELD (parked 'waiting' + a delayed __retry__
+    scheduled to re-evaluate this same node) — the caller must then return without
+    sending. Returns False when the send may proceed. The lead is never DROPPED;
+    a capped/out-of-window send is deferred, exactly like the B6 schedule hold.
+
+    Account-level caps are enforced earlier, at selection (build_command's
+    pick_lru excludes over-cap seats); this is the campaign-level throttle on top
+    — a send must clear BOTH. The increment happens on the confirmed send in
+    handle_transition, so a held/failed send never consumes capacity."""
+    controls = await _workflow_send_controls(workspace_id, workflow_id)
+    if not controls:
+        return False
+
+    tz_name = controls.get("timezone") or "UTC"
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo("UTC")
+    now_local = datetime.now(tz)
+
+    # (1) business-hours window — hold until the next in-window moment.
+    earliest = controls.get("earliest_hour")
+    latest = controls.get("latest_hour")
+    if send_policy.window_is_configured(earliest, latest, controls.get("days_of_week")):
+        days = controls.get("days_of_week")
+        hold = send_policy.compute_window_hold_seconds(now_local, int(earliest), int(latest), days)
+        if hold > 0:
+            await _hold_send(workspace_id, lead, node, correlation_id, hold, reason="window")
+            return True
+
+    # (2) campaign daily cap — count in the workflow's business day. A rolled-over
+    # counter (day_anchor != today) reads as 0; at/over cap holds until midnight.
+    daily_cap = controls.get("daily_cap")
+    if daily_cap and int(daily_cap) > 0:
+        today_local = now_local.date()
+        if send_policy.is_over_cap(
+            int(controls.get("sends_today") or 0), int(daily_cap),
+            controls.get("day_anchor"), today_local,
+        ):
+            hold = send_policy.next_reset_seconds(now_local, "day")
+            await _hold_send(workspace_id, lead, node, correlation_id, hold, reason="daily_cap")
+            return True
+
+    return False
+
+
+async def _hold_send(
+    workspace_id: str,
+    lead: dict,
+    node: dict,
+    correlation_id: str | None,
+    hold_seconds: float,
+    reason: str,
+) -> None:
+    """Park a lead 'waiting' and schedule a delayed __retry__ that re-fires this
+    same node once the hold elapses — the B6 pattern, reused for cap/window. The
+    dedupe marker is keyed on (node, reset bucket) so a redelivered hold collapses
+    but a genuinely later retry (next bucket) still fires (send_policy.cap_hold_marker)."""
+    log.info(
+        "lead %s: send held %.0fs (%s) at node %s",
+        lead["id"], hold_seconds, reason, node["id"],
+    )
+    await _advance_lead(workspace_id, str(lead["id"]), str(node["id"]), status="waiting")
+    reset_ts = datetime.now(UTC).timestamp() + hold_seconds
+    await _emit_synthetic_result(
+        workspace_id, str(lead["id"]), str(node["id"]), "__retry__",
+        correlation_id, delay_seconds=hold_seconds,
+        extra_metadata=send_policy.cap_hold_marker(str(node["id"]), reset_ts),
+    )
+
+
+async def _workflow_local_date(workspace_id: str, workflow_id: str | None):
+    """'Today' in the workflow's timezone — the business-day basis for the
+    campaign daily cap. Shared by _gate_send (cap check) and the increment so
+    both agree on when the day rolls over."""
+    tz_name = await _workflow_timezone(workspace_id, workflow_id)
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo("UTC")
+    return datetime.now(tz).date()
+
+
+async def _increment_send_counters(
+    workspace_id: str,
+    sending_account_id: str,
+    workflow_id: str | None,
+    command_id: str,
+) -> None:
+    """Bump the sending account's (and campaign's) rate counters on a confirmed
+    send, exactly once. The claim ledger (omni_send_count_claims, command-keyed)
+    makes the increment idempotent under Kafka/Flink at-least-once redelivery: the
+    INSERT … ON CONFLICT DO NOTHING wins on the first delivery only; a redelivery
+    finds the claim and skips. The counter UPDATEs reset-on-rollover atomically
+    (CASE on the anchor) so a new day/hour starts the count at 1 — the same lazy
+    reset send_policy.effective_count models.
+
+    A command_id is required (it's the dedupe key); a synthetic/missing one is a
+    bug upstream — skip rather than double-count every redelivery."""
+    if not command_id:
+        log.warning("send-count: no command_id for account %s; skipping increment", sending_account_id)
+        return
+
+    claim_id = send_policy.increment_claim_id(command_id)
+    async with system_scope():
+        claimed = await fetch_one(
+            "INSERT INTO omni_send_count_claims (claim_id) VALUES ($1) "
+            "ON CONFLICT (claim_id) DO NOTHING RETURNING claim_id",
+            claim_id,
+        )
+        if not claimed:
+            log.info("send-count: %s already counted; skipping duplicate", claim_id)
+            return
+
+        now = datetime.now(UTC)
+        utc_today = now.date()
+        hour_bucket = now.replace(minute=0, second=0, microsecond=0)
+        # Account counters: daily + hourly, each reset when its anchor rolls over.
+        # Anchored to the UTC business day — the SAME basis pick_lru uses when it
+        # excludes over-cap seats at selection (build_command), so selection and
+        # increment agree on which day a send counts toward.
+        await execute(
+            "UPDATE omni_sending_accounts SET "
+            "sends_today = CASE WHEN day_anchor = $2 THEN sends_today + 1 ELSE 1 END, "
+            "day_anchor = $2, "
+            "sends_this_hour = CASE WHEN hour_anchor = $3 THEN sends_this_hour + 1 ELSE 1 END, "
+            "hour_anchor = $3, "
+            "last_used_at = NOW(), updated_at = NOW() "
+            "WHERE id = $1 AND workspace_id = $4",
+            sending_account_id, utc_today, hour_bucket, workspace_id,
+        )
+        # Campaign daily counter — only when the send is attributed to a workflow.
+        # Anchored to the workflow's TIMEZONE business day so the increment and
+        # _gate_send's cap check (which uses workflow-tz "today") agree on the
+        # reset boundary — otherwise a counter written in UTC and checked in a
+        # local tz would disagree near midnight and reset at the wrong time.
+        if workflow_id:
+            tz_today = await _workflow_local_date(workspace_id, workflow_id)
+            await execute(
+                "UPDATE omni_workflows SET "
+                "sends_today = CASE WHEN day_anchor = $2 THEN sends_today + 1 ELSE 1 END, "
+                "day_anchor = $2, updated_at = NOW() "
+                "WHERE id = $1 AND workspace_id = $3",
+                workflow_id, tz_today, workspace_id,
+            )
+
+
 async def _compute_flow_delay_seconds(workspace_id: str, node: dict) -> float:
     """Seconds a flow.delay / flow.wait_until node should hold the lead.
 
@@ -849,8 +1023,7 @@ async def _compute_flow_delay_seconds(workspace_id: str, node: dict) -> float:
     business-hours window (earliest_hour ≤ local hour < latest_hour, on an
     allowed weekday), evaluated in the workflow's timezone. 0 if the window is
     open right now."""
-    from datetime import datetime, timedelta
-    from zoneinfo import ZoneInfo
+    from datetime import timedelta
 
     cfg = node.get("config") or {}
     node_type = node.get("node_type")
@@ -1079,6 +1252,14 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
                     "retry_attempt": int(start_at.timestamp()),
                 },
             )
+            return
+
+        # Rate-limit + business-hours gate (campaign-level). Sits between the B6
+        # absolute schedule (above, which already resolved workflow_id) and the
+        # DNC check (below): a send held here for cap/window shouldn't even reach
+        # suppression. Holds the lead (never drops) by re-firing this node after
+        # the window opens / cap resets.
+        if await _gate_send(workspace_id, lead, node, workflow_id, correlation_id):
             return
 
     # T1 — DNC enforcement at the outbound-send seam. Before any channel intent
@@ -1395,7 +1576,7 @@ async def handle_transition(t: dict) -> None:
     # result; refuse the transition rather than acting in the echoed tenant.
     async with system_scope():
         row = await fetch_one(
-            "SELECT workspace_id, status, parent_lead_id, origin_node_id FROM omni_leads WHERE id=$1",
+            "SELECT workspace_id, status, parent_lead_id, origin_node_id, workflow_id FROM omni_leads WHERE id=$1",
             lead_id,
         )
     workspace_id = str(row["workspace_id"]) if row else None
@@ -1444,6 +1625,19 @@ async def handle_transition(t: dict) -> None:
     # for_each or downstream node sees the freshly merged data.
     if lead_mutations:
         await _apply_lead_mutations(workspace_id, lead_id, lead_mutations)
+
+    # Rate-counter increment on a CONFIRMED send. A real outbound result carries
+    # status='sent' and (when a per-seat account was resolved) the stamped
+    # sending_account_id. Increment that account's + the campaign's daily/hourly
+    # counters here — on the confirmed send, NOT at dispatch — so a failed/held
+    # send never consumes capacity. Exactly-once via the omni_send_count_claims
+    # ledger keyed on the command_id (Kafka/Flink redelivery bumps once).
+    if (meta.get("status") or "").lower() == "sent" and meta.get("sending_account_id"):
+        await _increment_send_counters(
+            workspace_id, str(meta["sending_account_id"]),
+            str(row.get("workflow_id") or "") or None,
+            str(meta.get("command_id") or ""),
+        )
 
     # FLINK-001: the orchestrator emits handle="__retry__" after a retriable
     # failure's backoff timer fires. This is NOT an edge — re-fire the SAME node
