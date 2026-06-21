@@ -22,9 +22,9 @@ from typing import Any
 
 from app.config import settings
 from app.core.events import ChannelType
-from app.db import fetch_one, system_scope
+from app.db import fetch_all, fetch_one, system_scope
 from app.execution.render import render_channel_payload
-from app.services import bus
+from app.services import bus, send_policy
 from app.services.email_tracking import make_token
 from app.services.encryption import decrypt
 
@@ -99,6 +99,124 @@ _CHANNEL_PROVIDER: dict[ChannelType, str] = {
     ChannelType.INSTAGRAM: "unipile",
     ChannelType.TELEGRAM: "unipile",
 }
+
+# A sending account's coarse channel family (omni_sending_accounts.channel_kind).
+# The muscle's ChannelType is finer-grained (LinkedIn has invite/dm/inmail/view
+# variants), but a LinkedIn *seat* is one account regardless of action — so all
+# LINKEDIN_* collapse to "linkedin". Only the outbound channels that can have a
+# per-seat sending account appear here; absent channels never resolve an account
+# and fall straight through to the legacy connection_name path.
+_CHANNEL_KIND: dict[ChannelType, str] = {
+    ChannelType.EMAIL: "email",
+    ChannelType.SMS: "sms",
+    ChannelType.VOICE: "voice",
+    ChannelType.WHATSAPP: "whatsapp",
+    ChannelType.INSTAGRAM: "instagram",
+    ChannelType.TELEGRAM: "telegram",
+    ChannelType.LINKEDIN_DM: "linkedin",
+    ChannelType.LINKEDIN_INVITE: "linkedin",
+    ChannelType.LINKEDIN_INMAIL: "linkedin",
+    ChannelType.LINKEDIN_PROFILE_VIEW: "linkedin",
+}
+
+
+async def _load_pooled_accounts(workspace_id: str, workflow_id: str, channel_kind: str) -> list[dict[str, Any]]:
+    """The campaign's pooled sending accounts for this channel family, with the
+    counter columns send_policy.pick_lru needs. The DB only filters by membership
+    + kind; eligibility (status/caps) + LRU ordering happen in pick_lru so the
+    exact selection rule is the one locked by test_send_policy.py."""
+    async with system_scope():
+        rows = await fetch_all(
+            """
+            SELECT a.id, a.connection_id, a.channel_kind, a.external_identity,
+                   a.status, a.daily_cap, a.hourly_cap, a.sends_today,
+                   a.sends_this_hour, a.day_anchor, a.hour_anchor,
+                   a.warmup_target, a.last_used_at
+            FROM omni_sending_accounts a
+            JOIN omni_campaign_sending_accounts p ON p.sending_account_id = a.id
+            WHERE a.workspace_id = $1 AND p.workflow_id = $2 AND a.channel_kind = $3
+            """,
+            workspace_id, workflow_id, channel_kind,
+        )
+    return [dict(r) for r in rows]
+
+
+async def _load_account_by_id(workspace_id: str, account_id: str) -> dict[str, Any] | None:
+    """Load a single pinned sending account (node-level override)."""
+    async with system_scope():
+        row = await fetch_one(
+            "SELECT id, connection_id, channel_kind, external_identity, status "
+            "FROM omni_sending_accounts WHERE workspace_id=$1 AND id=$2",
+            workspace_id, account_id,
+        )
+    return dict(row) if row else None
+
+
+async def _connection_bundle_by_id(workspace_id: str, connection_id: str) -> dict[str, Any] | None:
+    """Decrypt a connection's bundle by id (the account's parent connection holds
+    the secret; the account only carries the sender identity)."""
+    async with system_scope():
+        row = await fetch_one(
+            "SELECT credentials_encrypted FROM omni_connections WHERE workspace_id=$1 AND id=$2",
+            workspace_id, connection_id,
+        )
+    if not row:
+        return None
+    return json.loads(decrypt(row["credentials_encrypted"]))
+
+
+def _apply_account_to_bundle(bundle: dict[str, Any], account: dict[str, Any], channel: ChannelType) -> dict[str, Any]:
+    """Override the bundle's sender identity with the chosen account's, leaving
+    the secret untouched. render_channel_payload reads these exact keys
+    (render.py): unipile account_id for social, "from" for email. Returns a NEW
+    bundle (no mutation of the shared connection bundle)."""
+    out = dict(bundle)
+    ext = account.get("external_identity")
+    kind = account.get("channel_kind")
+    if kind == "email":
+        out["from"] = ext
+    elif kind in ("linkedin", "whatsapp", "instagram", "telegram"):
+        out["account_id"] = ext
+    elif kind in ("sms", "voice"):
+        out["from"] = ext  # E.164 sender number
+    return out
+
+
+async def _resolve_sending_account(
+    *,
+    workspace_id: str,
+    workflow_id: str | None,
+    channel: ChannelType,
+    node_account_id: str | None,
+    account_pool: str | None,
+) -> dict[str, Any] | None:
+    """Pick the sending account for this send, or None to fall back to the legacy
+    connection_name path. Precedence (send_policy.resolve_send_source): node pin →
+    campaign pool (LRU) → no account. ``connection_name`` precedence is handled by
+    the caller (a non-None account here overrides it; None lets it through)."""
+    channel_kind = _CHANNEL_KIND.get(channel)
+    if channel_kind is None:
+        return None  # channel can't have per-seat accounts
+
+    # 1. Node-level pin always wins (operator chose this exact seat on the node).
+    if node_account_id:
+        acct = await _load_account_by_id(workspace_id, node_account_id)
+        # Honour the pin only if it's a live seat of the right family; otherwise
+        # fall through rather than silently sending from an unintended account.
+        if acct and acct.get("channel_kind") == channel_kind and acct.get("status") in ("active", "warming"):
+            return acct
+        return None
+
+    # 2. Campaign pool: LRU among eligible. account_pool gates whether the pool is
+    #    consulted at all — only "campaign"/"round_robin" rotate; explicit "single"
+    #    or None means "no pool", defer to connection_name.
+    if workflow_id and account_pool in ("campaign", "round_robin"):
+        pooled = await _load_pooled_accounts(workspace_id, workflow_id, channel_kind)
+        if pooled:
+            today = datetime.now(UTC).date()
+            hour_bucket = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+            return send_policy.pick_lru(pooled, today, hour_bucket)
+    return None
 
 
 async def _load_connection_bundle(workspace_id: str, connection_name: str | None) -> dict[str, Any] | None:
@@ -175,9 +293,37 @@ async def build_command(
     payload: dict[str, Any],
     connection_name: str | None,
     correlation_id: str | None = None,
+    sending_account_id: str | None = None,
+    account_pool: str | None = None,
 ) -> dict[str, Any]:
-    """Assemble the ActionCommand envelope the muscle consumes."""
-    bundle = await _load_connection_bundle(workspace_id, connection_name)
+    """Assemble the ActionCommand envelope the muscle consumes.
+
+    Sender resolution precedence (additive, backward-compatible):
+      node pin → campaign pool (LRU) → legacy connection_name → provider default.
+    A resolved sending account loads ITS connection's bundle (secret stays at the
+    connection) and overrides only the sender identity; metadata.sending_account_id
+    is stamped so the transition worker increments that account's rate counter on
+    the confirmed send. When no account resolves, the legacy connection_name path
+    runs unchanged — saved graphs that only set connection_name see zero change."""
+    account = await _resolve_sending_account(
+        workspace_id=workspace_id,
+        workflow_id=str(lead.get("workflow_id")) if lead.get("workflow_id") else None,
+        channel=channel,
+        node_account_id=sending_account_id,
+        account_pool=account_pool,
+    )
+    sending_account_id_used: str | None = None
+    if account is not None:
+        bundle = await _connection_bundle_by_id(workspace_id, str(account["connection_id"]))
+        if bundle is not None:
+            bundle = _apply_account_to_bundle(bundle, account, channel)
+            sending_account_id_used = str(account["id"])
+        else:
+            # Account points at a deleted connection — don't send from a phantom
+            # sender; fall back to the named connection.
+            bundle = await _load_connection_bundle(workspace_id, connection_name)
+    else:
+        bundle = await _load_connection_bundle(workspace_id, connection_name)
     credential_ref = await _mint_credential_ref(bundle, channel.value)
     # T3: for email, mint a signed open/click tracking token so render injects
     # the pixel + link rewrites. Keyed to this workspace/lead/contact so the
@@ -211,6 +357,11 @@ async def build_command(
             "workspace_id": workspace_id,
             "node_id": node_id,
             "correlation_id": correlation_id or str(uuid.uuid4()),
+            # Stamped only when a per-seat account was resolved; the transition
+            # worker reads it to increment that account's rate counter on the
+            # CONFIRMED send (exactly-once via processed_commands). Absent = the
+            # legacy connection_name path; no per-account counter to bump.
+            "sending_account_id": sending_account_id_used,
         },
         "occurred_at": datetime.now(UTC).isoformat(),
     }

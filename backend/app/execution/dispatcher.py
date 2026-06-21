@@ -152,6 +152,11 @@ async def handle_event(env: dict) -> None:
     command_payload.update({k: v for k, v in payload.items() if k not in ("node_id", "lead_id", "channel")})
 
     connection_name = payload.get("connection_name") or config.get("connection_name")
+    # Per-seat sending account (additive): a node may pin a specific account, or
+    # opt into the campaign pool. Both come from the node config (merged into the
+    # payload above); absent = the legacy connection_name path in build_command.
+    sending_account_id = payload.get("sending_account_id") or config.get("sending_account_id")
+    account_pool = payload.get("account_pool") or config.get("account_pool")
 
     # SPINE-2: a synthetic lead is a black hole the operator must hear about.
     # When no lead row backs this intent, the command's lead.id is the NODE id;
@@ -177,6 +182,8 @@ async def handle_event(env: dict) -> None:
         payload=command_payload,
         connection_name=connection_name,
         correlation_id=payload.get("correlation_id") or env.get("correlation_id"),
+        sending_account_id=sending_account_id,
+        account_pool=account_pool,
     )
     await commands.publish_command(command)
     log.info("dispatched %s -> channel=%s node=%s", event_type, channel.value, node_id)
