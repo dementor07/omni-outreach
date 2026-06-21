@@ -150,6 +150,27 @@ def test_measure_is_lineage_scoped_not_global():
     assert "COUNT(*) AS n FROM omni_contacts" not in src, "no whole-workspace count"
 
 
+def test_companies_metric_reads_discovery_events_not_dead_field():
+    """REGRESSION: the companies metric read custom_fields.company_resolution.
+    company_id — an INPUT the worker injects, never a durable output — so it
+    measured 0 forever while real runs created companies (caught live 2026-06-21,
+    65 real companies reported as 0). It must count company.discovered events in
+    the workflow's correlation lineage, mirroring spend()'s proven join."""
+    src = (BACKEND / "app" / "services" / "objective_controller.py").read_text(encoding="utf-8")
+    body = src.split("async def measure", 1)[1].split("async def spend", 1)[0]
+    companies = body.split('metric == "companies"', 1)[1].split("elif", 1)[0]
+    # the dead field must NOT be queried as the basis of the companies measure
+    # (a comment may still NAME it to document the old bug — only the SQL matters)
+    assert "->'company_resolution'" not in companies, (
+        "companies must not query custom_fields.company_resolution (a node input, "
+        "absent on real leads — it read 0 forever)"
+    )
+    # it counts discovery EVENTS, lineage-linked by correlation (like spend())
+    assert "company.discovered" in companies
+    assert "omni_events_archive" in companies and "correlation_id" in companies
+    assert "l.workflow_id = $1" in companies, "still lineage-scoped to this workflow"
+
+
 def test_seed_path_is_shared_single_source():
     run = (BACKEND / "app" / "execution" / "run.py").read_text(encoding="utf-8")
     assert "async def seed_and_run" in run, "the one shared seed-and-fire entry point"

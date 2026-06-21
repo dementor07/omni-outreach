@@ -132,12 +132,29 @@ async def measure(workspace_id: str, metric: str, workflow_id: str) -> int:
                 workflow_id, workspace_id,
             )
         elif metric == "companies":
-            # Distinct companies resolved in this workflow's lineage (the
-            # crm.resolve_company node stamps custom_fields.company_resolution).
+            # Distinct companies THIS workflow discovered. The authoritative record
+            # is the `company.discovered` event (entity_type='company', keyed on
+            # the company id) that crm.resolve_company emits — NOT a lead
+            # custom_fields field. `company_resolution` is an INPUT the worker
+            # injects before firing the node, not a durable output, so it's absent
+            # on real leads (it read 0 forever — the metric was blind). Link a
+            # discovery to this workflow the same way spend() does: by a
+            # correlation_id whose archived lead-events belong to this workflow.
             row = await fetch_one(
-                "SELECT COUNT(DISTINCT (custom_fields->'company_resolution'->>'company_id')) AS n "
-                "FROM omni_leads WHERE workflow_id=$1 AND workspace_id=$2 "
-                "AND custom_fields->'company_resolution'->>'company_id' IS NOT NULL",
+                """
+                SELECT COUNT(DISTINCT cd.entity_id) AS n
+                FROM omni_events_archive cd
+                WHERE cd.workspace_id = $2
+                  AND cd.event_type = 'company.discovered'
+                  AND cd.correlation_id IN (
+                    SELECT DISTINCT a.correlation_id
+                    FROM omni_events_archive a
+                    JOIN omni_leads l ON l.id = a.entity_id AND l.workspace_id = $2
+                    WHERE a.entity_type = 'lead'
+                      AND a.correlation_id IS NOT NULL
+                      AND l.workflow_id = $1
+                  )
+                """,
                 workflow_id, workspace_id,
             )
         elif metric == "replies":
