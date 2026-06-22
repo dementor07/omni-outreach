@@ -24,7 +24,11 @@ COPY . .
 
 EXPOSE 8100
 
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD python -c "import urllib.request,sys; urllib.request.urlopen('http://localhost:8100/health'); " || exit 1
+# Probe the ACTIVE deep check: it self-heals a dead browser in-process and only
+# fails (503) when the browser is genuinely unrecoverable, so a transient flake
+# never trips a restart but a wedged service does. Generous timeout: a heal
+# relaunches the browser (a few seconds). start-period covers first-boot launch.
+HEALTHCHECK --interval=30s --timeout=20s --start-period=40s --retries=3 \
+    CMD python -c "import urllib.request,sys; urllib.request.urlopen('http://localhost:8100/health/deep', timeout=18)" || exit 1
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8100", "--log-level", "info"]
