@@ -104,11 +104,16 @@ fn slug_to_company_name(slug: &str) -> String {
 }
 
 /// Canonical company row — mirrors naukri::extract_companies / discovery::company_row.
-/// `slug` is the raw ATS handle (URL + dedup); the displayed company_name is
-/// derived from it via slug_to_company_name (NAME-003).
-fn company_row(slug: &str, url: &str, title: &str, role_count: i64, location: &str, source: &str) -> Value {
+/// `slug` is the raw ATS handle (URL + dedup). The displayed company_name is the
+/// REAL name from the ATS API when we have it (NAME-003), else the slug
+/// title-cased via slug_to_company_name.
+fn company_row(slug: &str, real_name: Option<&str>, url: &str, title: &str, role_count: i64, location: &str, source: &str) -> Value {
+    let name = match real_name.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(n) => n.to_string(),
+        None => slug_to_company_name(slug),
+    };
     json!({
-        "company_name": slug_to_company_name(slug),
+        "company_name": name,
         "company_slug": slug.trim(),
         "title": title.trim(),
         "role_count": role_count,
@@ -161,7 +166,11 @@ pub async fn handle_ats(command: &ActionCommand) -> ExecutionResult {
         if let Some((title, count, location, url)) = fetch_company(&platform, slug).await {
             let key = slug.to_lowercase();
             if seen.insert(key) {
-                companies.push(company_row(slug, &url, &title, count, &location, &format!("ats:{platform}")));
+                // NAME-003: prefer the REAL company name fetched from the ATS API
+                // (greenhouse boards expose it; a numeric board id like 103644278
+                // has no name in the slug) over the slug-derived fallback.
+                let real_name = fetch_company_name(&platform, slug).await;
+                companies.push(company_row(slug, real_name.as_deref(), &url, &title, count, &location, &format!("ats:{platform}")));
             }
         }
     }
@@ -200,6 +209,32 @@ async fn fetch_company(platform: &str, slug: &str) -> Option<(String, i64, Strin
         "personio" => personio(slug).await,
         "rippling" => rippling(slug).await,
         "breezy" => breezy(slug).await,
+        _ => None,
+    }
+}
+
+/// NAME-003: fetch the REAL company name from the ATS's API where it's exposed.
+/// Returns None when the platform doesn't surface a name (then company_row falls
+/// back to the slug). Greenhouse is the priority — its board slug is often a
+/// numeric id (103644278) with no name in the slug at all; the board root
+/// (/v1/boards/{slug}) returns {"name": "<Company>"}.
+async fn fetch_company_name(platform: &str, slug: &str) -> Option<String> {
+    match platform {
+        "greenhouse" => {
+            let v = get_json(&format!("https://boards-api.greenhouse.io/v1/boards/{slug}")).await?;
+            v["name"].as_str().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+        }
+        "lever" => {
+            // Lever postings carry the company under categories.team sometimes, but
+            // the canonical display is the slug; no reliable name endpoint. Skip.
+            let _ = slug;
+            None
+        }
+        "ashby" => {
+            // Ashby's GraphQL response includes organizationName.
+            let v = get_json(&format!("https://jobs.ashbyhq.com/api/non-user-graphql?op=ApiJobBoardWithTeams&slug={slug}")).await.unwrap_or(Value::Null);
+            v["data"]["jobBoard"]["organizationName"].as_str().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+        }
         _ => None,
     }
 }
@@ -446,4 +481,33 @@ async fn breezy(slug: &str) -> Option<(String, i64, String, String)> {
     let v: Value = resp.json().await.ok()?;
     let jobs = v["data"].as_array()?;
     summarise(jobs, "name", "location", format!("https://{slug}.breezy.hr"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::slug_to_company_name;
+
+    #[test]
+    fn slug_title_cases_hyphenated() {
+        assert_eq!(slug_to_company_name("3pillar-global"), "3pillar Global");
+        assert_eq!(slug_to_company_name("action-against-hunger"), "Action Against Hunger");
+    }
+
+    #[test]
+    fn slug_keeps_numeric_board_id_as_is() {
+        // greenhouse numeric ids have no recoverable name from the slug (the real
+        // name comes from fetch_company_name); keep the id, don't mangle it.
+        assert_eq!(slug_to_company_name("103644278"), "103644278");
+    }
+
+    #[test]
+    fn workday_composite_uses_company_segment_only() {
+        assert_eq!(slug_to_company_name("2020companies|wd1|external_careers"), "2020companies");
+        assert_eq!(slug_to_company_name("8x8inc|wd5|8x8_external"), "8x8inc");
+    }
+
+    #[test]
+    fn single_token_letter_slug_capitalises() {
+        assert_eq!(slug_to_company_name("abbvie"), "Abbvie");
+    }
 }

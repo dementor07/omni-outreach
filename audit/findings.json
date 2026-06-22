@@ -1593,7 +1593,7 @@
       "file": "backend-rust/src/handlers/discovery.rs",
       "line": 475,
       "severity": "HIGH",
-      "status": "OPEN",
+      "status": "FIXED",
       "title": "searxng/serper company-name extraction is structurally wrong \u2014 page-title first word, no junk filter",
       "evidence": "hits_to_companies()->clean_agency_name(title) takes title.split([space,-,|]).next() = the FIRST WORD of a search-result page title. A Google/SearXNG query for \"software development companies\" returns LISTICLE pages, so company_name lands as \"Top\",\"List\",\"Best\",\"Dallas\". No filter drops non-company domains (clutch.co, wikipedia.org, cookiebot.com, business.safety.google) \u2014 cookie banners and privacy links become companies (clutch run: \"Learn more about this provider\", \"Cookiebot\"). Live-observed 2026-06-22. search_serper also reduces each rich organic result to (link,title), discarding structured fields. ROOT: a web search result is not a company; treating the title as a name is the wrong primitive."
     },
@@ -1603,7 +1603,7 @@
       "file": "backend-rust/src/handlers/serper_people.rs",
       "line": 237,
       "severity": "HIGH",
-      "status": "OPEN",
+      "status": "FIXED",
       "title": "serper_people name parse only splits on \" - \" (ASCII) \u2014 en-dash/pipe LinkedIn titles bleed the whole title into the name",
       "evidence": "clean_name() does raw_title.split(\" - \").next(). LinkedIn result titles overwhelmingly use the en-dash \"\u2013\" or \"|\" separator, not \" - \". So \"Jan Urbanec \u2013 Associate Lead Software Engineer ve spolecnosti 2K\" never splits \u2192 first_name=Jan, last_name=\"Urbanec \u2013 Associate Lead Software Engineer ve spolecnosti 2K\". clean_role_from_title has the same \" - \"-only split so role falls back. Live-observed garbage contacts 2026-06-22."
     },
@@ -1613,7 +1613,7 @@
       "file": "backend-rust/src/handlers/ats.rs",
       "line": 133,
       "severity": "MEDIUM",
-      "status": "OPEN",
+      "status": "FIXED",
       "title": "ATS sources store the raw slug as company_name (15five, 103644278, 2020companies|wd1|external_careers) \u2014 never resolved to a display name",
       "evidence": "ats.rs company_row(slug, ...) uses the slug verbatim as company_name. greenhouse leaks numeric board IDs (103644278); workday leaks the composite company|wd|site slug; others are lowercased slugs (abbvie, 1stdibscom). Real companies, unusable display names. The job API responses DO carry a real company/department name that is discarded."
     },
@@ -1633,7 +1633,7 @@
       "file": "backend/app/routers/integrations.py",
       "line": 276,
       "severity": "MEDIUM",
-      "status": "OPEN",
+      "status": "FIXED",
       "title": "Unipile account sync marks every seat active \u2014 ignores per-account Unipile health (CREDENTIALS/needs-reauth)",
       "evidence": "sync_accounts INSERTs status='active' for every returned seat. Unipile /api/v1/accounts reports per-account sources[].status (OK vs CREDENTIALS). A CREDENTIALS seat (live-observed: Praveen Menon) is synced active and is selectable for sending, where it would fail. Sync should map non-OK Unipile status \u2192 paused/warming."
     },
@@ -1643,7 +1643,7 @@
       "file": "backend/app/execution/commands.py",
       "line": 213,
       "severity": "HIGH",
-      "status": "OPEN",
+      "status": "FIXED",
       "title": "Account rate-caps are NOT enforced for legacy connection_name sends \u2014 only pool/pinned campaigns get capped",
       "evidence": "_resolve_sending_account returns an account ONLY for a node pin or account_pool in (campaign,round_robin); the DEFAULT legacy connection_name path returns None. With no account, build_command stamps no metadata.sending_account_id, so transition_worker handle_transition (line 1635: status==sent AND sending_account_id) never calls _increment_send_counters \u2192 the account daily/hourly cap is never counted or enforced. The per-seat safety floor (the entire point of omni_sending_accounts + _linkedin_safe_cap) is bypassed for any campaign not explicitly opted into a pool. A connection_name LinkedIn campaign can exceed the cap and risk an account ban. Campaign-level daily_cap in _gate_send still applies if set, but the ACCOUNT-level cap does not."
     },
@@ -1653,7 +1653,7 @@
       "file": "backend/app/execution/transition_worker.py",
       "line": 1271,
       "severity": "MEDIUM",
-      "status": "OPEN",
+      "status": "FIXED",
       "title": "DNC/suppression check is skipped when an outbound-send lead has no contact_id",
       "evidence": "T1 DNC gate is guarded by . A send-channel lead with contact_id=None (e.g. a company-stage lead a misbuilt graph routes straight to a channel, or identity not yet attached) skips suppression entirely and the intent publishes. Suppression should also resolve by the recipient identity in the rendered payload (email/linkedin_url), not only contact_id, so a do-not-contact recipient can never be messaged."
     },
@@ -1663,7 +1663,7 @@
       "file": "backend/app/services/objective_controller.py",
       "line": 6,
       "severity": "MEDIUM",
-      "status": "OPEN",
+      "status": "FIXED",
       "title": "qualified_leads objective metric is identical to contacts \u2014 counts UNSCREENED contacts as qualified",
       "evidence": "measure() uses the SAME COUNT(DISTINCT contact_id) query for both \"contacts\" and \"qualified_leads\". The comment claims a contact \"had to pass verify+screen to get one\", but create_contact has NO screen guard and the common pipeline (source->for_each->people->for_each->create_contact) has no ai.screen/condition.verify_person node, so every contact is counted as qualified. A campaign with a qualified_leads goal reports success on unscreened data. qualified_leads should require a passing screening signal (e.g. leads whose custom_fields.verification.score >= threshold or screening_status=qualified), not merely contact_id IS NOT NULL."
     },
@@ -1673,7 +1673,7 @@
       "file": "backend/app/services/objective_controller.py",
       "line": 136,
       "severity": "MEDIUM",
-      "status": "OPEN",
+      "status": "FIXED",
       "title": "companies objective metric reads 0 unless the graph includes crm.resolve_company",
       "evidence": "companies metric counts company.discovered events in the workflow lineage. company.discovered is emitted ONLY by crm.resolve_company (resolve_company.py:101). A pipeline that discovers companies into custom_fields but has no resolve_company node (e.g. the all-sources->for_each->people->create_contact graph built 2026-06-22, which discovered 250 companies) emits zero company.discovered events, so a companies goal measures 0 and widens until exhausted despite real discovery. The metric is only valid for graphs containing resolve_company; otherwise it is silently blind. Either count discovery from the source.* completion events / custom_fields[companies] too, or document resolve_company as a hard prerequisite for a companies goal."
     },
@@ -1683,7 +1683,7 @@
       "file": "backend/app/services/objective_controller.py",
       "line": 187,
       "severity": "MEDIUM",
-      "status": "OPEN",
+      "status": "FIXED",
       "title": "Objective max_spend_usd cap is blind to Serper/Apify/Apollo API spend \u2014 only counts AI (ai_jobs) cost",
       "evidence": "spend() = SUM(omni_ai_jobs.cost_usd) over the workflow correlation lineage. That captures Claude/AI cost only. A lead-gen campaign's dominant cost is paid Serper people/search queries (and Apify/Apollo) \u2014 serper_people fans hundreds of paid Google queries per run. The projector records serper_calls as a COUNT in omni_pipeline_metrics but never as cost_usd in ai_jobs, so spend() undercounts and a max_spend_usd bound never trips on the real expense. The budget guard can run far over the intended cap. Fix: attribute a per-call cost for serper/apify/apollo into the spend() rollup (or a unified cost ledger)."
     },
@@ -1693,9 +1693,19 @@
       "file": "backend/app/execution/transition_worker.py",
       "line": 1712,
       "severity": "HIGH",
-      "status": "OPEN",
+      "status": "FIXED",
       "title": "Unmatched handle is ALWAYS terminalized as \"completed\" \u2014 a failed/empty run is recorded as success",
       "evidence": "handle_transition: target = _target_node(handle); if not target -> _terminalize_lead(lead_id, \"completed\"). This is correct for a genuine leaf on the default/then path, but it fires for ANY handle with no wired edge. Operators rarely wire on_error/empty edges, so: a channel node emitting on_error (send failed) with no on_error edge -> lead marked completed; a source emitting empty (no results) with no empty edge -> completed. Failed and empty runs are indistinguishable from successful ones in lead.status. This inflates Analytics success rates, and the root run-lead terminalizes completed even when the run errored, which the objective worker consumes as a real completion. Fix: choose the terminal status from the handle (on_error->errored, empty->ended/empty, default/then/leaf->completed)."
+    },
+    {
+      "id": "NAME-003-ASHBY",
+      "area": "sources",
+      "file": "backend-rust/src/handlers/ats.rs",
+      "line": 1,
+      "severity": "LOW",
+      "status": "OPEN",
+      "title": "Ashby real-name fetch returns empty \u2014 falls back to slug (greenhouse real-name works)",
+      "evidence": "fetch_company_name greenhouse path resolves real names live (103644278->Lume Deodorant, 12jlkfsk->Orion Global Solutions, verified 2026-06-22). The ashby GraphQL guess (ApiJobBoardWithTeams?slug=) did not return organizationName, so ashby falls back to slug_to_company_name (1password, 3y-health->3y Health) \u2014 acceptable, not garbage. Refine the ashby org-name query later. NAME-003 core (greenhouse + slug casing + workday composite) is FIXED."
     }
   ]
 }

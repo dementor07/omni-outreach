@@ -286,3 +286,32 @@ fn clean_role_from_title(raw_title: &str, company_name: &str, fallback_role: &st
     let trimmed: String = cleaned.trim_matches(|c: char| " -|,•".contains(c)).trim().to_string();
     if trimmed.is_empty() { fallback_role.to_string() } else { trimmed }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{clean_name, clean_role_from_title};
+
+    #[test]
+    fn name_splits_on_endash_the_linkedin_default() {
+        // NAME-002: the bleed bug — en-dash must split name from role.
+        assert_eq!(clean_name("Jan Urbanec – Lead Engineer at 2K"), "Jan Urbanec");
+        assert_eq!(clean_name("Roman Hladík – General Manager at 2K Czech"), "Roman Hladík");
+    }
+
+    #[test]
+    fn name_splits_on_pipe_and_ascii_hyphen() {
+        assert_eq!(clean_name("Maggie Leen | CEO and Board Member"), "Maggie Leen");
+        assert_eq!(clean_name("Marcel Mizrahi - CEO at Bros Web Design"), "Marcel Mizrahi");
+    }
+
+    #[test]
+    fn name_without_separator_is_the_whole_trimmed_title() {
+        assert_eq!(clean_name("  David Kelley  "), "David Kelley");
+    }
+
+    #[test]
+    fn role_extracted_after_separator_with_company_stripped() {
+        let role = clean_role_from_title("Jan Urbanec – Lead Engineer at 2K", "2K", "CEO");
+        assert!(role.to_lowercase().contains("lead engineer"), "got: {role}");
+    }
+}
