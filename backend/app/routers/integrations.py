@@ -153,6 +153,21 @@ def _linkedin_safe_cap(channel_kind: str, daily_cap: int) -> int:
     return daily_cap
 
 
+def _unipile_seat_status(item: dict) -> str:
+    """UNIPILE-HEALTH-001: map a Unipile account's reported health to our seat
+    status, so an unhealthy seat is NOT synced 'active' and selectable for sending
+    (it would just fail at send time). Unipile reports per-account health under
+    sources[].status (or a top-level status); OK/CONNECTED → active, anything else
+    (CREDENTIALS = needs re-auth, ERROR, DISCONNECTED, …) → paused. The send-account
+    selector only picks active/warming seats, so a paused seat is skipped."""
+    sources = item.get("sources") or []
+    raw = ""
+    if sources and isinstance(sources, list) and isinstance(sources[0], dict):
+        raw = str(sources[0].get("status") or "")
+    raw = (raw or str(item.get("status") or "")).strip().upper()
+    return "active" if raw in ("OK", "CONNECTED", "ACTIVE", "") else "paused"
+
+
 @router.get("/accounts", response_model=list[SendingAccountOut], summary="List all accounts across all connections")
 async def list_all_accounts(ctx: AuthContext = Depends(get_current_workspace)) -> list[SendingAccountOut]:
     rows = await fetch_all(
@@ -272,13 +287,14 @@ async def sync_accounts(connection_id: uuid.UUID, ctx: AuthContext = Depends(get
             channel_kind = "linkedin"
 
         daily_cap = _linkedin_safe_cap(channel_kind, 0)
+        seat_status = _unipile_seat_status(item)
 
         await execute(
             """
             INSERT INTO omni_sending_accounts (workspace_id, connection_id, provider, channel_kind, external_identity, display_name, daily_cap, status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (workspace_id, connection_id, external_identity)
-            DO UPDATE SET display_name = EXCLUDED.display_name, updated_at = NOW()
+            DO UPDATE SET display_name = EXCLUDED.display_name, status = EXCLUDED.status, updated_at = NOW()
             """,
             ctx.workspace_id,
             connection_id,
@@ -286,7 +302,8 @@ async def sync_accounts(connection_id: uuid.UUID, ctx: AuthContext = Depends(get
             channel_kind,
             ext_id,
             name,
-            daily_cap
+            daily_cap,
+            seat_status,
         )
         synced += 1
 

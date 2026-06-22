@@ -234,15 +234,42 @@ async fn search_searxng(base_url: &str, pattern: &str) -> Vec<(String, String)> 
     }
 }
 
+// NAME-002: LinkedIn result titles separate the name from the role with ANY of
+// these, and the en-dash "–" is by far the most common — not the ASCII " - ".
+// Splitting on " - " alone bled the whole title into the name
+// ("Jan Urbanec – Lead Engineer at 2K" -> name = the entire string). Split on the
+// FIRST occurrence of any separator so name = head, role = tail.
+const NAME_SEPARATORS: &[&str] = &[" - ", " – ", " — ", " | ", " · ", " • "];
+
+/// (head, tail) of a title split at the first name/role separator. If none
+/// matches, the whole title is the head and the tail is empty.
+fn split_title(raw_title: &str) -> (String, String) {
+    let mut best: Option<(usize, &str)> = None;
+    for sep in NAME_SEPARATORS {
+        if let Some(idx) = raw_title.find(sep) {
+            if best.map_or(true, |(b, _)| idx < b) {
+                best = Some((idx, sep));
+            }
+        }
+    }
+    match best {
+        Some((idx, sep)) => (
+            raw_title[..idx].trim().to_string(),
+            raw_title[idx + sep.len()..].trim().to_string(),
+        ),
+        None => (raw_title.trim().to_string(), String::new()),
+    }
+}
+
 fn clean_name(raw_title: &str) -> String {
-    raw_title.split(" - ").next().unwrap_or("").trim().to_string()
+    split_title(raw_title).0
 }
 
 fn clean_role_from_title(raw_title: &str, company_name: &str, fallback_role: &str) -> String {
     if raw_title.is_empty() {
         return fallback_role.to_string();
     }
-    let tail: String = raw_title.splitn(2, " - ").nth(1).unwrap_or("").trim().to_string();
+    let tail = split_title(raw_title).1;
     if tail.is_empty() {
         return fallback_role.to_string();
     }

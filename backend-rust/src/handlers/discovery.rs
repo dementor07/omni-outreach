@@ -134,7 +134,55 @@ fn company_row(name: &str, url: &str, industry: &str, description: &str, titles:
     })
 }
 
+/// NAME-001: directory / listicle / utility hosts that are NOT companies. A web
+/// search for "<x> companies" returns ranking pages, aggregators, encyclopaedias,
+/// and consent/utility pages — none are leads. Match on the registrable domain.
+const NON_COMPANY_DOMAINS: &[&str] = &[
+    // directories / ranking aggregators
+    "clutch.co", "goodfirms.co", "designrush.com", "sortlist.com", "g2.com",
+    "capterra.com", "trustpilot.com", "glassdoor.com", "ambitionbox.com",
+    "crunchbase.com", "owler.com", "zoominfo.com", "yelp.com", "indeed.com",
+    "techreviewer.co", "businessofapps.com", "manifest.com",
+    // encyclopaedias / news / social / forums
+    "wikipedia.org", "medium.com", "reddit.com", "quora.com", "youtube.com",
+    "facebook.com", "twitter.com", "x.com", "instagram.com", "linkedin.com",
+    "forbes.com", "techcrunch.com", "github.com", "stackoverflow.com",
+    // consent / utility / vendor pages (the cookiebot/google class)
+    "cookiebot.com", "google.com", "gstatic.com", "doubleclick.net",
+    "cloudflare.com", "wordpress.com", "wix.com", "godaddy.com",
+];
+
+fn is_non_company_domain(domain: &str) -> bool {
+    let d = domain.to_lowercase();
+    NON_COMPANY_DOMAINS.iter().any(|bad| d == *bad || d.ends_with(&format!(".{bad}")))
+}
+
+/// Derive a presentable company name from a registrable domain: the SLD,
+/// hyphen/dot-split into Title Case. acme-corp.com -> "Acme Corp". Falls back to
+/// the raw SLD when there's nothing to title-case.
+fn name_from_domain(domain: &str) -> String {
+    let sld = domain.split('.').next().unwrap_or(domain);
+    let titled: Vec<String> = sld
+        .split(['-', '_'])
+        .filter(|s| !s.is_empty())
+        .map(|w| {
+            let mut c = w.chars();
+            match c.next() {
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect();
+    if titled.is_empty() { sld.to_string() } else { titled.join(" ") }
+}
+
 /// Turn search hits (url, title) into deduped company rows.
+///
+/// NAME-001: a search result is a PAGE, not a company. We derive the company from
+/// the result's registrable DOMAIN (the company's own site), skip known
+/// directory/listicle/utility domains, and dedup by domain. The cleaned page
+/// title is kept only as the `description`, never as the company name (the old
+/// code used title.split().next() = the first word — "Top", "List", "Best").
 fn hits_to_companies(hits: Vec<(String, String)>, max_results: usize, titles: &[String], source: &str) -> Vec<Value> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut out: Vec<Value> = Vec::new();
@@ -142,13 +190,19 @@ fn hits_to_companies(hits: Vec<(String, String)>, max_results: usize, titles: &[
         if out.len() >= max_results {
             break;
         }
-        let name = clean_agency_name(&title);
         let domain = root_domain(&url);
-        let key = if domain.is_empty() { name.to_lowercase() } else { domain };
-        if name.is_empty() || !seen.insert(key) {
+        // No domain (or a directory/utility domain) -> not a company; skip.
+        if domain.is_empty() || is_non_company_domain(&domain) {
             continue;
         }
-        out.push(company_row(&name, &url, "Marketing & Advertising", &title, titles, source));
+        if !seen.insert(domain.clone()) {
+            continue;
+        }
+        let name = name_from_domain(&domain);
+        if name.is_empty() {
+            continue;
+        }
+        out.push(company_row(&name, &url, "", &title, titles, source));
     }
     out
 }
@@ -378,13 +432,30 @@ async fn discover_clutch(
         }
         let name = e.name.trim().to_string();
         let domain = root_domain(&e.url);
-        let key = if domain.is_empty() { name.to_lowercase() } else { domain };
-        if name.is_empty() || !seen.insert(key) {
+        // NAME-001: drop consent/utility/aggregator rows the directory scrape
+        // sometimes captures ("Learn more about this provider", Cookiebot, a
+        // google.com privacy link) — a real provider has its own outbound domain.
+        if name.is_empty() || is_directory_noise(&name) || is_non_company_domain(&domain) {
             continue;
         }
-        out.push(company_row(&name, &e.url, "Marketing & Advertising", &e.description, titles, "clutch"));
+        let key = if domain.is_empty() { name.to_lowercase() } else { domain };
+        if !seen.insert(key) {
+            continue;
+        }
+        out.push(company_row(&name, &e.url, "", &e.description, titles, "clutch"));
     }
     Ok(out)
+}
+
+/// Boilerplate strings a directory scrape can mistake for a company name.
+fn is_directory_noise(name: &str) -> bool {
+    let n = name.trim().to_lowercase();
+    const NOISE: &[&str] = &[
+        "learn more", "learn more about this provider", "site feedback", "read more",
+        "view profile", "visit website", "see profile", "show more", "load more",
+        "cookiebot", "privacy", "terms", "advertise", "sponsored", "sign in", "log in",
+    ];
+    n.is_empty() || NOISE.iter().any(|x| n == *x || n.starts_with(x))
 }
 
 // ── search helpers (mirror serper_people's implementations) ──────────────────
@@ -468,13 +539,6 @@ async fn search_searxng(base_url: &str, pattern: &str) -> Vec<(String, String)> 
             Vec::new()
         }
     }
-}
-
-/// Strip directory chrome from a result title to get a usable agency name.
-/// "LeadRoad - B2B Lead Generation | Clutch.co" -> "LeadRoad".
-fn clean_agency_name(title: &str) -> String {
-    let head = title.split([' ', '-', '|']).next().unwrap_or("").trim();
-    head.trim_matches(|c: char| !c.is_alphanumeric()).to_string()
 }
 
 /// Best-effort root domain extraction for dedup ("https://x.leadroad.in/a" -> "leadroad.in").

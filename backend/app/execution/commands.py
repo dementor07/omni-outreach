@@ -152,6 +152,31 @@ async def _load_account_by_id(workspace_id: str, account_id: str) -> dict[str, A
     return dict(row) if row else None
 
 
+async def _load_accounts_by_connection_name(
+    workspace_id: str, connection_name: str, channel_kind: str
+) -> list[dict[str, Any]]:
+    """SEND-ATTRIB-001: the sending accounts under the connection named on the
+    node, for this channel family. The legacy connection_name path used to bypass
+    per-seat caps entirely (no account resolved → no sending_account_id stamped →
+    the increment never ran → the account daily/hourly cap was never enforced).
+    Now a connection_name send still resolves a seat under that connection, so the
+    cap is counted via the same pick_lru + increment path the pool path uses."""
+    async with system_scope():
+        rows = await fetch_all(
+            """
+            SELECT a.id, a.connection_id, a.channel_kind, a.external_identity,
+                   a.status, a.daily_cap, a.hourly_cap, a.sends_today,
+                   a.sends_this_hour, a.day_anchor, a.hour_anchor,
+                   a.warmup_target, a.last_used_at
+            FROM omni_sending_accounts a
+            JOIN omni_connections c ON c.id = a.connection_id
+            WHERE a.workspace_id = $1 AND c.name = $2 AND a.channel_kind = $3
+            """,
+            workspace_id, connection_name, channel_kind,
+        )
+    return [dict(r) for r in rows]
+
+
 async def _connection_bundle_by_id(workspace_id: str, connection_id: str) -> dict[str, Any] | None:
     """Decrypt a connection's bundle by id (the account's parent connection holds
     the secret; the account only carries the sender identity)."""
@@ -189,14 +214,28 @@ async def _resolve_sending_account(
     channel: ChannelType,
     node_account_id: str | None,
     account_pool: str | None,
+    connection_name: str | None = None,
 ) -> dict[str, Any] | None:
-    """Pick the sending account for this send, or None to fall back to the legacy
-    connection_name path. Precedence (send_policy.resolve_send_source): node pin →
-    campaign pool (LRU) → no account. ``connection_name`` precedence is handled by
-    the caller (a non-None account here overrides it; None lets it through)."""
+    """Pick the sending account for this send, or None to fall back to the bare
+    connection bundle. Precedence: node pin → campaign pool (LRU) → an LRU seat
+    under the named connection (SEND-ATTRIB-001) → None.
+
+    Resolving a seat even for the legacy connection_name path is what makes the
+    per-seat rate cap actually apply: build_command stamps metadata.sending_account_id
+    from whatever this returns, and the transition worker only counts/enforces the
+    cap when that id is present. Returning None here (the old behaviour for
+    connection_name) silently disabled the account cap."""
     channel_kind = _CHANNEL_KIND.get(channel)
     if channel_kind is None:
         return None  # channel can't have per-seat accounts
+
+    def _pick(accts: list[dict[str, Any]]) -> dict[str, Any] | None:
+        eligible = [a for a in accts if a.get("status") in ("active", "warming")]
+        if not eligible:
+            return None
+        today = datetime.now(UTC).date()
+        hour_bucket = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+        return send_policy.pick_lru(eligible, today, hour_bucket)
 
     # 1. Node-level pin always wins (operator chose this exact seat on the node).
     if node_account_id:
@@ -209,13 +248,21 @@ async def _resolve_sending_account(
 
     # 2. Campaign pool: LRU among eligible. account_pool gates whether the pool is
     #    consulted at all — only "campaign"/"round_robin" rotate; explicit "single"
-    #    or None means "no pool", defer to connection_name.
+    #    or None means "no pool", defer to connection_name (below).
     if workflow_id and account_pool in ("campaign", "round_robin"):
-        pooled = await _load_pooled_accounts(workspace_id, workflow_id, channel_kind)
-        if pooled:
-            today = datetime.now(UTC).date()
-            hour_bucket = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
-            return send_policy.pick_lru(pooled, today, hour_bucket)
+        picked = _pick(await _load_pooled_accounts(workspace_id, workflow_id, channel_kind))
+        if picked:
+            return picked
+
+    # 3. SEND-ATTRIB-001: legacy connection_name path — resolve an eligible seat
+    #    under the named connection so the per-seat cap is counted + enforced.
+    #    (A connection with no synced accounts still falls through to None and
+    #    uses the bare bundle — unchanged behaviour, but then there's no seat to
+    #    cap anyway.)
+    if connection_name:
+        picked = _pick(await _load_accounts_by_connection_name(workspace_id, connection_name, channel_kind))
+        if picked:
+            return picked
     return None
 
 
@@ -311,6 +358,7 @@ async def build_command(
         channel=channel,
         node_account_id=sending_account_id,
         account_pool=account_pool,
+        connection_name=connection_name,
     )
     sending_account_id_used: str | None = None
     if account is not None:

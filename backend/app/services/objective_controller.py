@@ -121,39 +121,75 @@ async def measure(workspace_id: str, metric: str, workflow_id: str) -> int:
     from app.db import fetch_one, system_scope
 
     async with system_scope():
-        if metric == "contacts" or metric == "qualified_leads":
+        if metric == "contacts":
             # A contact this campaign produced = a lead of THIS workflow that
-            # reached a contact (it had to pass verify + screen to get one), so
-            # "contacts" and "qualified_leads" share the same honest measure:
-            # distinct contacts created by this workflow's leads.
+            # reached a contact (contact_id set by crm.create_contact).
             row = await fetch_one(
                 "SELECT COUNT(DISTINCT contact_id) AS n FROM omni_leads "
                 "WHERE workflow_id=$1 AND workspace_id=$2 AND contact_id IS NOT NULL",
                 workflow_id, workspace_id,
             )
-        elif metric == "companies":
-            # Distinct companies THIS workflow discovered. The authoritative record
-            # is the `company.discovered` event (entity_type='company', keyed on
-            # the company id) that crm.resolve_company emits — NOT a lead
-            # custom_fields field. `company_resolution` is an INPUT the worker
-            # injects before firing the node, not a durable output, so it's absent
-            # on real leads (it read 0 forever — the metric was blind). Link a
-            # discovery to this workflow the same way spend() does: by a
-            # correlation_id whose archived lead-events belong to this workflow.
+        elif metric == "qualified_leads":
+            # OBJ-METRIC-001: a QUALIFIED lead must have passed screening, not just
+            # become a contact. create_contact has no screen guard and a pipeline
+            # may have no ai.screen/verify node, so contact_id alone is NOT
+            # qualification — that counted every raw contact as qualified. Require a
+            # positive screening/verification signal on the lead's custom_fields:
+            #   verification.score >= 0.5  (condition.verify_person), OR
+            #   screening_status in (qualified, passed, accepted)  (ai.screen /
+            #   crm.resolve_company company_resolution.screening_status).
             row = await fetch_one(
                 """
-                SELECT COUNT(DISTINCT cd.entity_id) AS n
-                FROM omni_events_archive cd
-                WHERE cd.workspace_id = $2
-                  AND cd.event_type = 'company.discovered'
-                  AND cd.correlation_id IN (
-                    SELECT DISTINCT a.correlation_id
-                    FROM omni_events_archive a
-                    JOIN omni_leads l ON l.id = a.entity_id AND l.workspace_id = $2
-                    WHERE a.entity_type = 'lead'
-                      AND a.correlation_id IS NOT NULL
-                      AND l.workflow_id = $1
+                SELECT COUNT(DISTINCT contact_id) AS n FROM omni_leads
+                WHERE workflow_id=$1 AND workspace_id=$2 AND contact_id IS NOT NULL
+                  AND (
+                    COALESCE((custom_fields->'verification'->>'score')::float, 0) >= 0.5
+                    OR lower(COALESCE(custom_fields->'screening'->>'status',
+                                      custom_fields->'company_resolution'->>'screening_status', ''))
+                       IN ('qualified', 'passed', 'accepted', 'pass')
                   )
+                """,
+                workflow_id, workspace_id,
+            )
+        elif metric == "companies":
+            # Distinct companies THIS workflow discovered. Two honest sources,
+            # whichever is higher (OBJ-METRIC-002):
+            #  (a) company.discovered events (entity_type='company') that
+            #      crm.resolve_company emits — the authoritative record when the
+            #      graph RESOLVES companies; linked to this workflow by the same
+            #      correlation→archive→lead join spend() uses.
+            #  (b) the for_each company children themselves — each carries a
+            #      company under custom_fields.item.company_name. A discovery
+            #      pipeline that has NO resolve_company node (source→for_each→
+            #      people→contact) emits zero company.discovered events, so (a)
+            #      read 0 and the goal widened forever despite real discovery.
+            #      Counting distinct item.company_name on this workflow's leads
+            #      covers that case.
+            row = await fetch_one(
+                """
+                SELECT GREATEST(
+                  (
+                    SELECT COUNT(DISTINCT cd.entity_id)
+                    FROM omni_events_archive cd
+                    WHERE cd.workspace_id = $2
+                      AND cd.event_type = 'company.discovered'
+                      AND cd.correlation_id IN (
+                        SELECT DISTINCT a.correlation_id
+                        FROM omni_events_archive a
+                        JOIN omni_leads l ON l.id = a.entity_id AND l.workspace_id = $2
+                        WHERE a.entity_type = 'lead'
+                          AND a.correlation_id IS NOT NULL
+                          AND l.workflow_id = $1
+                      )
+                  ),
+                  (
+                    SELECT COUNT(DISTINCT lower(custom_fields->'item'->>'company_name'))
+                    FROM omni_leads
+                    WHERE workflow_id = $1 AND workspace_id = $2
+                      AND custom_fields->'item'->>'company_name' IS NOT NULL
+                      AND custom_fields->'item'->>'company_name' <> ''
+                  )
+                ) AS n
                 """,
                 workflow_id, workspace_id,
             )
@@ -171,18 +207,28 @@ async def measure(workspace_id: str, metric: str, workflow_id: str) -> int:
     return int(row["n"]) if row and row["n"] is not None else 0
 
 
-async def spend(workspace_id: str, workflow_id: str) -> float:
-    """Total AI cost for THIS workflow's runs (not the whole workspace).
+# OBJ-SPEND-001: a lead-gen campaign's cost is NOT just AI. The dominant spend is
+# paid search-API queries (Serper). Serper bills per query; serper_people fans
+# ~2 queries per (role × company). We estimate from the count of serper requests
+# in this workflow's lineage. Conservative blended per-request estimate (Serper
+# is ~$1/1k queries; a people node makes several). Tune as real billing lands.
+_SERPER_COST_PER_REQUEST = 0.003
 
-    omni_pipeline_metrics has no workflow_id, but omni_ai_jobs carries a
-    correlation_id and the event archive ties a correlation to this workflow's
-    leads — the same join the lead-journey endpoint uses for per-lead cost. So
-    spend = SUM(ai_jobs.cost_usd) over correlations whose archived lead-events
-    belong to a lead of this workflow."""
+
+async def spend(workspace_id: str, workflow_id: str) -> float:
+    """Total cost for THIS workflow's runs (not the whole workspace): AI cost
+    (omni_ai_jobs) PLUS estimated paid search-API spend (Serper), both scoped to
+    correlations whose archived lead-events belong to a lead of this workflow —
+    the same lineage join the lead-journey endpoint uses.
+
+    OBJ-SPEND-001: spend() used to be AI-only, so a max_spend_usd bound never
+    tripped on the real expense (paid Serper queries). We now add an estimate for
+    the workflow's serper requests so the budget guard reflects actual cost."""
     from app.db import fetch_one, system_scope
 
     async with system_scope():
-        row = await fetch_one(
+        # lineage correlations for this workflow (shared by both cost legs)
+        ai = await fetch_one(
             """
             SELECT COALESCE(SUM(j.cost_usd), 0) AS c
             FROM omni_ai_jobs j
@@ -198,4 +244,23 @@ async def spend(workspace_id: str, workflow_id: str) -> float:
             """,
             workflow_id, workspace_id,
         )
-    return float(row["c"]) if row and row["c"] is not None else 0.0
+        serper = await fetch_one(
+            """
+            SELECT COUNT(*) AS n
+            FROM omni_events_archive e
+            WHERE e.workspace_id = $2
+              AND e.event_type IN ('source.serper_people.requested', 'source.serper_search.requested')
+              AND e.correlation_id IN (
+                SELECT DISTINCT a.correlation_id
+                FROM omni_events_archive a
+                JOIN omni_leads l ON l.id = a.entity_id AND l.workspace_id = $2
+                WHERE a.entity_type = 'lead'
+                  AND a.correlation_id IS NOT NULL
+                  AND l.workflow_id = $1
+              )
+            """,
+            workflow_id, workspace_id,
+        )
+    ai_cost = float(ai["c"]) if ai and ai["c"] is not None else 0.0
+    serper_reqs = int(serper["n"]) if serper and serper["n"] is not None else 0
+    return ai_cost + serper_reqs * _SERPER_COST_PER_REQUEST

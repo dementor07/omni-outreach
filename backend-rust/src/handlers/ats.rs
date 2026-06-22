@@ -75,10 +75,41 @@ async fn fetch_slugs(platform: &str, limit: i64) -> Result<Vec<String>, String> 
         .unwrap_or_default())
 }
 
+/// NAME-003: turn an ATS slug into a presentable company name. ATS slugs are the
+/// company handle (lever "15five", smartrecruiters "abercrombieandfitchco"), the
+/// workday composite "company|wdN|site", or — for greenhouse boards keyed by a
+/// numeric board id — just digits. Title-case the hyphen/underscore parts; for
+/// the workday composite keep only the company segment; leave a numeric-only
+/// slug as-is (no real name is recoverable from a board id, but it still dedups
+/// and links correctly). The raw slug is still used for the URL + dedup key.
+fn slug_to_company_name(slug: &str) -> String {
+    // workday composite: company|wdN|site_id -> company
+    let core = slug.split('|').next().unwrap_or(slug);
+    // a numeric-only slug (greenhouse board id) has no recoverable name
+    if !core.is_empty() && core.chars().all(|c| c.is_ascii_digit()) {
+        return core.to_string();
+    }
+    let parts: Vec<String> = core
+        .split(['-', '_'])
+        .filter(|s| !s.is_empty())
+        .map(|w| {
+            let mut c = w.chars();
+            match c.next() {
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect();
+    if parts.is_empty() { core.to_string() } else { parts.join(" ") }
+}
+
 /// Canonical company row — mirrors naukri::extract_companies / discovery::company_row.
-fn company_row(name: &str, url: &str, title: &str, role_count: i64, location: &str, source: &str) -> Value {
+/// `slug` is the raw ATS handle (URL + dedup); the displayed company_name is
+/// derived from it via slug_to_company_name (NAME-003).
+fn company_row(slug: &str, url: &str, title: &str, role_count: i64, location: &str, source: &str) -> Value {
     json!({
-        "company_name": name.trim(),
+        "company_name": slug_to_company_name(slug),
+        "company_slug": slug.trim(),
         "title": title.trim(),
         "role_count": role_count,
         "company_url": url,

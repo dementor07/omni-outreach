@@ -3,6 +3,7 @@ import { X, Trash2, Save } from 'lucide-react'
 import { clsx } from 'clsx'
 import type { NodeManifest } from '../api/v2'
 import { nodeLabel, categoryLabel } from '../utils/nodeLabel'
+import { fieldLabel, fieldHelp } from '../utils/fieldLabel'
 import Button from './Button'
 import Select from './Select'
 
@@ -55,8 +56,10 @@ function fieldsFromSchema(schema: JsonSchema): SchemaField[] {
       (LONG_FIELD_HINTS.some((h) => name.toLowerCase().includes(h)) || (prop.maxLength ?? 0) > 200)
     return {
       name,
-      title: prop.title ?? name,
-      description: prop.description,
+      // Human label + plain-English help (overrides the raw snake_case name and
+      // the often-terse schema description) — see utils/fieldLabel.
+      title: fieldLabel(name, prop.title),
+      description: fieldHelp(name) ?? prop.description,
       type,
       format: variant.format,
       enumValues,

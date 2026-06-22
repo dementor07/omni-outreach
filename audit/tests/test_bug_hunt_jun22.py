@@ -30,77 +30,72 @@ RUST = ROOT / "backend-rust" / "src" / "handlers"
 BACKEND = ROOT / "backend"
 
 
-@pytest.mark.xfail(reason="NAME-002 open: clean_name only splits ' - ' (ASCII), not en-dash/pipe", strict=False)
 def test_serper_people_name_split_handles_endash_and_pipe():
-    """A LinkedIn result title 'Jan Urbanec – Lead Engineer at 2K' must yield the
-    NAME only. clean_name splitting just on ' - ' bleeds the whole title into the
-    name field for en-dash/pipe titles (the dominant LinkedIn format)."""
+    """NAME-002 (FIXED): a LinkedIn result title 'Jan Urbanec – Lead Engineer at
+    2K' must yield the NAME only. clean_name/clean_role now split on the first of
+    several separators (en-dash, em-dash, pipe, ' - ') via split_title."""
     src = (RUST / "serper_people.rs").read_text(encoding="utf-8")
-    body = src.split("fn clean_name", 1)[1].split("fn ", 1)[0]
-    # the fix must split on more than just " - " — at minimum the en-dash and pipe
-    assert ("–" in body or "\\u{2013}" in body or "en_dash" in body.lower()), (
-        "clean_name must split on the en-dash '–' (LinkedIn's default separator)"
+    seps = src.split("NAME_SEPARATORS", 1)[1].split("];", 1)[0]
+    assert "–" in seps, "must split on the en-dash '–' (LinkedIn's default separator)"
+    assert "|" in seps, "must split on the pipe '|' separator"
+    assert "fn split_title" in src and "split_title(raw_title).0" in src, (
+        "clean_name must delegate to split_title (first-separator split)"
     )
-    assert "|" in body, "clean_name must also split on the pipe '|' separator"
 
 
-@pytest.mark.xfail(reason="NAME-001 open: search hits → first word of page title, no junk-domain filter", strict=True)
 def test_search_company_extraction_filters_non_company_domains():
-    """searxng/serper company extraction must drop directory/listicle/utility
-    domains (clutch.co, wikipedia.org, cookiebot.com, *.google.com) and must not
-    derive the name from the first word of the page title."""
+    """NAME-001 (FIXED): searxng/serper company extraction drops directory/
+    listicle/utility domains and derives the name from the result DOMAIN, not the
+    first word of the page title."""
     src = (RUST / "discovery.rs").read_text(encoding="utf-8")
-    cleaner = src.split("fn clean_agency_name", 1)[1].split("\nfn ", 1)[0]
-    # THE BUG: clean_agency_name = title.split([' ', '-', '|']).next() — the first
-    # token of the page title. The fix removes that primitive (derive from domain
-    # or a structured org field) AND adds a non-company-domain skip list.
-    still_first_token = ".split([' ', '-', '|'])" in cleaner and ".next()" in cleaner
-    has_junk_filter = any(d in src for d in ("wikipedia", "cookiebot", "JUNK_DOMAIN", "skip_domain", "NON_COMPANY"))
-    assert (not still_first_token) and has_junk_filter, (
-        "NAME-001: company_name must not be title.split().next(), and non-company "
-        "result domains must be filtered"
-    )
+    # the title-first-word primitive is gone
+    assert "fn clean_agency_name" not in src, "clean_agency_name (title-first-word) must be removed"
+    # a non-company domain skip list exists and covers the observed offenders
+    assert "NON_COMPANY_DOMAINS" in src and "is_non_company_domain" in src
+    for bad in ("wikipedia.org", "cookiebot.com", "clutch.co", "google.com"):
+        assert bad in src, f"non-company domain filter must cover {bad}"
+    # company name now derives from the domain
+    assert "fn name_from_domain" in src and "name_from_domain(&domain)" in src
 
 
-@pytest.mark.xfail(reason="SPINE-LEAF-001 open: unmatched handle always terminalizes 'completed'", strict=False)
 def test_unmatched_handle_status_reflects_the_handle():
-    """A node emitting on_error/empty with no wired edge must NOT be recorded as
-    'completed' — failed/empty runs must be distinguishable from success."""
+    """SPINE-LEAF-001 (FIXED): a node emitting on_error/empty with no wired edge
+    must NOT be recorded as 'completed' — failed/empty runs must be
+    distinguishable from success. The leaf-terminalize now derives status from
+    the handle via _leaf_terminal_status."""
     src = (BACKEND / "app" / "execution" / "transition_worker.py").read_text(encoding="utf-8")
-    # the leaf-terminalize must branch on the handle, not hard-code "completed"
-    leaf = src.split("Leaf reached on this handle", 1)
-    assert len(leaf) == 2, "leaf-terminalize block not found (refactored?)"
-    region = leaf[1][:400]
-    assert ('handle == "on_error"' in src and "errored" in region) or "_terminal_status_for_handle" in src, (
-        "unmatched on_error handle must terminalize 'errored', not 'completed'"
-    )
+    # the helper exists and maps the failure/empty handles
+    assert "_leaf_terminal_status" in src, "leaf status must be derived from the handle"
+    helper = src.split("_LEAF_TERMINAL_STATUS", 1)[1].split("def _leaf_terminal_status", 1)[0]
+    assert '"on_error": "errored"' in helper, "on_error must terminalize 'errored'"
+    assert '"empty": "ended"' in helper, "empty must terminalize 'ended'"
+    # and the leaf call uses it, not a hard-coded 'completed'
+    leaf = src.split("Leaf reached on this handle", 1)[1][:500]
+    assert "_leaf_terminal_status(handle)" in leaf, "leaf must call _leaf_terminal_status(handle)"
 
 
-@pytest.mark.xfail(reason="SEND-ATTRIB-001 open: connection_name sends never stamp sending_account_id → no cap enforcement", strict=False)
 def test_legacy_connection_name_send_still_enforces_account_cap():
-    """An account-level rate cap must apply even on the legacy connection_name
-    path. Today _resolve_sending_account returns None unless a pool/pin is set, so
-    no sending_account_id is stamped and _increment_send_counters never runs.
-
-    NOTE: this is a control-flow bug not cleanly provable by substring (the resolver
-    mentions connection_name in comments). The authoritative record is finding
-    SEND-ATTRIB-001; this asserts the resolver gained a real fallback RETURN for the
-    connection_name path (a resolved account or a connection-keyed counter)."""
+    """SEND-ATTRIB-001 (FIXED): an account-level rate cap must apply even on the
+    legacy connection_name path. _resolve_sending_account now resolves an LRU seat
+    under the named connection so a sending_account_id is stamped and the cap is
+    counted/enforced."""
     cmd = (BACKEND / "app" / "execution" / "commands.py").read_text(encoding="utf-8")
+    assert "_load_accounts_by_connection_name" in cmd, (
+        "a connection_name → accounts loader must exist so the cap is attributable"
+    )
     resolve = cmd.split("async def _resolve_sending_account", 1)[1].split("\nasync def ", 1)[0]
-    # the fix adds a branch that, for the connection_name path, returns an account
-    # to attribute the send to (so the cap is counted) instead of falling to None.
-    has_connection_fallback = (
-        "_load_account_by_connection" in resolve
-        or "connection_name" in resolve.split("return None")[0]  # consulted BEFORE the None fallthrough
+    # the resolver consults the connection_name path, and that branch precedes the
+    # FINAL `return None` fallthrough (not the earlier node-pin one).
+    assert "_load_accounts_by_connection_name" in resolve, "connection_name fallback branch missing"
+    branch_at = resolve.find("_load_accounts_by_connection_name(workspace_id")
+    final_return = resolve.rfind("return None")
+    assert 0 < branch_at < final_return, (
+        "the connection_name fallback must run before the final None fallthrough"
     )
-    assert has_connection_fallback, (
-        "SEND-ATTRIB-001: connection_name sends must resolve an account so the "
-        "account-level rate cap is enforced (currently caps only apply to pooled campaigns)"
-    )
+    # and build_command passes connection_name through
+    assert "connection_name=connection_name" in cmd, "build_command must pass connection_name to the resolver"
 
 
-@pytest.mark.xfail(reason="OBJ-METRIC-001 open: qualified_leads reuses the contacts COUNT(DISTINCT contact_id)", strict=True)
 def test_qualified_leads_metric_is_not_identical_to_contacts():
     """OBJ-METRIC-001: qualified_leads must require a screening signal, not just
     contact_id IS NOT NULL (which equals the contacts metric)."""

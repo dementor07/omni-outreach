@@ -50,6 +50,45 @@ CONSUMER_GROUP = "v2-transitions"
 # losers (SM-6). Enforced once, at handle_transition entry.
 TERMINAL_STATUSES = ("completed", "errored", "cancelled", "converted", "ended", "suppressed")
 
+# SPINE-LEAF-001: when a lead reaches a leaf (a handle with no outgoing edge), the
+# terminal status must REFLECT THE HANDLE, not be a blanket "completed". A node
+# emitting on_error (the send/scrape failed) or empty (found nothing) with no
+# wired handler is the common case — recording those as "completed" makes a
+# failure indistinguishable from success in Leads/Analytics and reports a false
+# campaign.run.completed to the objective loop. Map the outcome honestly.
+_LEAF_TERMINAL_STATUS: dict[str, str] = {
+    "on_error": "errored",
+    "error": "errored",
+    "failed": "errored",
+    "empty": "ended",
+    "no_results": "ended",
+    "none": "ended",
+}
+
+
+def _leaf_terminal_status(handle: str) -> str:
+    """Terminal status for a lead that fell off the graph on `handle`. A failure
+    handle terminalizes 'errored', an empty/no-result handle 'ended', and any
+    success/continuation handle (default/then/done/known/new/…) 'completed'."""
+    return _LEAF_TERMINAL_STATUS.get((handle or "").strip().lower(), "completed")
+
+
+def _suppression_identity(contact: dict | None, lead: dict | None) -> dict | None:
+    """DNC-SKIP-001: the recipient identity to suppression-check, from the contact
+    row if present, else from the lead's own custom_fields (a discovered person /
+    company before a contact row exists). suppression.is_suppressed matches on
+    email / linkedin_url / domain, so surface those keys from wherever they live."""
+    if contact:
+        return contact
+    cf = (lead or {}).get("custom_fields") or {}
+    person = cf.get("item") if isinstance(cf.get("item"), dict) else {}
+    ident = {
+        "email": cf.get("email") or person.get("email"),
+        "linkedin_url": cf.get("linkedin_url") or person.get("linkedin_url"),
+        "company": cf.get("company") or person.get("company") or person.get("company_name"),
+    }
+    return ident if any(ident.values()) else None
+
 # Outbound channels that physically message the contact — the DNC gate (T1)
 # applies to these. Internal "channels" (tags, alerts, enrich) are not sends.
 _OUTBOUND_SEND_CHANNELS = frozenset(
@@ -1264,13 +1303,19 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
 
     # T1 — DNC enforcement at the outbound-send seam. Before any channel intent
     # ships, re-check the recipient against the workspace suppression list. A
-    # suppressed contact must never be messaged on ANY channel (unsubscribe /
+    # suppressed recipient must never be messaged on ANY channel (unsubscribe /
     # competitor / do-not-contact compliance), even if a stale workflow still
     # routes to them. The lead terminates 'suppressed' (a distinct terminal
     # status, visible in Leads/Analytics) and the intent is NOT published.
-    if node_type in _OUTBOUND_SEND_CHANNELS and lead.get("contact_id"):
+    #
+    # DNC-SKIP-001: match on the RECIPIENT IDENTITY, not only contact_id. A
+    # send-channel lead may carry the recipient in its own custom_fields (a
+    # discovered person before a contact row exists, or a misbuilt graph routing a
+    # company-stage lead to a channel) — those must still be suppression-checked.
+    if node_type in _OUTBOUND_SEND_CHANNELS:
+        recipient = _suppression_identity(contact, lead)
         async with system_scope():
-            blocked, reason = await suppression.is_suppressed(workspace_id, contact)
+            blocked, reason = await suppression.is_suppressed(workspace_id, recipient)
         if blocked:
             log.warning(
                 "lead %s suppressed at %s (%s) — %s; no send dispatched",
@@ -1715,8 +1760,11 @@ async def handle_transition(t: dict) -> None:
         # (claim + barrier accounting): a fan-out CHILD completing at a leaf
         # must still arrive at its parent's join barrier (SM-5's sibling hole —
         # an arm that never reaches flow.join used to hang the parent forever).
-        await _terminalize_lead(workspace_id, lead_id, "completed", correlation_id)
-        log.info("lead %s reached leaf at node %s/%s", lead_id, source_node_id, handle)
+        # SPINE-LEAF-001: the status reflects the HANDLE — on_error→errored,
+        # empty→ended — so a failed/empty run isn't recorded as success.
+        leaf_status = _leaf_terminal_status(handle)
+        await _terminalize_lead(workspace_id, lead_id, leaf_status, correlation_id)
+        log.info("lead %s reached leaf at node %s/%s -> %s", lead_id, source_node_id, handle, leaf_status)
         return
 
     target_type = target["node_type"]
