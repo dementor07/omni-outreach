@@ -126,9 +126,14 @@ PLATFORMS: dict[str, ATSPlatform] = {
         composite=True,
     ),
     "lever": ATSPlatform(
+        # Allen's harvest pinned the SURT to `co,lever,jobs` (jobs.lever.co only)
+        # and found 0 slugs across 5 crawls — Lever boards overwhelmingly live on
+        # hire.lever.co (the canonical host), which that prefix never reached.
+        # Widen to the `co,lever` prefix so the cluster.idx binary-search spans
+        # every *.lever.co board host, and match the slug off both hire. and jobs.
         name="lever",
-        surt_prefix="co,lever,jobs",
-        slug_regex=r"jobs\.lever\.co/([a-z0-9][a-z0-9-]*[a-z0-9])",
+        surt_prefix="co,lever",
+        slug_regex=r"(?:hire|jobs)\.lever\.co/([a-z0-9][a-z0-9-]*[a-z0-9])",
         invalid_slugs=frozenset({"robots", "favicon"}),
     ),
     "workable": ATSPlatform(
