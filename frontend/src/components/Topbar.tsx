@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { LayoutDashboard, Moon, Sun, Search, Command, ChevronDown, Settings, LogOut, RefreshCw } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useTheme } from '../hooks/useTheme'
 import { apiBase, updateApiBase } from '../api/client'
+import { auth } from '../api/v2'
 import Button from './Button'
 import Avatar from './Avatar'
 
@@ -78,7 +80,10 @@ export default function Topbar({ onToggleSidebar }: TopbarProps) {
   const dot = apiOk ? 'bg-emerald-500' : apiOk === false ? 'bg-rose-500' : 'bg-slate-300'
   const label = checking ? 'Checking…' : apiOk ? 'API connected' : apiOk === false ? 'API offline' : 'No connection'
 
-  // User menu
+  // User menu — wired to the real signed-in user (was hardcoded "You").
+  const meQ = useQuery({ queryKey: ['me'], queryFn: auth.me, staleTime: 5 * 60_000 })
+  const userEmail = meQ.data?.email ?? ''
+  const userName = userEmail ? userEmail.split('@')[0].replace(/[._-]+/g, ' ') : ''
   const [showUser, setShowUser] = useState(false)
   const userRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -165,12 +170,15 @@ export default function Topbar({ onToggleSidebar }: TopbarProps) {
         {/* User menu */}
         <div className="relative" ref={userRef}>
           <button onClick={() => setShowUser((v) => !v)} className="rounded-full transition-opacity hover:opacity-80" aria-label="Account menu">
-            <Avatar name="You" size={28} />
+            <Avatar name={userName || userEmail || '?'} size={28} />
           </button>
           {showUser && (
             <div className="glass-panel absolute right-0 top-11 z-50 w-56 overflow-hidden rounded-2xl border border-white/40 dark:border-white/10">
               <div className="border-b border-slate-100 px-3 py-2.5 dark:border-slate-800">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Signed in</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Signed in as</p>
+                <p className="mt-0.5 truncate text-sm font-medium text-slate-900 dark:text-white" title={userEmail}>
+                  {meQ.isLoading ? 'Loading…' : userEmail || 'Unknown user'}
+                </p>
               </div>
               <div className="p-1">
                 <button

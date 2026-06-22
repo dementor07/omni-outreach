@@ -335,6 +335,9 @@ export const canvas = {
   update: (id: UUID, body: Partial<Pick<Workflow, 'name' | 'status' | 'timezone' | 'start_at' | 'end_at' | 'daily_cap' | 'earliest_hour' | 'latest_hour' | 'days_of_week'>>) =>
     api.patch<Workflow>(`/canvas/workflows/${id}`, body).then((r) => r.data),
   archive: (id: UUID) => api.delete(`/canvas/workflows/${id}`).then(() => undefined),
+  // Hard-delete an ARCHIVED workflow + all its data (nodes/edges/leads/objectives).
+  // 409 if not archived first — the two-step guard.
+  deletePermanent: (id: UUID) => api.delete(`/canvas/workflows/${id}/permanent`).then(() => undefined),
   pool: (workflowId: UUID) =>
     api.get<SendingAccount[]>(`/canvas/workflows/${workflowId}/accounts`).then((r) => r.data),
   setPool: (workflowId: UUID, sendingAccountIds: UUID[]) =>

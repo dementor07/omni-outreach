@@ -276,6 +276,48 @@ async def archive_workflow(workflow_id: uuid.UUID, _: AuthContext = Depends(get_
     await execute("UPDATE omni_workflows SET status = 'archived', updated_at = NOW() WHERE id = $1", workflow_id)
 
 
+@router.delete(
+    "/workflows/{workflow_id}/permanent",
+    status_code=204,
+    summary="Permanently delete an ARCHIVED workflow and all its data",
+)
+async def delete_workflow_permanent(
+    workflow_id: uuid.UUID, ctx: AuthContext = Depends(get_current_workspace)
+) -> None:
+    """Hard-delete a workflow. Two-step by design: a workflow must be ARCHIVED
+    first (the reversible step), so a live campaign can't be wiped by one click.
+
+    Nodes/edges/objectives/sending-account pool FK omni_workflows ON DELETE
+    CASCADE, so deleting the workflow row removes them. omni_leads does NOT (it
+    FKs only workspaces, carrying a plain workflow_id), so its rows would be
+    orphaned — delete them explicitly first. (omni_tasks is contact-scoped, not
+    workflow-scoped, so it's untouched here.) All in one transaction so a failure
+    leaves nothing half-deleted."""
+    async with acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT status FROM omni_workflows WHERE id = $1 AND workspace_id = $2",
+                workflow_id, ctx.workspace_id,
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="workflow not found")
+            if row["status"] != "archived":
+                raise HTTPException(
+                    status_code=409,
+                    detail="archive the campaign before deleting it permanently",
+                )
+            # Leads carry a plain workflow_id (no FK cascade) — remove explicitly.
+            await conn.execute(
+                "DELETE FROM omni_leads WHERE workflow_id = $1 AND workspace_id = $2",
+                workflow_id, ctx.workspace_id,
+            )
+            # Cascade handles nodes/edges/objectives/pool.
+            await conn.execute(
+                "DELETE FROM omni_workflows WHERE id = $1 AND workspace_id = $2",
+                workflow_id, ctx.workspace_id,
+            )
+
+
 class PoolUpdate(BaseModel):
     sending_account_ids: list[uuid.UUID]
 

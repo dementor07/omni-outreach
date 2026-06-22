@@ -84,7 +84,10 @@ def test_surt_prefix_actually_prefixes_the_board_host():
         "icims": "careers-pfizer.icims.com",
         "bamboohr": "stripe.bamboohr.com",
         "workday": "nvidia.wd5.myworkdayjobs.com",
-        "lever": "hire.lever.co",
+        # lever is SEEDED, not CDX-discovered (CCBot robots-blocked) — its SURT
+        # prefix targets jobs.lever.co only and is never actually searched; the
+        # prefix-of-host invariant is asserted against that host, not hire.
+        "lever": "jobs.lever.co",
         "workable": "shopify.workable.com",
         "recruitee": "gitlab.recruitee.com",
         "personio": "contentful.jobs.personio.de",
@@ -99,16 +102,18 @@ def test_surt_prefix_actually_prefixes_the_board_host():
         )
 
 
-def test_lever_catches_hire_host_the_old_pattern_missed():
-    """REGRESSION: the precise failure. hire.lever.co/<slug> must yield the slug,
-    and the SURT prefix must span both lever board hosts."""
+def test_lever_is_seeded_not_cdx_discovered():
+    """REGRESSION: Lever produced ZERO because its slug inventory was empty, and
+    the trap is thinking a CDX/SURT tweak fixes it — it can't. CCBot is blocked
+    by jobs.lever.co/robots.txt, so CommonCrawl has NO Lever board URLs to find.
+    Lever's 4,368 slugs are SEEDED from the Feashliaa aggregator via
+    app.services.ats.seed, not harvested. This locks the architecture so nobody
+    'fixes' lever by widening the SURT again (chasing an empty index)."""
     lever = get_platform("lever")
+    # the regex still recognises both board hosts (so a seeded slug's URL parses,
+    # and a future re-crawl is harmless), even though CDX never supplies them
     assert "spotify" in list(lever.extract_slugs_from_url("https://hire.lever.co/spotify"))
     assert "netflix" in list(lever.extract_slugs_from_url("https://jobs.lever.co/netflix"))
-    # widened to the host-spanning prefix, not the jobs-only one
-    assert lever.surt_prefix == "co,lever"
-    assert "co,lever,hire".startswith(lever.surt_prefix)
-    assert "co,lever,jobs".startswith(lever.surt_prefix)
 
 
 def test_lever_drops_marketing_and_system_paths():
@@ -118,6 +123,14 @@ def test_lever_drops_marketing_and_system_paths():
     # robots IS extracted by the regex but rejected by the validity filter
     assert not lever.is_valid_slug("robots")
     assert not lever.is_valid_slug("favicon")
+    # REGRESSION: the first real harvest of the widened prefix returned ONLY
+    # Lever's own chrome (hire.lever.co/auth, /developer, jobs.lever.co/jobs) —
+    # system pages on the same hosts. They must be filtered, not stored as
+    # companies, or source.lever produces garbage rows.
+    for system_path in ("auth", "developer", "jobs", "login", "signup", "api"):
+        assert not lever.is_valid_slug(system_path), f"{system_path} is Lever chrome, not a company"
+    # a real company slug still passes
+    assert lever.is_valid_slug("spotify")
 
 
 def test_all_twelve_platforms_present():

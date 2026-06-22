@@ -126,15 +126,23 @@ PLATFORMS: dict[str, ATSPlatform] = {
         composite=True,
     ),
     "lever": ATSPlatform(
-        # Allen's harvest pinned the SURT to `co,lever,jobs` (jobs.lever.co only)
-        # and found 0 slugs across 5 crawls — Lever boards overwhelmingly live on
-        # hire.lever.co (the canonical host), which that prefix never reached.
-        # Widen to the `co,lever` prefix so the cluster.idx binary-search spans
-        # every *.lever.co board host, and match the slug off both hire. and jobs.
+        # Lever is the ONE platform CommonCrawl can't discover: CCBot is blocked
+        # by jobs.lever.co/robots.txt, so the CDX index has NO Lever board URLs —
+        # a CDX harvest (any SURT prefix) returns 0 or only chrome. Lever slugs
+        # are SEEDED instead, from the Feashliaa job-board-aggregator (CC BY-NC
+        # 4.0), via `python -m app.services.ats.seed` — see Allen's
+        # docs/platforms.md and [[project_ats_cdx_port]]. The SURT/regex below
+        # stay only so a future re-crawl is harmless; the invalid_slugs guard
+        # drops the system pages a crawl WOULD surface (hire/jobs.lever.co/auth,
+        # /developer, /jobs) so they never masquerade as companies.
         name="lever",
-        surt_prefix="co,lever",
+        surt_prefix="co,lever,jobs",
         slug_regex=r"(?:hire|jobs)\.lever\.co/([a-z0-9][a-z0-9-]*[a-z0-9])",
-        invalid_slugs=frozenset({"robots", "favicon"}),
+        invalid_slugs=frozenset(
+            {"robots", "favicon", "auth", "developer", "jobs", "login", "signup",
+             "api", "about", "blog", "pricing", "contact", "privacy", "terms",
+             "help", "support", "careers", "company", "search", "static", "assets"}
+        ),
     ),
     "workable": ATSPlatform(
         name="workable",
