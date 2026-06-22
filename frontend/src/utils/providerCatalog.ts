@@ -100,9 +100,14 @@ export const PROVIDERS: ProviderSpec[] = [
     id: 'unipile', name: 'LinkedIn (via Unipile)', category: 'social', icon: Linkedin,
     blurb: 'Send LinkedIn connection requests and messages through Unipile.',
     docsUrl: 'https://www.unipile.com',
+    // The account-sync reads credentials.api_key + credentials.base_url
+    // (integrations.py sync_accounts). The base_url must be the full Unipile DSN
+    // URL incl. scheme + port, e.g. https://apiNN.unipile.com:NNNNN — that's what
+    // GET {base_url}/api/v1/accounts needs. (Was 'dsn' stored as metadata, which
+    // the sync never read → "invalid credentials" on every Unipile connect.)
     fields: [
       { key: 'api_key', label: 'API key', type: 'secret' },
-      { key: 'dsn', label: 'DSN / account', type: 'text', placeholder: 'api.unipile.com:13xxx', metadata: true },
+      { key: 'base_url', label: 'DSN base URL', type: 'text', placeholder: 'https://api10.unipile.com:14090' },
     ],
   },
   {
