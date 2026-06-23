@@ -1786,6 +1786,16 @@
       "status": "FIXED",
       "title": "1,063 leads stranded active+current_node_id=NULL by the pre-fix projector resurrection",
       "evidence": "[RESOLVED 2026-06-23] Migration 040 RAN on the box (alembic 039->040). Backfill verified live: leads went from {active:1063(stranded), completed:1156} to {completed:2219, stranded:0}. Overview ACTIVE LEADS now 0 (was inflated by phantoms). DEPLOY LESSON: /app is baked into the image (no bind-mount) — scp of the migration to host disk was invisible to the running container; had to rebuild backend-v2 image to bake in 040, then `compose run --rm backend-v2 alembic upgrade head`, then recreate the long-running backend so its alembic resolves 040. Migration is idempotent + scoped to the impossible state. Commit 49e7898. || RUNTIME 2026-06-23: 1063 of 2219 leads are status=active WITH current_node_id IS NULL — an impossible state in a healthy spine (a leaf terminalize nulls the node AND sets a terminal status). All updated_at BEFORE the SPINE-TERM-001 projector fix deployed (~07:50Z 06-23). My fix stops NEW occurrences (proven: post-fix searxng leads persist completed); these are pre-fix casualties, miscounted as 'active' in Overview/Leads/objective loop. NEEDS a one-time backfill but the right terminal status isn't unambiguous from status alone (could be completed OR errored) — destructive bulk prod mutation, surfaced to user for the cleanup decision rather than auto-run."
+    },
+    {
+      "id": "LEAD-IDENTITY-001",
+      "area": "frontend",
+      "file": "backend/app/execution/lead_columns.py",
+      "line": 189,
+      "severity": "LOW",
+      "status": "FIXED",
+      "title": "Source-batch leads rendered 'Unresolved lead' on the Leads view (1362 rows looked like garbage)",
+      "evidence": "lead_identity handled a single company (item.company_name) + the root-run case but NOT custom_fields.companies (a LIST, the source batch) -> fell through to 'Unresolved lead'. After the SPINE-TERM-001 backfill, 1362 completed company-stage roots all read 'Unresolved lead', making the Leads page look broken though the data was healthy. FIXED: a companies list now reads 'Source batch · N companies' (singular/plural), and an EMPTY list (source ran, found nothing — 978 from the auto-pilot re-seeding) reads 'Source batch · no results'. DEPLOYED + verified live: Unresolved went 1362->7 (the 7 are genuinely identity-less _retry_marker stubs). 6 tests in test_lead_identity. Commits 89fd219 + (empty-batch refinement)."
     }
   ]
 }
