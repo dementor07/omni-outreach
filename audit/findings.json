@@ -1756,6 +1756,36 @@
       "status": "FIXED",
       "title": "Workspace team management (invites, member removal, leave) is fully built in backend but has NO UI",
       "evidence": "FIXED (DEPLOYED 2026-06-23). The workspaces team API (invites create/list/revoke, member remove, leave) had no UI. Added the client methods to v2.ts (removeMember/leave/invites/createInvite/revokeInvite + WorkspaceInvite type) and rebuilt Settings.tsx MembersCard into a full team manager: members list with role badges + Remove (owner/admin, not self, not owner), pending-invites list with Revoke, and an invite form (email + member/admin role). Controls gated on canManage; the API enforces the same. Frontend tsc clean. || PRIOR: workspaces.py exposes POST/GET/DELETE /workspaces/{id}/invites, POST /invites/accept, DELETE /members/{user_id}, POST /leave — a complete team-management API. The frontend (Settings.tsx) only renders members READ-ONLY (no invite/remove/leave UI; grep finds no invite/removeMember/leave component). So multi-user collaboration is implemented server-side but unreachable from the product. Either build "
+    },
+    {
+      "id": "PIPELINE-METRICS-001",
+      "area": "analytics",
+      "file": "backend/app/execution/transition_worker.py",
+      "line": 1603,
+      "severity": "MEDIUM",
+      "status": "FIXED",
+      "title": "pipeline.metric event was never emitted — efficiency rollup dead by construction",
+      "evidence": "omni_pipeline_metrics + _project_pipeline_metric (consumer) + analytics_summary (reader) + the Analytics 'Lead-gen efficiency & cost' panel all existed, but grep proved NOTHING published the pipeline.metric event — the producer leg was never built, so the table was permanently empty ('No source runs yet') despite 250 companies/719 people discovered. FIXED: transition_worker._emit_pipeline_metric emits one delta per source result, keyed by run correlation_id (projector ON CONFLICT(run_id) accumulates), counts telemetry-first w/ custom_fields-collection fallback, gated on source.* + skips empty, best-effort. DEPLOYED 2026-06-23 (rebuilt transitions-v2 — LESSON: transitions/projector/backend each build their OWN image; rebuild the service running the changed file). VERIFIED LIVE: ran source.searxng -> efficiency panel shows COMPANIES COLLECTED:12 / 1 run. 2 regression tests in test_spine_integrity. Commit b990d25."
+    },
+    {
+      "id": "COMPANIES-LINK-001",
+      "area": "frontend",
+      "file": "frontend/src/pages/Companies.tsx",
+      "line": 154,
+      "severity": "LOW",
+      "status": "FIXED",
+      "title": "Company domain link doubled the scheme (https://https://...) for full-URL domains",
+      "evidence": "The domain field can hold a bare domain or a full URL (a discovery source stored 'https://clutch.co/...'); the link blindly prefixed 'https://' -> href='https://https://...' (dead link). domainLink() now keeps an existing scheme + shows a clean host(+path) label. DEPLOYED + verified live (0 doubled links). Commit 346303e."
+    },
+    {
+      "id": "SPINE-TERM-001-BACKFILL",
+      "area": "spine",
+      "file": "(data)",
+      "line": 0,
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "title": "1,063 leads stranded active+current_node_id=NULL by the pre-fix projector resurrection",
+      "evidence": "RUNTIME 2026-06-23: 1063 of 2219 leads are status=active WITH current_node_id IS NULL — an impossible state in a healthy spine (a leaf terminalize nulls the node AND sets a terminal status). All updated_at BEFORE the SPINE-TERM-001 projector fix deployed (~07:50Z 06-23). My fix stops NEW occurrences (proven: post-fix searxng leads persist completed); these are pre-fix casualties, miscounted as 'active' in Overview/Leads/objective loop. NEEDS a one-time backfill but the right terminal status isn't unambiguous from status alone (could be completed OR errored) — destructive bulk prod mutation, surfaced to user for the cleanup decision rather than auto-run."
     }
   ]
 }
