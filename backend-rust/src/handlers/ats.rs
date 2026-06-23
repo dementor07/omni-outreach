@@ -231,9 +231,34 @@ async fn fetch_company_name(platform: &str, slug: &str) -> Option<String> {
             None
         }
         "ashby" => {
-            // Ashby's GraphQL response includes organizationName.
-            let v = get_json(&format!("https://jobs.ashbyhq.com/api/non-user-graphql?op=ApiJobBoardWithTeams&slug={slug}")).await.unwrap_or(Value::Null);
-            v["data"]["jobBoard"]["organizationName"].as_str().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+            // NAME-003-ASHBY: Ashby's GraphQL is a POST with the slug in the
+            // variables (the same call as ashby() job-fetch) — the old GET with
+            // ?slug= returned null, so this always fell back to the slug. Request
+            // the board's `name` (the org's display name) and read it.
+            const Q: &str = "query ApiJobBoardWithTeams($organizationHostedJobsPageName: String!) { jobBoard: jobBoardWithTeams(organizationHostedJobsPageName: $organizationHostedJobsPageName) { name } }";
+            let body = json!({
+                "operationName": "ApiJobBoardWithTeams",
+                "variables": {"organizationHostedJobsPageName": slug},
+                "query": Q,
+            });
+            let resp = ATS_HTTP
+                .post("https://jobs.ashbyhq.com/api/non-user-graphql?op=ApiJobBoardWithTeams")
+                .header("Content-Type", "application/json")
+                .header("User-Agent", UA)
+                .json(&body)
+                .send()
+                .await
+                .ok()?;
+            if !resp.status().is_success() {
+                return None;
+            }
+            let v: Value = resp.json().await.ok()?;
+            // Newer boards expose `name`; some older payloads use `organizationName`.
+            v["data"]["jobBoard"]["name"]
+                .as_str()
+                .or_else(|| v["data"]["jobBoard"]["organizationName"].as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
         }
         _ => None,
     }
