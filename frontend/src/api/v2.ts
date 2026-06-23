@@ -616,6 +616,21 @@ export interface ContactFilters {
   limit?: number
 }
 
+export interface ContactSummary {
+  total: number
+  with_email: number
+  with_linkedin: number
+  with_company: number
+}
+
+export interface LeadSummary {
+  total: number
+  active: number
+  people: number
+  companies: number
+  hot: number
+}
+
 export interface CompanyFilters {
   q?: string
   industry?: string
@@ -629,6 +644,8 @@ export const projections = {
     const params = typeof filters === 'number' ? { limit: filters } : filters
     return api.get<Contact[]>('/projections/contacts', { params }).then((r) => r.data)
   },
+  contactSummary: (filters: Omit<ContactFilters, 'limit'> = {}) =>
+    api.get<ContactSummary>('/projections/contacts/summary', { params: filters }).then((r) => r.data),
   contact: (id: UUID) => api.get<Contact>(`/projections/contacts/${id}`).then((r) => r.data),
   contactSources: () => api.get<string[]>('/projections/contacts/sources').then((r) => r.data),
   companies: (filters: CompanyFilters | number = 100) => {
@@ -641,8 +658,10 @@ export const projections = {
     api.get<Task[]>('/projections/tasks', { params }).then((r) => r.data),
   completeTask: (id: UUID, done = true) =>
     api.post(`/projections/tasks/${id}/complete`, undefined, { params: { done } }).then((r) => r.data),
-  leads: (params: { workflow_id?: UUID; limit?: number } = {}) =>
+  leads: (params: { workflow_id?: UUID; include_source_batches?: boolean; limit?: number } = {}) =>
     api.get<Lead[]>('/projections/leads', { params }).then((r) => r.data),
+  leadSummary: (params: { workflow_id?: UUID; include_source_batches?: boolean } = {}) =>
+    api.get<LeadSummary>('/projections/leads/summary', { params }).then((r) => r.data),
   deleteContact: (id: UUID) => api.delete<void>(`/projections/contacts/${id}`).then(() => undefined),
   deleteCompany: (id: UUID) => api.delete<void>(`/projections/companies/${id}`).then(() => undefined),
   deleteLead: (id: UUID) => api.delete<void>(`/projections/leads/${id}`).then(() => undefined),
@@ -844,6 +863,15 @@ export interface LeadScore {
   reasons: string[]
   model: string | null
   scored_at: ISODate
+  identity: string | null
+}
+
+export interface LeadScoreSummary {
+  total: number
+  hot: number
+  warm: number
+  cold: number
+  historical: number
 }
 
 export type AiJobKind = 'score' | 'compose' | 'enrich' | 'classify' | 'screen'
@@ -873,9 +901,10 @@ export interface AiJobCreate {
 }
 
 export const ai = {
-  scores: (params: { tier?: LeadTier; limit?: number } = {}) =>
+  scores: (params: { tier?: LeadTier; include_historical?: boolean; limit?: number } = {}) =>
     api.get<LeadScore[]>('/ai/scores', { params }).then((r) => r.data),
   score: (leadId: UUID) => api.get<LeadScore>(`/ai/scores/${leadId}`).then((r) => r.data),
+  scoreSummary: () => api.get<LeadScoreSummary>('/ai/scores/summary').then((r) => r.data),
   jobs: (params: { kind?: AiJobKind; status?: AiJobStatus; limit?: number } = {}) =>
     api.get<AiJob[]>('/ai/jobs', { params }).then((r) => r.data),
   runJob: (body: AiJobCreate) =>

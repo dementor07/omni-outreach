@@ -9,10 +9,10 @@ import Card, { CardHeader } from '../components/Card'
 import EmptyState from '../components/EmptyState'
 
 export default function Analytics() {
-  const leadsQ = useQuery({ queryKey: ['leads'], queryFn: () => projections.leads({ limit: 2000 }) })
-  const dealsQ = useQuery({ queryKey: ['deals'], queryFn: () => projections.deals({ limit: 2000 }) })
+  const leadsQ = useQuery({ queryKey: ['leads', { limit: 2000 }], queryFn: () => projections.leads({ limit: 2000 }) })
+  const dealsQ = useQuery({ queryKey: ['deals', { limit: 2000 }], queryFn: () => projections.deals({ limit: 2000 }) })
   const threadsQ = useQuery({ queryKey: ['inbox-threads'], queryFn: () => inbox.threads(200) })
-  const scoresQ = useQuery({ queryKey: ['lead-scores'], queryFn: () => ai.scores({ limit: 2000 }) })
+  const scoresQ = useQuery({ queryKey: ['lead-scores', { limit: 2000 }], queryFn: () => ai.scores({ limit: 2000 }) })
   const effQ = useQuery({ queryKey: ['analytics-summary'], queryFn: projections.analytics })
 
   const leads = leadsQ.data ?? []

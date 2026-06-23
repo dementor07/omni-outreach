@@ -22,14 +22,21 @@ export default function Leads() {
 
   const { data: workflows = [] } = useQuery({ queryKey: ['workflows'], queryFn: canvas.list })
   const { data: leads = [], isLoading } = useQuery({
-    queryKey: ['leads', workflowId],
+    queryKey: ['leads', { workflowId, includeSourceBatches: false, limit: 1000 }],
     queryFn: () => projections.leads({ workflow_id: workflowId || undefined, limit: 1000 }),
+  })
+  const summaryQ = useQuery({
+    queryKey: ['leads-summary', workflowId],
+    queryFn: () => projections.leadSummary({ workflow_id: workflowId || undefined }),
   })
   const { data: columnsResp } = useQuery({
     queryKey: ['lead-columns', workflowId],
     queryFn: () => projections.leadColumns(workflowId || undefined),
   })
-  const { data: scores = [] } = useQuery({ queryKey: ['lead-scores'], queryFn: () => ai.scores({ limit: 1000 }) })
+  const { data: scores = [] } = useQuery({
+    queryKey: ['lead-scores', { limit: 1000 }],
+    queryFn: () => ai.scores({ limit: 1000 }),
+  })
 
   const columns = columnsResp?.columns ?? []
   const scoreByLead = useMemo(() => {
@@ -48,9 +55,7 @@ export default function Leads() {
     return [...out].sort((a, b) => (scoreByLead.get(b.id)?.score ?? -1) - (scoreByLead.get(a.id)?.score ?? -1))
   }, [leads, status, search, scoreByLead])
 
-  const persons = leads.filter((l) => l.stage === 'person').length
-  const companies = leads.filter((l) => l.stage === 'company' || l.stage === 'resolved').length
-  const hot = scores.filter((s) => s.tier === 'hot').length
+  const summary = summaryQ.data
   // Only show the AI score column when at least one visible lead is scored —
   // otherwise it's a leftmost column of "—" for every row (dead real estate).
   const hasScores = useMemo(() => filtered.some((l) => scoreByLead.has(l.id)), [filtered, scoreByLead])
@@ -65,10 +70,10 @@ export default function Leads() {
       />
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total" value={isLoading ? '—' : leads.length} icon={Users} accent="brand" />
-        <StatCard label="People" value={isLoading ? '—' : persons} icon={Activity} accent="emerald" hint="Resolved to a contact" />
-        <StatCard label="Companies" value={isLoading ? '—' : companies} icon={Building2} accent="violet" hint="Discovered, awaiting people" />
-        <StatCard label="Hot (AI)" value={hot} icon={Flame} accent="rose" hint="ICP score ≥ 70" />
+        <StatCard label="Total prospects" value={summaryQ.isLoading ? '—' : summary?.total ?? 0} icon={Users} accent="brand" />
+        <StatCard label="People" value={summaryQ.isLoading ? '—' : summary?.people ?? 0} icon={Activity} accent="emerald" hint="Resolved to a person" />
+        <StatCard label="Companies" value={summaryQ.isLoading ? '—' : summary?.companies ?? 0} icon={Building2} accent="violet" hint="Discovered, awaiting people" />
+        <StatCard label="Hot (AI)" value={summaryQ.isLoading ? '—' : summary?.hot ?? 0} icon={Flame} accent="rose" hint="ICP score ≥ 70" />
       </section>
 
       <FilterBar>
@@ -92,7 +97,7 @@ export default function Leads() {
         </Select>
       </FilterBar>
 
-      <Card padding="none">
+      <Card padding="none" className="overflow-hidden">
         {isLoading ? (
           <div className="space-y-2 p-4">{[0, 1, 2, 3].map((i) => <div key={i} className="h-12 skeleton rounded-lg" />)}</div>
         ) : filtered.length === 0 ? (

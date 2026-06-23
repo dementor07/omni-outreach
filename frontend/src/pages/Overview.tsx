@@ -18,21 +18,14 @@ const DEAL_STAGE_ORDER = ['lead', 'qualified', 'meeting', 'proposal', 'closed_wo
 
 export default function Overview() {
   const navigate = useNavigate()
-  const contactsQ = useQuery({ queryKey: ['contacts'], queryFn: () => projections.contacts(500) })
-  const leadsQ = useQuery({ queryKey: ['leads'], queryFn: () => projections.leads({ limit: 1000 }) })
-  const dealsQ = useQuery({ queryKey: ['deals'], queryFn: () => projections.deals({ limit: 1000 }) })
+  const contactsSummaryQ = useQuery({ queryKey: ['contacts-summary', {}], queryFn: () => projections.contactSummary() })
+  const leadsSummaryQ = useQuery({ queryKey: ['leads-summary', 'all'], queryFn: () => projections.leadSummary() })
+  const dealsQ = useQuery({ queryKey: ['deals', { limit: 1000 }], queryFn: () => projections.deals({ limit: 1000 }) })
   const threadsQ = useQuery({ queryKey: ['inbox-threads'], queryFn: () => inbox.threads(200) })
   const campaignsQ = useQuery({ queryKey: ['workflows'], queryFn: canvas.list })
-  const scoresQ = useQuery({ queryKey: ['lead-scores'], queryFn: () => ai.scores({ limit: 200 }) })
+  const scoresQ = useQuery({ queryKey: ['lead-scores', { limit: 6 }], queryFn: () => ai.scores({ limit: 6 }) })
+  const scoresSummaryQ = useQuery({ queryKey: ['lead-scores-summary'], queryFn: ai.scoreSummary })
 
-  const contacts = contactsQ.data ?? []
-  const leads = useMemo(() => leadsQ.data ?? [], [leadsQ.data])
-  // Resolve a scored lead's human identity (the score row only carries lead_id).
-  const identityByLead = useMemo(() => {
-    const m = new Map<string, string>()
-    for (const l of leads) if (l.identity) m.set(l.id, l.identity)
-    return m
-  }, [leads])
   // Stable reference so the openPipeline memo doesn't recompute every render.
   const deals = useMemo(() => dealsQ.data ?? [], [dealsQ.data])
   const threads = threadsQ.data ?? []
@@ -44,7 +37,9 @@ export default function Overview() {
     () => deals.filter((d) => !d.stage.startsWith('closed')).reduce((s, d) => s + Number(d.value ?? 0), 0),
     [deals],
   )
-  const hotLeads = scores.filter((s) => s.tier === 'hot').length
+  const contactsSummary = contactsSummaryQ.data
+  const leadsSummary = leadsSummaryQ.data
+  const scoresSummary = scoresSummaryQ.data
 
   return (
     <div className="space-y-6">
@@ -63,8 +58,8 @@ export default function Overview() {
 
       {/* Primary stats */}
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Contacts" value={contactsQ.isLoading ? '—' : contacts.length} icon={ContactIcon} accent="brand" hint="In your CRM" />
-        <StatCard label="Active leads" value={leadsQ.isLoading ? '—' : leads.filter((l) => l.status === 'active').length} icon={Users} accent="emerald" hint={`${leads.length} total`} />
+        <StatCard label="Contacts" value={contactsSummaryQ.isLoading ? '—' : contactsSummary?.total ?? 0} icon={ContactIcon} accent="brand" hint="In your CRM" />
+        <StatCard label="Active leads" value={leadsSummaryQ.isLoading ? '—' : leadsSummary?.active ?? 0} icon={Users} accent="emerald" hint={`${leadsSummary?.total ?? 0} prospects`} />
         <StatCard label="Open pipeline" value={dealsQ.isLoading ? '—' : `$${openPipeline.toLocaleString()}`} icon={KanbanSquare} accent="amber" hint={`${deals.length} deals`} />
         <StatCard label="Conversations" value={threadsQ.isLoading ? '—' : threads.length} icon={InboxIcon} accent="violet" hint="Open threads" />
       </section>
@@ -72,8 +67,8 @@ export default function Overview() {
       {/* Secondary stats */}
       <section className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Active campaigns" value={campaignsQ.isLoading ? '—' : activeCampaigns} icon={Megaphone} accent="emerald" hint={`${campaigns.length} total`} />
-        <StatCard label="Hot leads (AI)" value={scoresQ.isLoading ? '—' : hotLeads} icon={Flame} accent="rose" hint="ICP score ≥ 70" />
-        <StatCard label="Scored leads" value={scoresQ.isLoading ? '—' : scores.length} icon={Sparkles} accent="violet" hint="By AI Studio" />
+        <StatCard label="Hot leads (AI)" value={scoresSummaryQ.isLoading ? '—' : scoresSummary?.hot ?? 0} icon={Flame} accent="rose" hint="ICP score ≥ 70" />
+        <StatCard label="Scored leads" value={scoresSummaryQ.isLoading ? '—' : scoresSummary?.total ?? 0} icon={Sparkles} accent="violet" hint="By AI Studio" />
       </section>
 
       {/* Pipeline + AI hot list */}
@@ -106,7 +101,7 @@ export default function Overview() {
           ) : (
             <div className="space-y-2">
               {[...scores].sort((a, b) => b.score - a.score).slice(0, 6).map((s) => (
-                <ScoreRow key={s.lead_id} s={s} identity={identityByLead.get(s.lead_id)} onClick={() => navigate('/leads')} />
+                <ScoreRow key={s.lead_id} s={s} identity={s.identity ?? undefined} onClick={() => navigate('/leads')} />
               ))}
             </div>
           )}
@@ -200,7 +195,7 @@ function ScoreRow({ s, identity, onClick }: { s: LeadScore; identity?: string; o
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
-          {identity ?? 'Unresolved lead'}
+          {identity ?? 'Historical score'}
         </p>
         <p className="truncate text-[11px] text-slate-500">{s.reasons[0] ?? 'No reason recorded'}</p>
       </div>

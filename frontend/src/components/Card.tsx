@@ -28,7 +28,7 @@ export default function Card({
   return (
     <Tag
       className={clsx(
-        'rounded-2xl border',
+        'min-w-0 rounded-2xl border',
         glass
           ? 'glass-panel border-white/40 dark:border-white/10'
           : 'bg-white border-slate-200/80 dark:border-slate-800 dark:bg-slate-900',

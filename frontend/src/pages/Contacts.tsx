@@ -52,6 +52,18 @@ export default function Contacts() {
     queryKey: ['contacts', filters],
     queryFn: () => projections.contacts(filters),
   })
+  const summaryFilters = useMemo(() => {
+    return {
+      q: filters.q,
+      source: filters.source,
+      workflow_id: filters.workflow_id,
+      has_email: filters.has_email,
+    }
+  }, [filters])
+  const summaryQ = useQuery({
+    queryKey: ['contacts-summary', summaryFilters],
+    queryFn: () => projections.contactSummary(summaryFilters),
+  })
   // Filter-option sources for the dropdowns.
   const campaignsQ = useQuery({ queryKey: ['campaigns-list'], queryFn: canvas.list })
   const sourcesQ = useQuery({ queryKey: ['contact-sources'], queryFn: projections.contactSources })
@@ -125,9 +137,7 @@ export default function Contacts() {
     toast.success(`Exported ${rows.length} contact${rows.length === 1 ? '' : 's'}`)
   }
 
-  const withEmail = contacts.filter((c) => c.email).length
-  const withLinkedin = contacts.filter((c) => c.linkedin_url).length
-  const withCompany = contacts.filter((c) => c.company).length
+  const summary = summaryQ.data
 
   return (
     <div className="space-y-6">
@@ -150,10 +160,10 @@ export default function Contacts() {
       />
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label={anyFilter ? 'Matching contacts' : 'Total contacts'} value={isLoading ? '—' : contacts.length} icon={Users} accent="brand" />
-        <StatCard label="With email" value={isLoading ? '—' : withEmail} icon={Mail} accent="emerald" />
-        <StatCard label="With LinkedIn" value={isLoading ? '—' : withLinkedin} icon={AtSign} accent="violet" />
-        <StatCard label="With company" value={isLoading ? '—' : withCompany} icon={Building2} accent="amber" />
+        <StatCard label={anyFilter ? 'Matching contacts' : 'Total contacts'} value={summaryQ.isLoading ? '—' : summary?.total ?? 0} icon={Users} accent="brand" />
+        <StatCard label="With email" value={summaryQ.isLoading ? '—' : summary?.with_email ?? 0} icon={Mail} accent="emerald" />
+        <StatCard label="With LinkedIn" value={summaryQ.isLoading ? '—' : summary?.with_linkedin ?? 0} icon={AtSign} accent="violet" />
+        <StatCard label="With company" value={summaryQ.isLoading ? '—' : summary?.with_company ?? 0} icon={Building2} accent="amber" />
       </section>
 
       <FilterBar>
@@ -212,7 +222,7 @@ export default function Contacts() {
         </div>
       )}
 
-      <Card padding="none">
+      <Card padding="none" className="overflow-hidden">
         {isLoading ? (
           <div className="space-y-2 p-4">{[0, 1, 2, 3].map((i) => <div key={i} className="h-12 skeleton rounded-lg" />)}</div>
         ) : filtered.length === 0 ? (
@@ -296,4 +306,3 @@ export default function Contacts() {
     </div>
   )
 }
-

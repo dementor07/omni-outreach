@@ -117,15 +117,27 @@ class LeadColumnsResponse(BaseModel):
     columns: list[LeadColumnOut]
 
 
-@router.get("/contacts", response_model=list[ContactOut], summary="List contacts, with filters")
-async def list_contacts(
-    _: AuthContext = Depends(get_current_workspace),
-    q: str | None = Query(None, description="Search across name, email, company, title"),
-    source: str | None = Query(None, description="Filter by acquisition source (e.g. naukri, greenhouse)"),
-    workflow_id: uuid.UUID | None = Query(None, description="Only contacts enrolled in this campaign (via a lead)"),
-    has_email: bool | None = Query(None, description="True = only contacts with an email"),
-    limit: int = Query(100, ge=1, le=500),
-) -> list[ContactOut]:
+class ContactSummary(BaseModel):
+    total: int
+    with_email: int
+    with_linkedin: int
+    with_company: int
+
+
+class LeadSummary(BaseModel):
+    total: int
+    active: int
+    people: int
+    companies: int
+    hot: int
+
+
+def _contact_filters(
+    q: str | None,
+    source: str | None,
+    workflow_id: uuid.UUID | None,
+    has_email: bool | None,
+) -> tuple[str, list[Any]]:
     clauses: list[str] = []
     args: list[Any] = []
 
@@ -144,14 +156,24 @@ async def list_contacts(
     elif has_email is False:
         clauses.append("(c.email IS NULL OR c.email = '')")
     if workflow_id:
-        # Contact↔campaign link: a contact belongs to a campaign if a lead for it
-        # carries that workflow_id. EXISTS keeps it a membership test (no fan-out).
         args.append(workflow_id)
         clauses.append(
             f"EXISTS (SELECT 1 FROM omni_leads l WHERE l.contact_id = c.id AND l.workflow_id = ${len(args)})"
         )
 
-    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    return (f"WHERE {' AND '.join(clauses)}" if clauses else ""), args
+
+
+@router.get("/contacts", response_model=list[ContactOut], summary="List contacts, with filters")
+async def list_contacts(
+    _: AuthContext = Depends(get_current_workspace),
+    q: str | None = Query(None, description="Search across name, email, company, title"),
+    source: str | None = Query(None, description="Filter by acquisition source (e.g. naukri, greenhouse)"),
+    workflow_id: uuid.UUID | None = Query(None, description="Only contacts enrolled in this campaign (via a lead)"),
+    has_email: bool | None = Query(None, description="True = only contacts with an email"),
+    limit: int = Query(100, ge=1, le=500),
+) -> list[ContactOut]:
+    where, args = _contact_filters(q, source, workflow_id, has_email)
     args.append(limit)
     rows = await fetch_all(
         f"SELECT c.* FROM omni_contacts c {where} ORDER BY c.updated_at DESC LIMIT ${len(args)}",
@@ -160,8 +182,36 @@ async def list_contacts(
     return [ContactOut.model_validate(r) for r in rows]
 
 
-# NB: the static /contacts/sources path is declared BEFORE /contacts/{contact_id}
-# so it can never be shadowed by the dynamic segment.
+@router.get(
+    "/contacts/summary",
+    response_model=ContactSummary,
+    summary="Exact contact counts for the current filters",
+)
+async def contact_summary(
+    _: AuthContext = Depends(get_current_workspace),
+    q: str | None = Query(None),
+    source: str | None = Query(None),
+    workflow_id: uuid.UUID | None = Query(None),
+    has_email: bool | None = Query(None),
+) -> ContactSummary:
+    where, args = _contact_filters(q, source, workflow_id, has_email)
+    row = await fetch_one(
+        f"""
+        SELECT
+            COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE c.email IS NOT NULL AND c.email <> '') AS with_email,
+            COUNT(*) FILTER (WHERE c.linkedin_url IS NOT NULL AND c.linkedin_url <> '') AS with_linkedin,
+            COUNT(*) FILTER (WHERE c.company IS NOT NULL AND c.company <> '') AS with_company
+        FROM omni_contacts c
+        {where}
+        """,
+        *args,
+    )
+    return ContactSummary(**{k: int((row or {}).get(k) or 0) for k in ContactSummary.model_fields})
+
+
+# NB: static /contacts/* paths are declared BEFORE /contacts/{contact_id}
+# so they can never be shadowed by the dynamic segment.
 @router.get(
     "/contacts/sources",
     response_model=list[str],
@@ -326,10 +376,40 @@ async def lead_columns_for_workflow(
     )
 
 
-@router.get("/leads", response_model=list[LeadOut], summary="List leads, with contact identity joined and per-workflow display fields")
+_SOURCE_BATCH_SQL = """
+(
+    l.contact_id IS NULL
+    AND jsonb_typeof(l.custom_fields->'companies') = 'array'
+    AND COALESCE(l.custom_fields->'item'->>'linkedin_url', '') = ''
+    AND COALESCE(l.custom_fields->'item'->>'company_name', '') = ''
+    AND COALESCE(l.custom_fields->'verification', 'null'::jsonb) = 'null'::jsonb
+    AND COALESCE(l.custom_fields->'company_resolution', 'null'::jsonb) = 'null'::jsonb
+)
+"""
+
+
+def _lead_filters(
+    workflow_id: uuid.UUID | None,
+    include_source_batches: bool,
+) -> tuple[str, list[Any]]:
+    clauses: list[str] = []
+    args: list[Any] = []
+    if workflow_id:
+        args.append(workflow_id)
+        clauses.append(f"l.workflow_id = ${len(args)}")
+    if not include_source_batches:
+        clauses.append(f"NOT {_SOURCE_BATCH_SQL}")
+    return (f"WHERE {' AND '.join(clauses)}" if clauses else ""), args
+
+
+@router.get("/leads", response_model=list[LeadOut], summary="List prospect leads with contact identity and display fields")
 async def list_leads(
     _: AuthContext = Depends(get_current_workspace),
     workflow_id: uuid.UUID | None = Query(None),
+    include_source_batches: bool = Query(
+        False,
+        description="Include operational source-run roots. Off by default because they are runs, not prospects.",
+    ),
     limit: int = Query(500, ge=1, le=5000),
 ) -> list[LeadOut]:
     # LEFT JOIN the contact so the view can show a name/company/title/email for
@@ -346,15 +426,52 @@ async def list_leads(
         FROM omni_leads l
         LEFT JOIN omni_contacts c ON c.id = l.contact_id AND c.workspace_id = l.workspace_id
     """
-    if workflow_id:
-        rows = await fetch_all(
-            select + " WHERE l.workflow_id = $1 ORDER BY l.updated_at DESC LIMIT $2", workflow_id, limit
-        )
-    else:
-        rows = await fetch_all(select + " ORDER BY l.updated_at DESC LIMIT $1", limit)
+    where, args = _lead_filters(workflow_id, include_source_batches)
+    args.append(limit)
+    rows = await fetch_all(
+        select + f" {where} ORDER BY l.updated_at DESC LIMIT ${len(args)}",
+        *args,
+    )
 
     columns = lead_columns.derive_columns(await _workflow_node_types(workflow_id))
     return [_lead_out(dict(r), columns) for r in rows]
+
+
+@router.get(
+    "/leads/summary",
+    response_model=LeadSummary,
+    summary="Exact prospect-lead counts for the selected campaign",
+)
+async def lead_summary(
+    _: AuthContext = Depends(get_current_workspace),
+    workflow_id: uuid.UUID | None = Query(None),
+    include_source_batches: bool = Query(False),
+) -> LeadSummary:
+    where, args = _lead_filters(workflow_id, include_source_batches)
+    row = await fetch_one(
+        f"""
+        SELECT
+            COUNT(DISTINCT l.id) AS total,
+            COUNT(DISTINCT l.id) FILTER (WHERE l.status = 'active') AS active,
+            COUNT(DISTINCT l.id) FILTER (
+                WHERE l.contact_id IS NOT NULL
+                   OR COALESCE(l.custom_fields->'item'->>'linkedin_url', '') <> ''
+            ) AS people,
+            COUNT(DISTINCT l.id) FILTER (
+                WHERE l.contact_id IS NULL
+                  AND (
+                    COALESCE(l.custom_fields->'item'->>'company_name', '') <> ''
+                    OR COALESCE(l.custom_fields->'company_resolution', 'null'::jsonb) <> 'null'::jsonb
+                  )
+            ) AS companies,
+            COUNT(DISTINCT s.lead_id) FILTER (WHERE s.tier = 'hot') AS hot
+        FROM omni_leads l
+        LEFT JOIN omni_lead_scores s ON s.lead_id = l.id
+        {where}
+        """,
+        *args,
+    )
+    return LeadSummary(**{k: int((row or {}).get(k) or 0) for k in LeadSummary.model_fields})
 
 
 @router.delete("/leads/{lead_id}", status_code=204, summary="Delete a lead")

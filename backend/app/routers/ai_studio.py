@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 
 from app.auth import AuthContext, get_current_workspace
 from app.db import fetch_all, fetch_one
+from app.execution.lead_columns import lead_identity
 from app.services.bus import publish_event
 
 router = APIRouter()
@@ -43,6 +44,15 @@ class LeadScoreOut(BaseModel):
     reasons: list[str]
     model: str | None
     scored_at: datetime
+    identity: str | None = None
+
+
+class LeadScoreSummary(BaseModel):
+    total: int
+    hot: int
+    warm: int
+    cold: int
+    historical: int
 
 
 class AiJobOut(BaseModel):
@@ -87,17 +97,67 @@ class AiJobAccepted(BaseModel):
 async def list_scores(
     _: AuthContext = Depends(get_current_workspace),
     tier: Literal["hot", "warm", "cold"] | None = Query(None),
+    include_historical: bool = Query(
+        False,
+        description="Include scores whose lead has since been deleted. Hidden by default.",
+    ),
     limit: int = Query(200, ge=1, le=2000),
 ) -> list[LeadScoreOut]:
+    select = """
+        SELECT s.*, l.id AS identity_lead_id, l.custom_fields,
+               c.first_name AS c_first_name, c.last_name AS c_last_name,
+               c.email AS c_email
+        FROM omni_lead_scores s
+        LEFT JOIN omni_leads l ON l.id = s.lead_id
+        LEFT JOIN omni_contacts c ON c.id = l.contact_id AND c.workspace_id = l.workspace_id
+    """
+    clauses: list[str] = []
+    args: list[Any] = []
     if tier:
-        rows = await fetch_all(
-            "SELECT * FROM omni_lead_scores WHERE tier = $1 ORDER BY score DESC LIMIT $2",
-            tier,
-            limit,
-        )
-    else:
-        rows = await fetch_all("SELECT * FROM omni_lead_scores ORDER BY score DESC LIMIT $1", limit)
-    return [LeadScoreOut.model_validate(r) for r in rows]
+        args.append(tier)
+        clauses.append(f"s.tier = ${len(args)}")
+    if not include_historical:
+        clauses.append("l.id IS NOT NULL")
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    args.append(limit)
+    rows = await fetch_all(select + f"{where} ORDER BY s.score DESC LIMIT ${len(args)}", *args)
+    return [_score_out(r) for r in rows]
+
+
+def _score_out(row: dict[str, Any]) -> LeadScoreOut:
+    contact = None
+    if row.get("c_first_name") or row.get("c_last_name") or row.get("c_email"):
+        contact = {
+            "first_name": row.get("c_first_name"),
+            "last_name": row.get("c_last_name"),
+            "email": row.get("c_email"),
+        }
+    custom_fields = row.get("custom_fields") or {}
+    identity = None
+    if row.get("identity_lead_id"):
+        identity = lead_identity(custom_fields, contact, str(row["lead_id"]))
+    return LeadScoreOut.model_validate({**row, "identity": identity})
+
+
+@router.get(
+    "/scores/summary",
+    response_model=LeadScoreSummary,
+    summary="Exact lead-score tier counts",
+)
+async def score_summary(_: AuthContext = Depends(get_current_workspace)) -> LeadScoreSummary:
+    row = await fetch_one(
+        """
+        SELECT
+            COUNT(*) FILTER (WHERE l.id IS NOT NULL) AS total,
+            COUNT(*) FILTER (WHERE l.id IS NOT NULL AND s.tier = 'hot') AS hot,
+            COUNT(*) FILTER (WHERE l.id IS NOT NULL AND s.tier = 'warm') AS warm,
+            COUNT(*) FILTER (WHERE l.id IS NOT NULL AND s.tier = 'cold') AS cold,
+            COUNT(*) FILTER (WHERE l.id IS NULL) AS historical
+        FROM omni_lead_scores s
+        LEFT JOIN omni_leads l ON l.id = s.lead_id
+        """
+    )
+    return LeadScoreSummary(**{k: int((row or {}).get(k) or 0) for k in LeadScoreSummary.model_fields})
 
 
 @router.get(
@@ -106,10 +166,21 @@ async def list_scores(
     summary="Fetch one lead's latest score + reasons",
 )
 async def get_score(lead_id: uuid.UUID, _: AuthContext = Depends(get_current_workspace)) -> LeadScoreOut:
-    row = await fetch_one("SELECT * FROM omni_lead_scores WHERE lead_id = $1", lead_id)
+    row = await fetch_one(
+        """
+        SELECT s.*, l.id AS identity_lead_id, l.custom_fields,
+               c.first_name AS c_first_name, c.last_name AS c_last_name,
+               c.email AS c_email
+        FROM omni_lead_scores s
+        LEFT JOIN omni_leads l ON l.id = s.lead_id
+        LEFT JOIN omni_contacts c ON c.id = l.contact_id AND c.workspace_id = l.workspace_id
+        WHERE s.lead_id = $1
+        """,
+        lead_id,
+    )
     if not row:
         raise HTTPException(status_code=404, detail="no score for this lead yet")
-    return LeadScoreOut.model_validate(row)
+    return _score_out(row)
 
 
 # ── AI jobs (run log) ──────────────────────────────────────────────────────

@@ -29,8 +29,8 @@ export default function ContactDetail() {
   })
   // Deals + leads + campaigns aren't per-contact endpoints, so derive from the
   // workspace lists (small in practice) filtered to this contact.
-  const dealsQ = useQuery({ queryKey: ['deals'], queryFn: () => projections.deals({ limit: 500 }) })
-  const leadsQ = useQuery({ queryKey: ['leads'], queryFn: () => projections.leads({ limit: 1000 }) })
+  const dealsQ = useQuery({ queryKey: ['deals', { limit: 500 }], queryFn: () => projections.deals({ limit: 500 }) })
+  const leadsQ = useQuery({ queryKey: ['leads', { limit: 1000 }], queryFn: () => projections.leads({ limit: 1000 }) })
   const campaignsQ = useQuery({ queryKey: ['campaigns-list'], queryFn: canvas.list })
 
   const contact = contactQ.data
