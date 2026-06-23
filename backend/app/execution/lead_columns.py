@@ -206,6 +206,15 @@ def lead_identity(custom_fields: dict[str, Any], contact: dict[str, Any] | None,
             return str(item["name"])
         if item.get("company_name"):
             return str(item["company_name"])
+    # A source-batch lead (the run-lead a source wrote its discovered companies
+    # into) IS a meaningful entity — "X companies discovered" — not an
+    # "Unresolved lead". Without this, every completed source run reads as garbage
+    # on the Leads view even though its companies fanned out fine (the 1,362
+    # company-stage roots that looked broken pre-fix).
+    companies = custom_fields.get("companies")
+    if isinstance(companies, list) and companies:
+        n = len(companies)
+        return f"Source batch · {n} {'company' if n == 1 else 'companies'}"
     if custom_fields.get("companies_key") or custom_fields.get("keyword") or custom_fields.get("platform"):
         return "Campaign run"
     return "Unresolved lead"
