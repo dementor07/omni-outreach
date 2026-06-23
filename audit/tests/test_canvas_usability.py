@@ -251,6 +251,11 @@ def test_linear_view_refuses_to_flatten_branched_graphs():
     editor = (ROOT / "frontend/src/pages/CampaignEditor.tsx").read_text(encoding="utf-8")
     assert "analyzeGraph" in builder
     assert "Branch-safe view" in builder
+    assert "Multi-source journey" in builder
+    assert "sources start together" in builder
+    assert "Source root" in builder
+    assert "Merges ${incomingCount} routes" in builder
+    assert "shared join" in builder
     assert "adding, deleting, or reordering a branched graph is disabled" in builder
     assert "{shape.linear && <button" in builder
     assert ">Journey</button>" in editor

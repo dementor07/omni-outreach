@@ -40,6 +40,10 @@ function nodeLabel(manifest: NodeManifest): string {
 export interface GraphShape {
   linear: boolean
   orderedNodeIds: string[]
+  rootNodeIds: string[]
+  sourceRootIds: string[]
+  joinNodeIds: string[]
+  splitNodeIds: string[]
   incoming: Map<string, Edge[]>
   outgoing: Map<string, Edge[]>
 }
@@ -59,6 +63,13 @@ export function analyzeGraph(nodes: OmniNode[], edges: Edge[]): GraphShape {
   }
 
   const roots = nodes.filter((node) => (incoming.get(node.id)?.length ?? 0) === 0)
+  const sourceRoots = roots.filter((node) => String(node.data.manifest.type).startsWith('source.'))
+  const joinNodeIds = nodes
+    .filter((node) => (incoming.get(node.id)?.length ?? 0) > 1)
+    .map((node) => node.id)
+  const splitNodeIds = nodes
+    .filter((node) => (outgoing.get(node.id)?.length ?? 0) > 1)
+    .map((node) => node.id)
   const orderedNodeIds: string[] = []
   const seen = new Set<string>()
   const queue = roots
@@ -90,7 +101,16 @@ export function analyzeGraph(nodes: OmniNode[], edges: Edge[]): GraphShape {
       && nodes.every((node) => (outgoing.get(node.id)?.length ?? 0) <= 1)
     )
   )
-  return { linear, orderedNodeIds, incoming, outgoing }
+  return {
+    linear,
+    orderedNodeIds,
+    rootNodeIds: roots.map((node) => node.id),
+    sourceRootIds: sourceRoots.map((node) => node.id),
+    joinNodeIds,
+    splitNodeIds,
+    incoming,
+    outgoing,
+  }
 }
 
 // Chain the nodes head-to-tail by array order via their 'default'/first handle.
@@ -116,6 +136,7 @@ function rechain(nodes: OmniNode[], existing: Edge[]): Edge[] {
 export default function SequentialBuilder({ nodes, edges, manifests, onChange, onSave, onEditNode, isSaving }: Props) {
   const [showPalette, setShowPalette] = useState(false)
   const shape = useMemo(() => analyzeGraph(nodes, edges), [nodes, edges])
+  const isMultiSource = shape.sourceRootIds.length > 1
   const orderedNodes = useMemo(() => {
     const byId = new Map(nodes.map((node) => [node.id, node]))
     return shape.orderedNodeIds.map((id) => byId.get(id)).filter((node): node is OmniNode => !!node)
@@ -158,17 +179,30 @@ export default function SequentialBuilder({ nodes, edges, manifests, onChange, o
     return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b))
   }, [manifests])
 
+  const startLabel = shape.linear
+    ? 'Sequence start'
+    : isMultiSource
+      ? `${shape.sourceRootIds.length} sources start together`
+      : shape.rootNodeIds.length > 1
+        ? `${shape.rootNodeIds.length} starts`
+        : 'Journey start'
+  const endLabel = shape.linear ? 'End of sequence' : 'Journey ends'
+  const mapTitle = shape.linear ? 'Linear sequence' : isMultiSource ? 'Multi-source journey' : 'Journey map'
+  const mapDescription = shape.linear
+    ? 'A true single-path workflow. Reordering changes execution order.'
+    : isMultiSource
+      ? 'Multiple sources run in parallel and feed shared enrichment steps. Routes are shown read-only so the source stack stays precise.'
+      : 'This workflow branches. Its real routes are shown read-only so no branch can be flattened accidentally.'
+
   return (
     <div className="mx-auto max-w-3xl space-y-10 py-8">
       <div className="flex items-center justify-between gap-4 px-6">
         <div>
           <h3 className="text-[18px] font-bold tracking-tight text-slate-900 dark:text-white">
-            {shape.linear ? 'Linear sequence' : 'Journey map'}
+            {mapTitle}
           </h3>
           <p className="mt-0.5 text-sm text-slate-500">
-            {shape.linear
-              ? 'A true single-path workflow. Reordering changes execution order.'
-              : 'This workflow branches. Its real routes are shown read-only so no branch can be flattened accidentally.'}
+            {mapDescription}
           </p>
         </div>
         <Button variant="primary" size="sm" icon={Save} isLoading={isSaving} onClick={onSave}>Save</Button>
@@ -178,10 +212,17 @@ export default function SequentialBuilder({ nodes, edges, manifests, onChange, o
         <div className="mx-6 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
           <GitBranch size={18} className="mt-0.5 shrink-0" />
           <div>
-            <p className="text-sm font-semibold">Branch-safe view</p>
+            <p className="text-sm font-semibold">{isMultiSource ? 'Branch-safe multi-source view' : 'Branch-safe view'}</p>
             <p className="mt-0.5 text-xs leading-relaxed opacity-80">
-              Edit connections on Canvas. Node settings remain editable here, but adding, deleting, or reordering a branched graph is disabled.
+              {isMultiSource
+                ? 'Stack sources for enrichment, then edit their connections on Canvas. Node settings remain editable here, but adding, deleting, or reordering this graph is disabled.'
+                : 'Edit connections on Canvas. Node settings remain editable here, but adding, deleting, or reordering a branched graph is disabled.'}
             </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {shape.sourceRootIds.length > 0 && <Badge label={`${shape.sourceRootIds.length} source${shape.sourceRootIds.length === 1 ? '' : 's'}`} variant="neutral" size="xs" />}
+              {shape.joinNodeIds.length > 0 && <Badge label={`${shape.joinNodeIds.length} shared join${shape.joinNodeIds.length === 1 ? '' : 's'}`} variant="neutral" size="xs" />}
+              {shape.splitNodeIds.length > 0 && <Badge label={`${shape.splitNodeIds.length} split${shape.splitNodeIds.length === 1 ? '' : 's'}`} variant="neutral" size="xs" />}
+            </div>
           </div>
         </div>
       )}
@@ -196,7 +237,7 @@ export default function SequentialBuilder({ nodes, edges, manifests, onChange, o
               <Zap size={18} fill="currentColor" />
             </div>
           </div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-brand-500">Sequence start</p>
+          <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-brand-500">{startLabel}</p>
         </div>
 
         {nodes.length === 0 ? (
@@ -210,6 +251,11 @@ export default function SequentialBuilder({ nodes, edges, manifests, onChange, o
             const v = visualFor(manifest.category)
             const Icon = nodeIcon(manifest, v.icon)
             const schema = manifest.config_schema as { required?: string[] }
+            const isRoot = shape.rootNodeIds.includes(node.id)
+            const sourceRootIndex = shape.sourceRootIds.indexOf(node.id)
+            const incomingCount = shape.incoming.get(node.id)?.length ?? 0
+            const outgoingCount = shape.outgoing.get(node.id)?.length ?? 0
+            const stepMarker = isMultiSource && sourceRootIndex >= 0 ? `S${sourceRootIndex + 1}` : i + 1
             const missing = (schema.required ?? []).filter((k) => {
               const val = node.data.config[k]
               return val === undefined || val === null || val === ''
@@ -218,7 +264,7 @@ export default function SequentialBuilder({ nodes, edges, manifests, onChange, o
               <div key={node.id} className="group relative z-10 flex items-start gap-6">
                 <div className="flex h-20 w-20 shrink-0 items-center justify-center">
                   <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-slate-100 text-xs font-black text-slate-400 shadow-sm transition-all group-hover:bg-brand-500 group-hover:text-white dark:border-slate-950 dark:bg-slate-800">
-                    {i + 1}
+                    {stepMarker}
                   </div>
                 </div>
                 <Card padding="none" className="flex-1 transition-all group-hover:border-brand-200 group-hover:shadow-md">
@@ -230,6 +276,9 @@ export default function SequentialBuilder({ nodes, edges, manifests, onChange, o
                       <div className="flex items-center gap-2">
                         <p className="truncate text-[15px] font-bold text-slate-900 dark:text-white">{nodeLabel(manifest)}</p>
                         {missing.length > 0 && <Badge label="Needs config" variant="warning" size="xs" />}
+                        {!shape.linear && isRoot && <Badge label={sourceRootIndex >= 0 ? 'Source root' : 'Start'} variant="neutral" size="xs" />}
+                        {!shape.linear && incomingCount > 1 && <Badge label={`Merges ${incomingCount} routes`} variant="neutral" size="xs" />}
+                        {!shape.linear && outgoingCount > 1 && <Badge label={`Splits ${outgoingCount} routes`} variant="neutral" size="xs" />}
                       </div>
                       <p className="mt-0.5 truncate text-[11px] font-medium text-slate-400">{manifest.summary}</p>
                     </div>
@@ -266,7 +315,7 @@ export default function SequentialBuilder({ nodes, edges, manifests, onChange, o
           <div className="flex h-20 w-20 shrink-0 items-center justify-center">
             <div className="h-3.5 w-3.5 rounded-full border-4 border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950" />
           </div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">End of sequence</p>
+          <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">{endLabel}</p>
         </div>
       </div>
 
