@@ -248,6 +248,35 @@ def test_project_lead_is_terminal_sticky():
     ), "current_node_id can be re-pinned on a terminal lead by a late event"
 
 
+# ── PIPELINE-METRICS-001: the producer leg of the efficiency rollup ────────────
+
+def test_pipeline_metric_is_emitted_for_source_results():
+    """REGRESSION PIPELINE-METRICS-001: omni_pipeline_metrics + its projector
+    consumer + the Analytics efficiency panel all existed, but NOTHING emitted the
+    pipeline.metric event — the producer leg was never built, so the table was
+    always empty. The transition worker must emit it for a source node's result."""
+    assert 'event_type="pipeline.metric"' in TW_SRC, (
+        "transition worker no longer emits pipeline.metric — the efficiency rollup "
+        "producer leg is missing again (consumer+reader would read an empty table)"
+    )
+    body = _func_body(TW_SRC, "_emit_pipeline_metric")
+    # keyed by run_id so the projector's ON CONFLICT(run_id) accumulates the run.
+    assert 'entity_type="run"' in body and "entity_id=run_id" in body
+    # only fires for source nodes, and never for an empty (0/0) result.
+    assert 'node_type.startswith("source.")' in body
+    assert "companies == 0 and people == 0" in body
+    # best-effort: a metrics failure must never wedge the spine.
+    assert "except Exception" in body
+
+
+def test_pipeline_metric_wired_into_handle_transition():
+    """The emit must actually be CALLED from the result-handling path (after the
+    source's mutations are applied), gated on the firing node being a source."""
+    body = _func_body(TW_SRC, "handle_transition")
+    assert "_emit_pipeline_metric(" in body, "pipeline.metric emit is never called"
+    assert 'firing_node.get("node_type") or "").startswith("source.")' in body
+
+
 # ── Decision C: identity minted once ───────────────────────────────────────────
 
 def test_correlation_minted_once_at_spine_entry():

@@ -1600,6 +1600,77 @@ async def _apply_lead_mutations(workspace_id: str, lead_id: str, mutations: dict
             )
 
 
+# PIPELINE-METRICS-001: the omni_pipeline_metrics table + its projector consumer
+# (_project_pipeline_metric) + the Analytics "Lead-gen efficiency & cost" panel all
+# existed, but NOTHING ever emitted the pipeline.metric event that feeds them — the
+# producer leg was never built, so the table was always empty and the panel always
+# read "No source runs yet". This emits one delta per source result, keyed by the
+# run's correlation_id (ON CONFLICT(run_id) in the projector accumulates), counting
+# what the source actually produced. Best-effort: a metrics hiccup must never wedge
+# the spine, so every failure is swallowed.
+_SOURCE_COMPANY_KEYS = ("companies", "agencies", "items")
+_SOURCE_PEOPLE_KEYS = ("people", "persons", "contacts")
+
+
+def _count_collection(custom_fields: dict, keys: tuple[str, ...]) -> int:
+    for k in keys:
+        v = custom_fields.get(k)
+        if isinstance(v, list):
+            return len(v)
+    return 0
+
+
+async def _emit_pipeline_metric(
+    workspace_id: str,
+    node_type: str,
+    run_id: str | None,
+    telemetry: dict,
+    lead_mutations: dict,
+    correlation_id: str | None,
+) -> None:
+    """Emit a pipeline.metric delta for a SOURCE node's result. run_id = the run's
+    correlation_id so the projector accumulates every source in the run into one row.
+    Counts come telemetry-first (the muscle's own count) with a fallback to the size
+    of the collection the source wrote into custom_fields."""
+    if not node_type.startswith("source.") or not run_id:
+        return
+    cf = (lead_mutations or {}).get("custom_fields") or {}
+    companies = int(telemetry.get("companies_extracted") or 0) or _count_collection(cf, _SOURCE_COMPANY_KEYS)
+    people = int(telemetry.get("people_found") or telemetry.get("people_extracted") or 0) or _count_collection(
+        cf, _SOURCE_PEOPLE_KEYS
+    )
+    if companies == 0 and people == 0:
+        return  # nothing produced — don't write an empty row
+    collector = node_type.removeprefix("source.")
+    try:
+        # 'start' (idempotent) stamps the run + collector; 'delta' carries the counts.
+        await bus.publish_event(
+            workspace_id=workspace_id,
+            event_type="pipeline.metric",
+            entity_type="run",
+            entity_id=run_id,
+            payload={"kind": "start", "collector_source": collector},
+            correlation_id=correlation_id,
+        )
+        await bus.publish_event(
+            workspace_id=workspace_id,
+            event_type="pipeline.metric",
+            entity_type="run",
+            entity_id=run_id,
+            payload={
+                "kind": "delta",
+                "collector_source": collector,
+                "companies_collected": companies,
+                "people_found": people,
+                "serper_calls": int(telemetry.get("serper_calls") or 0),
+                "claude_calls": int(telemetry.get("claude_calls") or 0),
+            },
+            correlation_id=correlation_id,
+        )
+    except Exception:  # noqa: BLE001
+        log.exception("failed to emit pipeline.metric for run %s (%s)", run_id, collector)
+
+
 async def handle_transition(t: dict) -> None:
     lead_id = t.get("lead_id")
     handle = t.get("handle") or "default"
@@ -1670,6 +1741,20 @@ async def handle_transition(t: dict) -> None:
     # for_each or downstream node sees the freshly merged data.
     if lead_mutations:
         await _apply_lead_mutations(workspace_id, lead_id, lead_mutations)
+
+    # PIPELINE-METRICS-001: a source node's result feeds the lead-gen efficiency
+    # rollup. We know the firing node from source_node_id; emit one metric delta
+    # for the run (best-effort, never wedges the spine).
+    firing_node = await _node_row(workspace_id, str(source_node_id))
+    if firing_node and str(firing_node.get("node_type") or "").startswith("source."):
+        await _emit_pipeline_metric(
+            workspace_id,
+            str(firing_node["node_type"]),
+            correlation_id,
+            meta.get("telemetry") or {},
+            lead_mutations,
+            correlation_id,
+        )
 
     # Rate-counter increment on a CONFIRMED send. A real outbound result carries
     # status='sent' and (when a per-seat account was resolved) the stamped
