@@ -306,16 +306,23 @@ async def test_multi_source_runner_shares_correlation_and_records_source_order(m
     assert [call["start_node"]["id"] for call in calls] == ["source-a", "source-b"]
 
 
-def test_campaign_creation_is_goal_first_and_atomic():
+def test_campaign_creation_has_architect_and_preserves_classic_goal_flow():
     backend = (ROOT / "backend/app/routers/canvas.py").read_text(encoding="utf-8")
     frontend = (ROOT / "frontend/src/pages/Campaigns.tsx").read_text(encoding="utf-8")
+    architect = (ROOT / "frontend/src/components/CampaignArchitect.tsx").read_text(encoding="utf-8")
     api = (ROOT / "frontend/src/api/v2.ts").read_text(encoding="utf-8")
     assert '"/workflows/from-goal"' in backend
     assert "INSERT INTO omni_campaign_objectives" in backend
     assert "async with conn.transaction()" in backend
-    assert "What should Omni achieve?" in frontend
-    assert "Create goal-driven campaign" in frontend
-    assert "The canvas is the editable plan Omni uses to reach it." in frontend
+    assert "CampaignArchitect" in frontend
+    assert "Campaign Architect" in architect
+    assert "Design the outcome system" in architect
+    assert "Source stack" in architect
+    assert "Enrichment stack" in architect
+    assert "Outreach sequence" in architect
+    assert "Classic goal creation" in architect
+    assert "canvas.createFromGoal" in architect
     assert '"/workflows/from-spec"' in backend
+    assert "canvas.createFromSpec" in architect
     assert "createFromSpec" in api
     assert "CampaignSpec" in api
