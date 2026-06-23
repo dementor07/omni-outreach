@@ -307,18 +307,37 @@ async def _project_pipeline_metric(env: dict[str, Any]) -> None:
     )
 
 
+# SPINE-TERM-001: a terminal lead must never be resurrected by a generic lead
+# projection. The transition worker owns terminalization (it writes errored/ended/
+# completed/cancelled/converted directly); side-channel lead.* events
+# (lead.contact_attached, lead.custom_fields_updated, redeliveries) carry NO status
+# and used to default to 'active', which the status-COALESCE then wrote OVER the
+# terminal status the worker had just set — the lead flipped back to active with
+# only updated_at moving (the exact reported symptom). Two guards close it:
+#   1. an event without a status passes NULL (not a fabricated 'active'), so the
+#      COALESCE keeps the existing status untouched;
+#   2. even WITH an incoming status, the conflict update is terminal-sticky — once
+#      a lead is terminal, no projection downgrades it back to a live status.
+# New rows still default to 'active' on the INSERT side (COALESCE($6,'active')).
+_TERMINAL_LEAD_STATUSES = ("completed", "errored", "cancelled", "converted", "ended")
+
+
 async def _project_lead(env: dict[str, Any]) -> None:
     p = env.get("payload") or {}
     await execute(
         """
         INSERT INTO omni_leads (id, workspace_id, contact_id, workflow_id,
                            current_node_id, status, custom_fields)
-        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+        VALUES ($1, $2, $3, $4, $5, COALESCE($6, 'active'), $7::jsonb)
         ON CONFLICT (id) DO UPDATE SET
           contact_id      = COALESCE(EXCLUDED.contact_id,      omni_leads.contact_id),
           workflow_id     = COALESCE(EXCLUDED.workflow_id,     omni_leads.workflow_id),
-          current_node_id = COALESCE(EXCLUDED.current_node_id, omni_leads.current_node_id),
-          status          = COALESCE(EXCLUDED.status,          omni_leads.status),
+          -- a terminal lead has no current node; don't let a late event re-pin one
+          current_node_id = CASE WHEN omni_leads.status = ANY($8::text[]) THEN omni_leads.current_node_id
+                                 ELSE COALESCE(EXCLUDED.current_node_id, omni_leads.current_node_id) END,
+          -- terminal-sticky: once terminal, never downgrade back to a live status
+          status          = CASE WHEN omni_leads.status = ANY($8::text[]) THEN omni_leads.status
+                                 ELSE COALESCE($6, omni_leads.status) END,
           custom_fields   = omni_leads.custom_fields || EXCLUDED.custom_fields,
           updated_at      = NOW()
         """,
@@ -327,8 +346,9 @@ async def _project_lead(env: dict[str, Any]) -> None:
         p.get("contact_id"),
         p.get("workflow_id"),
         p.get("current_node_id"),
-        p.get("status") or "active",
+        p.get("status"),  # NULL when the event carries none — COALESCE keeps existing
         p.get("custom_fields") or {},
+        list(_TERMINAL_LEAD_STATUSES),
     )
 
 

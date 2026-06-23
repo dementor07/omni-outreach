@@ -28,6 +28,7 @@ DISPATCH_SRC = (REPO / "backend/app/execution/dispatcher.py").read_text(encoding
 # Seed-and-fire was extracted from run_workflow into the shared run module; the
 # SM-3 invariant (error-before-publish) now lives in seed_and_run.
 RUN_SRC = (REPO / "backend/app/execution/run.py").read_text(encoding="utf-8")
+PROJ_SRC = (REPO / "backend/app/projector/main.py").read_text(encoding="utf-8")
 
 
 def _func_body(src: str, name: str) -> str:
@@ -203,6 +204,48 @@ def test_run_workflow_errors_before_publishing():
     assert "SET status='errored'" in body[err_at:pub_at], (
         "seed_and_run error path must terminalize the seed lead"
     )
+
+
+# ── SPINE-TERM-001: the projector must not resurrect a terminalized lead ───────
+
+def test_project_lead_does_not_fabricate_active_on_conflict():
+    """REGRESSION SPINE-TERM-001: the generic lead projector used to default a
+    missing status to 'active' AND COALESCE it over the existing row. Side-channel
+    lead.* events (lead.contact_attached / lead.custom_fields_updated / any
+    redelivery) carry no status, so a lead the transition worker had just
+    terminalized flipped back to 'active' with only updated_at moving — the exact
+    reported symptom. The conflict path must NOT use a fabricated 'active': a
+    no-status event must pass NULL so the existing status is kept."""
+    body = _func_body(PROJ_SRC, "_project_lead")
+    # The OLD bug, verbatim, must be gone: status defaulting to 'active' as the
+    # value bound for the conflict update.
+    assert 'p.get("status") or "active"' not in body, (
+        "_project_lead still fabricates 'active' for a missing status (resurrects terminal leads)"
+    )
+    # A new row still gets a default, but ONLY on the INSERT side.
+    assert "COALESCE($6, 'active')" in body, (
+        "new-lead INSERT must still default status to 'active'"
+    )
+
+
+def test_project_lead_is_terminal_sticky():
+    """REGRESSION SPINE-TERM-001: once a lead is terminal, no projection may
+    downgrade it back to a live status (or re-pin a current_node_id). The conflict
+    update's status (and current_node_id) must be guarded by a terminal-status
+    CASE that keeps the existing value when the row is already terminal."""
+    body = _func_body(PROJ_SRC, "_project_lead")
+    # The terminal set is named and passed as a parameter for the guard.
+    assert "_TERMINAL_LEAD_STATUSES" in PROJ_SRC, "terminal-status set constant missing"
+    # status overwrite is terminal-sticky.
+    assert re.search(
+        r"status\s*=\s*CASE WHEN omni_leads\.status = ANY\(\$8::text\[\]\) THEN omni_leads\.status",
+        body,
+    ), "status update is not terminal-sticky (a late event can downgrade a terminal lead)"
+    # current_node_id is not re-pinned on a terminal lead.
+    assert re.search(
+        r"current_node_id\s*=\s*CASE WHEN omni_leads\.status = ANY\(\$8::text\[\]\) THEN omni_leads\.current_node_id",
+        body,
+    ), "current_node_id can be re-pinned on a terminal lead by a late event"
 
 
 # ── Decision C: identity minted once ───────────────────────────────────────────
