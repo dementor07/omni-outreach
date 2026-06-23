@@ -37,6 +37,7 @@ from app.nodes import (
     SideEffect,
     register,
 )
+
 # Reuse the ONE deterministic contact-id function (DEDUP-001) so a sheet import
 # converges on the same row a discovered/CRM contact would — re-importing the
 # same sheet upserts instead of duplicating people.

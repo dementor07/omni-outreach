@@ -27,6 +27,7 @@ from app.routers import (
     auth,
     auth_google,
     canvas,
+    deliverability,
     events,
     inbox,
     integrations,
@@ -145,6 +146,7 @@ app.include_router(inbox.router, prefix="/inbox", tags=["inbox"])
 app.include_router(ai_studio.router, prefix="/ai", tags=["ai"])
 app.include_router(approvals.router, prefix="/approvals", tags=["approvals"])
 app.include_router(suppression.router, prefix="/suppression", tags=["suppression"])
+app.include_router(deliverability.router, prefix="/deliverability", tags=["deliverability"])
 app.include_router(templates.router, prefix="/templates", tags=["templates"])
 app.include_router(objectives.router, prefix="/objectives", tags=["objectives"])
 
@@ -188,7 +190,11 @@ async def health():
     checks["nodes"] = "ok" if not node_failures else "error"
 
     status = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
-    body: dict[str, object] = {"status": status, "checks": checks}
+    body: dict[str, object] = {
+        "status": status,
+        "checks": checks,
+        "build": {"sha": settings.build_sha},
+    }
     if node_failures:
         body["node_import_failures"] = node_failures
     return body

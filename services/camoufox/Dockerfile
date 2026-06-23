@@ -9,6 +9,10 @@
 # (services/camoufox) and hardened: shared-secret auth, env config, team crawl.
 FROM mcr.microsoft.com/playwright/python:v1.44.0-jammy
 
+ARG BUILD_SHA=unknown
+LABEL org.opencontainers.image.revision="${BUILD_SHA}"
+ENV BUILD_SHA="${BUILD_SHA}"
+
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

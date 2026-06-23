@@ -1,5 +1,9 @@
 FROM flink:1.18-scala_2.12
 
+ARG BUILD_SHA=unknown
+LABEL org.opencontainers.image.revision="${BUILD_SHA}"
+ENV BUILD_SHA="${BUILD_SHA}"
+
 # Python + build deps. PyFlink needs the python3-dev headers to compile the
 # native bridge bits. wget is used to download connector JARs.
 RUN apt-get update -y && \

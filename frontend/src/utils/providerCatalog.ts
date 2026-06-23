@@ -84,6 +84,16 @@ export const PROVIDERS: ProviderSpec[] = [
       { key: 'password', label: 'Password', type: 'secret', placeholder: 'SMTP password' },
     ],
   },
+  {
+    id: 'zerobounce', name: 'ZeroBounce', category: 'email', icon: Mail,
+    blurb: 'Mailbox verification stage with catch-all, abuse, spamtrap, and do-not-mail signals.',
+    docsUrl: 'https://www.zerobounce.net/docs/email-validation-api-quickstart',
+    fields: [
+      API_KEY,
+      { key: 'verification_priority', label: 'Waterfall priority', type: 'number', placeholder: '20', optional: true, metadata: true },
+      { key: 'verification_timeout_seconds', label: 'Timeout seconds', type: 'number', placeholder: '12', optional: true, metadata: true },
+    ],
+  },
 
   // ── Messaging / social channels ──────────────────────────────────────────
   {
@@ -165,9 +175,13 @@ export const PROVIDERS: ProviderSpec[] = [
   },
   {
     id: 'hunter', name: 'Hunter.io', category: 'data', icon: Mail,
-    blurb: 'Find and verify professional email addresses.',
+    blurb: 'Find professional emails and run a provider-backed verification stage.',
     docsUrl: 'https://hunter.io/api-keys',
-    fields: [API_KEY],
+    fields: [
+      API_KEY,
+      { key: 'verification_priority', label: 'Waterfall priority', type: 'number', placeholder: '10', optional: true, metadata: true },
+      { key: 'verification_timeout_seconds', label: 'Timeout seconds', type: 'number', placeholder: '12', optional: true, metadata: true },
+    ],
   },
   {
     id: 'proxycurl', name: 'Proxycurl', category: 'data', icon: Linkedin,

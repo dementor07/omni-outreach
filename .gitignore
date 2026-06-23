@@ -41,6 +41,10 @@ frontend/screenshots/
 frontend/*.png
 screenshots/
 
+# Runtime TLS material copied into the production checkout by certbot hooks.
+# Certificates are machine state, never source.
+/certs/*.pem
+
 # One-off UI test scratch
 frontend/test-*.cjs
 

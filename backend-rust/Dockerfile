@@ -5,6 +5,8 @@
 # resolves exactly the audited dependency tree.
 FROM rust:1.89-bookworm as builder
 
+ARG BUILD_SHA=unknown
+
 # Install build dependencies
 RUN apt-get update && apt-get install -y pkg-config libssl-dev build-essential zlib1g-dev libsasl2-dev libzstd-dev librdkafka-dev && rm -rf /var/lib/apt/lists/*
 
@@ -17,6 +19,10 @@ RUN cargo build --release --locked
 
 # Stage 2: Runtime
 FROM debian:bookworm-slim
+
+ARG BUILD_SHA=unknown
+LABEL org.opencontainers.image.revision="${BUILD_SHA}"
+ENV BUILD_SHA="${BUILD_SHA}"
 
 # Install runtime dependencies (OpenSSL is needed for HTTPS)
 RUN apt-get update && apt-get install -y libssl3 ca-certificates && rm -rf /var/lib/apt/lists/*

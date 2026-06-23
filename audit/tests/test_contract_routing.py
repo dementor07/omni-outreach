@@ -49,6 +49,7 @@ from app.nodes import NodeCategory, SideEffect, discover, manifests  # noqa: E40
 # resolved by a different mechanism than node_type lookup. These are the
 # explicitly-wired exceptions; anything else must be in NODE_CHANNEL.
 LOCALLY_RESOLVED = {
+    "enrich.email_verify", # in-process DNS + durable verification record
     "source.csv",         # self-contained: does its own fetch, emits projection events
     "source.sheets",      # SHEETS-001: same pattern — fetches a Google Sheet, emits contact.created
     "source.producthunt", # PH-001: same pattern — pulls PH makers via GraphQL, emits contact.created

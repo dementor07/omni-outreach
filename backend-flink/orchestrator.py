@@ -109,6 +109,7 @@ class JourneyProcessFunction(KeyedProcessFunction):
                 "channel": data.get("channel"),
                 "status": data.get("status"),
                 "error": data.get("error"),
+                "is_retriable": data.get("is_retriable"),
                 "telemetry": data.get("telemetry") or {},
                 # Forward any column mutations the muscle wants applied (e.g. a
                 # source handler writing custom_fields[companies]). The

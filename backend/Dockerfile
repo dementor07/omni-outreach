@@ -1,5 +1,9 @@
 FROM python:3.12-slim
 
+ARG BUILD_SHA=unknown
+LABEL org.opencontainers.image.revision="${BUILD_SHA}"
+ENV BUILD_SHA="${BUILD_SHA}"
+
 # System deps + Chromium for stealth scrapers (Naukri/PH fallback paths).
 # chromium-driver is the matching driver; undetected-chromedriver will use
 # the system one when available, otherwise auto-downloads. The fonts/libs

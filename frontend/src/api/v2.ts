@@ -71,6 +71,69 @@ export const suppression = {
   remove: (id: UUID) => api.delete<void>(`/suppression/${id}`).then(() => undefined),
 }
 
+// ── Deliverability evidence ──────────────────────────────────────────────────
+export type EmailVerificationStatus = 'verified' | 'valid_domain' | 'risky' | 'invalid' | 'unknown'
+
+export interface EmailVerification {
+  email_normalized: string
+  status: EmailVerificationStatus
+  reason: string
+  provider: string
+  mx_domain: string | null
+  mx_hosts: string[]
+  disposable: boolean
+  role_based: boolean
+  checked_at: ISODate
+  expires_at: ISODate
+}
+
+export interface DeliverabilitySummary {
+  total: number
+  verified: number
+  valid_domain: number
+  risky: number
+  invalid: number
+  unknown: number
+  expired: number
+}
+
+export interface VerificationProviderHealth {
+  connection_id: UUID
+  connection_name: string
+  provider: string
+  priority: number
+  success_count: number
+  failure_count: number
+  consecutive_failures: number
+  last_status: string | null
+  last_error_code: string | null
+  last_latency_ms: number | null
+  last_checked_at: ISODate | null
+  open_until: ISODate | null
+}
+
+export interface SenderHealth {
+  sending_account_id: UUID
+  identity: string
+  provider: string
+  account_status: string
+  sent_7d: number
+  transient_failures_7d: number
+  permanent_failures_7d: number
+  health_status: 'healthy' | 'warning' | 'critical' | 'unknown'
+  last_event_at: ISODate | null
+}
+
+export const deliverability = {
+  list: (limit = 100) =>
+    api.get<EmailVerification[]>('/deliverability/verifications', { params: { limit } }).then((r) => r.data),
+  summary: () => api.get<DeliverabilitySummary>('/deliverability/summary').then((r) => r.data),
+  providers: () => api.get<VerificationProviderHealth[]>('/deliverability/providers').then((r) => r.data),
+  senderHealth: () => api.get<SenderHealth[]>('/deliverability/sender-health').then((r) => r.data),
+  verify: (email: string) =>
+    api.post<EmailVerification>('/deliverability/verify', { email }).then((r) => r.data),
+}
+
 // ── Templates (shared message library, B5) ────────────────────────────────────
 export type TemplateChannel = 'email' | 'linkedin' | 'sms' | 'whatsapp' | 'instagram' | 'telegram' | 'voice'
 

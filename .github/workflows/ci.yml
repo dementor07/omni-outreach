@@ -73,13 +73,13 @@ jobs:
         # The backend Dockerfile references paths like `backend/app` and
         # `scripts/`, so the build context must be the repo root — matching
         # docker-compose.yml which uses `context: .` + `dockerfile: ./backend/Dockerfile`.
-        run: docker build -t omni-outreach-backend -f backend/Dockerfile .
+        run: docker build --build-arg BUILD_SHA="$GITHUB_SHA" -t "omni-outreach-backend:$GITHUB_SHA" -f backend/Dockerfile .
       - name: Build frontend image
-        run: docker build -t omni-outreach-frontend ./frontend
+        run: docker build --build-arg BUILD_SHA="$GITHUB_SHA" -t "omni-outreach-frontend:$GITHUB_SHA" -f frontend/Dockerfile.v2 frontend
       - name: Build rust muscle image
-        run: docker build -t omni-outreach-rust ./backend-rust
+        run: docker build --build-arg BUILD_SHA="$GITHUB_SHA" -t "omni-outreach-rust:$GITHUB_SHA" ./backend-rust
       - name: Build flink lungs image
-        run: docker build -t omni-outreach-flink ./backend-flink
+        run: docker build --build-arg BUILD_SHA="$GITHUB_SHA" -t "omni-outreach-flink:$GITHUB_SHA" ./backend-flink
 
   deploy:
     runs-on: ubuntu-latest
@@ -105,6 +105,7 @@ jobs:
             --max-time 300 \
             -X POST \
             -H "Authorization: Bearer $DEPLOY_WEBHOOK_SECRET" \
+            -H "X-Deploy-SHA: $GITHUB_SHA" \
             https://13-140-169-62.sslip.io/deploy
 
       - name: Report skipped deploy

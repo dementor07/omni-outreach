@@ -26,11 +26,12 @@ import Integrations from './pages/Integrations'
 import LeadSources from './pages/LeadSources'
 import Templates from './pages/Templates'
 import Blacklist from './pages/Blacklist'
+import Deliverability from './pages/Deliverability'
 import Settings from './pages/Settings'
 
 function RequireAuth() {
   const location = useLocation()
-  const token = localStorage.getItem('token') || 'dummy'
+  const token = localStorage.getItem('token')
   if (!token) return <Navigate to="/login" replace state={{ from: location.pathname }} />
   return (
     <Layout>
@@ -73,6 +74,7 @@ export default function App() {
         <Route path="/lead-sources" element={<LeadSources />} />
         <Route path="/templates" element={<Templates />} />
         <Route path="/blacklist" element={<Blacklist />} />
+        <Route path="/deliverability" element={<Deliverability />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" />} />

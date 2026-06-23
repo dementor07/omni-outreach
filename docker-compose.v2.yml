@@ -18,6 +18,9 @@ x-secret-env: &secret-env
   DB_PASSWORD: ${DB_PASSWORD}
   SECRET_KEY: ${SECRET_KEY}
 
+x-build-args: &build-args
+  BUILD_SHA: ${BUILD_SHA:-unknown}
+
 services:
   # DEPLOY-003: pre-create the topics with intentional partition counts instead
   # of relying on Redpanda implicit auto-create (which lands every topic at 1
@@ -45,6 +48,7 @@ services:
     build:
       context: .
       dockerfile: ./backend/Dockerfile
+      args: *build-args
     container_name: omni-v2-backend
     env_file:
       - .env
@@ -67,6 +71,7 @@ services:
     build:
       context: .
       dockerfile: ./backend/Dockerfile
+      args: *build-args
     container_name: omni-v2-projector
     command: python -m app.projector.main
     env_file:
@@ -90,6 +95,7 @@ services:
   camoufox-v2:
     build:
       context: ./services/camoufox
+      args: *build-args
     container_name: omni-v2-camoufox
     environment:
       CAMOUFOX_SHARED_SECRET: ${CAMOUFOX_SHARED_SECRET:-dev-camoufox-secret-rotate-me}
@@ -100,6 +106,7 @@ services:
   muscle-v2:
     build:
       context: ./backend-rust
+      args: *build-args
     container_name: omni-v2-muscle
     environment:
       KAFKA_BROKERS: ${KAFKA_BROKERS}
@@ -126,6 +133,7 @@ services:
     build:
       context: .
       dockerfile: ./backend/Dockerfile
+      args: *build-args
     container_name: omni-v2-dispatcher
     command: python -m app.execution.dispatcher
     env_file:
@@ -146,6 +154,7 @@ services:
     build:
       context: .
       dockerfile: ./backend/Dockerfile
+      args: *build-args
     container_name: omni-v2-transitions
     command: python -m app.execution.transition_worker
     env_file:
@@ -170,6 +179,7 @@ services:
     build:
       context: .
       dockerfile: ./backend/Dockerfile
+      args: *build-args
     container_name: omni-v2-objective
     command: python -m app.execution.objective_worker
     env_file:
@@ -195,6 +205,7 @@ services:
     build:
       context: .
       dockerfile: ./backend/Dockerfile
+      args: *build-args
     container_name: omni-v2-ai-jobs
     command: python -m app.execution.ai_jobs_worker
     env_file:
@@ -214,6 +225,7 @@ services:
   orchestrator-v2:
     build:
       context: ./backend-flink
+      args: *build-args
     container_name: omni-v2-orchestrator
     command: sh -lc "until curl -fsS http://flink-jobmanager:8081/overview >/dev/null 2>&1; do echo waiting for jobmanager; sleep 3; done && (flink run -d -m flink-jobmanager:8081 -py /opt/flink/usrlib/orchestrator.py || echo 'submit failed (job may already be running)') && tail -f /dev/null"
     environment:
@@ -226,6 +238,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile.v2
+      args: *build-args
     container_name: omni-v2-frontend
     networks:
       - omni-outreach_default

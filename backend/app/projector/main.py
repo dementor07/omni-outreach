@@ -307,6 +307,29 @@ async def _project_pipeline_metric(env: dict[str, Any]) -> None:
     )
 
 
+async def _project_sender_delivery_result(env: dict[str, Any]) -> None:
+    """Persist a deduplicated transport outcome for sender-health rollups."""
+    payload = env.get("payload") or {}
+    await execute(
+        """
+        INSERT INTO omni_sender_delivery_results (
+            workspace_id, result_key, sending_account_id, command_id,
+            status, error_code, retriable, occurred_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        ON CONFLICT (workspace_id, result_key) DO NOTHING
+        """,
+        env["workspace_id"],
+        payload.get("result_key"),
+        env["entity_id"],
+        payload.get("command_id") or "",
+        payload.get("status") or "failed",
+        payload.get("error_code"),
+        bool(payload.get("retriable")),
+        datetime.fromisoformat(env["occurred_at"]),
+    )
+
+
 # SPINE-TERM-001: a terminal lead must never be resurrected by a generic lead
 # projection. The transition worker owns terminalization (it writes errored/ended/
 # completed/cancelled/converted directly); side-channel lead.* events
@@ -319,7 +342,15 @@ async def _project_pipeline_metric(env: dict[str, Any]) -> None:
 #   2. even WITH an incoming status, the conflict update is terminal-sticky — once
 #      a lead is terminal, no projection downgrades it back to a live status.
 # New rows still default to 'active' on the INSERT side (COALESCE($6,'active')).
-_TERMINAL_LEAD_STATUSES = ("completed", "errored", "cancelled", "converted", "ended")
+_TERMINAL_LEAD_STATUSES = (
+    "completed",
+    "errored",
+    "cancelled",
+    "converted",
+    "ended",
+    "suppressed",
+    "invalid",
+)
 
 
 async def _project_lead(env: dict[str, Any]) -> None:
@@ -630,6 +661,9 @@ async def _apply_projection(env: dict[str, Any]) -> None:
     # Pipeline cost/usage metrics (per source run). entity_id = run_id.
     if et == "pipeline.metric" and env.get("entity_id"):
         await _project_pipeline_metric(env)
+        return
+    if et == "sender.delivery_result" and env.get("entity_id"):
+        await _project_sender_delivery_result(env)
         return
     # Task status flips (entity_type 'task' but NOT the create path).
     if et in ("task.completed", "task.reopened") and env.get("entity_id"):

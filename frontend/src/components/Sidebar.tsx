@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Megaphone, Inbox, ListTodo, UserCheck,
   Users, Building2, KanbanSquare, Contact,
   BarChart3, Activity, Sparkles,
-  Plug, Database, FileText, ShieldOff, Settings, LogOut,
+  Plug, Database, FileText, ShieldOff, ShieldCheck, Settings, LogOut,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import Logo, { LogoMark } from './Logo'
@@ -52,6 +52,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/lead-sources', label: 'Lead Sources', icon: Database },
       { to: '/templates', label: 'Templates', icon: FileText },
       { to: '/blacklist', label: 'Blacklist', icon: ShieldOff },
+      { to: '/deliverability', label: 'Deliverability', icon: ShieldCheck },
     ],
   },
 ]

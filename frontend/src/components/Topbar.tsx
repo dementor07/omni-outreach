@@ -27,6 +27,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/lead-sources': 'Lead Sources',
   '/templates': 'Templates',
   '/blacklist': 'Blacklist',
+  '/deliverability': 'Deliverability',
   '/settings': 'Settings',
 }
 

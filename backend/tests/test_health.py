@@ -14,6 +14,7 @@ async def test_health(client: httpx.AsyncClient):
     assert data["status"] in ("ok", "degraded")
     assert data["checks"]["api"] == "ok"
     assert data["checks"]["db"] == "ok"
+    assert data["build"]["sha"]
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,8 @@
 
 # ── Stage 1: build ───────────────────────────────────────────────────────────
 FROM node:20-alpine AS build
+ARG BUILD_SHA=unknown
+ENV VITE_BUILD_SHA="${BUILD_SHA}"
 WORKDIR /app
 
 # Install deps first so npm cache layer is reused
@@ -20,6 +22,8 @@ RUN npm run build
 
 # ── Stage 2: serve ───────────────────────────────────────────────────────────
 FROM nginx:1.27-alpine
+ARG BUILD_SHA=unknown
+LABEL org.opencontainers.image.revision="${BUILD_SHA}"
 COPY nginx.v2.conf /etc/nginx/nginx.conf
 COPY --from=build /app/dist/ /usr/share/nginx/html/
 EXPOSE 80 443

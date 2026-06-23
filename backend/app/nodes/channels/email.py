@@ -39,6 +39,16 @@ class EmailChannelConfig(BaseModel):
     subject_template: str = Field(description="Subject with {{contact.first_name}}-style variables")
     body_template: str = Field(description="HTML body with {{contact.first_name}}-style variables")
     from_address: EmailStr | None = Field(None, description="Override the connection's default From address")
+    verification_policy: Literal[
+        "off", "block_invalid", "require_safe", "require_verified"
+    ] = Field(
+        "block_invalid",
+        description=(
+            "off: skip verification; block_invalid: stop known-invalid addresses; "
+            "require_safe: require syntax+MX with no risk flags; require_verified: "
+            "require mailbox-level verification from a trusted provider"
+        ),
+    )
 
 
 MANIFEST = NodeManifest(

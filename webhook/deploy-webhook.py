@@ -11,7 +11,10 @@ docker-compose.yml contributes only the shared infra services
 `omni-outreach` project name, which owns the omni-outreach_default
 network that docker-compose.v2.yml joins as external.
 
-Runs:  git pull origin phase-out-non-v2
+Runs:  reject a dirty checkout
+       git fetch origin phase-out-non-v2
+       verify the requested X-Deploy-SHA is on origin/phase-out-non-v2
+       git reset --hard <requested SHA>
        docker compose -p omni-outreach up -d <infra services>
        docker compose -p omni-v2 -f docker-compose.v2.yml up -d --build --remove-orphans
        docker compose -p omni-v2 ... exec -T backend-v2 alembic upgrade head
@@ -22,6 +25,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -36,6 +40,8 @@ DEPLOY_SECRET: str = os.environ["DEPLOY_SECRET"]
 PROJECT_DIR: str = os.environ.get("PROJECT_DIR", "/home/omni-v2")
 DEPLOY_BRANCH: str = os.environ.get("DEPLOY_BRANCH", "phase-out-non-v2")
 PORT: int = int(os.environ.get("PORT", "9000"))
+DEPLOY_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+DEPLOY_LOCK = threading.Lock()
 
 # The only services taken from docker-compose.yml — the legacy app plane
 # (backend, projector, frontend, execution-engine, journey-orchestrator,
@@ -49,9 +55,55 @@ INFRA_SERVICES: tuple[str, ...] = (
 )
 
 
-def _run_deploy() -> tuple[bool, str]:
+def _run(
+    command: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    timeout: int = 900,
+) -> subprocess.CompletedProcess[str]:
+    log.info("Running step: %s", " ".join(command))
+    return subprocess.run(
+        command,
+        cwd=PROJECT_DIR,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=env,
+    )
+
+
+def _failure(step: list[str], result: subprocess.CompletedProcess[str]) -> tuple[bool, str]:
+    msg = (result.stderr or result.stdout)[:1000]
+    log.error("Step failed: %s", msg)
+    return False, f"deploy failed at {' '.join(step[:4])}: {msg}"
+
+
+def _run_deploy(deploy_sha: str) -> tuple[bool, str]:
+    dirty = _run(["git", "status", "--porcelain"], timeout=60)
+    if dirty.returncode != 0:
+        return _failure(["git", "status", "--porcelain"], dirty)
+    if dirty.stdout.strip():
+        log.error("Refusing deploy: checkout is dirty")
+        return False, "deploy refused: production checkout is dirty"
+
+    fetch = _run(["git", "fetch", "--prune", "origin", DEPLOY_BRANCH], timeout=300)
+    if fetch.returncode != 0:
+        return _failure(["git", "fetch", "origin", DEPLOY_BRANCH], fetch)
+
+    verify = _run(
+        ["git", "merge-base", "--is-ancestor", deploy_sha, f"origin/{DEPLOY_BRANCH}"],
+        timeout=60,
+    )
+    if verify.returncode != 0:
+        return False, "deploy refused: requested SHA is not on the deployment branch"
+
+    reset = _run(["git", "reset", "--hard", deploy_sha], timeout=60)
+    if reset.returncode != 0:
+        return _failure(["git", "reset", "--hard", deploy_sha], reset)
+
+    deploy_env = os.environ.copy()
+    deploy_env["BUILD_SHA"] = deploy_sha
     steps = [
-        ["git", "pull", "origin", DEPLOY_BRANCH],
         # Infra: explicit service list, no --remove-orphans (would tear down
         # nothing today, but guards against compose ever touching unlisted
         # services). --build because the flink images build from ./backend-flink.
@@ -64,17 +116,23 @@ def _run_deploy() -> tuple[bool, str]:
         ["docker", "image", "prune", "-f"],
     ]
     for step in steps:
-        log.info("Running step: %s", " ".join(step))
-        result = subprocess.run(
-            step, cwd=PROJECT_DIR, capture_output=True, text=True, timeout=900
-        )
+        result = _run(step, env=deploy_env)
         if result.returncode != 0:
-            msg = (result.stderr or result.stdout)[:1000]
-            log.error("Step failed: %s", msg)
-            return False, f"deploy failed at {' '.join(step[:4])}: {msg}"
+            return _failure(step, result)
         log.info("Done step: %s", " ".join(step))
 
-    return True, "ok"
+    return True, f"ok: {deploy_sha}"
+
+
+def _deploy_thread(deploy_sha: str) -> None:
+    try:
+        ok, message = _run_deploy(deploy_sha)
+        if ok:
+            log.info("Deploy completed: %s", message)
+        else:
+            log.error("Deploy failed: %s", message)
+    finally:
+        DEPLOY_LOCK.release()
 
 
 
@@ -97,11 +155,20 @@ class _Handler(BaseHTTPRequestHandler):
             self._respond(403, {"error": "forbidden"})
             return
 
-        log.info("Deploy triggered")
+        deploy_sha = self.headers.get("X-Deploy-SHA", "").strip().lower()
+        if not DEPLOY_SHA_RE.fullmatch(deploy_sha):
+            self._respond(400, {"error": "missing or invalid X-Deploy-SHA"})
+            return
+
+        if not DEPLOY_LOCK.acquire(blocking=False):
+            self._respond(409, {"error": "deploy already running"})
+            return
+
+        log.info("Deploy triggered for %s", deploy_sha)
         # Respond immediately — docker compose restarts nginx which would
         # break the proxy connection if we waited for the deploy to finish.
-        self._respond(202, {"status": "accepted"})
-        threading.Thread(target=_run_deploy, daemon=True).start()
+        self._respond(202, {"status": "accepted", "sha": deploy_sha})
+        threading.Thread(target=_deploy_thread, args=(deploy_sha,), daemon=True).start()
 
     def _respond(self, code: int, body: dict) -> None:
         payload = json.dumps(body).encode()

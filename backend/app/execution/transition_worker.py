@@ -35,7 +35,7 @@ import app.nodes as noderegistry
 from app.config import settings
 from app.db import close_pool, execute, fetch_all, fetch_one, init_pool, system_scope
 from app.execution import commands
-from app.services import bus, company_kg, send_policy, suppression
+from app.services import bus, company_kg, email_verification, send_policy, suppression
 
 log = logging.getLogger("transitions")
 
@@ -48,7 +48,7 @@ CONSUMER_GROUP = "v2-transitions"
 # re-emitted transitions for already-finished leads are NORMAL, not exceptional;
 # without this guard they resurrected errored leads (SM-1) and cancelled race
 # losers (SM-6). Enforced once, at handle_transition entry.
-TERMINAL_STATUSES = ("completed", "errored", "cancelled", "converted", "ended", "suppressed")
+TERMINAL_STATUSES = ("completed", "errored", "cancelled", "converted", "ended", "suppressed", "invalid")
 
 # SPINE-LEAF-001: when a lead reaches a leaf (a handle with no outgoing edge), the
 # terminal status must REFLECT THE HANDLE, not be a blanket "completed". A node
@@ -623,7 +623,7 @@ async def _terminalize_lead(
         row = await fetch_one(
             "UPDATE omni_leads SET status=$1, current_node_id=NULL, updated_at=NOW() "
             "WHERE id=$2 AND workspace_id=$3 AND status NOT IN "
-            "('completed','errored','cancelled','converted','ended') "
+            "('completed','errored','cancelled','converted','ended','suppressed','invalid') "
             "RETURNING parent_lead_id, origin_node_id, workflow_id",
             status,
             lead_id,
@@ -1314,6 +1314,36 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
     # company-stage lead to a channel) — those must still be suppression-checked.
     if node_type in _OUTBOUND_SEND_CHANNELS:
         recipient = _suppression_identity(contact, lead)
+        # Deliverability P0: email sends consult the durable verification cache.
+        # Default rollout policy blocks only known-invalid recipients; campaigns
+        # can opt into require_safe or provider-backed require_verified.
+        if node_type == "channel.email":
+            email = (recipient or {}).get("email")
+            policy = (node.get("config") or {}).get("verification_policy") or "block_invalid"
+            verification = await email_verification.get_verification(workspace_id, str(email or ""))
+            allowed, verification_reason = email_verification.send_decision(verification, policy)
+            if not allowed:
+                log.warning(
+                    "lead %s blocked at %s: email verification policy=%s reason=%s",
+                    lead["id"], node["id"], policy, verification_reason,
+                )
+                await bus.publish_event(
+                    workspace_id=workspace_id,
+                    event_type="email.send_blocked",
+                    entity_type="lead",
+                    entity_id=str(lead["id"]),
+                    payload={
+                        "node_id": str(node["id"]),
+                        "policy": policy,
+                        "reason": verification_reason,
+                        "email": str(email or "").lower(),
+                    },
+                    correlation_id=correlation_id,
+                )
+                await _terminalize_lead(
+                    workspace_id, str(lead["id"]), "invalid", correlation_id
+                )
+                return
         async with system_scope():
             blocked, reason = await suppression.is_suppressed(workspace_id, recipient)
         if blocked:
@@ -1671,6 +1701,42 @@ async def _emit_pipeline_metric(
         log.exception("failed to emit pipeline.metric for run %s (%s)", run_id, collector)
 
 
+async def _emit_sender_delivery_result(
+    workspace_id: str,
+    node_type: str,
+    meta: dict,
+    correlation_id: str | None,
+) -> None:
+    """Project transport health from real muscle outcomes, idempotently."""
+    account_id = meta.get("sending_account_id")
+    if node_type != "channel.email" or not account_id:
+        return
+    status = str(meta.get("status") or "").lower()
+    if status not in {"sent", "failed"}:
+        return
+    command_id = str(meta.get("command_id") or "")
+    retry_attempt = int(meta.get("retry_attempt") or 0)
+    error_code = str(meta.get("error") or "") or None
+    result_key = f"{command_id}:{retry_attempt}:{status}:{error_code or ''}"
+    try:
+        await bus.publish_event(
+            workspace_id=workspace_id,
+            event_type="sender.delivery_result",
+            entity_type="sending_account",
+            entity_id=str(account_id),
+            payload={
+                "result_key": result_key,
+                "command_id": command_id,
+                "status": status,
+                "error_code": error_code,
+                "retriable": bool(meta.get("is_retriable")),
+            },
+            correlation_id=correlation_id,
+        )
+    except Exception:  # noqa: BLE001
+        log.exception("failed to emit sender.delivery_result for account %s", account_id)
+
+
 async def handle_transition(t: dict) -> None:
     lead_id = t.get("lead_id")
     handle = t.get("handle") or "default"
@@ -1753,6 +1819,13 @@ async def handle_transition(t: dict) -> None:
             correlation_id,
             meta.get("telemetry") or {},
             lead_mutations,
+            correlation_id,
+        )
+    if firing_node:
+        await _emit_sender_delivery_result(
+            workspace_id,
+            str(firing_node.get("node_type") or ""),
+            meta,
             correlation_id,
         )
 

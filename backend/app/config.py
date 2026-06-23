@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     db_password: str
     secret_key: str
     database_url: str = ""
+    # Immutable source identity injected at image-build time. "unknown" is
+    # acceptable for local development, but production deploys stamp a full
+    # Git SHA so /health can prove exactly what is running.
+    build_sha: str = "unknown"
 
     @field_validator("secret_key", "db_password")
     @classmethod
