@@ -129,8 +129,54 @@ pub async fn handle_linkedin_invite(command: &ActionCommand) -> ExecutionResult 
     }
 }
 
+/// First non-empty string at any of `paths` (each a dotted JSON pointer like
+/// "work_experience.0.company") in `body`. Unipile's profile shape varies by
+/// account tier, so we probe several known field names per attribute.
+fn first_str(body: &Value, paths: &[&str]) -> Option<String> {
+    for p in paths {
+        let mut cur = body;
+        for seg in p.split('.') {
+            cur = match seg.parse::<usize>() {
+                Ok(i) => cur.get(i).unwrap_or(&Value::Null),
+                Err(_) => cur.get(seg).unwrap_or(&Value::Null),
+            };
+        }
+        if let Some(s) = cur.as_str().map(str::trim).filter(|s| !s.is_empty()) {
+            return Some(s.to_string());
+        }
+    }
+    None
+}
+
+/// UNIPILE-ENRICH-001: lift the enrichment fields a profile view already paid
+/// for into custom_fields. The /api/v1/users/{id} response carries headline,
+/// occupation, current company, and location — this handler used to read only
+/// network_distance and throw the rest away, wasting free enrichment from the 7
+/// live LinkedIn seats. Field names differ across Unipile account tiers, so we
+/// probe several known paths each. Only custom_fields is wrapped (the one
+/// mutation key _apply_lead_mutations persists); the worker jsonb-merges it, so
+/// CRM/conditions/AI-compose can read profile.* without a paid Proxycurl call.
+fn profile_enrichment(body: &Value) -> Value {
+    let mut cf = serde_json::Map::new();
+    let put = |cf: &mut serde_json::Map<String, Value>, key: &str, paths: &[&str]| {
+        if let Some(v) = first_str(body, paths) {
+            cf.insert(format!("profile_{key}"), json!(v));
+        }
+    };
+    put(&mut cf, "headline", &["headline", "occupation", "summary"]);
+    put(&mut cf, "company", &["company", "current_company", "organization_name", "work_experience.0.company"]);
+    put(&mut cf, "role", &["job_title", "position", "work_experience.0.position", "work_experience.0.title"]);
+    put(&mut cf, "location", &["location", "city", "geo.full"]);
+    if cf.is_empty() {
+        json!({})
+    } else {
+        json!({ "custom_fields": Value::Object(cf) })
+    }
+}
+
 /// Profile view — fetches /api/v1/users/{public_id}. Side effect on LinkedIn
-/// is the view itself. Records network_distance back to the lead.
+/// is the view itself. Records network_distance AND lifts the profile's
+/// headline/company/role/location into custom_fields (UNIPILE-ENRICH-001).
 pub async fn handle_linkedin_profile_view(command: &ActionCommand) -> ExecutionResult {
     let (api_key, base) = match unipile_creds(command).await {
         Ok(v) => v,
@@ -156,11 +202,15 @@ pub async fn handle_linkedin_profile_view(command: &ActionCommand) -> ExecutionR
         Ok(r) if r.status().is_success() => {
             let body: Value = r.json().await.unwrap_or(json!({}));
             let distance = body.get("network_distance").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            // Merge distance + enrichment into one mutations object.
+            let mut mutations = profile_enrichment(&body);
+            mutations["profile_viewed_at"] = json!("now");
+            mutations["linkedin_distance"] = json!(distance);
             common::ok(
                 command,
                 json!({"provider": "unipile", "channel": "linkedin_profile_view", "distance": distance}),
                 Some("profile_viewed"),
-                json!({"profile_viewed_at": "now", "linkedin_distance": distance}),
+                mutations,
             )
         }
         Ok(r) => common::fail(command, format!("profile view HTTP {}", r.status()), r.status().is_server_error()),
@@ -330,4 +380,49 @@ pub async fn handle_instagram(command: &ActionCommand) -> ExecutionResult {
 
 pub async fn handle_telegram(command: &ActionCommand) -> ExecutionResult {
     send_chat(command, "dm_sent", "tg_chat_id").await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{first_str, profile_enrichment};
+    use serde_json::json;
+
+    #[test]
+    fn first_str_probes_in_order_and_skips_empty() {
+        let body = json!({"occupation": "", "headline": "VP Eng"});
+        assert_eq!(first_str(&body, &["occupation", "headline"]).as_deref(), Some("VP Eng"));
+        assert_eq!(first_str(&body, &["missing"]), None);
+    }
+
+    #[test]
+    fn first_str_walks_array_index_paths() {
+        let body = json!({"work_experience": [{"company": "Acme", "position": "CTO"}]});
+        assert_eq!(first_str(&body, &["work_experience.0.company"]).as_deref(), Some("Acme"));
+        assert_eq!(first_str(&body, &["work_experience.0.position"]).as_deref(), Some("CTO"));
+    }
+
+    #[test]
+    fn enrichment_lifts_known_fields_into_custom_fields() {
+        let body = json!({
+            "headline": "Head of Growth",
+            "current_company": "Globex",
+            "job_title": "Director",
+            "city": "Pune",
+            "network_distance": "DISTANCE_1",
+        });
+        let m = profile_enrichment(&body);
+        let cf = &m["custom_fields"];
+        assert_eq!(cf["profile_headline"], json!("Head of Growth"));
+        assert_eq!(cf["profile_company"], json!("Globex"));
+        assert_eq!(cf["profile_role"], json!("Director"));
+        assert_eq!(cf["profile_location"], json!("Pune"));
+    }
+
+    #[test]
+    fn enrichment_is_empty_object_when_nothing_present() {
+        // A bare profile (only distance) yields no custom_fields wrapper, so the
+        // worker merges nothing — no spurious empty keys on the lead.
+        let m = profile_enrichment(&json!({"network_distance": "DISTANCE_2"}));
+        assert_eq!(m, json!({}));
+    }
 }
