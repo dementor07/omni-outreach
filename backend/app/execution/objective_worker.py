@@ -29,6 +29,7 @@ import asyncio
 import json
 import logging
 import signal
+import uuid
 
 from aiokafka import AIOKafkaConsumer
 
@@ -63,10 +64,128 @@ async def handle_event(env: dict) -> None:
     workflow_id = payload.get("workflow_id")
     if not workspace_id or not workflow_id:
         return
-    await pursue(str(workspace_id), str(workflow_id))
+    correlation_id = str(env.get("correlation_id") or "")
+    source_count = int(payload.get("run_source_count") or 1)
+    if source_count > 1 and not await _multi_source_run_complete(
+        str(workspace_id), str(workflow_id), correlation_id, source_count
+    ):
+        return
+    try:
+        await pursue(
+            str(workspace_id),
+            str(workflow_id),
+            completion_correlation_id=correlation_id or None,
+        )
+    except Exception:
+        if correlation_id:
+            await _release_completion_claim(
+                str(workspace_id), str(workflow_id), correlation_id
+            )
+        raise
 
 
-async def pursue(workspace_id: str, workflow_id: str) -> None:
+async def _multi_source_run_complete(
+    workspace_id: str,
+    workflow_id: str,
+    correlation_id: str,
+    source_count: int,
+) -> bool:
+    """True once every source root in one logical run is terminal.
+
+    Root leads carry the shared correlation id in custom_fields. This avoids
+    treating each independently finishing source as a separate objective
+    iteration.
+    """
+    if not correlation_id:
+        return False
+    async with system_scope():
+        row = await fetch_one(
+            """
+            SELECT
+                COUNT(*) AS roots,
+                COUNT(*) FILTER (
+                    WHERE status IN (
+                        'completed','errored','cancelled','converted',
+                        'ended','suppressed','invalid'
+                    )
+                ) AS terminal
+            FROM omni_leads
+            WHERE workspace_id=$1
+              AND workflow_id=$2
+              AND parent_lead_id IS NULL
+              AND custom_fields->>'_run_correlation_id'=$3
+            """,
+            workspace_id,
+            workflow_id,
+            correlation_id,
+        )
+    roots = int((row or {}).get("roots") or 0)
+    terminal = int((row or {}).get("terminal") or 0)
+    return roots >= source_count and terminal >= source_count
+
+
+async def _claim_completion(
+    workspace_id: str,
+    objective_id: str,
+    completion_correlation_id: str,
+) -> bool:
+    """Acquire a recoverable lease for one completed logical run."""
+    async with system_scope():
+        row = await fetch_one(
+            """
+            UPDATE omni_campaign_objectives
+            SET progress = COALESCE(progress, '{}'::jsonb)
+                         || jsonb_build_object(
+                              'processing_completion_correlation_id', $1::text,
+                              'completion_claimed_at', NOW()::text
+                            ),
+                updated_at = NOW()
+            WHERE id=$2 AND workspace_id=$3
+              AND COALESCE(progress->>'last_completion_correlation_id', '') <> $1
+              AND (
+                    COALESCE(progress->>'processing_completion_correlation_id', '') = ''
+                    OR NULLIF(progress->>'completion_claimed_at', '')::timestamptz
+                        < NOW() - make_interval(secs => $4)
+                  )
+            RETURNING id
+            """,
+            completion_correlation_id,
+            objective_id,
+            workspace_id,
+            STALE_AFTER_S,
+        )
+    return bool(row)
+
+
+async def _release_completion_claim(
+    workspace_id: str,
+    workflow_id: str,
+    completion_correlation_id: str,
+) -> None:
+    """Release a lease after a handled exception so event redelivery can retry."""
+    async with system_scope():
+        await execute(
+            """
+            UPDATE omni_campaign_objectives
+            SET progress = COALESCE(progress, '{}'::jsonb)
+                         - 'processing_completion_correlation_id'
+                         - 'completion_claimed_at',
+                updated_at = NOW()
+            WHERE workflow_id=$1 AND workspace_id=$2
+              AND progress->>'processing_completion_correlation_id'=$3
+            """,
+            workflow_id,
+            workspace_id,
+            completion_correlation_id,
+        )
+
+
+async def pursue(
+    workspace_id: str,
+    workflow_id: str,
+    *,
+    completion_correlation_id: str | None = None,
+) -> None:
     """Measure this campaign's objective, decide, persist, and re-seed on widen.
 
     No-op when the workflow has no objective or it's terminal/paused."""
@@ -77,8 +196,19 @@ async def pursue(workspace_id: str, workflow_id: str) -> None:
         )
     if not obj or obj["status"] in ("reached", "exhausted", "paused"):
         return
+    if completion_correlation_id and not await _claim_completion(
+        workspace_id, str(obj["id"]), completion_correlation_id
+    ):
+        log.info(
+            "objective %s already evaluated completion %s",
+            obj["id"],
+            completion_correlation_id,
+        )
+        return
 
     progress = dict(obj.get("progress") or {})
+    if completion_correlation_id:
+        progress["last_completion_correlation_id"] = completion_correlation_id
     bounds = dict(obj.get("bounds") or {})
     audience = dict(obj.get("audience") or {})
     iterations_used = int(progress.get("iterations_used") or 0)
@@ -106,23 +236,43 @@ async def pursue(workspace_id: str, workflow_id: str) -> None:
     # Widen: advance the sourcing ladder and re-seed via the shared run path.
     from app.execution import run as runner
 
-    entry = await runner.entry_node(workflow_id, workspace_id)
+    entries = await runner.entry_nodes(workflow_id, workspace_id)
+    entry = entries[0] if entries else None
     entry_type = str(entry["node_type"]) if entry else ""
     overrides, summary = objective_controller.widen_audience(audience, iterations_used, entry_type)
     progress["iterations_used"] = iterations_used + 1
     progress["last_action"] = summary
     await _persist(workspace_id, str(obj["id"]), verdict.next_status, progress)
 
-    outcome = await runner.seed_and_run(
-        workspace_id=workspace_id,
-        workflow_id=workflow_id,
-        start_node=entry,
-        config_overrides=overrides,
-    )
-    if outcome.error:
-        log.warning("objective re-seed failed for %s: %s", workflow_id, outcome.error)
+    correlation_id = str(uuid.uuid4())
+    outcomes = []
+    for index, source in enumerate(entries):
+        source_type = str(source["node_type"])
+        source_overrides, _source_summary = objective_controller.widen_audience(
+            audience, iterations_used, source_type
+        )
+        outcomes.append(
+            await runner.seed_and_run(
+                workspace_id=workspace_id,
+                workflow_id=workflow_id,
+                start_node=source,
+                config_overrides=source_overrides or overrides,
+                correlation_id=correlation_id,
+                run_source_count=len(entries),
+                run_source_index=index,
+            )
+        )
+    failures = [outcome for outcome in outcomes if outcome.error]
+    if failures:
+        log.warning(
+            "objective re-seed had %d/%d source failures for %s: %s",
+            len(failures), len(outcomes), workflow_id, [outcome.error for outcome in failures],
+        )
     else:
-        log.info("objective re-seed: workflow %s re-ran (lead %s, overrides=%s)", workflow_id, outcome.lead_id, overrides)
+        log.info(
+            "objective re-seed: workflow %s re-ran %d sources (correlation=%s)",
+            workflow_id, len(outcomes), correlation_id,
+        )
 
 
 async def _persist(workspace_id: str, objective_id: str, status: str, progress: dict) -> None:

@@ -14,6 +14,7 @@ os.environ.setdefault("REDIS_PASSWORD", "")
 from app.nodes import NodeContext, discover, manifests  # noqa: E402
 from app.nodes.ai.enrich import execute as execute_enrichment  # noqa: E402
 from app.nodes.conditions.rules import _resolve, evaluate_rule, execute  # noqa: E402
+from app.execution import run as workflow_runner  # noqa: E402
 from app.execution.transition_worker import _clean_enrichment_fields  # noqa: E402
 from app.services.graph_validation import validate_graph  # noqa: E402
 
@@ -124,7 +125,7 @@ def test_low_level_building_block_nodes_are_hidden_from_the_palette():
     assert by_type["flow.continue"].visible_in_palette is False
 
 
-def test_graph_validation_rejects_ambiguous_routes_and_multiple_starts():
+def test_graph_validation_rejects_ambiguous_routes_but_accepts_multiple_source_starts():
     discover()
     nodes = [
         {"id": "source-a", "node_type": "source.webhook_in", "config": {}},
@@ -150,7 +151,37 @@ def test_graph_validation_rejects_ambiguous_routes_and_multiple_starts():
     codes = {issue["code"] for issue in result["issues"]}
     assert result["valid_for_save"] is False
     assert "AMBIGUOUS_ROUTE" in codes
-    assert "ENTRY_NODE_COUNT" in codes
+    assert "ENTRY_NODE_COUNT" not in codes
+    assert "MULTI_SOURCE_START" in codes
+
+
+def test_graph_validation_runs_multiple_independent_source_journeys():
+    discover()
+    result = validate_graph(
+        [
+            {"id": "source-a", "node_type": "source.webhook_in", "config": {}},
+            {"id": "source-b", "node_type": "source.webhook_in", "config": {}},
+            {"id": "end-a", "node_type": "flow.end", "config": {}},
+            {"id": "end-b", "node_type": "flow.end", "config": {}},
+        ],
+        [
+            {
+                "id": "edge-a",
+                "source_node_id": "source-a",
+                "target_node_id": "end-a",
+                "source_handle": "default",
+            },
+            {
+                "id": "edge-b",
+                "source_node_id": "source-b",
+                "target_node_id": "end-b",
+                "source_handle": "default",
+            },
+        ],
+    )
+    assert result["valid_for_save"] is True
+    assert result["valid_for_run"] is True
+    assert any(issue["code"] == "MULTI_SOURCE_START" for issue in result["issues"])
 
 
 def test_graph_validation_accepts_one_readable_source_to_terminal_journey():
@@ -213,6 +244,66 @@ def test_canvas_builds_ordered_enrichment_stacks_with_precise_merge_semantics():
     assert "Start pursuit" in editor
     assert "onAdd(m)\n                          setOpen(false)" in editor
     assert "lg:flex-row" in editor
+
+
+def test_linear_view_refuses_to_flatten_branched_graphs():
+    builder = (ROOT / "frontend/src/components/SequentialBuilder.tsx").read_text(encoding="utf-8")
+    editor = (ROOT / "frontend/src/pages/CampaignEditor.tsx").read_text(encoding="utf-8")
+    assert "analyzeGraph" in builder
+    assert "Branch-safe view" in builder
+    assert "adding, deleting, or reordering a branched graph is disabled" in builder
+    assert "{shape.linear && <button" in builder
+    assert ">Journey</button>" in editor
+    assert "onEditNode={(nodeId) => setSelectedNodeId(nodeId)}" in editor
+
+
+def test_multi_source_run_is_one_correlated_objective_iteration():
+    runner = (ROOT / "backend/app/execution/run.py").read_text(encoding="utf-8")
+    objective = (ROOT / "backend/app/execution/objective_worker.py").read_text(encoding="utf-8")
+    transition = (ROOT / "backend/app/execution/transition_worker.py").read_text(encoding="utf-8")
+    assert "seed_and_run_many" in runner
+    assert "_run_correlation_id" in runner
+    assert "run_source_count=len(roots)" in runner
+    assert "_multi_source_run_complete" in objective
+    assert "_claim_completion" in objective
+    assert "_release_completion_claim" in objective
+    assert "processing_completion_correlation_id" in objective
+    assert "last_completion_correlation_id" in objective
+    assert '"run_source_count"' in transition
+
+
+@pytest.mark.asyncio
+async def test_multi_source_runner_shares_correlation_and_records_source_order(monkeypatch):
+    calls: list[dict] = []
+
+    async def fake_seed_and_run(**kwargs):
+        calls.append(kwargs)
+        return workflow_runner.RunOutcome(
+            lead_id=f"lead-{len(calls)}",
+            node_id=str(kwargs["start_node"]["id"]),
+            node_type=str(kwargs["start_node"]["node_type"]),
+            correlation_id=str(kwargs["correlation_id"]),
+            handle="default",
+            events_published=1,
+        )
+
+    monkeypatch.setattr(workflow_runner, "seed_and_run", fake_seed_and_run)
+    roots = [
+        {"id": "source-a", "node_type": "source.webhook_in", "config": {}},
+        {"id": "source-b", "node_type": "source.webhook_in", "config": {}},
+    ]
+    outcomes = await workflow_runner.seed_and_run_many(
+        workspace_id="workspace",
+        workflow_id="workflow",
+        start_nodes=roots,
+        actor_user_id="actor",
+    )
+
+    assert len(outcomes) == 2
+    assert len({call["correlation_id"] for call in calls}) == 1
+    assert [call["run_source_count"] for call in calls] == [2, 2]
+    assert [call["run_source_index"] for call in calls] == [0, 1]
+    assert [call["start_node"]["id"] for call in calls] == ["source-a", "source-b"]
 
 
 def test_campaign_creation_is_goal_first_and_atomic():

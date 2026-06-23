@@ -328,13 +328,23 @@ export default function CampaignEditor() {
     onError: (error: unknown) => toast.error(error instanceof Error ? error.message : 'The graph could not be saved.'),
   })
 
-  // Run the workflow: seed a lead at the entry (source) node and fire it. The
-  // discovered entities fan out into child leads that surface in the Leads tab.
+  // Run the workflow: seed one root lead per starting source and fire them under
+  // one correlation id. Discovered entities fan out into campaign leads.
   const hasSource = useMemo(() => rfNodes.some((n) => n.data.manifest.type.startsWith('source.')), [rfNodes])
   const runMut = useMutation({
     mutationFn: () => canvas.run(id!),
     onSuccess: (r) => {
-      toast.success(`Run started at ${r.node_type} — ${r.events_published} intent dispatched. Leads will appear shortly.`)
+      if (r.sources_failed > 0) {
+        toast.error(
+          `${r.sources_started} sources started; ${r.sources_failed} failed immediately. ${r.failures.join(' · ')}`,
+        )
+      } else {
+        toast.success(
+          r.sources_started > 1
+            ? `${r.sources_started} sources started together — ${r.events_published} intents dispatched under one run.`
+            : `Run started at ${r.node_type} — ${r.events_published} intent dispatched. Leads will appear shortly.`,
+        )
+      }
       qc.invalidateQueries({ queryKey: ['workflow-leads', id] })
       qc.invalidateQueries({ queryKey: ['leads'] })
       qc.invalidateQueries({ queryKey: ['workflow', id, 'validation'] })
@@ -684,7 +694,7 @@ export default function CampaignEditor() {
                     type="button"
                     onClick={() => setViewMode('linear')} 
                     className={clsx('px-3 py-1 text-xs font-semibold rounded-md transition-colors', viewMode === 'linear' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200')}
-                  >Linear</button>
+                  >Journey</button>
                 </div>
               </div>
               
@@ -692,21 +702,39 @@ export default function CampaignEditor() {
                 {viewMode === 'canvas' ? (
                   <div className="h-full">{flow}</div>
                 ) : (
-                  <div className="h-full overflow-auto bg-white rounded-2xl border border-slate-200 dark:bg-slate-900/50 dark:border-slate-800">
-                    <SequentialBuilder
-                      nodes={rfNodes}
-                      edges={rfEdges}
-                      manifests={manifestsQuery.data ?? []}
-                      onChange={(n, e) => {
-                        setRfNodes(n)
-                        setRfEdges(e)
-                        setDirty(true)
-                        pushState(n, e)
-                      }}
-                      onSave={() => saveMut.mutate()}
-                      onEditNode={(id) => setSelectedNodeId(id)}
-                      isSaving={saveMut.isPending}
-                    />
+                  <div className="flex h-full overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/50">
+                    <div className="min-w-0 flex-1 overflow-auto">
+                      <SequentialBuilder
+                        nodes={rfNodes}
+                        edges={rfEdges}
+                        manifests={manifestsQuery.data ?? []}
+                        onChange={(n, e) => {
+                          setRfNodes(n)
+                          setRfEdges(e)
+                          setDirty(true)
+                          pushState(n, e)
+                        }}
+                        onSave={() => saveMut.mutate()}
+                        onEditNode={(nodeId) => setSelectedNodeId(nodeId)}
+                        isSaving={saveMut.isPending}
+                      />
+                    </div>
+                    {selectedNode && (
+                      <div className="w-96 shrink-0 border-l border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+                        <NodeConfigPanel
+                          manifest={selectedNode.data.manifest}
+                          nodeId={selectedNode.id}
+                          initialConfig={selectedNode.data.config}
+                          saving={false}
+                          connections={connectionsQuery.data ?? []}
+                          onSave={(config) => {
+                            updateNodeConfig(selectedNode.id, config)
+                            setSelectedNodeId(null)
+                          }}
+                          onClose={() => setSelectedNodeId(null)}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

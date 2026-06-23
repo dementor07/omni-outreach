@@ -168,21 +168,33 @@ def validate_graph(
 
     incoming: Counter[str] = Counter(target for _source, target, _handle in valid_edges)
     roots = [node_id for node_id in node_ids if incoming[node_id] == 0]
-    if len(roots) != 1:
+    if not roots:
         issues.append(
             _issue(
                 "ENTRY_NODE_COUNT",
-                f"The campaign needs exactly one starting step; found {len(roots)}.",
+                "The campaign needs at least one starting source.",
             )
         )
-    elif not str(by_id[roots[0]].get("node_type") or "").startswith("source."):
-        issues.append(
-            _issue(
-                "ENTRY_NOT_SOURCE",
-                "The first step must be a source so the campaign has people or companies to process.",
-                node_id=roots[0],
+    else:
+        for root in roots:
+            if not str(by_id[root].get("node_type") or "").startswith("source."):
+                issues.append(
+                    _issue(
+                        "ENTRY_NOT_SOURCE",
+                        "Every starting step must be a source so each branch has people or companies to process.",
+                        node_id=root,
+                    )
+                )
+        if len(roots) > 1 and all(
+            str(by_id[root].get("node_type") or "").startswith("source.") for root in roots
+        ):
+            issues.append(
+                _issue(
+                    "MULTI_SOURCE_START",
+                    f"This run starts {len(roots)} sources together. Results keep source provenance and converge through downstream deduplication.",
+                    severity="warning",
+                )
             )
-        )
 
     adjacency: dict[str, list[str]] = defaultdict(list)
     indegree = {node_id: 0 for node_id in node_ids}
@@ -207,9 +219,9 @@ def validate_graph(
             )
         )
 
-    if len(roots) == 1:
+    if roots:
         reachable: set[str] = set()
-        queue = deque([roots[0]])
+        queue = deque(roots)
         while queue:
             current = queue.popleft()
             if current in reachable:

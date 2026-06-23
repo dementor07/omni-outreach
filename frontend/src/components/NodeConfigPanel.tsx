@@ -121,7 +121,7 @@ interface NodeConfigPanelProps {
   saving: boolean
   connections?: Connection[]
   onSave: (config: Record<string, unknown>) => void
-  onDelete: () => void
+  onDelete?: () => void
   onClose: () => void
 }
 
@@ -294,7 +294,9 @@ export default function NodeConfigPanel({
           </p>
         )}
         <div className="flex items-center justify-between gap-2">
-          <Button variant="danger" size="sm" icon={Trash2} onClick={onDelete}>Delete</Button>
+          {onDelete ? (
+            <Button variant="danger" size="sm" icon={Trash2} onClick={onDelete}>Delete</Button>
+          ) : <span />}
           <Button variant="primary" size="sm" icon={Save} onClick={handleSave} isLoading={saving} disabled={missingRequired.length > 0}>
             Save
           </Button>

@@ -17,6 +17,7 @@ worker keys off (see app.execution.objective_worker).
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from dataclasses import dataclass
@@ -40,9 +41,13 @@ class RunOutcome:
     error: str | None = None
 
 
-async def entry_node(workflow_id: str, workspace_id: str) -> dict | None:
-    """The workflow's entry node — the one no edge targets. Prefer a source.*
-    node when several qualify (parallel sources), else the first by position."""
+async def entry_nodes(workflow_id: str, workspace_id: str) -> list[dict]:
+    """All graph roots in stable visual order.
+
+    Valid runnable graphs contain only source roots. Keeping this primitive
+    plural makes multi-source execution explicit instead of silently choosing
+    whichever source happens to sort first.
+    """
     async with system_scope():
         nodes = await fetch_all(
             "SELECT id, node_type, config FROM omni_workflow_nodes "
@@ -50,16 +55,54 @@ async def entry_node(workflow_id: str, workspace_id: str) -> dict | None:
             workflow_id, workspace_id,
         )
         if not nodes:
-            return None
+            return []
         targeted = await fetch_all(
             "SELECT DISTINCT target_node_id FROM omni_workflow_edges WHERE workflow_id=$1 AND workspace_id=$2",
             workflow_id, workspace_id,
         )
     targeted_ids = {str(r["target_node_id"]) for r in targeted}
-    roots = [n for n in nodes if str(n["id"]) not in targeted_ids]
+    return [n for n in nodes if str(n["id"]) not in targeted_ids]
+
+
+async def entry_node(workflow_id: str, workspace_id: str) -> dict | None:
+    """Back-compatible single-entry accessor used by focused re-runs."""
+    roots = await entry_nodes(workflow_id, workspace_id)
+    return roots[0] if roots else None
+
+
+async def seed_and_run_many(
+    *,
+    workspace_id: str,
+    workflow_id: str,
+    start_nodes: list[dict] | None = None,
+    actor_user_id: str | None = None,
+    correlation_id: str | None = None,
+) -> list[RunOutcome]:
+    """Fire every root source as one logical campaign run.
+
+    Each source receives its own seed lead (preserving lineage and provenance)
+    while all roots share one correlation id for tracing, cost, and objective
+    accounting. Sources are fired in stable order; their external work remains
+    asynchronous through the normal intent bus.
+    """
+    roots = start_nodes if start_nodes is not None else await entry_nodes(workflow_id, workspace_id)
     if not roots:
-        return None
-    return next((n for n in roots if str(n["node_type"]).startswith("source.")), roots[0])
+        return [RunOutcome("", "", "", "", "", 0, error="workflow has no entry node")]
+    run_correlation_id = correlation_id or str(uuid.uuid4())
+    outcomes: list[RunOutcome] = []
+    for index, root in enumerate(roots):
+        outcomes.append(
+            await seed_and_run(
+                workspace_id=workspace_id,
+                workflow_id=workflow_id,
+                start_node=root,
+                actor_user_id=actor_user_id,
+                correlation_id=run_correlation_id,
+                run_source_count=len(roots),
+                run_source_index=index,
+            )
+        )
+    return outcomes
 
 
 async def seed_and_run(
@@ -70,6 +113,8 @@ async def seed_and_run(
     config_overrides: dict[str, Any] | None = None,
     actor_user_id: str | None = None,
     correlation_id: str | None = None,
+    run_source_count: int = 1,
+    run_source_index: int = 0,
 ) -> RunOutcome:
     """Seed a root lead at the entry (or given) node, fire it, publish its
     intents. Returns a RunOutcome (``error`` set if the entry node errored —
@@ -93,14 +138,19 @@ async def seed_and_run(
     node_id = str(node["id"])
     correlation_id = correlation_id or str(uuid.uuid4())
     merged_config = {**(node.get("config") or {}), **(config_overrides or {})}
+    run_metadata = {
+        "_run_correlation_id": correlation_id,
+        "_run_source_count": run_source_count,
+        "_run_source_index": run_source_index,
+    }
 
     # Seed the root lead at the entry node (no contact — the source discovers
     # entities that fan out into children).
     async with system_scope():
         await execute(
             "INSERT INTO omni_leads (id, workspace_id, contact_id, workflow_id, current_node_id, status, custom_fields) "
-            "VALUES ($1, $2, NULL, $3, $4, 'active', '{}'::jsonb)",
-            lead_id, workspace_id, workflow_id, node_id,
+            "VALUES ($1, $2, NULL, $3, $4, 'active', $5::jsonb)",
+            lead_id, workspace_id, workflow_id, node_id, json.dumps(run_metadata),
         )
 
     node_ctx = noderegistry.NodeContext(
@@ -108,7 +158,7 @@ async def seed_and_run(
         workflow_id=str(workflow_id),
         node_id=node_id,
         config=merged_config,
-        lead={"id": lead_id, "contact_id": None, "custom_fields": {}},
+        lead={"id": lead_id, "contact_id": None, "custom_fields": run_metadata},
         correlation_id=correlation_id,
     )
     result = await execute_fn(node_ctx)

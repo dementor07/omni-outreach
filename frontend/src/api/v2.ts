@@ -417,6 +417,12 @@ export interface RunResponse {
   correlation_id: UUID
   handle: string
   events_published: number
+  sources_started: number
+  sources_failed: number
+  failures: string[]
+  lead_ids: UUID[]
+  start_node_ids: UUID[]
+  node_types: string[]
 }
 
 export interface CampaignTemplateInfo {

@@ -687,18 +687,24 @@ class RunResponse(BaseModel):
     correlation_id: uuid.UUID
     handle: str
     events_published: int
+    sources_started: int = 1
+    sources_failed: int = 0
+    failures: list[str] = Field(default_factory=list)
+    lead_ids: list[uuid.UUID] = Field(default_factory=list)
+    start_node_ids: list[uuid.UUID] = Field(default_factory=list)
+    node_types: list[str] = Field(default_factory=list)
 
 
 @router.post(
     "/workflows/{workflow_id}/run",
     response_model=RunResponse,
-    summary="Run a workflow — enroll a seed lead at the entry node and fire it",
+    summary="Run a workflow — start every source as one correlated run",
     description=(
-        "Creates a seed lead positioned at the workflow's entry (source) node and "
-        "fires that node, publishing its intent event(s) so the dispatcher routes "
-        "the muscle command and the pipeline begins. This is the missing trigger: "
+        "Creates one seed lead per starting source and fires those sources under one "
+        "correlation id, publishing their intent events so the dispatcher routes "
+        "the muscle commands and the pipeline begins. This is the missing trigger: "
         "without it, workflows are inert CRUD and no lead is ever produced. The "
-        "source's discovered entities fan out into child leads via flow.for_each, "
+        "sources' discovered entities fan out into child leads via flow.for_each, "
         "which then appear in the Leads view."
     ),
 )
@@ -734,18 +740,28 @@ async def run_workflow(
         if not start_node:
             raise HTTPException(status_code=404, detail="start_node_id not in this workflow")
 
-    # The single seed-and-fire path (shared with the objective re-seed).
-    outcome = await runner.seed_and_run(
-        workspace_id=ctx.workspace_id,
-        workflow_id=str(workflow_id),
-        start_node=dict(start_node) if start_node else None,
-        actor_user_id=ctx.user_id,
-    )
-    if outcome.error and not outcome.lead_id:
-        raise HTTPException(status_code=400, detail=outcome.error)
-    if outcome.error:
-        raise HTTPException(status_code=422, detail=f"entry node error: {outcome.error}")
-
+    if start_node:
+        outcomes = [
+            await runner.seed_and_run(
+                workspace_id=ctx.workspace_id,
+                workflow_id=str(workflow_id),
+                start_node=dict(start_node),
+                actor_user_id=ctx.user_id,
+            )
+        ]
+    else:
+        outcomes = await runner.seed_and_run_many(
+            workspace_id=ctx.workspace_id,
+            workflow_id=str(workflow_id),
+            actor_user_id=ctx.user_id,
+        )
+    failures = [outcome for outcome in outcomes if outcome.error]
+    successes = [outcome for outcome in outcomes if not outcome.error]
+    if not successes:
+        error = failures[0].error if failures else "workflow has no entry node"
+        status_code = 400 if failures and not failures[0].lead_id else 422
+        raise HTTPException(status_code=status_code, detail=f"entry node error: {error}")
+    outcome = successes[0]
     return RunResponse(
         lead_id=uuid.UUID(outcome.lead_id),
         workflow_id=workflow_id,
@@ -753,5 +769,13 @@ async def run_workflow(
         node_type=outcome.node_type,
         correlation_id=uuid.UUID(outcome.correlation_id),
         handle=outcome.handle,
-        events_published=outcome.events_published,
+        events_published=sum(item.events_published for item in successes),
+        sources_started=len(successes),
+        sources_failed=len(failures),
+        failures=[
+            f"{item.node_type or 'unknown'}: {item.error or 'failed to start'}" for item in failures
+        ],
+        lead_ids=[uuid.UUID(item.lead_id) for item in successes],
+        start_node_ids=[uuid.UUID(item.node_id) for item in successes],
+        node_types=[item.node_type for item in successes],
     )

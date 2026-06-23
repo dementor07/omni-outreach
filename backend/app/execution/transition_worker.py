@@ -624,7 +624,7 @@ async def _terminalize_lead(
             "UPDATE omni_leads SET status=$1, current_node_id=NULL, updated_at=NOW() "
             "WHERE id=$2 AND workspace_id=$3 AND status NOT IN "
             "('completed','errored','cancelled','converted','ended','suppressed','invalid') "
-            "RETURNING parent_lead_id, origin_node_id, workflow_id",
+            "RETURNING parent_lead_id, origin_node_id, workflow_id, custom_fields",
             status,
             lead_id,
             workspace_id,
@@ -663,6 +663,12 @@ async def _terminalize_lead(
                         "workflow_id": str(row["workflow_id"]),
                         "root_lead_id": str(lead_id),
                         "terminal_status": status,
+                        "run_source_count": int(
+                            (row.get("custom_fields") or {}).get("_run_source_count") or 1
+                        ),
+                        "run_source_index": int(
+                            (row.get("custom_fields") or {}).get("_run_source_index") or 0
+                        ),
                     },
                     correlation_id=correlation_id,
                 )
