@@ -11,6 +11,8 @@
 const NODE_LABELS: Record<string, string> = {
   // Sources — job boards / discovery
   'source.csv': 'CSV import',
+  'source.sheets': 'Google Sheets import',
+  'source.producthunt': 'Product Hunt',
   'source.webhook_in': 'Inbound webhook',
   'source.naukri': 'Naukri jobs',
   'source.indeed': 'Indeed jobs',
