@@ -211,6 +211,8 @@ def test_canvas_builds_ordered_enrichment_stacks_with_precise_merge_semantics():
     assert "Plan check" in editor
     assert "Goal:" in editor
     assert "Start pursuit" in editor
+    assert "onAdd(m)\n                          setOpen(false)" in editor
+    assert "lg:flex-row" in editor
 
 
 def test_campaign_creation_is_goal_first_and_atomic():

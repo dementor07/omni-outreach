@@ -636,7 +636,7 @@ export default function CampaignEditor() {
           not the tall PageHeader the scrolling pages use. The editor is a
           fixed-viewport canvas tool, so every row above the canvas is height
           stolen from the graph. */}
-      <div className="flex items-center justify-between gap-3 border-b border-slate-200/80 pb-2 dark:border-slate-800">
+      <div className="flex flex-col gap-2 border-b border-slate-200/80 pb-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3 dark:border-slate-800">
         <div className="flex min-w-0 items-center gap-2.5">
           <Link to="/campaigns" title="Back to campaigns" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800">
             <ArrowLeft size={16} />
@@ -653,7 +653,7 @@ export default function CampaignEditor() {
             </div>
           )}
         </div>
-        <div className="shrink-0">
+        <div className="min-w-0 overflow-x-auto lg:shrink-0">
           <Tabs
             value={activeTab}
             onChange={(v) => setActiveTab(v)}
@@ -1273,7 +1273,10 @@ function NodePalette({
                         type="button"
                         draggable
                         onDragStart={(e) => { e.dataTransfer.setData('application/x-omni-node', m.type); e.dataTransfer.effectAllowed = 'move' }}
-                        onClick={() => onAdd(m)}
+                        onClick={() => {
+                          onAdd(m)
+                          setOpen(false)
+                        }}
                         title={m.summary}
                         className="flex w-full cursor-grab items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[12px] font-medium text-slate-700 transition-colors hover:bg-slate-50 active:cursor-grabbing dark:text-slate-300 dark:hover:bg-slate-800"
                       >
@@ -1298,6 +1301,7 @@ function NodePalette({
           onAdd={(stages) => {
             onAddEnrichmentStack(stages)
             setShowEnrichmentStack(false)
+            setOpen(false)
           }}
         />
       )}
