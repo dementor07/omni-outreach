@@ -50,6 +50,8 @@ from app.nodes import NodeCategory, SideEffect, discover, manifests  # noqa: E40
 # explicitly-wired exceptions; anything else must be in NODE_CHANNEL.
 LOCALLY_RESOLVED = {
     "source.csv",         # self-contained: does its own fetch, emits projection events
+    "source.sheets",      # SHEETS-001: same pattern — fetches a Google Sheet, emits contact.created
+    "source.producthunt", # PH-001: same pattern — pulls PH makers via GraphQL, emits contact.created
     "source.webhook_in",  # passive declaration (listener lives in an HTTP route)
 }
 
@@ -63,8 +65,10 @@ LOCAL_CATEGORIES = {NodeCategory.FLOW, NodeCategory.CONDITION, NodeCategory.CRM}
 
 # Dead-on-arrival tracker. EMPTY after the CONTRACT-001/002/004/005 fixes:
 #   * genuinely-dead source/ai canvas nodes were removed from the registry
-#     (ai.score/ai.classify -> AI-Studio-only; apollo/hunter/proxycurl/sheets/
-#     producthunt deleted), so they no longer appear in manifests();
+#     (ai.score/ai.classify -> AI-Studio-only; apollo/hunter/proxycurl deleted),
+#     so they no longer appear in manifests(); source.sheets + source.producthunt
+#     were later REBUILT as self-contained in-process sources (SHEETS-001/PH-001)
+#     and live in LOCALLY_RESOLVED above;
 #   * crm.add_tag/remove_tag/hot_lead_alert now emit .queued intents and route
 #     via NODE_CHANNEL;
 #   * crm.create_*/update_* are projection-only (LOCAL_CATEGORIES above).
