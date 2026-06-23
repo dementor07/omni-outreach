@@ -35,7 +35,7 @@ interface Props {
 // The label shown on a step — the shared human node name (curated, falls back
 // to a prettified type tail for unknown types).
 function nodeLabel(manifest: NodeManifest): string {
-  return nodeLabelFor(manifest.type)
+  return manifest.display_name || nodeLabelFor(manifest.type)
 }
 
 // Chain the nodes head-to-tail by array order via their 'default'/first handle.
@@ -90,6 +90,7 @@ export default function SequentialBuilder({ nodes, edges, manifests, onChange, o
   const grouped = useMemo(() => {
     const map = new Map<string, NodeManifest[]>()
     for (const m of manifests) {
+      if (m.visible_in_palette === false) continue
       const arr = map.get(m.category) ?? []
       arr.push(m)
       map.set(m.category, arr)

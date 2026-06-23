@@ -292,8 +292,12 @@ export interface NodeManifest {
   config_schema: Record<string, unknown>
   output_handles: NodeHandleManifest[]
   capabilities: string[]
-  side_effect: 'READ' | 'NETWORK' | 'MUTATE'
+  side_effect: 'read' | 'network' | 'mutate'
   icon: string
+  display_name: string
+  primary_fields: string[]
+  advanced_fields: string[]
+  visible_in_palette: boolean
 }
 
 export interface NodeExecuteRequest {
@@ -388,6 +392,23 @@ export interface WorkflowDetail {
   edges: WorkflowEdge[]
 }
 
+export interface GraphIssue {
+  code: string
+  message: string
+  severity: 'error' | 'warning'
+  scope: 'structural' | 'config'
+  node_id: UUID | null
+  edge_id: UUID | null
+}
+
+export interface GraphValidation {
+  valid_for_save: boolean
+  valid_for_run: boolean
+  issues: GraphIssue[]
+  error_count: number
+  warning_count: number
+}
+
 export interface RunResponse {
   lead_id: UUID
   workflow_id: UUID
@@ -404,6 +425,16 @@ export interface CampaignTemplateInfo {
   summary: string
 }
 
+export interface GoalWorkflowCreate {
+  name: string
+  timezone?: string
+  metric: ObjectiveMetric
+  target: number
+  audience: ObjectiveAudience
+  bounds: ObjectiveBounds
+  template_id?: string | null
+}
+
 export const canvas = {
   list: () => api.get<Workflow[]>('/canvas/workflows').then((r) => r.data),
   create: (name: string, timezone = 'UTC') =>
@@ -413,7 +444,11 @@ export const canvas = {
     api
       .post<WorkflowDetail>('/canvas/workflows/from-template', { template_id: templateId, name, timezone })
       .then((r) => r.data),
+  createFromGoal: (input: GoalWorkflowCreate) =>
+    api.post<WorkflowDetail>('/canvas/workflows/from-goal', input).then((r) => r.data),
   get: (id: UUID) => api.get<WorkflowDetail>(`/canvas/workflows/${id}`).then((r) => r.data),
+  validation: (id: UUID) =>
+    api.get<GraphValidation>(`/canvas/workflows/${id}/validation`).then((r) => r.data),
   update: (id: UUID, body: Partial<Pick<Workflow, 'name' | 'status' | 'timezone' | 'start_at' | 'end_at' | 'daily_cap' | 'earliest_hour' | 'latest_hour' | 'days_of_week'>>) =>
     api.patch<Workflow>(`/canvas/workflows/${id}`, body).then((r) => r.data),
   archive: (id: UUID) => api.delete(`/canvas/workflows/${id}`).then(() => undefined),

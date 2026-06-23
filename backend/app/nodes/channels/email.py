@@ -63,6 +63,9 @@ MANIFEST = NodeManifest(
     capabilities=("connection:smtp",),
     side_effect=SideEffect.NETWORK,
     icon="mail",
+    display_name="Send email",
+    primary_fields=("subject_template", "body_template", "verification_policy"),
+    advanced_fields=("connection_name", "sending_account_id", "account_pool", "from_address"),
 )
 
 

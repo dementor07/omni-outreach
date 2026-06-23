@@ -33,7 +33,7 @@ from aiokafka import AIOKafkaConsumer
 
 import app.nodes as noderegistry
 from app.config import settings
-from app.db import close_pool, execute, fetch_all, fetch_one, init_pool, system_scope
+from app.db import acquire, close_pool, execute, fetch_all, fetch_one, init_pool, system_scope
 from app.execution import commands
 from app.services import bus, company_kg, email_verification, send_policy, suppression
 
@@ -1539,14 +1539,174 @@ async def _emit_synthetic_result(
     await bus._producer.send_and_wait(bus.RESULTS_TOPIC, value=result, key=lead_id)  # type: ignore[union-attr]
 
 
-async def _apply_lead_mutations(workspace_id: str, lead_id: str, mutations: dict) -> None:
-    """Merge muscle-supplied column mutations into omni_leads.
+_ENRICHMENT_IDENTITY_FIELDS = (
+    "email",
+    "first_name",
+    "last_name",
+    "company",
+    "headline",
+    "linkedin_url",
+    "phone",
+)
 
-    Only ``custom_fields`` (jsonb merge) is supported today — that's how source
-    handlers (Apify, Serper) hand a fanned-out collection to the next
-    ``flow.for_each``. Other top-level lead columns can be wired here as
-    explicit branches; we don't blindly UPDATE arbitrary columns because the
-    muscle is not trusted to name internal DB schema."""
+
+def _clean_enrichment_fields(value: object) -> dict[str, str]:
+    """Accept only explicit contact identity fields and non-empty strings."""
+    if not isinstance(value, dict):
+        return {}
+    clean: dict[str, str] = {}
+    for field in _ENRICHMENT_IDENTITY_FIELDS:
+        raw = value.get(field)
+        if isinstance(raw, str) and raw.strip():
+            clean[field] = raw.strip()
+    return clean
+
+
+def _enrichment_history(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]
+
+
+async def _apply_enrichment_mutation(
+    workspace_id: str,
+    lead_id: str,
+    envelope: object,
+) -> None:
+    """Apply one provider result with fill-missing/overwrite and provenance.
+
+    The muscle is not allowed to name database columns directly. It returns one
+    typed ``enrichment`` envelope; this function whitelists identity fields,
+    locks the lead/contact rows, deduplicates by command id, and records exactly
+    which values were received and applied.
+    """
+    if not isinstance(envelope, dict):
+        return
+    fields = _clean_enrichment_fields(envelope.get("fields"))
+    provider = str(envelope.get("provider") or "unknown")[:80]
+    attempt_id = str(envelope.get("attempt_id") or "")[:120]
+    merge_policy = "overwrite" if envelope.get("merge_policy") == "overwrite" else "fill_missing"
+    observed_at = str(envelope.get("observed_at") or datetime.now(UTC).isoformat())
+    provider_metadata = envelope.get("metadata")
+    if not isinstance(provider_metadata, dict):
+        provider_metadata = {}
+
+    async with system_scope():
+        async with acquire() as conn:
+            async with conn.transaction():
+                lead = await conn.fetchrow(
+                    """
+                    SELECT contact_id, custom_fields
+                    FROM omni_leads
+                    WHERE id=$1 AND workspace_id=$2
+                    FOR UPDATE
+                    """,
+                    lead_id,
+                    workspace_id,
+                )
+                if not lead:
+                    return
+
+                lead_cf = dict(lead["custom_fields"] or {})
+                lead_history = _enrichment_history(lead_cf.get("enrichment_history"))
+                if attempt_id and any(
+                    isinstance(item, dict) and item.get("attempt_id") == attempt_id
+                    for item in lead_history
+                ):
+                    return
+
+                applied: dict[str, str] = {}
+                contact_id = lead["contact_id"]
+                contact_found = False
+                if contact_id:
+                    contact = await conn.fetchrow(
+                        """
+                        SELECT email, first_name, last_name, company, headline,
+                               linkedin_url, phone, custom_fields
+                        FROM omni_contacts
+                        WHERE id=$1 AND workspace_id=$2
+                        FOR UPDATE
+                        """,
+                        contact_id,
+                        workspace_id,
+                    )
+                    if contact:
+                        contact_found = True
+                        for field, value in fields.items():
+                            current = contact[field]
+                            if merge_policy == "overwrite" or not (
+                                isinstance(current, str) and current.strip()
+                            ):
+                                applied[field] = value
+
+                        contact_cf = dict(contact["custom_fields"] or {})
+                        contact_history = _enrichment_history(contact_cf.get("enrichment_history"))
+                        record = {
+                            "attempt_id": attempt_id,
+                            "provider": provider,
+                            "observed_at": observed_at,
+                            "merge_policy": merge_policy,
+                            "fields_received": sorted(fields),
+                            "fields_applied": sorted(applied),
+                            "metadata": provider_metadata,
+                        }
+                        contact_history.append(record)
+                        contact_cf["enrichment_history"] = contact_history
+
+                        assignments: list[str] = []
+                        args: list[object] = []
+                        for field, value in applied.items():
+                            args.append(value)
+                            assignments.append(f"{field}=${len(args)}")
+                        args.append(json.dumps(contact_cf))
+                        assignments.append(f"custom_fields=${len(args)}::jsonb")
+                        args.extend([contact_id, workspace_id])
+                        await conn.execute(
+                            f"UPDATE omni_contacts SET {', '.join(assignments)}, updated_at=NOW() "
+                            f"WHERE id=${len(args) - 1} AND workspace_id=${len(args)}",
+                            *args,
+                        )
+                if not contact_found:
+                    # Before crm.create_contact exists, keep learned identity on
+                    # the lead. commands._lead_context lifts these fields into the
+                    # next provider command so an ordered stack can build on them.
+                    for field, value in fields.items():
+                        current = lead_cf.get(field)
+                        if merge_policy == "overwrite" or not (
+                            isinstance(current, str) and current.strip()
+                        ):
+                            lead_cf[field] = value
+                            applied[field] = value
+
+                record = {
+                    "attempt_id": attempt_id,
+                    "provider": provider,
+                    "observed_at": observed_at,
+                    "merge_policy": merge_policy,
+                    "fields_received": sorted(fields),
+                    "fields_applied": sorted(applied),
+                    "metadata": provider_metadata,
+                }
+                lead_history.append(record)
+                lead_cf["enrichment_history"] = lead_history
+                await conn.execute(
+                    """
+                    UPDATE omni_leads
+                    SET custom_fields=$1::jsonb, updated_at=NOW()
+                    WHERE id=$2 AND workspace_id=$3
+                    """,
+                    json.dumps(lead_cf),
+                    lead_id,
+                    workspace_id,
+                )
+
+
+async def _apply_lead_mutations(workspace_id: str, lead_id: str, mutations: dict) -> None:
+    """Merge typed muscle-supplied mutations into lead/contact state.
+
+    ``custom_fields`` remains the generic lead-data channel. Enrichment is a
+    separate typed envelope because it may update whitelisted contact columns;
+    arbitrary muscle-supplied column names are never interpolated."""
     if not mutations:
         return
     cf = mutations.get("custom_fields")
@@ -1559,6 +1719,8 @@ async def _apply_lead_mutations(workspace_id: str, lead_id: str, mutations: dict
                 lead_id,
                 workspace_id,
             )
+
+    await _apply_enrichment_mutation(workspace_id, lead_id, mutations.get("enrichment"))
 
     # CONTRACT-003: persist tag mutations into custom_fields.tags (a JSONB string
     # array). condition.has_tag reads the same location. The ADD_TAG/REMOVE_TAG

@@ -40,7 +40,7 @@ const NODE_LABELS: Record<string, string> = {
   'ai.compose': 'AI compose message',
   'ai.screen_company': 'AI screen company',
   'ai.screen_person': 'AI screen person',
-  'ai.enrich': 'AI enrich',
+  'ai.enrich': 'Enrichment provider',
 
   // Channels
   'channel.email': 'Send email',
@@ -56,6 +56,7 @@ const NODE_LABELS: Record<string, string> = {
   // Conditions
   'condition.company_filter': 'Filter companies',
   'condition.field_match': 'If field matches',
+  'condition.rules': 'Rules',
   'condition.has_tag': 'If has tag',
   'condition.replied': 'If replied',
   'condition.verify_person': 'Verify person',
@@ -70,6 +71,7 @@ const NODE_LABELS: Record<string, string> = {
   'flow.goal': 'Goal reached',
   'flow.end': 'End sequence',
   'flow.human_approval': 'Human approval',
+  'flow.continue': 'Continue with enriched lead',
 
   // CRM
   'crm.add_tag': 'Add tag',

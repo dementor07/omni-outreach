@@ -1,7 +1,7 @@
 import {
   AtSign, Briefcase, Building2, CheckCircle2, CheckSquare, Clock, FileSpreadsheet,
   Filter, Flame, GitBranch, GitMerge, Globe, Hand, Instagram, Linkedin, Mail,
-  MessageCircle, MessageSquare, OctagonX, Phone, Repeat, Reply, Search, Send,
+  ListChecks, MessageCircle, MessageSquare, OctagonX, Phone, Repeat, Reply, Search, Send,
   ShieldCheck, Shuffle, Slack, Sparkles, Tag, Target, TrendingUp, UserCheck,
   UserPlus, Users, Webhook,
   type LucideIcon,
@@ -29,6 +29,7 @@ const ICON_BY_NAME: Record<string, LucideIcon> = {
   hand: Hand,
   instagram: Instagram,
   linkedin: Linkedin,
+  'list-checks': ListChecks,
   mail: Mail,
   'message-circle': MessageCircle,
   'message-square': MessageSquare,

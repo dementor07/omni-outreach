@@ -35,6 +35,8 @@ MANIFEST = NodeManifest(
     ),
     side_effect=SideEffect.READ,
     icon="git-branch",
+    display_name="If / else",
+    primary_fields=("field_path", "operator", "value"),
 )
 
 

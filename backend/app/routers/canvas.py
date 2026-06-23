@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 from app.auth import AuthContext, get_current_workspace
 from app.db import acquire, execute, fetch_all, fetch_one
 from app.routers.integrations import SendingAccountOut
+from app.services.graph_validation import validate_graph
 
 log = logging.getLogger(__name__)
 
@@ -95,6 +96,23 @@ class GraphEdgeIn(BaseModel):
 class GraphSave(BaseModel):
     nodes: list[GraphNodeIn] = Field(default_factory=list)
     edges: list[GraphEdgeIn] = Field(default_factory=list)
+
+
+class GraphIssue(BaseModel):
+    code: str
+    message: str
+    severity: Literal["error", "warning"]
+    scope: Literal["structural", "config"]
+    node_id: str | None = None
+    edge_id: str | None = None
+
+
+class GraphValidationOut(BaseModel):
+    valid_for_save: bool
+    valid_for_run: bool
+    issues: list[GraphIssue]
+    error_count: int
+    warning_count: int
 
 
 class WorkflowOut(BaseModel):
@@ -162,6 +180,16 @@ class TemplateInstantiate(BaseModel):
     timezone: str = Field("UTC", max_length=64)
 
 
+class GoalWorkflowCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    timezone: str = Field("UTC", max_length=64)
+    metric: Literal["contacts", "qualified_leads", "companies", "replies"]
+    target: int = Field(gt=0, le=100_000)
+    audience: dict[str, Any] = Field(default_factory=dict)
+    bounds: dict[str, Any] = Field(default_factory=dict)
+    template_id: str | None = Field(default=None, max_length=120)
+
+
 @router.get("/templates", summary="List starter campaign templates")
 async def list_campaign_templates(_: AuthContext = Depends(get_current_workspace)) -> list[dict[str, str]]:
     from app.canvas_templates import list_templates
@@ -223,6 +251,92 @@ async def create_from_template(
         workflow=WorkflowOut.model_validate(dict(wf)),
         nodes=[NodeOut.model_validate(dict(n)) for n in nodes],
         edges=[EdgeOut.model_validate(dict(e)) for e in edges],
+    )
+
+
+@router.post(
+    "/workflows/from-goal",
+    response_model=WorkflowDetail,
+    status_code=201,
+    summary="Create a goal-first workflow, optionally seeded from a starter plan",
+)
+async def create_from_goal(
+    body: GoalWorkflowCreate,
+    ctx: AuthContext = Depends(get_current_workspace),
+) -> WorkflowDetail:
+    from app.canvas_templates import TEMPLATES
+
+    template = TEMPLATES.get(body.template_id) if body.template_id else None
+    if body.template_id and not template:
+        raise HTTPException(status_code=404, detail=f"unknown template {body.template_id!r}")
+
+    key_to_id = {node.key: uuid.uuid4() for node in template.nodes} if template else {}
+    async with acquire() as conn:
+        async with conn.transaction():
+            wf = await conn.fetchrow(
+                "INSERT INTO omni_workflows (workspace_id, name, timezone) "
+                "VALUES ($1, $2, $3) RETURNING *",
+                ctx.workspace_id,
+                body.name,
+                body.timezone,
+            )
+            workflow_id = wf["id"]
+            if template:
+                for node in template.nodes:
+                    await conn.execute(
+                        """
+                        INSERT INTO omni_workflow_nodes
+                          (id, workspace_id, workflow_id, node_type, position_x, position_y, config)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+                        """,
+                        key_to_id[node.key],
+                        ctx.workspace_id,
+                        workflow_id,
+                        node.node_type,
+                        node.position_x,
+                        node.position_y,
+                        json.dumps(node.config),
+                    )
+                for edge in template.edges:
+                    await conn.execute(
+                        """
+                        INSERT INTO omni_workflow_edges
+                          (id, workspace_id, workflow_id, source_node_id, target_node_id,
+                           source_handle, target_handle)
+                        VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)
+                        """,
+                        ctx.workspace_id,
+                        workflow_id,
+                        key_to_id[edge.source],
+                        key_to_id[edge.target],
+                        edge.source_handle,
+                        edge.target_handle,
+                    )
+            await conn.execute(
+                """
+                INSERT INTO omni_campaign_objectives
+                  (workspace_id, workflow_id, metric, target, audience, bounds, progress, status)
+                VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,'{}'::jsonb,'pursuing')
+                """,
+                ctx.workspace_id,
+                workflow_id,
+                body.metric,
+                body.target,
+                json.dumps(body.audience),
+                json.dumps(body.bounds),
+            )
+            nodes = await conn.fetch(
+                "SELECT * FROM omni_workflow_nodes WHERE workflow_id=$1",
+                workflow_id,
+            )
+            edges = await conn.fetch(
+                "SELECT * FROM omni_workflow_edges WHERE workflow_id=$1",
+                workflow_id,
+            )
+    return WorkflowDetail(
+        workflow=WorkflowOut.model_validate(dict(wf)),
+        nodes=[NodeOut.model_validate(dict(node)) for node in nodes],
+        edges=[EdgeOut.model_validate(dict(edge)) for edge in edges],
     )
 
 
@@ -454,6 +568,36 @@ async def remove_edge(
 # ── Bulk graph save ────────────────────────────────────────────────────────────
 
 
+async def _graph_validation(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> GraphValidationOut:
+    connection_rows = await fetch_all("SELECT provider, name FROM omni_connections")
+    result = validate_graph(
+        nodes,
+        edges,
+        connections={(str(row["provider"]), str(row["name"])) for row in connection_rows},
+    )
+    return GraphValidationOut.model_validate(result)
+
+
+@router.get(
+    "/workflows/{workflow_id}/validation",
+    response_model=GraphValidationOut,
+    summary="Explain whether a saved workflow is structurally sound and runnable",
+)
+async def validate_saved_graph(
+    workflow_id: uuid.UUID,
+    _: AuthContext = Depends(get_current_workspace),
+) -> GraphValidationOut:
+    workflow = await fetch_one("SELECT id FROM omni_workflows WHERE id=$1", workflow_id)
+    if not workflow:
+        raise HTTPException(status_code=404, detail="workflow not found")
+    nodes = await fetch_all("SELECT * FROM omni_workflow_nodes WHERE workflow_id=$1", workflow_id)
+    edges = await fetch_all("SELECT * FROM omni_workflow_edges WHERE workflow_id=$1", workflow_id)
+    return await _graph_validation([dict(node) for node in nodes], [dict(edge) for edge in edges])
+
+
 @router.put(
     "/workflows/{workflow_id}/graph",
     response_model=WorkflowDetail,
@@ -470,6 +614,19 @@ async def save_graph(
     body: GraphSave,
     ctx: AuthContext = Depends(get_current_workspace),
 ) -> WorkflowDetail:
+    validation = await _graph_validation(
+        [node.model_dump() for node in body.nodes],
+        [edge.model_dump() for edge in body.edges],
+    )
+    if not validation.valid_for_save:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "The graph has structural errors and was not saved.",
+                "issues": [issue.model_dump() for issue in validation.issues],
+            },
+        )
+
     async with acquire() as conn:
         async with conn.transaction():
             wf = await conn.fetchrow("SELECT * FROM omni_workflows WHERE id = $1", workflow_id)
@@ -480,7 +637,6 @@ async def save_graph(
             await conn.execute("DELETE FROM omni_workflow_edges WHERE workflow_id = $1", workflow_id)
             await conn.execute("DELETE FROM omni_workflow_nodes WHERE workflow_id = $1", workflow_id)
 
-            node_ids: set[uuid.UUID] = set()
             for n in body.nodes:
                 await conn.execute(
                     """
@@ -490,12 +646,7 @@ async def save_graph(
                     """,
                     n.id, ctx.workspace_id, workflow_id, n.node_type, n.position_x, n.position_y, n.config,
                 )
-                node_ids.add(n.id)
-
             for e in body.edges:
-                # Skip dangling edges whose endpoints aren't in the posted node set.
-                if e.source_node_id not in node_ids or e.target_node_id not in node_ids:
-                    continue
                 await conn.execute(
                     """
                     INSERT INTO omni_workflow_edges
@@ -563,6 +714,16 @@ async def run_workflow(
     )
     if not wf:
         raise HTTPException(status_code=404, detail="workflow not found")
+
+    validation = await validate_saved_graph(workflow_id, ctx)
+    if not validation.valid_for_run:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Fix the campaign issues before running it.",
+                "issues": [issue.model_dump() for issue in validation.issues],
+            },
+        )
 
     start_node = None
     if body.start_node_id:

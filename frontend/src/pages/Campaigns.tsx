@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Megaphone, GitBranch, Sparkles, Rocket, Archive, Trash2, RotateCcw } from 'lucide-react'
-import { canvas, type Workflow } from '../api/v2'
+import {
+  Archive, Building2, ChevronDown, ChevronUp, GitBranch, Megaphone,
+  MessageCircle, Plus, Rocket, RotateCcw, Target, Trash2, UserCheck, Users,
+} from 'lucide-react'
+import { canvas, type ObjectiveMetric, type Workflow } from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Button from '../components/Button'
@@ -19,25 +22,39 @@ export default function Campaigns() {
 
   const [showCreate, setShowCreate] = useState(false)
   const [name, setName] = useState('')
-  const createMut = useMutation({
-    mutationFn: () => canvas.create(name.trim()),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['workflows'] })
-      setName('')
-      setShowCreate(false)
-    },
-  })
-  // Cold-start fix: instantiate a ready-to-run starter graph and jump straight
-  // into the editor, instead of dropping the user onto a blank canvas.
-  const fromTemplate = useMutation({
-    mutationFn: (templateId: string) => canvas.createFromTemplate(templateId),
+  const [metric, setMetric] = useState<ObjectiveMetric>('qualified_leads')
+  const [target, setTarget] = useState('50')
+  const [keywords, setKeywords] = useState('')
+  const [location, setLocation] = useState('')
+  const [templateId, setTemplateId] = useState<string | null>(null)
+  const [showBounds, setShowBounds] = useState(false)
+  const [maxIterations, setMaxIterations] = useState('5')
+  const [maxSpend, setMaxSpend] = useState('')
+
+  const createGoal = useMutation({
+    mutationFn: () => canvas.createFromGoal({
+      name: name.trim(),
+      metric,
+      target: Number(target),
+      audience: {
+        ...(keywords.trim() ? { keywords: keywords.split(',').map((item) => item.trim()).filter(Boolean) } : {}),
+        ...(location.trim() ? { location: location.trim() } : {}),
+      },
+      bounds: {
+        max_iterations: Number(maxIterations) || 5,
+        ...(Number(maxSpend) > 0 ? { max_spend_usd: Number(maxSpend) } : {}),
+      },
+      template_id: templateId,
+    }),
     onSuccess: (detail) => {
       qc.invalidateQueries({ queryKey: ['workflows'] })
       setShowCreate(false)
       navigate(`/campaigns/${detail.workflow.id}`)
     },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not create from template'),
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not create campaign'),
   })
+  const targetNumber = Number(target)
+  const canCreate = name.trim() && Number.isInteger(targetNumber) && targetNumber > 0
 
   return (
     <div className="space-y-6">
@@ -54,48 +71,145 @@ export default function Campaigns() {
       />
 
       {showCreate && (
-        <Card padding="md" className="space-y-4">
-          {templates.length > 0 && (
-            <div>
-              <p className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                <Sparkles size={13} /> Start from a template
-              </p>
-              <div className="space-y-2">
-                {templates.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    disabled={fromTemplate.isPending}
-                    onClick={() => fromTemplate.mutate(t.id)}
-                    className="flex w-full items-start gap-3 rounded-xl border border-slate-200 p-3 text-left transition-colors hover:border-brand-300 hover:bg-brand-50/40 disabled:opacity-60 dark:border-slate-700 dark:hover:border-brand-700 dark:hover:bg-brand-900/10"
-                  >
-                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600 dark:bg-brand-900/30 dark:text-brand-300">
-                      <Rocket size={16} />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-sm font-semibold text-slate-900 dark:text-white">{t.name}</span>
-                      <span className="block text-xs text-slate-500">{t.summary}</span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-              <div className="mt-4 flex items-center gap-3">
-                <span className="h-px flex-1 bg-slate-100 dark:bg-slate-800" />
-                <span className="text-[11px] font-medium uppercase tracking-wider text-slate-400">or start blank</span>
-                <span className="h-px flex-1 bg-slate-100 dark:bg-slate-800" />
-              </div>
+        <Card padding="lg" className="space-y-6">
+          <div>
+            <p className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+              <Target size={17} className="text-brand-500" /> What should Omni achieve?
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Start with the outcome. The canvas is the editable plan Omni uses to reach it.
+            </p>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {([
+              { value: 'companies', label: 'Find companies', description: 'Build a precise account list', icon: Building2 },
+              { value: 'contacts', label: 'Create contacts', description: 'Find the right people', icon: Users },
+              { value: 'qualified_leads', label: 'Qualify leads', description: 'Produce sales-ready prospects', icon: UserCheck },
+              { value: 'replies', label: 'Earn replies', description: 'Optimize for conversations', icon: MessageCircle },
+            ] as const).map((option) => {
+              const Icon = option.icon
+              const selected = metric === option.value
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setMetric(option.value)}
+                  className={`rounded-xl border p-3 text-left transition-colors ${
+                    selected
+                      ? 'border-brand-400 bg-brand-50 dark:border-brand-700 dark:bg-brand-950/30'
+                      : 'border-slate-200 hover:border-slate-300 dark:border-slate-700'
+                  }`}
+                >
+                  <Icon size={17} className={selected ? 'text-brand-600' : 'text-slate-400'} />
+                  <span className="mt-2 block text-sm font-semibold text-slate-900 dark:text-white">{option.label}</span>
+                  <span className="mt-0.5 block text-xs text-slate-500">{option.description}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-800/40">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Goal sentence</p>
+            <div className="mt-3 grid gap-3 md:grid-cols-[140px_1fr_180px]">
+              <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                How many?
+                <input
+                  type="number"
+                  min={1}
+                  value={target}
+                  onChange={(e) => setTarget(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+                />
+              </label>
+              <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                Who or what are you targeting?
+                <input
+                  value={keywords}
+                  onChange={(e) => setKeywords(e.target.value)}
+                  placeholder="B2B SaaS, VP Marketing, Head of Growth"
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+                />
+              </label>
+              <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                Where?
+                <input
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  placeholder="India or global"
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+                />
+              </label>
             </div>
-          )}
-          <div className="flex items-center gap-3">
+          </div>
+
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Starting plan</p>
+            <div className="mt-2 grid gap-2 md:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => setTemplateId(null)}
+                className={`rounded-xl border p-3 text-left ${templateId === null ? 'border-brand-400 bg-brand-50 dark:bg-brand-950/30' : 'border-slate-200 dark:border-slate-700'}`}
+              >
+                <GitBranch size={16} className="text-brand-500" />
+                <span className="mt-1.5 block text-sm font-semibold text-slate-900 dark:text-white">Design the plan</span>
+                <span className="block text-xs text-slate-500">Start with a clean canvas and the goal already attached.</span>
+              </button>
+              {templates.map((template) => (
+                <button
+                  key={template.id}
+                  type="button"
+                  onClick={() => setTemplateId(template.id)}
+                  className={`rounded-xl border p-3 text-left ${templateId === template.id ? 'border-brand-400 bg-brand-50 dark:bg-brand-950/30' : 'border-slate-200 dark:border-slate-700'}`}
+                >
+                  <Rocket size={16} className="text-brand-500" />
+                  <span className="mt-1.5 block text-sm font-semibold text-slate-900 dark:text-white">{template.name}</span>
+                  <span className="block text-xs text-slate-500">{template.summary}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-100 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => setShowBounds((value) => !value)}
+              className="flex w-full items-center justify-between px-3 py-2.5 text-left"
+            >
+              <span>
+                <span className="block text-xs font-semibold text-slate-700 dark:text-slate-200">Safety bounds</span>
+                <span className="block text-[11px] text-slate-400">Stop autonomous pursuit before it overspends or loops.</span>
+              </span>
+              {showBounds ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+            </button>
+            {showBounds && (
+              <div className="grid gap-3 border-t border-slate-100 p-3 sm:grid-cols-2 dark:border-slate-800">
+                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                  Maximum attempts
+                  <input type="number" min={1} value={maxIterations} onChange={(e) => setMaxIterations(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900" />
+                </label>
+                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                  Maximum spend (USD)
+                  <input type="number" min={0} step="0.5" value={maxSpend} onChange={(e) => setMaxSpend(e.target.value)} placeholder="No cap"
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900" />
+                </label>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4 dark:border-slate-800">
             <input
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && name.trim() && createMut.mutate()}
-              placeholder="Campaign name (e.g. Q3 SDR outbound)"
+              onKeyDown={(e) => e.key === 'Enter' && canCreate && createGoal.mutate()}
+              placeholder="Name this campaign"
               className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-800"
             />
-            <Button variant="primary" onClick={() => createMut.mutate()} isLoading={createMut.isPending} disabled={!name.trim()}>Create</Button>
+            <Button variant="primary" icon={Target} onClick={() => createGoal.mutate()} isLoading={createGoal.isPending} disabled={!canCreate}>
+              Create goal-driven campaign
+            </Button>
             <Button variant="ghost" onClick={() => setShowCreate(false)}>Cancel</Button>
           </div>
         </Card>

@@ -67,6 +67,10 @@ class NodeManifest:
     capabilities: tuple[str, ...] = ()
     side_effect: SideEffect = SideEffect.READ
     icon: str = ""
+    display_name: str = ""
+    primary_fields: tuple[str, ...] = ()
+    advanced_fields: tuple[str, ...] = ()
+    visible_in_palette: bool = True
 
     def to_openapi(self) -> dict[str, Any]:
         """Render as a JSON-serialisable manifest for ``GET /nodes``."""
@@ -79,6 +83,10 @@ class NodeManifest:
             "capabilities": list(self.capabilities),
             "side_effect": self.side_effect.value,
             "icon": self.icon,
+            "display_name": self.display_name,
+            "primary_fields": list(self.primary_fields),
+            "advanced_fields": list(self.advanced_fields),
+            "visible_in_palette": self.visible_in_palette,
         }
 
 

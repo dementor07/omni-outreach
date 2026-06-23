@@ -56,19 +56,19 @@ export const PROVIDERS: ProviderSpec[] = [
   },
   {
     id: 'openai', name: 'OpenAI', category: 'ai', icon: Sparkles,
-    blurb: 'Alternative model provider for compose, enrichment, and scoring.',
+    blurb: 'Alternative model provider for message composition and scoring.',
     docsUrl: 'https://platform.openai.com/api-keys',
     fields: [{ key: 'api_key', label: 'API key', type: 'secret', placeholder: 'sk-…' }],
   },
   {
     id: 'gemini', name: 'Google Gemini', category: 'ai', icon: Sparkles,
-    blurb: 'Google model provider for compose and enrichment.',
+    blurb: 'Google model provider for AI composition workflows.',
     docsUrl: 'https://aistudio.google.com/apikey',
     fields: [API_KEY],
   },
   {
     id: 'mindstudio', name: 'MindStudio', category: 'ai', icon: Sparkles,
-    blurb: 'Hosted AI workflows for enrichment and compose.',
+    blurb: 'Hosted AI workflows for message composition.',
     fields: [API_KEY],
   },
 

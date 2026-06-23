@@ -33,6 +33,10 @@ class NodeManifestOut(BaseModel):
     capabilities: list[str]
     side_effect: str
     icon: str
+    display_name: str
+    primary_fields: list[str]
+    advanced_fields: list[str]
+    visible_in_palette: bool
 
 
 class NodeExecuteRequest(BaseModel):

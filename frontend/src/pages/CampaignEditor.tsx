@@ -13,12 +13,26 @@ import '@xyflow/react/dist/style.css'
 import { clsx } from 'clsx'
 import {
   ArrowLeft, Search, GitBranch, Save, Undo2, Redo2, Maximize2, Minimize2, Plus,
-  Users, Settings as SettingsIcon, Trash2, Play, Target,
+  Users, Settings as SettingsIcon, Trash2, Play, Target, Layers3, ArrowUp, ArrowDown, X,
+  AlertTriangle, CheckCircle2,
 } from 'lucide-react'
-import { canvas, nodes as nodesApi, projections, integrations, type Lead, type NodeManifest, type WorkflowStatus } from '../api/v2'
+import {
+  canvas,
+  nodes as nodesApi,
+  projections,
+  integrations,
+  objectives,
+  type Connection as IntegrationConnection,
+  type GraphValidation,
+  type Lead,
+  type NodeManifest,
+  type Objective,
+  type WorkflowStatus,
+} from '../api/v2'
 import { nodeIcon } from '../utils/nodeIcons'
 import { visualFor } from '../utils/nodeVisuals'
 import { nodeLabel, handleLabel, categoryLabel } from '../utils/nodeLabel'
+import { nodeConfigSummary } from '../utils/nodeSummary'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
 import Button from '../components/Button'
@@ -34,27 +48,18 @@ import Select from '../components/Select'
 // Category → icon + accent now lives in utils/nodeVisuals (shared with the
 // linear SequentialBuilder so a node looks identical in either view).
 
-// A short, human config summary shown on the node body so cards aren't identical.
-function configSummary(config: Record<string, unknown>): string | null {
-  const keys = Object.keys(config)
-  if (keys.length === 0) return null
-  // Prefer the most meaningful field.
-  const preferred = ['subject_template', 'body_template', 'instruction', 'icp_description', 'new_stage', 'title_template', 'amount', 'connection_name', 'url', 'channel']
-  for (const k of preferred) {
-    const v = config[k]
-    if (typeof v === 'string' && v.trim()) return v.length > 48 ? v.slice(0, 47) + '…' : v
-    if (typeof v === 'number') return String(v)
-  }
-  const first = config[keys[0]]
-  return typeof first === 'string' ? first.slice(0, 48) : `${keys.length} fields`
-}
-
 // ── Node data shape ────────────────────────────────────────────────────────
 interface OmniNodeData extends Record<string, unknown> {
   manifest: NodeManifest
   config: Record<string, unknown>
 }
 type OmniRfNode = Node<OmniNodeData>
+
+type EnrichmentProvider = 'apollo' | 'hunter' | 'proxycurl'
+interface EnrichmentStage {
+  provider: EnrichmentProvider
+  connection_name: string
+}
 
 // ── Cycle detection ───────────────────────────────────────────────────────
 // flow.for_each is a sharp primitive: every visit spawns the whole collection
@@ -95,7 +100,7 @@ function OmniNode({ data, selected }: NodeProps<OmniRfNode>) {
   const { manifest, config } = data
   const v = visualFor(manifest.category)
   const Icon = nodeIcon(manifest, v.icon)
-  const summary = configSummary(config)
+  const summary = nodeConfigSummary(manifest, config)
   const schema = manifest.config_schema as { required?: string[] }
   const required = schema.required ?? []
   const missing = required.filter((k) => {
@@ -113,7 +118,7 @@ function OmniNode({ data, selected }: NodeProps<OmniRfNode>) {
           <Icon size={20} />
         </div>
         <div className="flex-1 overflow-hidden">
-          <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{nodeLabel(manifest.type)}</p>
+          <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{manifest.display_name || nodeLabel(manifest.type)}</p>
           <p className="truncate text-xs text-slate-500">{summary ?? manifest.summary}</p>
         </div>
       </div>
@@ -217,6 +222,18 @@ export default function CampaignEditor() {
 
   const detailQuery = useQuery({ queryKey: ['workflow', id], queryFn: () => canvas.get(id!), enabled: !!id })
   const manifestsQuery = useQuery({ queryKey: ['node-manifests'], queryFn: nodesApi.list })
+  const connectionsQuery = useQuery({ queryKey: ['integrations'], queryFn: () => integrations.list() })
+  const validationQuery = useQuery({
+    queryKey: ['workflow', id, 'validation'],
+    queryFn: () => canvas.validation(id!),
+    enabled: !!id && !!detailQuery.data,
+  })
+  const objectiveQuery = useQuery({
+    queryKey: ['objective', id],
+    queryFn: () => objectives.get(id!),
+    enabled: !!id,
+    refetchInterval: (query) => query.state.data?.status === 'pursuing' ? 8000 : false,
+  })
 
   const [rfNodes, setRfNodes, onNodesChangeRaw] = useNodesState<OmniRfNode>([])
   const [rfEdges, setRfEdges, onEdgesChangeRaw] = useEdgesState<Edge>([])
@@ -224,6 +241,7 @@ export default function CampaignEditor() {
   const [fullscreen, setFullscreen] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [viewMode, setViewMode] = useState<'canvas' | 'linear'>('canvas')
+  const [showValidation, setShowValidation] = useState(false)
   const { pushState, undo, redo, canUndo, canRedo, reset } = useCanvasHistory()
   const rfInstance = useRef<ReactFlowInstance<OmniRfNode, Edge> | null>(null)
 
@@ -304,7 +322,10 @@ export default function CampaignEditor() {
     onSuccess: () => {
       setDirty(false)
       qc.invalidateQueries({ queryKey: ['workflow', id] })
+      qc.invalidateQueries({ queryKey: ['workflow', id, 'validation'] })
+      toast.success('Campaign plan saved.')
     },
+    onError: (error: unknown) => toast.error(error instanceof Error ? error.message : 'The graph could not be saved.'),
   })
 
   // Run the workflow: seed a lead at the entry (source) node and fire it. The
@@ -316,6 +337,7 @@ export default function CampaignEditor() {
       toast.success(`Run started at ${r.node_type} — ${r.events_published} intent dispatched. Leads will appear shortly.`)
       qc.invalidateQueries({ queryKey: ['workflow-leads', id] })
       qc.invalidateQueries({ queryKey: ['leads'] })
+      qc.invalidateQueries({ queryKey: ['workflow', id, 'validation'] })
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Run failed'),
   })
@@ -360,6 +382,72 @@ export default function CampaignEditor() {
     setDirty(true)
     setSelectedNodeId(newNode.id)
   }, [rfEdges, setRfNodes, pushState])
+
+  const addEnrichmentStack = useCallback((stages: EnrichmentStage[]) => {
+    const stageManifest = manifestByType.get('ai.enrich')
+    const continueManifest = manifestByType.get('flow.continue')
+    if (!stageManifest || !continueManifest || stages.length === 0) {
+      toast.error('The enrichment building block is unavailable. Reload the node registry and try again.')
+      return
+    }
+
+    const base = {
+      x: 140 + (dropSeq % 4) * 48,
+      y: 120 + (dropSeq % 4) * 48,
+    }
+    dropSeq += 1
+    const stageNodes: OmniRfNode[] = stages.map((stage, index) => ({
+      id: crypto.randomUUID(),
+      type: 'omni',
+      position: { x: base.x + index * 270, y: base.y },
+      data: {
+        manifest: stageManifest,
+        config: {
+          enrich_source: stage.provider,
+          connection_name: stage.connection_name,
+          merge_policy: 'fill_missing',
+          skip_if_complete: true,
+        },
+      },
+    }))
+    const exitNode: OmniRfNode = {
+      id: crypto.randomUUID(),
+      type: 'omni',
+      position: { x: base.x + stages.length * 270, y: base.y },
+      data: { manifest: continueManifest, config: {} },
+    }
+    const insertedNodes = [...stageNodes, exitNode]
+    const insertedEdges: Edge[] = stageNodes.flatMap((node, index) => {
+      const target = insertedNodes[index + 1]
+      return [
+        {
+          id: crypto.randomUUID(),
+          source: node.id,
+          target: target.id,
+          sourceHandle: 'default',
+          targetHandle: null,
+          type: 'omni',
+        },
+        {
+          id: crypto.randomUUID(),
+          source: node.id,
+          target: target.id,
+          sourceHandle: 'on_error',
+          targetHandle: null,
+          type: 'omni',
+        },
+      ]
+    })
+    const nextNodes = [...rfNodes, ...insertedNodes]
+    const nextEdges = [...rfEdges, ...insertedEdges]
+    setRfNodes(nextNodes)
+    setRfEdges(nextEdges)
+    pushState(nextNodes, nextEdges)
+    setDirty(true)
+    setSelectedNodeId(exitNode.id)
+    requestAnimationFrame(() => rfInstance.current?.fitView({ padding: 0.25, duration: 300 }))
+    toast.success(`Added ${stages.length}-source enrichment stack. First source has highest priority; later sources fill gaps.`)
+  }, [manifestByType, pushState, rfEdges, rfNodes, setRfEdges, setRfNodes, toast])
 
   const updateNodeConfig = useCallback((nodeId: string, config: Record<string, unknown>) => {
     setRfNodes((ns) => {
@@ -418,7 +506,14 @@ export default function CampaignEditor() {
   const flow = (
     <div className={clsx('relative flex h-full overflow-hidden', fullscreen ? 'bg-white dark:bg-slate-950' : 'rounded-2xl border border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/50')}>
       {/* Palette as a fixed left rail — never overlaps the canvas/handles. */}
-      <NodePalette manifests={manifestsQuery.data ?? []} loading={manifestsQuery.isLoading} onAdd={addNode} />
+      <NodePalette
+        manifests={manifestsQuery.data ?? []}
+        loading={manifestsQuery.isLoading}
+        connections={connectionsQuery.data ?? []}
+        connectionsLoading={connectionsQuery.isLoading}
+        onAdd={addNode}
+        onAddEnrichmentStack={addEnrichmentStack}
+      />
       <div className="relative flex-1" onDrop={onDrop} onDragOver={onDragOver}>
         <ReactFlow
           nodes={rfNodes}
@@ -454,6 +549,19 @@ export default function CampaignEditor() {
           />
 
           {/* Toolbar */}
+          <Panel position="top-left" className="ml-2">
+            <ValidationStatus
+              validation={validationQuery.data}
+              loading={validationQuery.isLoading}
+              dirty={dirty}
+              open={showValidation}
+              onToggle={() => setShowValidation((visible) => !visible)}
+              onSelectNode={(nodeId) => {
+                setSelectedNodeId(nodeId)
+                setShowValidation(false)
+              }}
+            />
+          </Panel>
           <Panel position="top-right" className="flex items-center gap-2">
             <div className="glass-panel flex items-center gap-0.5 rounded-lg border border-white/40 p-0.5 dark:border-white/10">
               <ToolbarBtn title={fullscreen ? 'Exit full screen' : 'Full screen'} onClick={() => setFullscreen((f) => !f)}>
@@ -472,10 +580,18 @@ export default function CampaignEditor() {
               icon={Play}
               onClick={() => runMut.mutate()}
               isLoading={runMut.isPending}
-              disabled={dirty || !hasSource}
-              title={dirty ? 'Save the graph before running' : !hasSource ? 'Add a source node to run' : 'Enroll a lead at the source node and start the pipeline'}
+              disabled={dirty || !hasSource || validationQuery.data?.valid_for_run === false}
+              title={
+                dirty
+                  ? 'Save the graph before running'
+                  : !hasSource
+                    ? 'Add a source node to run'
+                    : validationQuery.data?.valid_for_run === false
+                      ? 'Fix the plan issues before running'
+                      : 'Enroll a lead at the source node and start the pipeline'
+              }
             >
-              Run
+              {objectiveQuery.data ? 'Start pursuit' : 'Run'}
             </Button>
           </Panel>
 
@@ -500,6 +616,7 @@ export default function CampaignEditor() {
             nodeId={selectedNode.id}
             initialConfig={selectedNode.data.config}
             saving={false}
+            connections={connectionsQuery.data ?? []}
             onSave={(config) => { updateNodeConfig(selectedNode.id, config); setSelectedNodeId(null) }}
             onDelete={() => deleteNode(selectedNode.id)}
             onClose={() => setSelectedNodeId(null)}
@@ -528,6 +645,9 @@ export default function CampaignEditor() {
           {wf && (
             <div className="flex shrink-0 items-center gap-2">
               <Badge variant={wf.status === 'active' ? 'success' : wf.status === 'paused' ? 'warning' : 'neutral'} label={wf.status} dot size="xs" />
+              {objectiveQuery.data && (
+                <GoalStatusChip objective={objectiveQuery.data} onClick={() => setActiveTab('goal')} />
+              )}
               <span className="hidden text-[11px] text-slate-400 sm:inline">{wf.timezone} · {rfNodes.length} nodes · {rfEdges.length} edges</span>
               {dirty && <Badge variant="warning" label="unsaved" size="xs" />}
             </div>
@@ -917,6 +1037,109 @@ function WorkflowPoolSettings({ workflowId }: { workflowId: string }) {
   )
 }
 
+function ValidationStatus({
+  validation,
+  loading,
+  dirty,
+  open,
+  onToggle,
+  onSelectNode,
+}: {
+  validation?: GraphValidation
+  loading: boolean
+  dirty: boolean
+  open: boolean
+  onToggle: () => void
+  onSelectNode: (nodeId: string) => void
+}) {
+  const ready = !dirty && validation?.valid_for_run
+  const count = validation?.issues.length ?? 0
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={onToggle}
+        className={clsx(
+          'glass-panel flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-semibold shadow-sm',
+          ready
+            ? 'border-emerald-200 text-emerald-700 dark:border-emerald-900 dark:text-emerald-300'
+            : 'border-amber-200 text-amber-700 dark:border-amber-900 dark:text-amber-300',
+        )}
+      >
+        {ready ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+        {loading ? 'Checking plan…' : dirty ? 'Unsaved changes' : ready ? 'Ready to run' : `${count} plan ${count === 1 ? 'issue' : 'issues'}`}
+      </button>
+      {open && (
+        <div className="absolute left-0 top-10 z-50 w-80 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900">
+          <div className="border-b border-slate-100 px-3 py-2.5 dark:border-slate-800">
+            <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">Plan check</p>
+            <p className="mt-0.5 text-[11px] text-slate-400">
+              {dirty ? 'Save to check the latest graph.' : 'Errors block runs. Warnings describe intentional journey endings.'}
+            </p>
+          </div>
+          <div className="max-h-72 overflow-y-auto p-2">
+            {!validation || validation.issues.length === 0 ? (
+              <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
+                Every step is configured and reachable.
+              </p>
+            ) : (
+              <ul className="space-y-1.5">
+                {validation.issues.map((issue, index) => (
+                  <li key={`${issue.code}-${issue.node_id ?? issue.edge_id ?? index}`}>
+                    <button
+                      type="button"
+                      disabled={!issue.node_id}
+                      onClick={() => issue.node_id && onSelectNode(issue.node_id)}
+                      className={clsx(
+                        'w-full rounded-lg px-2.5 py-2 text-left',
+                        issue.severity === 'error'
+                          ? 'bg-rose-50 text-rose-800 dark:bg-rose-950/30 dark:text-rose-200'
+                          : 'bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:text-amber-200',
+                        issue.node_id && 'hover:ring-1 hover:ring-current',
+                      )}
+                    >
+                      <span className="block text-[10px] font-bold uppercase tracking-wide opacity-60">{issue.severity}</span>
+                      <span className="mt-0.5 block text-xs leading-snug">{issue.message}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const GOAL_METRIC_LABELS: Record<Objective['metric'], string> = {
+  contacts: 'contacts',
+  qualified_leads: 'qualified leads',
+  companies: 'companies',
+  replies: 'replies',
+}
+
+function GoalStatusChip({ objective, onClick }: { objective: Objective; onClick: () => void }) {
+  const current = Number(objective.progress.current ?? 0)
+  const reached = objective.status === 'reached'
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Open campaign goal"
+      className={clsx(
+        'hidden items-center gap-1.5 rounded-full px-2 py-1 text-[10px] font-semibold md:flex',
+        reached
+          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+          : 'bg-brand-50 text-brand-700 dark:bg-brand-950/40 dark:text-brand-300',
+      )}
+    >
+      <Target size={11} />
+      Goal: {current.toLocaleString()} / {objective.target.toLocaleString()} {GOAL_METRIC_LABELS[objective.metric]}
+    </button>
+  )
+}
+
 function ToolbarBtn({ title, onClick, disabled, children }: { title: string; onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
   return (
     <button
@@ -936,21 +1159,42 @@ function fallbackManifest(type: string): NodeManifest {
   return {
     type, category: 'TRANSFORM', summary: 'Unknown node type — registry may have changed.',
     config_schema: {}, output_handles: [{ name: 'default', description: '' }],
-    capabilities: [], side_effect: 'READ', icon: 'help-circle',
+    capabilities: [], side_effect: 'read', icon: 'help-circle',
+    display_name: '', primary_fields: [], advanced_fields: [],
+    visible_in_palette: true,
   }
 }
 
 // ── In-canvas palette ────────────────────────────────────────────────────────
-function NodePalette({ manifests, loading, onAdd }: { manifests: NodeManifest[]; loading: boolean; onAdd: (m: NodeManifest) => void }) {
+function NodePalette({
+  manifests,
+  loading,
+  connections,
+  connectionsLoading,
+  onAdd,
+  onAddEnrichmentStack,
+}: {
+  manifests: NodeManifest[]
+  loading: boolean
+  connections: IntegrationConnection[]
+  connectionsLoading: boolean
+  onAdd: (m: NodeManifest) => void
+  onAddEnrichmentStack: (stages: EnrichmentStage[]) => void
+}) {
   const [filter, setFilter] = useState('')
+  const [showEnrichmentStack, setShowEnrichmentStack] = useState(false)
   // Default COLLAPSED to the slim rail so the canvas gets the full width on load
   // (the palette is only needed while adding nodes). Expand on demand.
   const [open, setOpen] = useState(false)
 
   const grouped = useMemo(() => {
     const filtered = filter
-      ? manifests.filter((m) => m.type.toLowerCase().includes(filter.toLowerCase()) || m.summary.toLowerCase().includes(filter.toLowerCase()))
-      : manifests
+      ? manifests.filter((m) => m.visible_in_palette !== false && (
+        m.type.toLowerCase().includes(filter.toLowerCase())
+        || m.summary.toLowerCase().includes(filter.toLowerCase())
+        || m.display_name.toLowerCase().includes(filter.toLowerCase())
+      ))
+      : manifests.filter((m) => m.visible_in_palette !== false)
     const map = new Map<string, NodeManifest[]>()
     for (const m of filtered) {
       const arr = map.get(m.category) ?? []
@@ -989,6 +1233,26 @@ function NodePalette({ manifests, loading, onAdd }: { manifests: NodeManifest[];
           className="w-full rounded-md border border-slate-200 bg-white py-1.5 pl-7 pr-2 text-xs focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-800"
         />
       </div>
+      {!filter && (
+        <div className="border-b border-slate-100 px-2 py-2 dark:border-slate-800">
+          <p className="px-1 pb-1.5 text-[9px] font-bold uppercase tracking-[0.18em] text-brand-500">Recommended building blocks</p>
+          <button
+            type="button"
+            onClick={() => setShowEnrichmentStack(true)}
+            className="w-full rounded-xl border border-brand-100 bg-brand-50/70 p-2.5 text-left transition-colors hover:border-brand-200 hover:bg-brand-50 dark:border-brand-900/60 dark:bg-brand-950/30"
+          >
+            <span className="flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-100">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white text-brand-600 shadow-sm dark:bg-slate-900">
+                <Layers3 size={14} />
+              </span>
+              Enrichment stack
+            </span>
+            <span className="mt-1 block text-[11px] leading-snug text-slate-500">
+              Order Apollo, Proxycurl, and Hunter. Later sources fill only the gaps.
+            </span>
+          </button>
+        </div>
+      )}
       <div className="flex-1 space-y-3 overflow-y-auto px-1.5 py-2">
         {loading ? (
           <p className="px-2 text-xs text-slate-500">Loading…</p>
@@ -1016,7 +1280,7 @@ function NodePalette({ manifests, loading, onAdd }: { manifests: NodeManifest[];
                         <span className={clsx('flex h-5 w-5 flex-shrink-0 items-center justify-center rounded', v.tint, v.accent)}>
                           <Icon size={12} />
                         </span>
-                        <span className="truncate">{nodeLabel(m.type)}</span>
+                        <span className="truncate">{m.display_name || nodeLabel(m.type)}</span>
                       </button>
                     )
                   })}
@@ -1026,6 +1290,180 @@ function NodePalette({ manifests, loading, onAdd }: { manifests: NodeManifest[];
           })
         )}
       </div>
+      {showEnrichmentStack && (
+        <EnrichmentStackDialog
+          connections={connections}
+          loading={connectionsLoading}
+          onClose={() => setShowEnrichmentStack(false)}
+          onAdd={(stages) => {
+            onAddEnrichmentStack(stages)
+            setShowEnrichmentStack(false)
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+const ENRICHMENT_PROVIDER_ORDER: EnrichmentProvider[] = ['apollo', 'proxycurl', 'hunter']
+const ENRICHMENT_PROVIDER_COPY: Record<EnrichmentProvider, { name: string; detail: string }> = {
+  apollo: { name: 'Apollo', detail: 'Identity, role, company, and LinkedIn matching' },
+  proxycurl: { name: 'Proxycurl', detail: 'Deep LinkedIn profile enrichment' },
+  hunter: { name: 'Hunter', detail: 'Professional email discovery' },
+}
+
+function EnrichmentStackDialog({
+  connections,
+  loading,
+  onClose,
+  onAdd,
+}: {
+  connections: IntegrationConnection[]
+  loading: boolean
+  onClose: () => void
+  onAdd: (stages: EnrichmentStage[]) => void
+}) {
+  const providerConnections = useMemo(() => {
+    const grouped = new Map<EnrichmentProvider, IntegrationConnection[]>()
+    for (const provider of ENRICHMENT_PROVIDER_ORDER) {
+      grouped.set(provider, connections.filter((connection) => connection.provider === provider))
+    }
+    return grouped
+  }, [connections])
+  const [stages, setStages] = useState<EnrichmentStage[]>([])
+  const initialized = useRef(false)
+  useEffect(() => {
+    if (loading || initialized.current) return
+    setStages(ENRICHMENT_PROVIDER_ORDER.flatMap((provider) => {
+      const first = connections.find((connection) => connection.provider === provider)
+      return first ? [{ provider, connection_name: first.name }] : []
+    }))
+    initialized.current = true
+  }, [connections, loading])
+
+  const missingProviders = ENRICHMENT_PROVIDER_ORDER.filter(
+    (provider) => (providerConnections.get(provider)?.length ?? 0) === 0,
+  )
+  const addableProviders = ENRICHMENT_PROVIDER_ORDER.filter(
+    (provider) => (providerConnections.get(provider)?.length ?? 0) > 0
+      && !stages.some((stage) => stage.provider === provider),
+  )
+  const connectedCount = ENRICHMENT_PROVIDER_ORDER.filter(
+    (provider) => (providerConnections.get(provider)?.length ?? 0) > 0,
+  ).length
+
+  function move(index: number, direction: -1 | 1) {
+    const target = index + direction
+    if (target < 0 || target >= stages.length) return
+    setStages((current) => {
+      const next = [...current]
+      ;[next[index], next[target]] = [next[target], next[index]]
+      return next
+    })
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-[10050] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Build enrichment stack">
+      <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+          <div>
+            <p className="text-base font-semibold text-slate-900 dark:text-white">Build an enrichment stack</p>
+            <p className="mt-1 text-xs leading-relaxed text-slate-500">
+              Put your most trusted source first. Each later source fills missing fields; it never silently replaces a value learned earlier.
+            </p>
+          </div>
+          <button type="button" onClick={onClose} title="Close" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="space-y-3 px-5 py-4">
+          {loading ? (
+            <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500 dark:bg-slate-800/50">Loading connected enrichment sources…</p>
+          ) : stages.length === 0 && connectedCount === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-300 p-5 text-center dark:border-slate-700">
+              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Connect an enrichment source first</p>
+              <p className="mt-1 text-xs text-slate-500">Apollo, Proxycurl, or Hunter connections will appear here automatically.</p>
+              <Link to="/integrations" className="mt-3 inline-flex text-xs font-semibold text-brand-600 hover:text-brand-700">Open integrations</Link>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-2">
+                {stages.map((stage, index) => {
+                  const options = providerConnections.get(stage.provider) ?? []
+                  const copy = ENRICHMENT_PROVIDER_COPY[stage.provider]
+                  return (
+                    <div key={stage.provider} className="flex items-center gap-3 rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+                      <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-bold text-brand-700 dark:bg-brand-950/50 dark:text-brand-300">
+                        {index + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">{copy.name}</span>
+                          <span className="truncate text-[11px] text-slate-400">{copy.detail}</span>
+                        </div>
+                        <select
+                          value={stage.connection_name}
+                          onChange={(event) => setStages((current) => current.map((item, itemIndex) => (
+                            itemIndex === index ? { ...item, connection_name: event.target.value } : item
+                          )))}
+                          className="mt-1.5 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 focus:border-brand-400 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        >
+                          {options.map((connection) => <option key={connection.id} value={connection.name}>{connection.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <button type="button" onClick={() => move(index, -1)} disabled={index === 0} title="Move earlier" className="rounded p-1 text-slate-400 hover:bg-slate-100 disabled:opacity-25 dark:hover:bg-slate-800"><ArrowUp size={13} /></button>
+                        <button type="button" onClick={() => move(index, 1)} disabled={index === stages.length - 1} title="Move later" className="rounded p-1 text-slate-400 hover:bg-slate-100 disabled:opacity-25 dark:hover:bg-slate-800"><ArrowDown size={13} /></button>
+                      </div>
+                      <button type="button" onClick={() => setStages((current) => current.filter((_, itemIndex) => itemIndex !== index))} title={`Remove ${copy.name}`} className="rounded p-1.5 text-slate-300 hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-950/30"><Trash2 size={14} /></button>
+                    </div>
+                  )
+                })}
+              </div>
+              {addableProviders.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] font-medium text-slate-400">Add source:</span>
+                  {addableProviders.map((provider) => {
+                    const connection = providerConnections.get(provider)?.[0]
+                    return (
+                      <button
+                        key={provider}
+                        type="button"
+                        onClick={() => connection && setStages((current) => [...current, { provider, connection_name: connection.name }])}
+                        className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:border-brand-200 hover:text-brand-600 dark:border-slate-700 dark:text-slate-300"
+                      >
+                        + {ENRICHMENT_PROVIDER_COPY[provider].name}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+              <div className="rounded-xl bg-emerald-50 px-3 py-2.5 text-[11px] leading-relaxed text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300">
+                Provider errors automatically fall through to the next source. Every attempt records the provider, fields received, fields applied, and timestamp.
+              </div>
+            </>
+          )}
+
+          {!loading && missingProviders.length > 0 && stages.length > 0 && (
+            <p className="text-[11px] text-slate-400">
+              Not connected: {missingProviders.map((provider) => ENRICHMENT_PROVIDER_COPY[provider].name).join(', ')}.{' '}
+              <Link to="/integrations" className="font-semibold text-brand-600">Add integrations</Link>
+            </p>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between border-t border-slate-100 px-5 py-3 dark:border-slate-800">
+          <p className="text-[11px] text-slate-400">{stages.length} {stages.length === 1 ? 'source' : 'sources'} · fill missing fields</p>
+          <div className="flex gap-2">
+            <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
+            <Button variant="primary" size="sm" icon={Layers3} disabled={stages.length === 0} onClick={() => onAdd(stages)}>
+              Add stack
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }

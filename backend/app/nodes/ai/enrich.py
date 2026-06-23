@@ -1,8 +1,9 @@
-"""AI research enrichment — find LinkedIn + role + company + recent news.
+"""Provider-backed person enrichment.
 
-Search-grounded LLM call. Cheaper than ProxyCurl for lead-level research
-when you only have a name + company; expensive but thorough vs. raw
-single-shot LLM calls for the same task.
+This is the executable stage used by the canvas' enrichment-stack building
+block. Each stage owns exactly one provider credential. Multiple stages are
+materialised as ordinary DAG nodes so retries, errors, credentials, and
+provenance remain visible instead of being hidden inside a bespoke side path.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from app.nodes import (
     NodeCategory,
@@ -24,48 +25,77 @@ from app.nodes import (
 
 
 class AiEnrichConfig(BaseModel):
-    provider: Literal["mindstudio", "gemini", "anthropic", "openai"] = Field(
-        "mindstudio",
-        description="MindStudio is the strongest at task-agent research; Gemini's grounding is the cheap option.",
+    enrich_source: Literal["apollo", "hunter", "proxycurl"] = Field(
+        description="The provider this stage queries",
     )
-    fields: list[str] = Field(
-        default_factory=lambda: ["linkedin_url", "current_role", "company_summary", "recent_news"],
-        description="Which structured fields the agent must return",
+    connection_name: str = Field(
+        min_length=1,
+        max_length=200,
+        description="Connected account whose credential this stage uses",
+    )
+    merge_policy: Literal["fill_missing", "overwrite"] = Field(
+        "fill_missing",
+        description="Keep existing contact data, or deliberately replace it with this provider",
+    )
+    skip_if_complete: bool = Field(
+        True,
+        description="Avoid a paid provider call when all fields that provider can add are already present",
+    )
+    domain: str | None = Field(
+        None,
+        max_length=255,
+        description="Optional company domain for Hunter when the contact has no domain",
     )
 
 
 MANIFEST = NodeManifest(
     type="ai.enrich",
     category=NodeCategory.ENRICH,
-    summary="Run a research agent that fills missing lead fields via web search + LLM reasoning",
+    display_name="Enrichment provider",
+    summary="Query one connected data provider and merge the fields it finds with provenance",
     config_schema=AiEnrichConfig,
     output_handles=(
-        NodeHandle("default", "Enrichment fields written to the contact"),
-        NodeHandle("empty", "Agent could not find sufficient public info"),
-        NodeHandle("on_error", "AI provider failed"),
+        NodeHandle("default", "Provider finished; continue with the merged contact"),
+        NodeHandle("on_error", "Provider failed; continue through the stack fallback"),
     ),
-    capabilities=("connection:mindstudio", "connection:gemini", "connection:anthropic", "connection:openai"),
+    capabilities=("connection:apollo", "connection:hunter", "connection:proxycurl"),
     side_effect=SideEffect.NETWORK,
-    icon="search",
+    icon="database-zap",
+    primary_fields=("enrich_source", "connection_name"),
+    advanced_fields=("merge_policy", "skip_if_complete", "domain"),
+    visible_in_palette=False,
 )
 
 
 async def execute(ctx: NodeContext) -> NodeResult:
-    cfg = AiEnrichConfig(**ctx.config)
+    try:
+        cfg = AiEnrichConfig(**ctx.config)
+    except ValidationError:
+        return NodeResult(error="ENRICHMENT_STAGE_CONFIG_INVALID")
+
     correlation_id = ctx.correlation_id or str(uuid.uuid4())
-    events = [
-        {
-            "event_type": "ai.enrich.queued",
-            "entity_type": "lead",
-            "entity_id": ctx.lead.get("id"),
-            "payload": {
-                "provider": cfg.provider,
-                "fields": cfg.fields,
-                "correlation_id": correlation_id,
-            },
-        }
-    ]
-    return NodeResult(handle="default", events=events, telemetry={"correlation_id": correlation_id})
+    payload = {
+        "enrich_source": cfg.enrich_source,
+        "connection_name": cfg.connection_name,
+        "merge_policy": cfg.merge_policy,
+        "skip_if_complete": cfg.skip_if_complete,
+        "correlation_id": correlation_id,
+    }
+    if cfg.domain:
+        payload["domain"] = cfg.domain
+
+    return NodeResult(
+        handle="default",
+        events=[
+            {
+                "event_type": "lead.enrichment_requested",
+                "entity_type": "lead",
+                "entity_id": ctx.lead.get("id"),
+                "payload": payload,
+            }
+        ],
+        telemetry={"correlation_id": correlation_id, "provider": cfg.enrich_source},
+    )
 
 
 register(MANIFEST, execute)

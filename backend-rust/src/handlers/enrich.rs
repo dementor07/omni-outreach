@@ -11,12 +11,53 @@ use serde_json::{json, Value};
 
 pub async fn handle_enrich(command: &ActionCommand) -> ExecutionResult {
     let provider = common::s(command, "enrich_source");
+    let skip_if_complete = command
+        .payload
+        .get("skip_if_complete")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
+    if skip_if_complete && enrichment_complete(command, &provider) {
+        if let Some(credential_ref) = command.credential_ref.as_ref() {
+            credentials::release(credential_ref).await;
+        }
+        return common::ok(
+            command,
+            json!({"provider": provider, "skipped": true, "reason": "already_complete"}),
+            Some("lead_enrichment_skipped"),
+            enrichment_mutations(
+                command,
+                &provider,
+                json!({}),
+                json!({"skipped": true, "reason": "already_complete"}),
+            ),
+        );
+    }
     match provider.as_str() {
         "apollo" => apollo(command).await,
         "hunter" => hunter(command).await,
         "proxycurl" => proxycurl(command).await,
         "" => common::fail(command, "enrich_source missing", false),
         other => common::fail(command, format!("unknown enrich provider {other}"), false),
+    }
+}
+
+fn enrichment_complete(command: &ActionCommand, provider: &str) -> bool {
+    let has = |value: &Option<String>| value.as_deref().is_some_and(|item| !item.trim().is_empty());
+    match provider {
+        "hunter" => has(&command.lead.email),
+        "proxycurl" => {
+            has(&command.lead.first_name)
+                && has(&command.lead.last_name)
+                && has(&command.lead.headline)
+                && has(&command.lead.email)
+        }
+        "apollo" => {
+            has(&command.lead.email)
+                && has(&command.lead.linkedin_url)
+                && has(&command.lead.headline)
+                && has(&command.lead.company)
+        }
+        _ => false,
     }
 }
 
@@ -72,7 +113,23 @@ async fn apollo(command: &ActionCommand) -> ExecutionResult {
         }
     };
 
-    let mutations = pick_mutations(&person, &["first_name", "last_name", "email", "headline", "company"]);
+    let mut fields = pick_mutations(&person, &["first_name", "last_name", "email", "headline", "company"]);
+    if fields.get("company").is_none() {
+        if let Some(company) = person
+            .get("organization")
+            .and_then(|v| v.get("name"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            fields["company"] = json!(company);
+        }
+    }
+    let mutations = enrichment_mutations(
+        command,
+        "apollo",
+        fields,
+        json!({"matched": !person.as_object().map(|o| o.is_empty()).unwrap_or(true)}),
+    );
     common::ok(
         command,
         json!({"provider": "apollo", "matched": !person.as_object().map(|o| o.is_empty()).unwrap_or(true)}),
@@ -132,7 +189,12 @@ async fn hunter(command: &ActionCommand) -> ExecutionResult {
         }
     };
 
-    let mutations = pick_mutations(&data, &["email", "linkedin_url"]);
+    let mutations = enrichment_mutations(
+        command,
+        "hunter",
+        pick_mutations(&data, &["email", "linkedin_url"]),
+        json!({"score": data.get("score")}),
+    );
     common::ok(
         command,
         json!({"provider": "hunter", "score": data.get("score")}),
@@ -179,10 +241,11 @@ async fn proxycurl(command: &ActionCommand) -> ExecutionResult {
         }
     };
 
-    let mut mutations = pick_mutations(&p, &["first_name", "last_name", "headline"]);
+    let mut fields = pick_mutations(&p, &["first_name", "last_name", "headline"]);
     if let Some(email) = p.get("personal_emails").and_then(|v| v.as_array()).and_then(|a| a.first()).and_then(|v| v.as_str()) {
-        mutations["email"] = json!(email);
+        fields["email"] = json!(email);
     }
+    let mutations = enrichment_mutations(command, "proxycurl", fields, json!({}));
     common::ok(
         command,
         json!({"provider": "proxycurl"}),
@@ -199,4 +262,26 @@ fn pick_mutations(src: &Value, fields: &[&str]) -> Value {
         }
     }
     out
+}
+
+fn enrichment_mutations(
+    command: &ActionCommand,
+    provider: &str,
+    fields: Value,
+    metadata: Value,
+) -> Value {
+    let merge_policy = match common::s(command, "merge_policy").as_str() {
+        "overwrite" => "overwrite",
+        _ => "fill_missing",
+    };
+    json!({
+        "enrichment": {
+            "attempt_id": command.command_id.to_string(),
+            "provider": provider,
+            "observed_at": chrono::Utc::now().to_rfc3339(),
+            "merge_policy": merge_policy,
+            "fields": fields,
+            "metadata": metadata,
+        }
+    })
 }

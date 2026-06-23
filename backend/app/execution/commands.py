@@ -312,13 +312,16 @@ def _lead_context(lead: dict[str, Any], contact: dict[str, Any] | None) -> dict[
     return {
         "id": str(lead["id"]),
         "campaign_id": str(lead.get("workflow_id") or lead["id"]),
-        "email": c.get("email"),
-        "linkedin_url": c.get("linkedin_url"),
-        "phone": c.get("phone"),
-        "first_name": c.get("first_name"),
-        "last_name": c.get("last_name"),
-        "company": c.get("company"),
-        "headline": c.get("headline"),
+        # A provider stack may run before crm.create_contact. In that case the
+        # transition worker stores learned identity fields on the lead until a
+        # contact exists. Contact columns always win once present.
+        "email": c.get("email") or lead_cf.get("email"),
+        "linkedin_url": c.get("linkedin_url") or lead_cf.get("linkedin_url"),
+        "phone": c.get("phone") or lead_cf.get("phone"),
+        "first_name": c.get("first_name") or lead_cf.get("first_name"),
+        "last_name": c.get("last_name") or lead_cf.get("last_name"),
+        "company": c.get("company") or lead_cf.get("company"),
+        "headline": c.get("headline") or lead_cf.get("headline"),
         "location": contact_cf.get("location"),
         "source": c.get("source"),
         "chat_id": lead_cf.get("chat_id"),
