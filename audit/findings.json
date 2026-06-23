@@ -1783,9 +1783,9 @@
       "file": "(data)",
       "line": 0,
       "severity": "MEDIUM",
-      "status": "OPEN",
+      "status": "FIXED",
       "title": "1,063 leads stranded active+current_node_id=NULL by the pre-fix projector resurrection",
-      "evidence": "RUNTIME 2026-06-23: 1063 of 2219 leads are status=active WITH current_node_id IS NULL — an impossible state in a healthy spine (a leaf terminalize nulls the node AND sets a terminal status). All updated_at BEFORE the SPINE-TERM-001 projector fix deployed (~07:50Z 06-23). My fix stops NEW occurrences (proven: post-fix searxng leads persist completed); these are pre-fix casualties, miscounted as 'active' in Overview/Leads/objective loop. NEEDS a one-time backfill but the right terminal status isn't unambiguous from status alone (could be completed OR errored) — destructive bulk prod mutation, surfaced to user for the cleanup decision rather than auto-run."
+      "evidence": "[RESOLVED 2026-06-23] Migration 040 RAN on the box (alembic 039->040). Backfill verified live: leads went from {active:1063(stranded), completed:1156} to {completed:2219, stranded:0}. Overview ACTIVE LEADS now 0 (was inflated by phantoms). DEPLOY LESSON: /app is baked into the image (no bind-mount) — scp of the migration to host disk was invisible to the running container; had to rebuild backend-v2 image to bake in 040, then `compose run --rm backend-v2 alembic upgrade head`, then recreate the long-running backend so its alembic resolves 040. Migration is idempotent + scoped to the impossible state. Commit 49e7898. || RUNTIME 2026-06-23: 1063 of 2219 leads are status=active WITH current_node_id IS NULL — an impossible state in a healthy spine (a leaf terminalize nulls the node AND sets a terminal status). All updated_at BEFORE the SPINE-TERM-001 projector fix deployed (~07:50Z 06-23). My fix stops NEW occurrences (proven: post-fix searxng leads persist completed); these are pre-fix casualties, miscounted as 'active' in Overview/Leads/objective loop. NEEDS a one-time backfill but the right terminal status isn't unambiguous from status alone (could be completed OR errored) — destructive bulk prod mutation, surfaced to user for the cleanup decision rather than auto-run."
     }
   ]
 }
