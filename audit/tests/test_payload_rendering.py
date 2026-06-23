@@ -15,11 +15,14 @@ that build_command actually routes through it. Run from backend/:
 
 from __future__ import annotations
 
+import asyncio
 import re
 from pathlib import Path
 
 from app.core.events import ChannelType
 from app.execution.render import render_channel_payload, render_template
+from app.nodes import NodeContext
+from app.nodes.channels import email as email_node
 
 BACKEND = Path(__file__).resolve().parents[2] / "backend"
 
@@ -144,6 +147,24 @@ def test_email_payload_carries_transport_config_not_secret():
     assert out["smtp_use_tls"] is False
     assert out["from"] == "outbound@acme.io"  # falls back to smtp_username
     assert "smtp_password" not in out  # secret stays behind the credential ref
+
+
+def test_email_node_emits_subject_and_body_templates():
+    result = asyncio.run(email_node.execute(NodeContext(
+        workspace_id="ws",
+        workflow_id="wf",
+        node_id="node-email",
+        config={
+            "subject_template": "Hello {{contact.first_name}}",
+            "body_template": "<p>{{contact.company}}</p>",
+        },
+        lead={"id": "lead-1"},
+        correlation_id="corr-1",
+    )))
+
+    payload = result.events[0]["payload"]
+    assert payload["subject_template"] == "Hello {{contact.first_name}}"
+    assert payload["body_template"] == "<p>{{contact.company}}</p>"
 
 
 def test_existing_payload_values_win_and_sources_pass_through():

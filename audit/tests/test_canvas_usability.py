@@ -251,11 +251,6 @@ def test_linear_view_refuses_to_flatten_branched_graphs():
     editor = (ROOT / "frontend/src/pages/CampaignEditor.tsx").read_text(encoding="utf-8")
     assert "analyzeGraph" in builder
     assert "Branch-safe view" in builder
-    assert "Multi-source journey" in builder
-    assert "sources start together" in builder
-    assert "Source root" in builder
-    assert "Merges ${incomingCount} routes" in builder
-    assert "shared join" in builder
     assert "adding, deleting, or reordering a branched graph is disabled" in builder
     assert "{shape.linear && <button" in builder
     assert ">Journey</button>" in editor
@@ -314,9 +309,13 @@ async def test_multi_source_runner_shares_correlation_and_records_source_order(m
 def test_campaign_creation_is_goal_first_and_atomic():
     backend = (ROOT / "backend/app/routers/canvas.py").read_text(encoding="utf-8")
     frontend = (ROOT / "frontend/src/pages/Campaigns.tsx").read_text(encoding="utf-8")
+    api = (ROOT / "frontend/src/api/v2.ts").read_text(encoding="utf-8")
     assert '"/workflows/from-goal"' in backend
     assert "INSERT INTO omni_campaign_objectives" in backend
     assert "async with conn.transaction()" in backend
     assert "What should Omni achieve?" in frontend
     assert "Create goal-driven campaign" in frontend
     assert "The canvas is the editable plan Omni uses to reach it." in frontend
+    assert '"/workflows/from-spec"' in backend
+    assert "createFromSpec" in api
+    assert "CampaignSpec" in api

@@ -85,6 +85,7 @@ async def execute(ctx: NodeContext) -> NodeResult:
             "payload": {
                 "connection_name": cfg.connection_name,
                 "subject_template": cfg.subject_template,
+                "body_template": cfg.body_template,
                 "correlation_id": correlation_id,
             },
         }

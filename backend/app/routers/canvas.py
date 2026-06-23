@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 from app.auth import AuthContext, get_current_workspace
 from app.db import acquire, execute, fetch_all, fetch_one
 from app.routers.integrations import SendingAccountOut
+from app.services.campaign_composer import CampaignSpec, compile_campaign_spec
 from app.services.graph_validation import validate_graph
 
 log = logging.getLogger(__name__)
@@ -324,6 +325,100 @@ async def create_from_goal(
                 body.target,
                 json.dumps(body.audience),
                 json.dumps(body.bounds),
+            )
+            nodes = await conn.fetch(
+                "SELECT * FROM omni_workflow_nodes WHERE workflow_id=$1",
+                workflow_id,
+            )
+            edges = await conn.fetch(
+                "SELECT * FROM omni_workflow_edges WHERE workflow_id=$1",
+                workflow_id,
+            )
+    return WorkflowDetail(
+        workflow=WorkflowOut.model_validate(dict(wf)),
+        nodes=[NodeOut.model_validate(dict(node)) for node in nodes],
+        edges=[EdgeOut.model_validate(dict(edge)) for edge in edges],
+    )
+
+
+@router.post(
+    "/workflows/from-spec",
+    response_model=WorkflowDetail,
+    status_code=201,
+    summary="Create a workflow from a structured campaign spec",
+    description=(
+        "Compile a campaign-level spec (sources, enrichment stack, message sequence, "
+        "and contact target) into the existing canvas graph. This is a higher-level "
+        "authoring path; the resulting workflow remains fully editable on Canvas."
+    ),
+)
+async def create_from_campaign_spec(
+    body: CampaignSpec,
+    ctx: AuthContext = Depends(get_current_workspace),
+) -> WorkflowDetail:
+    spec = body
+    compiled = compile_campaign_spec(spec)
+    key_to_id = {node.key: uuid.uuid4() for node in compiled.nodes}
+    missing = [
+        edge.source if edge.source not in key_to_id else edge.target
+        for edge in compiled.edges
+        if edge.source not in key_to_id or edge.target not in key_to_id
+    ]
+    if missing:
+        raise HTTPException(status_code=500, detail=f"campaign compiler emitted unknown node key {missing[0]!r}")
+
+    async with acquire() as conn:
+        async with conn.transaction():
+            wf = await conn.fetchrow(
+                "INSERT INTO omni_workflows (workspace_id, name, timezone) "
+                "VALUES ($1, $2, $3) RETURNING *",
+                ctx.workspace_id,
+                spec.name,
+                spec.timezone,
+            )
+            workflow_id = wf["id"]
+            for node in compiled.nodes:
+                await conn.execute(
+                    """
+                    INSERT INTO omni_workflow_nodes
+                      (id, workspace_id, workflow_id, node_type, position_x, position_y, config)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+                    """,
+                    key_to_id[node.key],
+                    ctx.workspace_id,
+                    workflow_id,
+                    node.node_type,
+                    node.position_x,
+                    node.position_y,
+                    json.dumps(node.config),
+                )
+            for edge in compiled.edges:
+                await conn.execute(
+                    """
+                    INSERT INTO omni_workflow_edges
+                      (id, workspace_id, workflow_id, source_node_id, target_node_id,
+                       source_handle, target_handle)
+                    VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)
+                    """,
+                    ctx.workspace_id,
+                    workflow_id,
+                    key_to_id[edge.source],
+                    key_to_id[edge.target],
+                    edge.source_handle,
+                    edge.target_handle,
+                )
+            await conn.execute(
+                """
+                INSERT INTO omni_campaign_objectives
+                  (workspace_id, workflow_id, metric, target, audience, bounds, progress, status)
+                VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,'{}'::jsonb,'pursuing')
+                """,
+                ctx.workspace_id,
+                workflow_id,
+                compiled.objective["metric"],
+                compiled.objective["target"],
+                json.dumps(compiled.objective["audience"]),
+                json.dumps(compiled.objective["bounds"]),
             )
             nodes = await conn.fetch(
                 "SELECT * FROM omni_workflow_nodes WHERE workflow_id=$1",

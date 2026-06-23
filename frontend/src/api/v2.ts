@@ -441,6 +441,58 @@ export interface GoalWorkflowCreate {
   template_id?: string | null
 }
 
+export type CampaignSourceProvider = 'naukri' | 'searxng' | 'serper_search'
+export type PeopleDiscoveryProvider = 'searxng_people' | 'serper_people'
+export type EnrichmentProvider = 'apollo' | 'proxycurl' | 'hunter'
+export type MessageChannel = 'email' | 'linkedin'
+
+export interface CampaignSourceSpec {
+  provider: CampaignSourceProvider
+  query?: string | null
+  keyword?: string | null
+  connection_name?: string | null
+  location?: string | null
+  max_results?: number
+  titles?: string[]
+}
+
+export interface PeopleDiscoverySpec {
+  provider?: PeopleDiscoveryProvider
+  connection_name?: string | null
+  titles?: string[]
+  max_per_company?: number
+}
+
+export interface EnrichmentStageSpec {
+  provider: EnrichmentProvider
+  connection_name: string
+  merge_policy?: 'fill_missing' | 'overwrite'
+  skip_if_complete?: boolean
+}
+
+export interface MessageStepSpec {
+  channel: MessageChannel
+  subject_template?: string | null
+  body_template?: string | null
+  message_template?: string | null
+  connection_name?: string | null
+  mode?: 'invite' | 'dm' | 'profile_view' | 'inmail'
+  delay_after?: { amount: number; unit: 'minutes' | 'hours' | 'days' } | null
+}
+
+export interface CampaignSpec {
+  name: string
+  timezone?: string
+  target_contacts: number
+  sources: CampaignSourceSpec[]
+  people?: PeopleDiscoverySpec
+  enrichment?: EnrichmentStageSpec[]
+  messages?: MessageStepSpec[]
+  bounds?: ObjectiveBounds
+  audience?: ObjectiveAudience
+  verification_threshold?: number
+}
+
 export const canvas = {
   list: () => api.get<Workflow[]>('/canvas/workflows').then((r) => r.data),
   create: (name: string, timezone = 'UTC') =>
@@ -452,6 +504,8 @@ export const canvas = {
       .then((r) => r.data),
   createFromGoal: (input: GoalWorkflowCreate) =>
     api.post<WorkflowDetail>('/canvas/workflows/from-goal', input).then((r) => r.data),
+  createFromSpec: (input: CampaignSpec) =>
+    api.post<WorkflowDetail>('/canvas/workflows/from-spec', input).then((r) => r.data),
   get: (id: UUID) => api.get<WorkflowDetail>(`/canvas/workflows/${id}`).then((r) => r.data),
   validation: (id: UUID) =>
     api.get<GraphValidation>(`/canvas/workflows/${id}/validation`).then((r) => r.data),
