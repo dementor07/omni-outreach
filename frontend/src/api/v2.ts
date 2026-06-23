@@ -185,6 +185,17 @@ export interface AnalyticsSummary {
   last_run_at: ISODate | null
 }
 
+export type WorkspaceRole = 'owner' | 'admin' | 'member'
+
+export interface WorkspaceInvite {
+  id: UUID
+  email: string
+  role: WorkspaceRole
+  token: string
+  expires_at: string
+  created_at?: string
+}
+
 export const workspaces = {
   list: () => api.get<Workspace[]>('/workspaces').then((r) => r.data),
   create: (name: string) => api.post<Workspace>('/workspaces', { name }).then((r) => r.data),
@@ -195,6 +206,14 @@ export const workspaces = {
   rename: (id: UUID, name: string) =>
     api.patch<Workspace>(`/workspaces/${id}`, { name }).then((r) => r.data),
   members: (id: UUID) => api.get<WorkspaceMember[]>(`/workspaces/${id}/members`).then((r) => r.data),
+  removeMember: (id: UUID, userId: UUID) =>
+    api.delete(`/workspaces/${id}/members/${userId}`).then((r) => r.data),
+  leave: (id: UUID) => api.post(`/workspaces/${id}/leave`).then((r) => r.data),
+  invites: (id: UUID) => api.get<WorkspaceInvite[]>(`/workspaces/${id}/invites`).then((r) => r.data),
+  createInvite: (id: UUID, email: string, role: 'admin' | 'member') =>
+    api.post<WorkspaceInvite>(`/workspaces/${id}/invites`, { email, role }).then((r) => r.data),
+  revokeInvite: (id: UUID, inviteId: UUID) =>
+    api.delete(`/workspaces/${id}/invites/${inviteId}`).then((r) => r.data),
 }
 
 // ── Nodes (manifest registry) ────────────────────────────────────────────────

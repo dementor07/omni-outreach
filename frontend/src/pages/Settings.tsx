@@ -240,15 +240,53 @@ function WorkspaceTab() {
 }
 
 function MembersCard() {
+  const qc = useQueryClient()
+  const toast = useToast()
   const meQ = useQuery({ queryKey: ['me'], queryFn: auth.me })
   // Without decoding the JWT the best proxy for "active" is the first
   // membership; member lists are identical for any workspace the user owns
   // alone, which is the common single-tenant case here.
-  const workspaceId = meQ.data?.workspaces?.[0]?.id
+  const me = meQ.data?.workspaces?.[0]
+  const workspaceId = me?.id
+  const myRole = me?.role
+  const myUserId = meQ.data?.id
+  const canManage = myRole === 'owner' || myRole === 'admin'
+
   const membersQ = useQuery({
     queryKey: ['workspace-members', workspaceId],
     queryFn: () => workspaces.members(workspaceId!),
     enabled: Boolean(workspaceId),
+  })
+  const invitesQ = useQuery({
+    queryKey: ['workspace-invites', workspaceId],
+    queryFn: () => workspaces.invites(workspaceId!),
+    enabled: Boolean(workspaceId) && canManage,
+  })
+
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member')
+
+  const inviteMut = useMutation({
+    mutationFn: () => workspaces.createInvite(workspaceId!, inviteEmail.trim(), inviteRole),
+    onSuccess: () => {
+      setInviteEmail('')
+      toast.success('Invite created')
+      qc.invalidateQueries({ queryKey: ['workspace-invites', workspaceId] })
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Invite failed'),
+  })
+  const revokeMut = useMutation({
+    mutationFn: (inviteId: string) => workspaces.revokeInvite(workspaceId!, inviteId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['workspace-invites', workspaceId] }),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Revoke failed'),
+  })
+  const removeMut = useMutation({
+    mutationFn: (userId: string) => workspaces.removeMember(workspaceId!, userId),
+    onSuccess: () => {
+      toast.success('Member removed')
+      qc.invalidateQueries({ queryKey: ['workspace-members', workspaceId] })
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Remove failed'),
   })
 
   return (
@@ -257,20 +295,99 @@ function MembersCard() {
         <UsersIcon size={14} className="text-slate-400" />
         <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Members</p>
       </div>
+
       <div className="mt-3 space-y-1.5">
         {membersQ.isLoading ? (
           <p className="text-sm text-slate-500">Loading…</p>
         ) : (membersQ.data ?? []).length === 0 ? (
           <p className="text-sm text-slate-400">No members found.</p>
         ) : (
-          membersQ.data?.map((m) => (
-            <div key={m.user_id} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-800">
-              <span className="truncate font-medium text-slate-900 dark:text-white">{m.email}</span>
-              <Badge variant={m.role === 'owner' ? 'brand' : 'neutral'} label={m.role} />
-            </div>
-          ))
+          membersQ.data?.map((m) => {
+            const isSelf = m.user_id === myUserId
+            const removable = canManage && !isSelf && m.role !== 'owner'
+            return (
+              <div key={m.user_id} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-800">
+                <span className="truncate font-medium text-slate-900 dark:text-white">
+                  {m.email}{isSelf && <span className="ml-1.5 text-xs text-slate-400">(you)</span>}
+                </span>
+                <div className="flex items-center gap-2">
+                  <Badge variant={m.role === 'owner' ? 'brand' : 'neutral'} label={m.role} />
+                  {removable && (
+                    <button
+                      type="button"
+                      onClick={() => removeMut.mutate(m.user_id)}
+                      disabled={removeMut.isPending}
+                      className="text-xs font-medium text-red-500 hover:text-red-600 disabled:opacity-50"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+            )
+          })
         )}
       </div>
+
+      {/* Pending invites + invite form are owner/admin only — the API enforces
+          the same, but hiding the controls avoids a guaranteed-403 click. */}
+      {canManage && (
+        <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Pending invites</p>
+          <div className="mt-2 space-y-1.5">
+            {(invitesQ.data ?? []).length === 0 ? (
+              <p className="text-sm text-slate-400">No pending invites.</p>
+            ) : (
+              invitesQ.data?.map((inv) => (
+                <div key={inv.id} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-800">
+                  <span className="truncate text-slate-700 dark:text-slate-200">{inv.email}</span>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="neutral" label={inv.role} />
+                    <button
+                      type="button"
+                      onClick={() => revokeMut.mutate(inv.id)}
+                      disabled={revokeMut.isPending}
+                      className="text-xs font-medium text-red-500 hover:text-red-600 disabled:opacity-50"
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <form
+            className="mt-3 flex flex-wrap items-center gap-2"
+            onSubmit={(e: FormEvent) => {
+              e.preventDefault()
+              if (inviteEmail.trim()) inviteMut.mutate()
+            }}
+          >
+            <input
+              type="email"
+              required
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              placeholder="teammate@company.com"
+              aria-label="Invite email"
+              className={clsx(inputClass, 'flex-1 min-w-[12rem]')}
+            />
+            <select
+              value={inviteRole}
+              onChange={(e) => setInviteRole(e.target.value as 'admin' | 'member')}
+              aria-label="Invite role"
+              className={clsx(inputClass, 'w-auto')}
+            >
+              <option value="member">Member</option>
+              <option value="admin">Admin</option>
+            </select>
+            <Button type="submit" size="sm" icon={Plus} isLoading={inviteMut.isPending}>
+              Invite
+            </Button>
+          </form>
+        </div>
+      )}
     </Card>
   )
 }
