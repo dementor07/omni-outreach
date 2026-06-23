@@ -28,9 +28,10 @@ def test_source_batch_singular_grammar():
     assert lead_identity({"companies": [{"x": 1}]}, None, "x") == "Source batch · 1 company"
 
 
-def test_empty_companies_list_is_not_a_batch():
-    # an empty list is not a meaningful batch — keep the existing fallback chain.
-    assert lead_identity({"companies": []}, None, "x") == "Unresolved lead"
+def test_empty_companies_list_reads_as_no_results():
+    # an empty list means the source RAN but found nothing — still a real run,
+    # labelled honestly (not "Unresolved lead", which implies broken/unknown data).
+    assert lead_identity({"companies": []}, None, "x") == "Source batch · no results"
 
 
 def test_existing_identity_branches_unchanged():

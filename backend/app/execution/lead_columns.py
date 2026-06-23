@@ -207,13 +207,16 @@ def lead_identity(custom_fields: dict[str, Any], contact: dict[str, Any] | None,
         if item.get("company_name"):
             return str(item["company_name"])
     # A source-batch lead (the run-lead a source wrote its discovered companies
-    # into) IS a meaningful entity — "X companies discovered" — not an
-    # "Unresolved lead". Without this, every completed source run reads as garbage
-    # on the Leads view even though its companies fanned out fine (the 1,362
-    # company-stage roots that looked broken pre-fix).
+    # into) IS a meaningful entity — not an "Unresolved lead". Without this, every
+    # completed source run read as garbage on the Leads view even though its
+    # companies fanned out fine (the company-stage roots that looked broken
+    # pre-fix). An EMPTY list means the source ran but found nothing — still a real
+    # (if fruitless) run, labelled honestly rather than "Unresolved".
     companies = custom_fields.get("companies")
-    if isinstance(companies, list) and companies:
+    if isinstance(companies, list):
         n = len(companies)
+        if n == 0:
+            return "Source batch · no results"
         return f"Source batch · {n} {'company' if n == 1 else 'companies'}"
     if custom_fields.get("companies_key") or custom_fields.get("keyword") or custom_fields.get("platform"):
         return "Campaign run"
