@@ -20,6 +20,24 @@ const CSV_COLUMNS: CsvColumn<Company>[] = [
   { header: 'Size', value: (c) => c.size },
 ]
 
+/** A safe href + clean display label for a company's domain field.
+ * The field may hold a bare domain ("acme.com"), a full URL
+ * ("https://clutch.co/..."), or junk. Blindly prefixing "https://" produced
+ * "https://https://…" for full-URL values — so normalise: keep an existing
+ * scheme, otherwise add one; show the host (or the raw value if it won't parse). */
+function domainLink(raw: string): { href: string; label: string } {
+  const trimmed = raw.trim()
+  const href = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+  try {
+    const u = new URL(href)
+    // Show host + path for directory URLs, just host for bare domains.
+    const label = u.pathname && u.pathname !== '/' ? `${u.host}${u.pathname}` : u.host
+    return { href, label }
+  } catch {
+    return { href, label: trimmed }
+  }
+}
+
 export default function Companies() {
   const qc = useQueryClient()
   const toast = useToast()
@@ -150,11 +168,14 @@ function CompanyCard({ c, onDelete, deleting }: CompanyCardProps) {
         <Avatar name={c.name} size={40} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{c.name}</p>
-          {c.domain && (
-            <a href={`https://${c.domain}`} target="_blank" rel="noreferrer" className="truncate text-xs text-brand-600 hover:underline">
-              {c.domain}
-            </a>
-          )}
+          {c.domain && (() => {
+            const { href, label } = domainLink(c.domain)
+            return (
+              <a href={href} target="_blank" rel="noreferrer" className="block truncate text-xs text-brand-600 hover:underline">
+                {label}
+              </a>
+            )
+          })()}
         </div>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
