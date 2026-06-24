@@ -11,7 +11,7 @@ import Button from './Button'
 import Card from './Card'
 
 /* The Linear builder is an editor only when the saved graph is truly one
- * connected chain. Branched graphs are rendered as a read-only journey map:
+ * connected chain. Branched graphs are rendered as a read-only sequence map:
  * editing their array order as a sequence would silently destroy branch
  * handles and rewrite the workflow into a different program. */
 
@@ -163,7 +163,7 @@ export default function SequentialBuilder({ nodes, edges, manifests, onChange, o
       <div className="flex items-center justify-between gap-4 px-6">
         <div>
           <h3 className="text-[18px] font-bold tracking-tight text-slate-900 dark:text-white">
-            {shape.linear ? 'Linear sequence' : 'Journey map'}
+            {shape.linear ? 'Linear sequence' : 'Sequence map'}
           </h3>
           <p className="mt-0.5 text-sm text-slate-500">
             {shape.linear

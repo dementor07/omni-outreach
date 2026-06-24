@@ -84,7 +84,7 @@ export default function LeadDrawer({ leadId, onClose, onSelectLead }: LeadDrawer
           </div>
         ) : !j ? (
           <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-slate-500">
-            Could not load this lead's journey.
+            Could not load this lead's sequence history.
           </div>
         ) : (
           <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5">

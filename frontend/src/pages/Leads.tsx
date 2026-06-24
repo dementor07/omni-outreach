@@ -66,7 +66,7 @@ export default function Leads() {
         screenLabel="Leads"
         eyebrow="Pipeline"
         title="Leads"
-        description="Every prospect in flight. Columns adapt to the selected workflow's pipeline. Click any lead to see its full journey. Step = where it rests in the sequence; Status = its lifecycle."
+        description="Every prospect in flight. Columns adapt to the selected workflow's pipeline. Click any lead to see its full sequence history. Step = where it rests in the sequence; Status = its lifecycle."
       />
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

@@ -278,7 +278,7 @@ export default function NodeConfigPanel({
           <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/50">
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Routes</p>
             <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-              Each output is an explicit branch. Unconnected routes intentionally end the journey.
+              Each output is an explicit branch. Unconnected routes intentionally end the sequence.
             </p>
             <ul className="mt-2 space-y-1.5">
               {manifest.output_handles.map((h) => {

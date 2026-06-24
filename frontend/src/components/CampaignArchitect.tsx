@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   ArrowRight, Building2, ChevronDown, ChevronUp, GitBranch, Mail, MessageCircle,
   Plus, Rocket, ShieldCheck, Sparkles, Target, Trash2, Users,
@@ -105,37 +105,53 @@ const DEFAULT_CLASSIC: ClassicDraft = {
 export default function CampaignArchitect({ templates, connections = [], onCreated, onCancel }: Props) {
   const toast = useToast()
   const [mode, setMode] = useState<AuthoringMode>('architect')
-  const [name, setName] = useState('500 real contacts from stacked sources')
-  const [targetContacts, setTargetContacts] = useState('500')
+  const [name, setName] = useState('Connected-source contact campaign')
+  const [targetContacts, setTargetContacts] = useState('25')
   const [audience, setAudience] = useState('software development companies')
   const [titles, setTitles] = useState('Founder, CEO, CTO')
   const [sources, setSources] = useState<DraftSource[]>([
-    DEFAULT_SOURCE,
     {
-      provider: 'searxng',
-      query: 'site:clutch.co software development company',
+      provider: 'serper_search',
+      query: 'site:clutch.co/profile "software development" India founder CEO CTO',
       keyword: '',
       connection_name: '',
       location: '',
-      max_results: '50',
+      max_results: '20',
+    },
+    {
+      provider: 'serper_search',
+      query: 'site:clutch.co/profile "web development" India founder CEO CTO',
+      keyword: '',
+      connection_name: '',
+      location: '',
+      max_results: '20',
     },
   ])
-  const [peopleProvider, setPeopleProvider] = useState<'searxng_people' | 'serper_people'>('searxng_people')
+  const [peopleProvider, setPeopleProvider] = useState<'searxng_people' | 'serper_people'>('serper_people')
   const [peopleConnection, setPeopleConnection] = useState('')
   const [maxPerCompany, setMaxPerCompany] = useState('4')
-  const [enrichment, setEnrichment] = useState<DraftEnrichment[]>([
-    { provider: 'proxycurl', connection_name: '' },
-    { provider: 'hunter', connection_name: '' },
-  ])
-  const [messages, setMessages] = useState<DraftMessage[]>([
-    DEFAULT_MESSAGE,
-    { ...DEFAULT_MESSAGE, subject_template: 'Following up', body_template: '<p>Still worth exploring?</p>' },
-  ])
+  const [enrichment, setEnrichment] = useState<DraftEnrichment[]>([])
+  const [messages, setMessages] = useState<DraftMessage[]>([])
   const [verificationThreshold, setVerificationThreshold] = useState('40')
   const [maxIterations, setMaxIterations] = useState('5')
   const [maxSpend, setMaxSpend] = useState('')
   const [classic, setClassic] = useState<ClassicDraft>(DEFAULT_CLASSIC)
-  const serperConnections = connectionsForProvider(connections, 'serper')
+  const serperConnections = useMemo(() => connectionsForProvider(connections, 'serper'), [connections])
+  const connectedEnrichmentProviders = useMemo(
+    () => (['proxycurl', 'hunter', 'apollo'] as EnrichmentProvider[]).filter((provider) => connections.some((connection) => connection.provider === provider)),
+    [connections],
+  )
+
+  useEffect(() => {
+    const firstSerper = serperConnections[0]?.name
+    if (!firstSerper) return
+    setPeopleConnection((current) => current || firstSerper)
+    setSources((current) => current.map((source) => (
+      source.provider === 'serper_search' && !source.connection_name
+        ? { ...source, connection_name: firstSerper }
+        : source
+    )))
+  }, [serperConnections])
 
   const buildResult = useMemo(() => buildSpec({
     name,
@@ -200,11 +216,11 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
       <div className="border-b border-slate-100 bg-gradient-to-br from-slate-950 via-slate-900 to-brand-950 px-6 py-6 text-white dark:border-slate-800">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-brand-200">Campaign Architect</p>
-            <h2 className="mt-2 text-2xl font-black tracking-tight">Design the outcome system, then let Omni compile the canvas.</h2>
+            <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-brand-200">Goal campaign builder</p>
+            <h2 className="mt-2 text-2xl font-black tracking-tight">Build a real multi-source campaign, then edit it on the canvas.</h2>
             <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">
-              Model the campaign as goals, incentives, source stacks, enrichment requirements, message sequences, and safety rules.
-              The result is still a normal editable graph — this is the intuitive layer above it.
+              Stack company sources, pick the people-finding API, add connected enrichment only when it exists, and optionally add message templates.
+              The result is still a normal editable graph.
             </p>
           </div>
           <div className="grid gap-2 rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-slate-200 sm:grid-cols-3 lg:w-[420px]">
@@ -218,7 +234,7 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
       <div className="grid min-h-[640px] lg:grid-cols-[250px_1fr]">
         <aside className="border-b border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900/50 lg:border-b-0 lg:border-r">
           <div className="space-y-2">
-            <ModeButton active={mode === 'architect'} icon={Sparkles} title="Architect" body="Outcome + source/enrichment/message system" onClick={() => setMode('architect')} />
+            <ModeButton active={mode === 'architect'} icon={Sparkles} title="Goal builder" body="Sources, people, verification, optional messages" onClick={() => setMode('architect')} />
             <ModeButton active={mode === 'classic'} icon={GitBranch} title="Classic" body="Keep the existing goal/template workflow" onClick={() => setMode('classic')} />
           </div>
           <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950/40">
@@ -242,7 +258,7 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
 
           {mode === 'architect' ? (
             <>
-              <ArchitectSection icon={Target} title="1. Goal / incentive system" subtitle="Tell Omni what it is optimizing for and what counts as real progress.">
+              <ArchitectSection icon={Target} title="1. Goal" subtitle="Define exactly what counts as progress. Contacts mean verified people, not just company names.">
                 <div className="grid gap-3 md:grid-cols-[160px_1fr_180px]">
                   <Field label="Real contacts">
                     <input type="number" min={1} value={targetContacts} onChange={(event) => setTargetContacts(event.target.value)} className={inputClass} />
@@ -256,7 +272,7 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
                 </div>
               </ArchitectSection>
 
-              <ArchitectSection icon={Building2} title="2. Source stack" subtitle="Multiple sources start together. Each source can discover companies, then the shared pipeline enriches and dedupes them.">
+              <ArchitectSection icon={Building2} title="2. Company sources" subtitle="Run multiple sources together. Each source discovers companies; the shared pipeline resolves, dedupes, and verifies people.">
                 <div className="space-y-3">
                   {sources.map((source, index) => (
                     <SourceRow
@@ -274,12 +290,12 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
                 </div>
               </ArchitectSection>
 
-              <ArchitectSection icon={Users} title="3. People discovery" subtitle="After companies are found and resolved, choose how Omni finds the right humans at each account.">
+              <ArchitectSection icon={Users} title="3. People discovery" subtitle="Choose how Omni finds the right humans at each company. Serper is selected by default because it is connected here.">
                 <div className="grid gap-3 md:grid-cols-3">
                   <Field label="People source">
                     <select value={peopleProvider} onChange={(event) => setPeopleProvider(event.target.value as 'searxng_people' | 'serper_people')} className={inputClass}>
-                      <option value="searxng_people">SearXNG people</option>
                       <option value="serper_people">Serper people</option>
+                      <option value="searxng_people">SearXNG people</option>
                     </select>
                   </Field>
                   <Field label="Connection">
@@ -291,12 +307,9 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
                         ))}
                       </select>
                     ) : peopleProvider === 'serper_people' ? (
-                      <>
-                        <input value={peopleConnection} onChange={(event) => setPeopleConnection(event.target.value)} placeholder="serper-prod" className={inputClass} />
-                        <p className="mt-1 text-[11px] leading-relaxed text-amber-600 dark:text-amber-300">
-                          No connected Serper account found. Type the connection name now, or add it in Integrations first.
-                        </p>
-                      </>
+                      <p className="mt-1 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
+                        No connected Serper account found. Add Serper in Integrations before creating a connected API campaign.
+                      </p>
                     ) : (
                       <p className="mt-1 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-900">
                         SearXNG people search uses the free self-hosted search service. No connection needed.
@@ -309,7 +322,7 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
                 </div>
               </ArchitectSection>
 
-              <ArchitectSection icon={Sparkles} title="4. Enrichment stack" subtitle="Stack data providers. Earlier stages win; later stages fill missing fields.">
+              <ArchitectSection icon={Sparkles} title="4. Enrichment stack" subtitle="Only connected enrichment APIs are offered. Earlier stages win; later stages fill missing fields.">
                 <div className="space-y-2">
                   {enrichment.map((stage, index) => (
                     <EnrichmentRow
@@ -321,13 +334,29 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
                       onRemove={() => setEnrichment((current) => current.filter((_, itemIndex) => itemIndex !== index))}
                     />
                   ))}
-                  <Button variant="secondary" size="sm" icon={Plus} onClick={() => setEnrichment((current) => [...current, { provider: 'proxycurl', connection_name: '' }])}>
-                    Add enrichment source
-                  </Button>
+                  {connectedEnrichmentProviders.length > 0 ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon={Plus}
+                      onClick={() => {
+                        const provider = connectedEnrichmentProviders.find((candidate) => !enrichment.some((stage) => stage.provider === candidate))
+                        if (!provider) return
+                        const connection = connections.find((item) => item.provider === provider)
+                        setEnrichment((current) => [...current, { provider, connection_name: connection?.name ?? '' }])
+                      }}
+                    >
+                      Add connected enrichment source
+                    </Button>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-500 dark:border-slate-800 dark:bg-slate-900/40">
+                      No connected enrichment API is active in this workspace, so enrichment is left out of this campaign. Connect one in Integrations and it will appear here.
+                    </div>
+                  )}
                 </div>
               </ArchitectSection>
 
-              <ArchitectSection icon={MessageCircle} title="5. Outreach sequence" subtitle="Create templated messages and automated follow-ups. Each step stops when the contact replies.">
+              <ArchitectSection icon={MessageCircle} title="5. Message sequence (optional)" subtitle="Create templated messages and automated follow-ups only when you want the generated canvas to include sending nodes.">
                 <div className="space-y-3">
                   {messages.map((message, index) => (
                     <MessageRow
@@ -341,15 +370,20 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
                   <Button variant="secondary" size="sm" icon={Plus} onClick={() => setMessages((current) => [...current, { ...DEFAULT_MESSAGE }])}>
                     Add message
                   </Button>
+                  {messages.length === 0 && (
+                    <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-900/40">
+                      No messages will be created. This campaign will stop after verified contacts are created.
+                    </p>
+                  )}
                 </div>
               </ArchitectSection>
 
-              <ArchitectSection icon={ShieldCheck} title="6. Safety and precision" subtitle="Bounds keep autonomous pursuit controlled while the objective worker keeps chasing the target.">
+              <ArchitectSection icon={ShieldCheck} title="6. Safety and precision" subtitle="Bounds keep repeated runs controlled while the objective worker keeps working toward the target.">
                 <div className="grid gap-3 md:grid-cols-3">
                   <Field label="Verification threshold">
                     <input type="number" min={0} max={100} value={verificationThreshold} onChange={(event) => setVerificationThreshold(event.target.value)} className={inputClass} />
                   </Field>
-                  <Field label="Max pursuit iterations">
+                  <Field label="Max attempts">
                     <input type="number" min={1} value={maxIterations} onChange={(event) => setMaxIterations(event.target.value)} className={inputClass} />
                   </Field>
                   <Field label="Max spend USD">
@@ -371,7 +405,7 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
           <div className="sticky bottom-0 -mx-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
             <p className="text-xs text-slate-500">
               {mode === 'architect'
-                ? 'Create the system, then inspect or tune the generated canvas.'
+                ? 'Create the campaign, then inspect or tune the generated canvas.'
                 : 'Classic mode preserves the existing goal/template creation flow.'}
             </p>
             <div className="flex items-center gap-2">
@@ -382,7 +416,7 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
                 onClick={mode === 'architect' ? createArchitect : createClassic}
                 disabled={mode === 'architect' && !architectReady}
               >
-                {mode === 'architect' ? 'Create architected campaign' : 'Create classic campaign'}
+                {mode === 'architect' ? 'Create campaign' : 'Create classic campaign'}
               </Button>
             </div>
           </div>
@@ -627,12 +661,9 @@ function SourceRow({
                 ))}
               </select>
             ) : (
-              <>
-                <input value={source.connection_name} onChange={(event) => onChange({ ...source, connection_name: event.target.value })} placeholder="serper-prod" className={inputClass} />
-                <p className="mt-1 text-[11px] leading-relaxed text-amber-600 dark:text-amber-300">
-                  No connected Serper account found. Type the connection name now, or add it in Integrations first.
-                </p>
-              </>
+              <p className="mt-1 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
+                No connected Serper account found. Add Serper in Integrations or remove this Serper source.
+              </p>
             )}
           </Field>
         </div>
@@ -655,6 +686,9 @@ function EnrichmentRow({
   onRemove: () => void
 }) {
   const providerConnections = connections.filter((connection) => connection.provider === stage.provider)
+  const connectedProviders = (['proxycurl', 'hunter', 'apollo'] as EnrichmentProvider[]).filter(
+    (provider) => connections.some((connection) => connection.provider === provider),
+  )
   return (
     <div className="grid gap-3 rounded-xl border border-slate-100 p-3 dark:border-slate-800 md:grid-cols-[180px_1fr_40px]">
       <Field label={`Stage ${index + 1}`}>
@@ -667,9 +701,9 @@ function EnrichmentRow({
           }}
           className={inputClass}
         >
-          <option value="proxycurl">Proxycurl</option>
-          <option value="hunter">Hunter</option>
-          <option value="apollo">Apollo</option>
+          {connectedProviders.map((provider) => (
+            <option key={provider} value={provider}>{providerLabel(provider)}</option>
+          ))}
         </select>
       </Field>
       <Field label="Connection name">
@@ -681,12 +715,9 @@ function EnrichmentRow({
             ))}
           </select>
         ) : (
-          <>
-            <input value={stage.connection_name} onChange={(event) => onChange({ ...stage, connection_name: event.target.value })} placeholder={`${stage.provider}-prod`} className={inputClass} />
-            <p className="mt-1 text-[11px] leading-relaxed text-amber-600 dark:text-amber-300">
-              No connected {providerLabel(stage.provider)} account found. Type the connection name now, or add it in Integrations first.
-            </p>
-          </>
+          <p className="mt-1 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
+            {providerLabel(stage.provider)} is not connected. Remove this row or connect it in Integrations.
+          </p>
         )}
       </Field>
       <button type="button" onClick={onRemove} className="mt-6 rounded-lg p-2 text-slate-300 hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-950/30" aria-label={`Remove enrichment ${index + 1}`}>
@@ -821,7 +852,7 @@ function ClassicGoalForm({ templates, draft, onChange }: { templates: CampaignTe
         <button type="button" onClick={() => setShowBounds((value) => !value)} className="flex w-full items-center justify-between px-3 py-2.5 text-left">
           <span>
             <span className="block text-xs font-semibold text-slate-700 dark:text-slate-200">Safety bounds</span>
-            <span className="block text-[11px] text-slate-400">Stop autonomous pursuit before it overspends or loops.</span>
+            <span className="block text-[11px] text-slate-400">Stop repeated attempts before they overspend or loop.</span>
           </span>
           {showBounds ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
         </button>

@@ -606,7 +606,7 @@ export default function CampaignEditor() {
                       : 'Enroll a lead at the source node and start the pipeline'
               }
             >
-              {objectiveQuery.data ? 'Start pursuit' : 'Run'}
+              Run
             </Button>
           </Panel>
 
@@ -700,7 +700,7 @@ export default function CampaignEditor() {
                     type="button"
                     onClick={() => setViewMode('linear')} 
                     className={clsx('px-3 py-1 text-xs font-semibold rounded-md transition-colors', viewMode === 'linear' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200')}
-                  >Journey</button>
+                  >Sequence</button>
                 </div>
               </div>
               
@@ -1109,7 +1109,7 @@ function ValidationStatus({
           <div className="border-b border-slate-100 px-3 py-2.5 dark:border-slate-800">
             <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">Plan check</p>
             <p className="mt-0.5 text-[11px] text-slate-400">
-              {dirty ? 'Save to check the latest graph.' : 'Errors block runs. Warnings describe intentional journey endings.'}
+              {dirty ? 'Save to check the latest graph.' : 'Errors block runs. Warnings describe intentional sequence endings.'}
             </p>
           </div>
           <div className="max-h-72 overflow-y-auto p-2">
@@ -1283,7 +1283,7 @@ function NodePalette({
               Enrichment stack
             </span>
             <span className="mt-1 block text-[11px] leading-snug text-slate-500">
-              Order Apollo, Proxycurl, and Hunter. Later sources fill only the gaps.
+              Order connected enrichment sources. Later sources fill only the gaps.
             </span>
           </button>
         </div>
@@ -1422,7 +1422,7 @@ function EnrichmentStackDialog({
           ) : stages.length === 0 && connectedCount === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-300 p-5 text-center dark:border-slate-700">
               <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Connect an enrichment source first</p>
-              <p className="mt-1 text-xs text-slate-500">Apollo, Proxycurl, or Hunter connections will appear here automatically.</p>
+              <p className="mt-1 text-xs text-slate-500">Connected enrichment APIs will appear here automatically.</p>
               <Link to="/integrations" className="mt-3 inline-flex text-xs font-semibold text-brand-600 hover:text-brand-700">Open integrations</Link>
             </div>
           ) : (

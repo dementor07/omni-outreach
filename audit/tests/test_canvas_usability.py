@@ -244,7 +244,7 @@ def test_canvas_builds_ordered_enrichment_stacks_with_precise_merge_semantics():
     assert "FOR UPDATE" in worker
     assert "Plan check" in editor
     assert "Goal:" in editor
-    assert "Start pursuit" in editor
+    assert "Run\n            </Button>" in editor
     assert "onAdd(m)\n                          setOpen(false)" in editor
     assert "lg:flex-row" in editor
 
@@ -256,7 +256,7 @@ def test_linear_view_refuses_to_flatten_branched_graphs():
     assert "Branch-safe view" in builder
     assert "adding, deleting, or reordering a branched graph is disabled" in builder
     assert "{shape.linear && <button" in builder
-    assert ">Journey</button>" in editor
+    assert ">Sequence</button>" in editor
     assert "onEditNode={(nodeId) => setSelectedNodeId(nodeId)}" in editor
 
 
@@ -320,9 +320,9 @@ def test_campaign_creation_has_architect_and_preserves_classic_goal_flow():
     assert "CampaignArchitect" in frontend
     assert "integrations.list" in frontend
     assert "connections={connections}" in frontend
-    assert "Campaign Architect" in architect
-    assert "Design the outcome system" in architect
-    assert "Source stack" in architect
+    assert "Goal campaign builder" in architect
+    assert "Build a real multi-source campaign" in architect
+    assert "Company sources" in architect
     assert "Enrichment stack" in architect
     assert "Choose connected" in architect
     assert "No connected" in architect
@@ -330,12 +330,14 @@ def test_campaign_creation_has_architect_and_preserves_classic_goal_flow():
     assert "No connection needed" in architect
     assert "connectionsForProvider(connections, 'serper')" in architect
     assert "requires a connection name" in architect
+    assert "No messages will be created" in architect
     assert ".filter((stage) => stage.connection_name.trim())" not in architect
     assert "disabled={mode === 'architect' && !architectReady}" in architect
-    assert "Outreach sequence" in architect
+    assert "Message sequence (optional)" in architect
     assert "Classic goal creation" in architect
     assert "canvas.createFromGoal" in architect
     assert '"/workflows/from-spec"' in backend
+    assert "_assert_campaign_spec_connections" in backend
     assert "canvas.createFromSpec" in architect
     assert "createFromSpec" in api
     assert "CampaignSpec" in api

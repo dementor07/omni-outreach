@@ -10,6 +10,37 @@ call, and a weighted score so even a Claude ACCEPT can be vetoed on weak signals
 from __future__ import annotations
 
 _EXCLUDE = ("linkedin", "linkedin.com", "linkedin profile")
+_PAST_ROLE_MARKERS = (
+    "former ",
+    "ex-",
+    "ex ",
+    "previously ",
+    "retired ",
+    "past ",
+)
+_BROKEN_COMPANY_MARKERS = (
+    " at | linkedin",
+    " at - linkedin",
+    " at  - linkedin",
+    " at · linkedin",
+    " at linkedin",
+)
+
+
+def has_past_role_signal(text: str) -> bool:
+    """Return true when the profile evidence is explicitly about a past role."""
+    t = (text or "").lower()
+    return any(marker in t for marker in _PAST_ROLE_MARKERS)
+
+
+def has_broken_company_slot(text: str) -> bool:
+    """LinkedIn/Google sometimes returns titles like ``CEO at | LinkedIn``.
+
+    Those have a seniority signal and a LinkedIn URL but no employer evidence.
+    They must not pass the pre-contact gate.
+    """
+    t = " ".join((text or "").lower().split())
+    return any(marker in t for marker in _BROKEN_COMPANY_MARKERS)
 
 
 def is_company_mismatch(title: str, target_company: str) -> bool:

@@ -94,6 +94,48 @@ class GraphEdgeIn(BaseModel):
     target_handle: str = "default"
 
 
+async def _assert_campaign_spec_connections(spec: CampaignSpec, workspace_id: uuid.UUID) -> None:
+    """Reject campaign specs that reference paid/API providers not connected here.
+
+    Naukri and SearXNG are first-party/self-hosted sources and do not need an
+    ``omni_connections`` row. Serper/company, Serper/people, and enrichment
+    providers do: creating a graph with a made-up connection name looks
+    successful but fails at runtime, which is much worse than blocking creation.
+    """
+    required: set[tuple[str, str]] = set()
+    for source in spec.sources:
+        if source.provider == "serper_search" and source.connection_name:
+            required.add(("serper", source.connection_name))
+    if spec.people.provider == "serper_people" and spec.people.connection_name:
+        required.add(("serper", spec.people.connection_name))
+    for stage in spec.enrichment:
+        required.add((stage.provider, stage.connection_name))
+    for message in spec.messages:
+        if not message.connection_name:
+            continue
+        if message.channel == "linkedin":
+            required.add(("unipile", message.connection_name))
+        elif message.channel == "email":
+            required.add(("smtp", message.connection_name))
+
+    for provider, name in sorted(required):
+        row = await fetch_one(
+            """
+            SELECT 1
+            FROM omni_connections
+            WHERE workspace_id = $1 AND provider = $2 AND name = $3
+            """,
+            workspace_id,
+            provider,
+            name,
+        )
+        if not row:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{provider} connection {name!r} is not connected in this workspace",
+            )
+
+
 class GraphSave(BaseModel):
     nodes: list[GraphNodeIn] = Field(default_factory=list)
     edges: list[GraphEdgeIn] = Field(default_factory=list)
@@ -357,6 +399,7 @@ async def create_from_campaign_spec(
     ctx: AuthContext = Depends(get_current_workspace),
 ) -> WorkflowDetail:
     spec = body
+    await _assert_campaign_spec_connections(spec, ctx.workspace_id)
     compiled = compile_campaign_spec(spec)
     key_to_id = {node.key: uuid.uuid4() for node in compiled.nodes}
     missing = [

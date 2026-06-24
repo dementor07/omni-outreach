@@ -68,22 +68,40 @@ async def execute(ctx: NodeContext) -> NodeResult:
     )
 
     title = person.get("title") or person.get("headline") or person.get("role") or ""
-    snippet = person.get("snippet") or person.get("raw_title") or person.get("headline")
+    raw_title = person.get("raw_title") or ""
+    headline = person.get("headline") or ""
+    raw_snippet = person.get("snippet") or ""
+    # Use all cheap search evidence together. A cleaned title often drops the
+    # company name ("CEO" instead of "CEO at Acme"), while raw_title/snippet
+    # keep the employer string needed for precision.
+    evidence_text = " ".join(str(part) for part in (title, raw_title, headline, raw_snippet) if part)
     linkedin_url = person.get("linkedin_url")
     domain_known = bool(company.get("domain"))
     kg_known = bool(company.get("people_discovered"))
 
     # Hard fast-path: explicit different-company mention → reject, skip scoring.
-    if people_scoring.is_company_mismatch(title, company_name):
+    if people_scoring.is_company_mismatch(evidence_text, company_name):
         return NodeResult(
             handle="rejected",
             telemetry={"reason": "company_mismatch", "title": title, "company": company_name},
         )
 
+    if people_scoring.has_past_role_signal(evidence_text):
+        return NodeResult(
+            handle="rejected",
+            telemetry={"reason": "past_role", "title": title, "company": company_name},
+        )
+
+    if people_scoring.has_broken_company_slot(evidence_text) and company_name.lower() not in evidence_text.lower():
+        return NodeResult(
+            handle="rejected",
+            telemetry={"reason": "missing_current_company_evidence", "title": title, "company": company_name},
+        )
+
     total, breakdown = people_scoring.verification_score(
         title=title,
         target_company=company_name,
-        snippet=snippet,
+        snippet=evidence_text,
         linkedin_url=linkedin_url,
         domain_known=domain_known,
         kg_known=kg_known,
@@ -93,7 +111,8 @@ async def execute(ctx: NodeContext) -> NodeResult:
         or domain_known
         or kg_known
     )
-    passed = total >= cfg.pass_threshold and has_role_or_prior_signal
+    has_current_company_evidence = any(label == "snippet_match" for label, _ in breakdown) or kg_known
+    passed = total >= cfg.pass_threshold and has_role_or_prior_signal and has_current_company_evidence
 
     # Stash the score breakdown so a downstream lead projection / ai.screen can
     # carry verification_details (plan.md Phase 5).

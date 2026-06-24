@@ -25,7 +25,7 @@ from aiokafka import AIOKafkaConsumer
 from aiokafka.structs import ConsumerRecord
 
 from app.config import settings
-from app.db import close_pool, execute, fetch_one, init_pool, system_scope
+from app.db import acquire, close_pool, execute, fetch_one, init_pool, system_scope
 from app.services import bus
 from app.services.bus import EVENTS_TOPIC
 
@@ -354,33 +354,88 @@ _TERMINAL_LEAD_STATUSES = (
 
 
 async def _project_lead(env: dict[str, Any]) -> None:
-    p = env.get("payload") or {}
-    await execute(
-        """
-        INSERT INTO omni_leads (id, workspace_id, contact_id, workflow_id,
-                           current_node_id, status, custom_fields)
-        VALUES ($1, $2, $3, $4, $5, COALESCE($6, 'active'), $7::jsonb)
-        ON CONFLICT (id) DO UPDATE SET
-          contact_id      = COALESCE(EXCLUDED.contact_id,      omni_leads.contact_id),
-          workflow_id     = COALESCE(EXCLUDED.workflow_id,     omni_leads.workflow_id),
-          -- a terminal lead has no current node; don't let a late event re-pin one
-          current_node_id = CASE WHEN omni_leads.status = ANY($8::text[]) THEN omni_leads.current_node_id
-                                 ELSE COALESCE(EXCLUDED.current_node_id, omni_leads.current_node_id) END,
-          -- terminal-sticky: once terminal, never downgrade back to a live status
-          status          = CASE WHEN omni_leads.status = ANY($8::text[]) THEN omni_leads.status
-                                 ELSE COALESCE($6, omni_leads.status) END,
-          custom_fields   = omni_leads.custom_fields || EXCLUDED.custom_fields,
-          updated_at      = NOW()
-        """,
-        env["entity_id"],
-        env["workspace_id"],
-        p.get("contact_id"),
-        p.get("workflow_id"),
-        p.get("current_node_id"),
-        p.get("status"),  # NULL when the event carries none — COALESCE keeps existing
-        p.get("custom_fields") or {},
-        list(_TERMINAL_LEAD_STATUSES),
-    )
+    p = dict(env.get("payload") or {})
+    async with acquire() as conn:
+        async with conn.transaction():
+            if p.get("contact_id"):
+                existing = await conn.fetchrow(
+                    """
+                    SELECT workflow_id, contact_id
+                    FROM omni_leads
+                    WHERE id = $1 AND workspace_id = $2
+                    FOR UPDATE
+                    """,
+                    env["entity_id"],
+                    env["workspace_id"],
+                )
+                workflow_id = p.get("workflow_id") or (existing["workflow_id"] if existing else None)
+                already_attached = bool(existing and existing["contact_id"])
+                if workflow_id and not already_attached:
+                    await conn.execute(
+                        "SELECT pg_advisory_xact_lock(hashtext($1))",
+                        f"lead-contact-cap:{env['workspace_id']}:{workflow_id}",
+                    )
+                    objective = await conn.fetchrow(
+                        """
+                        SELECT target
+                        FROM omni_campaign_objectives
+                        WHERE workspace_id = $1 AND workflow_id = $2 AND metric = 'contacts'
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """,
+                        env["workspace_id"],
+                        workflow_id,
+                    )
+                    if objective and int(objective["target"]) > 0:
+                        attached = await conn.fetchval(
+                            """
+                            SELECT count(DISTINCT contact_id)
+                            FROM omni_leads
+                            WHERE workspace_id = $1
+                              AND workflow_id = $2
+                              AND contact_id IS NOT NULL
+                            """,
+                            env["workspace_id"],
+                            workflow_id,
+                        )
+                        if int(attached or 0) >= int(objective["target"]):
+                            p["contact_id"] = None
+                            p["status"] = "ended"
+                            p["custom_fields"] = {
+                                **(p.get("custom_fields") or {}),
+                                "goal_cap": {
+                                    "metric": "contacts",
+                                    "target": int(objective["target"]),
+                                    "reason": "contact_target_reached",
+                                },
+                            }
+
+            await conn.execute(
+                """
+                INSERT INTO omni_leads (id, workspace_id, contact_id, workflow_id,
+                                   current_node_id, status, custom_fields)
+                VALUES ($1, $2, $3, $4, $5, COALESCE($6, 'active'), $7::jsonb)
+                ON CONFLICT (id) DO UPDATE SET
+                  contact_id      = COALESCE(EXCLUDED.contact_id,      omni_leads.contact_id),
+                  workflow_id     = COALESCE(EXCLUDED.workflow_id,     omni_leads.workflow_id),
+                  -- a terminal lead has no current node; don't let a late event re-pin one
+                  current_node_id = CASE WHEN omni_leads.status = ANY($8::text[]) THEN omni_leads.current_node_id
+                                         ELSE COALESCE(EXCLUDED.current_node_id, omni_leads.current_node_id) END,
+                  -- terminal-sticky: once terminal, never downgrade back to a live status
+                  status          = CASE WHEN omni_leads.status = ANY($8::text[]) THEN omni_leads.status
+                                         ELSE COALESCE($6, omni_leads.status) END,
+                  custom_fields   = omni_leads.custom_fields || EXCLUDED.custom_fields,
+                  updated_at      = NOW()
+                """,
+                env["entity_id"],
+                env["workspace_id"],
+                p.get("contact_id"),
+                p.get("workflow_id"),
+                p.get("current_node_id"),
+                p.get("status"),  # NULL when the event carries none — COALESCE keeps existing
+                p.get("custom_fields") or {},
+                list(_TERMINAL_LEAD_STATUSES),
+            )
 
 
 async def _project_message(env: dict[str, Any]) -> None:

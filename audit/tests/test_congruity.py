@@ -336,6 +336,67 @@ async def test_verify_person_rejects_company_match_without_role_signal():
     assert not verification["passed"]
 
 
+@pytest.mark.asyncio
+async def test_verify_person_rejects_past_role_contact():
+    """A former executive is not a current reachable decision-maker."""
+    from app.nodes import NodeContext
+    from app.nodes.conditions.verify_person import execute
+
+    result = await execute(NodeContext(
+        workspace_id="workspace",
+        workflow_id="workflow",
+        node_id="verify",
+        config={"pass_threshold": 40},
+        lead={
+            "id": "lead-former",
+            "custom_fields": {
+                "item": {
+                    "first_name": "Kumar",
+                    "last_name": "Mahadeva",
+                    "headline": "Founder and former CEO at Cognizant",
+                    "raw_title": "Kumar Mahadeva - Founder and former CEO at Cognizant | LinkedIn",
+                    "company_name": "Cognizant",
+                    "linkedin_url": "https://www.linkedin.com/in/kumar-mahadeva-6755b65",
+                }
+            },
+        },
+    ))
+
+    assert result.handle == "rejected"
+    assert result.telemetry["reason"] == "past_role"
+
+
+@pytest.mark.asyncio
+async def test_verify_person_rejects_broken_current_company_evidence():
+    """A title like 'CEO at | LinkedIn' has no employer evidence."""
+    from app.nodes import NodeContext
+    from app.nodes.conditions.verify_person import execute
+
+    result = await execute(NodeContext(
+        workspace_id="workspace",
+        workflow_id="workflow",
+        node_id="verify",
+        config={"pass_threshold": 40},
+        lead={
+            "id": "lead-broken-company",
+            "custom_fields": {
+                "item": {
+                    "first_name": "Narayan",
+                    "last_name": "Murthy",
+                    "headline": "Co-Founder at  - LinkedIn",
+                    "raw_title": "Narayan Murthy - Co-Founder at  - LinkedIn",
+                    "company_name": "Infosys",
+                    "linkedin_url": "https://in.linkedin.com/in/narayan-murthy-851b6a356",
+                },
+                "company_resolution": {"name": "Infosys", "domain": "infosys.com"},
+            },
+        },
+    ))
+
+    assert result.handle == "rejected"
+    assert result.telemetry["reason"] == "missing_current_company_evidence"
+
+
 # ── E2E-001: fan-out dedup + join distinct-child counting + screen verdict writeback ─
 def test_fan_out_dedups_identical_items():
     """REGRESSION E2E-001a: a source that returns the same company/person twice
