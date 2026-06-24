@@ -176,6 +176,7 @@ def _config_for(node_type: str, companies_key: str = "companies") -> dict[str, A
             "keyword": "sales development representative",
             "location": "India",
             "max_pages": 1,
+            "max_results": 3,
             "min_results": 0,
             "companies_key": companies_key,
         }
@@ -259,7 +260,7 @@ def _payload_keys_for(node_type: str) -> set[str]:
             keys.add("directory_url")
         return keys
     if node_type == "source.naukri":
-        return {"keyword", "location", "max_pages", "min_results", "companies_key", "correlation_id"}
+        return {"keyword", "location", "max_pages", "max_results", "min_results", "companies_key", "correlation_id"}
     if node_type == "source.indeed":
         return {
             "connection_name",

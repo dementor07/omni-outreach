@@ -80,7 +80,7 @@ _AGENCY_MINING = CampaignTemplate(
         TemplateNode("loop_ppl", "flow.for_each", 1280, 200, {
             "items_key": "people", "item_field": "item", "max_items": 5,
         }),
-        TemplateNode("verify", "condition.verify_person", 1600, 200, {"pass_threshold": 15}),
+        TemplateNode("verify", "condition.verify_person", 1600, 200, {"pass_threshold": 40}),
         TemplateNode("contact", "crm.create_contact", 1920, 200, {}),
     ),
     edges=(

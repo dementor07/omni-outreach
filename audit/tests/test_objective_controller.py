@@ -24,7 +24,11 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+from uuid import uuid4
 
+import pytest
+
+from app.routers import objectives
 from app.services.objective_controller import (
     DEFAULT_MAX_ITERATIONS,
     MEASURABLE_METRICS,
@@ -112,6 +116,44 @@ def test_only_measurable_metrics_exposed():
     assert "meetings_booked" not in literal_line, "router Metric must not offer an unmeasurable metric"
     for m in MEASURABLE_METRICS:
         assert m in literal_line, f"router Metric must offer {m}"
+
+
+@pytest.mark.asyncio
+async def test_objective_getter_reports_live_contact_progress(monkeypatch):
+    workflow_id = uuid4()
+    objective_id = uuid4()
+    calls: list[str] = []
+
+    async def fake_fetch_one(query: str, *args):
+        calls.append(query)
+        if "FROM omni_campaign_objectives" in query:
+            return {
+                "id": objective_id,
+                "workspace_id": uuid4(),
+                "workflow_id": workflow_id,
+                "metric": "contacts",
+                "target": 3,
+                "audience": {},
+                "bounds": {},
+                "progress": {},
+                "status": "pursuing",
+                "created_at": date(2026, 6, 24),
+                "updated_at": date(2026, 6, 24),
+            }
+        if "COUNT(DISTINCT contact_id)" in query:
+            return {"n": 42}
+        raise AssertionError(query)
+
+    monkeypatch.setattr(objectives, "fetch_one", fake_fetch_one)
+
+    result = await objectives.get_objective(workflow_id, None)  # type: ignore[arg-type]
+
+    assert result is not None
+    assert result.progress["current"] == 42
+    assert result.progress["target"] == 3
+    assert result.progress["percent"] == 100
+    assert result.status == "reached"
+    assert any("COUNT(DISTINCT contact_id)" in call for call in calls)
 
 
 # ── placement: the loop is event-driven, off the safety-critical claim ───────

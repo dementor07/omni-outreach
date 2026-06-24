@@ -50,6 +50,12 @@ class NaukriSourceConfig(BaseModel):
     max_pages: int = Field(
         5, ge=1, le=50, description="Pages to scrape (~20 jobs/page). 5 pages ~= 100 jobs"
     )
+    max_results: int = Field(
+        25,
+        ge=1,
+        le=500,
+        description="Hard cap on deduped companies returned to the campaign graph",
+    )
     companies_key: str = Field(
         "companies",
         description="custom_fields key where the deduped company list lands for flow.for_each",
@@ -88,6 +94,7 @@ async def execute(ctx: NodeContext) -> NodeResult:
                 "keyword": cfg.keyword,
                 "location": cfg.location,
                 "max_pages": cfg.max_pages,
+                "max_results": cfg.max_results,
                 "min_results": cfg.min_results,
                 "companies_key": cfg.companies_key,
                 "correlation_id": correlation_id,

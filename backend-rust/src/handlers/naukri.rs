@@ -14,6 +14,7 @@
 //!   - `keyword`       str (one role)
 //!   - `location`      str | null
 //!   - `max_pages`     int  (~20 jobs/page)
+//!   - `max_results`   int  hard cap on deduped companies returned
 //!   - `min_results`   int  — handle=`empty` if fewer jobs come back
 //!   - `companies_key` custom_fields key to write
 //!
@@ -74,6 +75,7 @@ pub async fn handle_naukri(command: &ActionCommand) -> ExecutionResult {
     }
     let location = common::opt_s(command, "location");
     let max_pages = command.payload["max_pages"].as_i64().unwrap_or(5).clamp(1, 50);
+    let max_results = command.payload["max_results"].as_i64().unwrap_or(25).clamp(1, 500) as usize;
     let min_results = command.payload["min_results"].as_i64().unwrap_or(1).max(0) as usize;
     let companies_key = {
         let k = common::s(command, "companies_key");
@@ -119,13 +121,17 @@ pub async fn handle_naukri(command: &ActionCommand) -> ExecutionResult {
         return result;
     }
 
-    let companies = extract_companies(&parsed.data);
+    let mut companies = extract_companies(&parsed.data);
+    if companies.len() > max_results {
+        companies.truncate(max_results);
+    }
     let mutations = json!({ "custom_fields": { companies_key.clone(): companies.clone() } });
     let mut result = common::ok(
         command,
         json!({
             "jobs_returned": parsed.data.len(),
             "companies_extracted": companies.len(),
+            "max_results": max_results,
             "keyword": keyword,
         }),
         Some("source.naukri.completed"),

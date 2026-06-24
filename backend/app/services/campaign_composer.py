@@ -271,6 +271,7 @@ def _source_config(source: CampaignSourceSpec, companies_key: str) -> dict[str, 
             "keyword": source.keyword,
             "location": source.location,
             "max_pages": max(1, min(50, source.max_results // 20 or 1)),
+            "max_results": source.max_results,
             "companies_key": companies_key,
         }
     if source.provider == "searxng":

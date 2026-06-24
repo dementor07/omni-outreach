@@ -81,6 +81,7 @@ def test_campaign_spec_compiles_multi_source_enrichment_and_followups():
     assert graph.objective["metric"] == "contacts"
     assert graph.objective["target"] == 500
     assert by_key["source_1"].node_type == "source.naukri"
+    assert by_key["source_1"].config["max_results"] == 100
     assert by_key["source_2"].node_type == "source.serper_search"
     assert by_key["source_1"].config["companies_key"] == "companies_1"
     assert by_key["source_2"].config["companies_key"] == "companies_2"

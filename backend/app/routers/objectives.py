@@ -67,7 +67,72 @@ async def get_objective(
     row = await fetch_one(
         "SELECT * FROM omni_campaign_objectives WHERE workflow_id = $1", workflow_id
     )
-    return ObjectiveOut.model_validate(row) if row else None
+    if not row:
+        return None
+    out = dict(row)
+    current = await _measure_current_progress(workflow_id, str(out["metric"]))
+    progress = dict(out.get("progress") or {})
+    progress["current"] = current
+    progress["target"] = out["target"]
+    progress["percent"] = min(100, round((current / max(1, int(out["target"]))) * 100))
+    out["progress"] = progress
+    if out["status"] == "pursuing" and current >= int(out["target"]):
+        out["status"] = "reached"
+    return ObjectiveOut.model_validate(out)
+
+
+async def _measure_current_progress(workflow_id: uuid.UUID, metric: str) -> int:
+    """Live lineage-scoped objective progress for the dashboard.
+
+    The objective worker still persists pursuit state, but the operator header
+    must not show stale 0/N while async source/transition/projector workers have
+    already created contacts or leads for this exact workflow.
+    """
+    if metric == "contacts":
+        row = await fetch_one(
+            "SELECT COUNT(DISTINCT contact_id) AS n FROM omni_leads "
+            "WHERE workflow_id = $1 AND contact_id IS NOT NULL",
+            workflow_id,
+        )
+        return int((row or {}).get("n") or 0)
+    if metric == "qualified_leads":
+        row = await fetch_one(
+            """
+            SELECT COUNT(DISTINCT id) AS n
+            FROM omni_leads
+            WHERE workflow_id = $1
+              AND contact_id IS NOT NULL
+              AND COALESCE((custom_fields->'verification'->>'passed')::boolean, false) = true
+            """,
+            workflow_id,
+        )
+        return int((row or {}).get("n") or 0)
+    if metric == "companies":
+        row = await fetch_one(
+            """
+            SELECT COUNT(DISTINCT COALESCE(
+                custom_fields->'item'->>'company_name',
+                custom_fields->>'company_name'
+            )) AS n
+            FROM omni_leads
+            WHERE workflow_id = $1
+              AND COALESCE(custom_fields->'item'->>'company_name', custom_fields->>'company_name') IS NOT NULL
+            """,
+            workflow_id,
+        )
+        return int((row or {}).get("n") or 0)
+    if metric == "replies":
+        row = await fetch_one(
+            """
+            SELECT COUNT(DISTINCT entity_id) AS n
+            FROM omni_events_archive
+            WHERE event_type IN ('message.replied', 'reply.received', 'inbound.reply.received')
+              AND entity_id IN (SELECT id FROM omni_leads WHERE workflow_id = $1)
+            """,
+            workflow_id,
+        )
+        return int((row or {}).get("n") or 0)
+    return 0
 
 
 @router.put(
