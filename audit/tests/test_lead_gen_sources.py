@@ -297,8 +297,6 @@ def _payload_keys_for(node_type: str) -> set[str]:
         }
     if node_type == "source.searxng_people":
         return {
-            "company_field",
-            "company_name_field",
             "provider",
             "searxng_url",
             "company_name",
