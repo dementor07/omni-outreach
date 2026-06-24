@@ -152,6 +152,7 @@ export default function CampaignArchitect({ templates, onCreated, onCancel }: Pr
     name, targetContacts, audience, titles, sources, peopleProvider, peopleConnection,
     maxPerCompany, enrichment, messages, verificationThreshold, maxIterations, maxSpend,
   ])
+  const architectReady = Boolean(buildResult.spec)
 
   const createArchitect = async () => {
     if (!buildResult.spec) {
@@ -352,7 +353,12 @@ export default function CampaignArchitect({ templates, onCreated, onCancel }: Pr
             </p>
             <div className="flex items-center gap-2">
               <Button variant="ghost" onClick={onCancel}>Cancel</Button>
-              <Button variant="primary" icon={mode === 'architect' ? Sparkles : Target} onClick={mode === 'architect' ? createArchitect : createClassic}>
+              <Button
+                variant="primary"
+                icon={mode === 'architect' ? Sparkles : Target}
+                onClick={mode === 'architect' ? createArchitect : createClassic}
+                disabled={mode === 'architect' && !architectReady}
+              >
                 {mode === 'architect' ? 'Create architected campaign' : 'Create classic campaign'}
               </Button>
             </div>
