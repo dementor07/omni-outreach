@@ -12,6 +12,8 @@ import os
 import re
 from pathlib import Path
 
+import pytest
+
 os.environ.setdefault("DB_PASSWORD", "testpass")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production")
 os.environ.setdefault("REDIS_PASSWORD", "")
@@ -257,6 +259,81 @@ def test_is_company_mismatch_matches_fork_logic():
     assert m("CTO · building things", "Acme") is False
     assert m("CEO at LinkedIn", "Acme") is False  # excluded sentinel
     assert m("Sales Lead", "Acme") is False  # no separator
+
+
+@pytest.mark.asyncio
+async def test_verify_person_scores_live_serper_person_shape():
+    """REGRESSION: live serper_people rows use item.headline + item.company_name.
+
+    The verifier used to read only item.title and company.name, so real people
+    discovered by the dashboard flow scored as linkedin_url-only (20) and were
+    rejected before contact creation.
+    """
+    from app.nodes import NodeContext
+    from app.nodes.conditions.verify_person import execute
+
+    result = await execute(NodeContext(
+        workspace_id="workspace",
+        workflow_id="workflow",
+        node_id="verify",
+        config={"pass_threshold": 40},
+        lead={
+            "id": "lead-1",
+            "custom_fields": {
+                "item": {
+                    "first_name": "Sahil",
+                    "last_name": "Barua",
+                    "headline": "Chief Executive Officer at | LinkedIn",
+                    "raw_title": "Sahil Barua - Chief Executive Officer at Delhivery | LinkedIn",
+                    "company_name": "Delhivery",
+                    "linkedin_url": "https://in.linkedin.com/in/sahil-barua-a09212364",
+                }
+            },
+        },
+    ))
+
+    assert result.handle == "verified"
+    verification = result.events[0]["payload"]["custom_fields"]["verification"]
+    assert verification["score"] >= 40
+    assert ("snippet_match", 40) in verification["breakdown"]
+    assert any(label == "decision_maker_title" for label, _ in verification["breakdown"])
+
+
+@pytest.mark.asyncio
+async def test_verify_person_rejects_company_match_without_role_signal():
+    """Company + LinkedIn alone is not a quality contact.
+
+    Live Serper results can include weak LinkedIn profile titles such as
+    "Private Limited - LinkedIn". Those may mention the target company in the raw
+    title, but they are not enough to create a campaign contact.
+    """
+    from app.nodes import NodeContext
+    from app.nodes.conditions.verify_person import execute
+
+    result = await execute(NodeContext(
+        workspace_id="workspace",
+        workflow_id="workflow",
+        node_id="verify",
+        config={"pass_threshold": 40},
+        lead={
+            "id": "lead-2",
+            "custom_fields": {
+                "item": {
+                    "first_name": "Arun",
+                    "last_name": "Kumar",
+                    "headline": "Private Limited - LinkedIn",
+                    "raw_title": "Arun Kumar - Aparajitha Corporate Services Private Limited - LinkedIn",
+                    "company_name": "Aparajitha Corporate Services",
+                    "linkedin_url": "https://in.linkedin.com/in/arun-kumar-176a2a1b5",
+                }
+            },
+        },
+    ))
+
+    assert result.handle == "rejected"
+    verification = result.events[0]["payload"]["custom_fields"]["verification"]
+    assert verification["score"] >= 40
+    assert not verification["passed"]
 
 
 # ── E2E-001: fan-out dedup + join distinct-child counting + screen verdict writeback ─

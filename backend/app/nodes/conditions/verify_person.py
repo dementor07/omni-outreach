@@ -59,10 +59,16 @@ async def execute(ctx: NodeContext) -> NodeResult:
     cf = ctx.lead.get("custom_fields") or {}
     person = cf.get(cfg.item_field) or {}
     company = cf.get(cfg.company_field) or {}
-    company_name = company.get("name") or cf.get("company_name") or ""
+    company_name = (
+        company.get("name")
+        or company.get("company_name")
+        or person.get("company_name")
+        or cf.get("company_name")
+        or ""
+    )
 
-    title = person.get("title") or ""
-    snippet = person.get("snippet")
+    title = person.get("title") or person.get("headline") or person.get("role") or ""
+    snippet = person.get("snippet") or person.get("raw_title") or person.get("headline")
     linkedin_url = person.get("linkedin_url")
     domain_known = bool(company.get("domain"))
     kg_known = bool(company.get("people_discovered"))
@@ -82,7 +88,12 @@ async def execute(ctx: NodeContext) -> NodeResult:
         domain_known=domain_known,
         kg_known=kg_known,
     )
-    passed = total >= cfg.pass_threshold
+    has_role_or_prior_signal = (
+        any(label == "decision_maker_title" for label, _ in breakdown)
+        or domain_known
+        or kg_known
+    )
+    passed = total >= cfg.pass_threshold and has_role_or_prior_signal
 
     # Stash the score breakdown so a downstream lead projection / ai.screen can
     # carry verification_details (plan.md Phase 5).

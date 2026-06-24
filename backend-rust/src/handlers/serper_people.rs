@@ -81,6 +81,7 @@ pub async fn handle_serper_people(command: &ActionCommand) -> ExecutionResult {
 
     let mut found: Vec<Value> = Vec::new();
     let mut seen_urls: HashSet<String> = HashSet::new();
+    let mut provider_failures: Vec<Value> = Vec::new();
 
     'outer: for role in &titles {
         if found.len() >= max_per_company {
@@ -95,7 +96,14 @@ pub async fn handle_serper_people(command: &ActionCommand) -> ExecutionResult {
                 break 'outer;
             }
             let hits = if provider == "searxng" {
-                search_searxng(&searxng_url, pattern).await
+                let outcome = search_searxng(&searxng_url, pattern).await;
+                if let Some(failure) = outcome.provider_failure {
+                    provider_failures.push(json!({
+                        "pattern": pattern,
+                        "reason": failure,
+                    }));
+                }
+                outcome.hits
             } else {
                 search_serper(&api_key, pattern).await
             };
@@ -115,6 +123,8 @@ pub async fn handle_serper_people(command: &ActionCommand) -> ExecutionResult {
                     "first_name": first_name,
                     "last_name": last_name,
                     "headline": clean_role,
+                    "raw_title": raw_title,
+                    "snippet": raw_title,
                     "location": "",
                     "linkedin_url": url,
                     "company_name": company_name,
@@ -131,6 +141,18 @@ pub async fn handle_serper_people(command: &ActionCommand) -> ExecutionResult {
 
     if let Some(r) = &cred_ref {
         credentials::release(r).await;
+    }
+
+    if provider == "searxng" && found.is_empty() && !provider_failures.is_empty() {
+        let mut result = common::fail(command, "SEARXNG_PROVIDER_UNHEALTHY", true);
+        result.telemetry = json!({
+            "company": company_name,
+            "profiles_found": 0,
+            "provider": provider,
+            "provider_failures": provider_failures,
+        });
+        result.metadata.insert("next_handle".to_string(), json!("error"));
+        return result;
     }
 
     let mutations = json!({"custom_fields": {people_key.clone(): found.clone()}});
@@ -195,11 +217,16 @@ async fn search_serper(api_key: &str, pattern: &str) -> Vec<(String, String)> {
     }
 }
 
+struct SearxngSearchOutcome {
+    hits: Vec<(String, String)>,
+    provider_failure: Option<Value>,
+}
+
 /// Run one query pattern against a self-hosted SearXNG instance (FREE — the
 /// economic equalizer). Uses the JSON output format (`format=json`); returns
 /// (url, title) pairs from `results`. SearXNG must have the `json` format
-/// enabled in its settings.yml. Empty on failure — never aborts discovery.
-async fn search_searxng(base_url: &str, pattern: &str) -> Vec<(String, String)> {
+/// enabled in its settings.yml.
+async fn search_searxng(base_url: &str, pattern: &str) -> SearxngSearchOutcome {
     let url = format!("{}/search", base_url.trim_end_matches('/'));
     let resp = OUTBOUND
         .get(&url)
@@ -209,7 +236,7 @@ async fn search_searxng(base_url: &str, pattern: &str) -> Vec<(String, String)> 
     match resp {
         Ok(r) if r.status().is_success() => {
             let v: Value = r.json().await.unwrap_or(Value::Null);
-            v["results"]
+            let hits: Vec<(String, String)> = v["results"]
                 .as_array()
                 .map(|arr| {
                     arr.iter()
@@ -221,17 +248,46 @@ async fn search_searxng(base_url: &str, pattern: &str) -> Vec<(String, String)> 
                         })
                         .collect()
                 })
-                .unwrap_or_default()
+                .unwrap_or_default();
+            let provider_failure = if hits.is_empty() && searxng_has_provider_failure(&v) {
+                Some(json!({
+                    "kind": "unresponsive_engines",
+                    "engines": v["unresponsive_engines"].clone(),
+                }))
+            } else {
+                None
+            };
+            SearxngSearchOutcome { hits, provider_failure }
         }
         Ok(r) => {
-            tracing::warn!(status = %r.status(), pattern = %pattern, "searxng pattern failed");
-            Vec::new()
+            let status = r.status();
+            tracing::warn!(status = %status, pattern = %pattern, "searxng pattern failed");
+            SearxngSearchOutcome {
+                hits: Vec::new(),
+                provider_failure: Some(json!({
+                    "kind": "http_status",
+                    "status": status.as_u16(),
+                })),
+            }
         }
         Err(e) => {
             tracing::warn!(error = %e, pattern = %pattern, "searxng request failed");
-            Vec::new()
+            SearxngSearchOutcome {
+                hits: Vec::new(),
+                provider_failure: Some(json!({
+                    "kind": "network_error",
+                    "message": e.to_string(),
+                })),
+            }
         }
     }
+}
+
+fn searxng_has_provider_failure(payload: &Value) -> bool {
+    payload["unresponsive_engines"]
+        .as_array()
+        .map(|engines| !engines.is_empty())
+        .unwrap_or(false)
 }
 
 // NAME-002: LinkedIn result titles separate the name from the role with ANY of
@@ -289,7 +345,8 @@ fn clean_role_from_title(raw_title: &str, company_name: &str, fallback_role: &st
 
 #[cfg(test)]
 mod tests {
-    use super::{clean_name, clean_role_from_title};
+    use super::{clean_name, clean_role_from_title, searxng_has_provider_failure};
+    use serde_json::json;
 
     #[test]
     fn name_splits_on_endash_the_linkedin_default() {
@@ -313,5 +370,23 @@ mod tests {
     fn role_extracted_after_separator_with_company_stripped() {
         let role = clean_role_from_title("Jan Urbanec – Lead Engineer at 2K", "2K", "CEO");
         assert!(role.to_lowercase().contains("lead engineer"), "got: {role}");
+    }
+
+    #[test]
+    fn searxng_unresponsive_engines_are_provider_failure() {
+        let payload = json!({
+            "results": [],
+            "unresponsive_engines": [
+                ["google", "Suspended: CAPTCHA"],
+                ["duckduckgo", "timeout"]
+            ]
+        });
+        assert!(searxng_has_provider_failure(&payload));
+    }
+
+    #[test]
+    fn searxng_empty_without_engine_failure_is_ordinary_empty() {
+        let payload = json!({"results": [], "unresponsive_engines": []});
+        assert!(!searxng_has_provider_failure(&payload));
     }
 }

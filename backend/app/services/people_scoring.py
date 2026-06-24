@@ -48,7 +48,15 @@ def person_title_score(title: str) -> int:
     """0-100 decision-maker seniority score (discovery.rs compute_person_score)."""
     t = (title or "").lower()
     score = 40  # base for a verified decision-maker
-    if any(k in t for k in ("ceo", "founder", "co-founder", "cto")):
+    if any(k in t for k in (
+        "ceo",
+        "chief executive officer",
+        "founder",
+        "co-founder",
+        "cto",
+        "chief technology officer",
+        "managing director",
+    )):
         score += 25
     elif any(k in t for k in ("cmo", "vp", "vice president")):
         score += 20
