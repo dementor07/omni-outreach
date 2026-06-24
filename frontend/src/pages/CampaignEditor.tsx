@@ -512,6 +512,11 @@ export default function CampaignEditor() {
   if (!id) return null
   const wf = detailQuery.data?.workflow
   const selectedNode = rfNodes.find((n) => n.id === selectedNodeId) ?? null
+  const selectedWiredOutputHandles = selectedNodeId
+    ? rfEdges
+        .filter((edge) => edge.source === selectedNodeId)
+        .map((edge) => String(edge.sourceHandle ?? 'default'))
+    : []
 
   const flow = (
     <div className={clsx('relative flex h-full overflow-hidden', fullscreen ? 'bg-white dark:bg-slate-950' : 'rounded-2xl border border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/50')}>
@@ -627,6 +632,7 @@ export default function CampaignEditor() {
             initialConfig={selectedNode.data.config}
             saving={false}
             connections={connectionsQuery.data ?? []}
+            wiredOutputHandles={selectedWiredOutputHandles}
             onSave={(config) => { updateNodeConfig(selectedNode.id, config); setSelectedNodeId(null) }}
             onDelete={() => deleteNode(selectedNode.id)}
             onClose={() => setSelectedNodeId(null)}
@@ -727,6 +733,7 @@ export default function CampaignEditor() {
                           initialConfig={selectedNode.data.config}
                           saving={false}
                           connections={connectionsQuery.data ?? []}
+                          wiredOutputHandles={selectedWiredOutputHandles}
                           onSave={(config) => {
                             updateNodeConfig(selectedNode.id, config)
                             setSelectedNodeId(null)

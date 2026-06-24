@@ -120,6 +120,7 @@ interface NodeConfigPanelProps {
   initialConfig: Record<string, unknown>
   saving: boolean
   connections?: Connection[]
+  wiredOutputHandles?: string[]
   onSave: (config: Record<string, unknown>) => void
   onDelete?: () => void
   onClose: () => void
@@ -131,6 +132,7 @@ export default function NodeConfigPanel({
   initialConfig,
   saving,
   connections = [],
+  wiredOutputHandles = [],
   onSave,
   onDelete,
   onClose,
@@ -161,6 +163,7 @@ export default function NodeConfigPanel({
   const advancedFields = fields.filter(
     (field) => explicitAdvanced.has(field.name) || !primaryNames.has(field.name),
   )
+  const wiredOutputHandleSet = new Set(wiredOutputHandles)
   const rules = Array.isArray(values.rules) ? values.rules as ConditionRuleValue[] : []
   const rulesReady = rules.length > 0 && rules.every(
     (rule) => rule.field?.trim()
@@ -273,14 +276,31 @@ export default function NodeConfigPanel({
         {/* Output handles reference */}
         {manifest.output_handles.length > 0 && (
           <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/50">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Outputs</p>
-            <ul className="mt-1.5 space-y-1">
-              {manifest.output_handles.map((h) => (
-                <li key={h.name} className="flex items-baseline gap-2 text-[11px]">
-                  <span className={clsx('font-semibold', h.name === 'on_error' ? 'text-rose-500' : 'text-emerald-600')}>{handleLabel(h.name)}</span>
-                  <span className="text-slate-500">{h.description}</span>
-                </li>
-              ))}
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Routes</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+              Each output is an explicit branch. Unconnected routes intentionally end the journey.
+            </p>
+            <ul className="mt-2 space-y-1.5">
+              {manifest.output_handles.map((h) => {
+                const wired = wiredOutputHandleSet.has(h.name)
+                const danger = isFailureRoute(h.name)
+                return (
+                  <li key={h.name} className="rounded-lg border border-white/70 bg-white px-2.5 py-2 text-[11px] dark:border-slate-700 dark:bg-slate-900/50">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={clsx('font-bold uppercase tracking-wide', danger ? 'text-rose-500' : 'text-emerald-600')}>{handleLabel(h.name)}</span>
+                      <span className={clsx(
+                        'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+                        wired
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
+                          : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300',
+                      )}>
+                        {wired ? 'Connected' : 'Ends here'}
+                      </span>
+                    </div>
+                    <p className="mt-1 leading-relaxed text-slate-500">{h.description || routeFallback(h.name)}</p>
+                  </li>
+                )
+              })}
             </ul>
           </div>
         )}
@@ -310,6 +330,16 @@ const ENRICHMENT_PROVIDER_NAMES: Record<string, string> = {
   apollo: 'Apollo',
   proxycurl: 'Proxycurl',
   hunter: 'Hunter',
+}
+
+function isFailureRoute(handle: string): boolean {
+  return ['on_error', 'rejected', 'timeout', 'empty', 'false'].includes(handle)
+}
+
+function routeFallback(handle: string): string {
+  return handle === 'default'
+    ? 'Continue to the next step.'
+    : `Follow the ${handleLabel(handle)} branch.`
 }
 
 function EnrichmentStageFields({

@@ -222,6 +222,9 @@ def test_canvas_hides_optional_complexity_and_humanizes_rules():
     summary = (ROOT / "frontend/src/utils/nodeSummary.ts").read_text(encoding="utf-8")
     assert "Advanced settings" in panel
     assert "defaults are usually best" in panel
+    assert "Each output is an explicit branch" in panel
+    assert "Ends here" in panel
+    assert "wiredOutputHandles" in panel
     assert "All rules match" in panel
     assert "Any rule matches" in panel
     assert "condition.rules" in summary
