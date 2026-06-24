@@ -53,6 +53,19 @@ interface ClassicDraft {
   maxSpend: string
 }
 
+interface BuildIssue {
+  severity: 'error' | 'warning'
+  message: string
+}
+
+interface BuildResult {
+  spec: CampaignSpec | null
+  issues: BuildIssue[]
+  sourceCount: number
+  enrichmentCount: number
+  messageCount: number
+}
+
 interface Props {
   templates: CampaignTemplateInfo[]
   onCreated: (detail: WorkflowDetail) => void
@@ -121,7 +134,7 @@ export default function CampaignArchitect({ templates, onCreated, onCancel }: Pr
   const [maxSpend, setMaxSpend] = useState('')
   const [classic, setClassic] = useState<ClassicDraft>(DEFAULT_CLASSIC)
 
-  const spec = useMemo(() => buildSpec({
+  const buildResult = useMemo(() => buildSpec({
     name,
     targetContacts,
     audience,
@@ -141,12 +154,12 @@ export default function CampaignArchitect({ templates, onCreated, onCancel }: Pr
   ])
 
   const createArchitect = async () => {
-    if (!spec) {
-      toast.error('Complete the campaign architecture before creating it.')
+    if (!buildResult.spec) {
+      toast.error(buildResult.issues.find((issue) => issue.severity === 'error')?.message ?? 'Complete the campaign architecture before creating it.')
       return
     }
     try {
-      onCreated(await canvas.createFromSpec(spec))
+      onCreated(await canvas.createFromSpec(buildResult.spec))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not create campaign')
     }
@@ -321,7 +334,7 @@ export default function CampaignArchitect({ templates, onCreated, onCancel }: Pr
                 </div>
               </ArchitectSection>
 
-              <ReviewPanel spec={spec} />
+              <ReviewPanel result={buildResult} />
             </>
           ) : (
             <ClassicGoalForm
@@ -364,63 +377,116 @@ function buildSpec(input: {
   verificationThreshold: string
   maxIterations: string
   maxSpend: string
-}): CampaignSpec | null {
+}): BuildResult {
+  const issues: BuildIssue[] = []
   const target = Number(input.targetContacts)
-  if (!input.name.trim() || !Number.isInteger(target) || target <= 0) return null
+  if (!input.name.trim()) issues.push({ severity: 'error', message: 'Campaign name is required.' })
+  if (!Number.isInteger(target) || target <= 0) issues.push({ severity: 'error', message: 'Real contacts must be a positive whole number.' })
   const titles = splitList(input.titles)
-  const sources = input.sources.map((source) => ({
-    provider: source.provider,
-    query: source.provider === 'naukri' ? undefined : source.query.trim(),
-    keyword: source.provider === 'naukri' ? source.keyword.trim() : undefined,
-    connection_name: source.connection_name.trim() || undefined,
-    location: source.location.trim() || undefined,
-    max_results: Number(source.max_results) || 25,
-    titles,
-  })).filter((source) => {
-    if (source.provider === 'naukri') return Boolean(source.keyword)
-    if (source.provider === 'serper_search') return Boolean(source.query && source.connection_name)
-    return Boolean(source.query)
+  if (titles.length === 0) issues.push({ severity: 'error', message: 'Add at least one buyer title.' })
+  const sources = input.sources.map((source, index) => {
+    const sourceNumber = index + 1
+    const query = source.provider === 'naukri' ? undefined : source.query.trim()
+    const keyword = source.provider === 'naukri' ? source.keyword.trim() : undefined
+    const connectionName = source.connection_name.trim() || undefined
+    const maxResults = Number(source.max_results) || 25
+    if (source.provider === 'naukri' && !keyword) issues.push({ severity: 'error', message: `Source ${sourceNumber} (Naukri) requires a role keyword.` })
+    if (source.provider === 'searxng' && !query) issues.push({ severity: 'error', message: `Source ${sourceNumber} (SearXNG) requires a search query.` })
+    if (source.provider === 'serper_search') {
+      if (!query) issues.push({ severity: 'error', message: `Source ${sourceNumber} (Serper) requires a search query.` })
+      if (!connectionName) issues.push({ severity: 'error', message: `Source ${sourceNumber} (Serper) requires a connection name.` })
+    }
+    if (!Number.isFinite(maxResults) || maxResults <= 0) issues.push({ severity: 'error', message: `Source ${sourceNumber} max results must be positive.` })
+    return {
+      provider: source.provider,
+      query,
+      keyword,
+      connection_name: connectionName,
+      location: source.location.trim() || undefined,
+      max_results: maxResults,
+      titles,
+    }
   })
-  if (sources.length === 0) return null
-  return {
-    name: input.name.trim(),
-    target_contacts: target,
-    audience: {
-      ...(input.audience.trim() ? { keywords: [input.audience.trim()] } : {}),
-      titles,
-    },
-    bounds: {
-      max_iterations: Number(input.maxIterations) || 5,
-      ...(Number(input.maxSpend) > 0 ? { max_spend_usd: Number(input.maxSpend) } : {}),
-    },
-    sources,
-    people: {
-      provider: input.peopleProvider,
-      connection_name: input.peopleConnection.trim() || undefined,
-      titles,
-      max_per_company: Number(input.maxPerCompany) || 4,
-    },
-    enrichment: input.enrichment
-      .filter((stage) => stage.connection_name.trim())
-      .map((stage) => ({ provider: stage.provider, connection_name: stage.connection_name.trim() })),
-    messages: input.messages.map((message) => ({
+  if (sources.length === 0) issues.push({ severity: 'error', message: 'Add at least one source.' })
+  if (input.peopleProvider === 'serper_people' && !input.peopleConnection.trim()) {
+    issues.push({ severity: 'error', message: 'Serper people discovery requires a connection name.' })
+  }
+  const enrichment = input.enrichment.map((stage, index) => {
+    const connectionName = stage.connection_name.trim()
+    if (!connectionName) issues.push({ severity: 'error', message: `Enrichment stage ${index + 1} (${providerLabel(stage.provider)}) requires a connection name.` })
+    return { provider: stage.provider, connection_name: connectionName }
+  })
+  const messages = input.messages.map((message, index) => {
+    const messageNumber = index + 1
+    if (message.channel === 'email') {
+      if (!message.subject_template.trim()) issues.push({ severity: 'error', message: `Message ${messageNumber} email subject is required.` })
+      if (!message.body_template.trim()) issues.push({ severity: 'error', message: `Message ${messageNumber} email body is required.` })
+    }
+    if (message.channel === 'linkedin' && !message.message_template.trim()) {
+      issues.push({ severity: 'error', message: `Message ${messageNumber} LinkedIn text is required.` })
+    }
+    return {
       channel: message.channel,
       subject_template: message.channel === 'email' ? message.subject_template : undefined,
       body_template: message.channel === 'email' ? message.body_template : undefined,
       message_template: message.channel === 'linkedin' ? message.message_template : undefined,
-      mode: message.channel === 'linkedin' ? 'dm' : undefined,
+      mode: message.channel === 'linkedin' ? ('dm' as const) : undefined,
       connection_name: undefined,
       delay_after: {
         amount: Number(message.delay_amount) || 3,
         unit: message.delay_unit,
       },
-    })),
-    verification_threshold: Number(input.verificationThreshold) || 40,
+    }
+  })
+  if (issues.some((issue) => issue.severity === 'error')) {
+    return {
+      spec: null,
+      issues,
+      sourceCount: input.sources.length,
+      enrichmentCount: input.enrichment.length,
+      messageCount: input.messages.length,
+    }
+  }
+  return {
+    spec: {
+      name: input.name.trim(),
+      target_contacts: target,
+      audience: {
+        ...(input.audience.trim() ? { keywords: [input.audience.trim()] } : {}),
+        titles,
+      },
+      bounds: {
+        max_iterations: Number(input.maxIterations) || 5,
+        ...(Number(input.maxSpend) > 0 ? { max_spend_usd: Number(input.maxSpend) } : {}),
+      },
+      sources,
+      people: {
+        provider: input.peopleProvider,
+        connection_name: input.peopleConnection.trim() || undefined,
+        titles,
+        max_per_company: Number(input.maxPerCompany) || 4,
+      },
+      enrichment,
+      messages,
+      verification_threshold: Number(input.verificationThreshold) || 40,
+    },
+    issues,
+    sourceCount: sources.length,
+    enrichmentCount: enrichment.length,
+    messageCount: messages.length,
   }
 }
 
 function splitList(value: string): string[] {
   return value.split(',').map((item) => item.trim()).filter(Boolean)
+}
+
+function providerLabel(provider: EnrichmentProvider): string {
+  return {
+    apollo: 'Apollo',
+    hunter: 'Hunter',
+    proxycurl: 'Proxycurl',
+  }[provider]
 }
 
 function replaceAt<T>(items: T[], index: number, next: T): T[] {
@@ -565,14 +631,20 @@ function MessageRow({ index, message, onChange, onRemove }: { index: number; mes
   )
 }
 
-function ReviewPanel({ spec }: { spec: CampaignSpec | null }) {
-  if (!spec) {
+function ReviewPanel({ result }: { result: BuildResult }) {
+  if (!result.spec) {
     return (
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-        Finish the required fields to preview the compiled campaign system.
+        <p className="font-bold">Finish the required fields to compile this exact campaign system.</p>
+        <ul className="mt-2 list-disc space-y-1 pl-5">
+          {result.issues.map((issue, index) => (
+            <li key={index}>{issue.message}</li>
+          ))}
+        </ul>
       </div>
     )
   }
+  const spec = result.spec
   return (
     <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/20">
       <div className="flex items-center gap-2 text-sm font-bold text-emerald-900 dark:text-emerald-200">

@@ -319,6 +319,8 @@ def test_campaign_creation_has_architect_and_preserves_classic_goal_flow():
     assert "Design the outcome system" in architect
     assert "Source stack" in architect
     assert "Enrichment stack" in architect
+    assert "requires a connection name" in architect
+    assert ".filter((stage) => stage.connection_name.trim())" not in architect
     assert "Outreach sequence" in architect
     assert "Classic goal creation" in architect
     assert "canvas.createFromGoal" in architect
