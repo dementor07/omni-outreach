@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Archive, GitBranch, Megaphone, Plus, RotateCcw, Trash2,
 } from 'lucide-react'
-import { canvas, type Workflow } from '../api/v2'
+import { canvas, integrations, type Workflow } from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Button from '../components/Button'
@@ -19,6 +19,7 @@ export default function Campaigns() {
   const toast = useToast()
   const { data: campaigns = [], isLoading } = useQuery({ queryKey: ['workflows'], queryFn: canvas.list })
   const { data: templates = [] } = useQuery({ queryKey: ['campaign-templates'], queryFn: canvas.templates })
+  const { data: connections = [] } = useQuery({ queryKey: ['integrations'], queryFn: () => integrations.list() })
 
   const [showCreate, setShowCreate] = useState(false)
   const onCreated = (workflowId: string) => {
@@ -44,6 +45,7 @@ export default function Campaigns() {
       {showCreate && (
         <CampaignArchitect
           templates={templates}
+          connections={connections}
           onCancel={() => setShowCreate(false)}
           onCreated={(detail) => onCreated(detail.workflow.id)}
         />

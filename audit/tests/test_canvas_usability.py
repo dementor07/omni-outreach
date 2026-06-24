@@ -318,10 +318,14 @@ def test_campaign_creation_has_architect_and_preserves_classic_goal_flow():
     assert "INSERT INTO omni_campaign_objectives" in backend
     assert "async with conn.transaction()" in backend
     assert "CampaignArchitect" in frontend
+    assert "integrations.list" in frontend
+    assert "connections={connections}" in frontend
     assert "Campaign Architect" in architect
     assert "Design the outcome system" in architect
     assert "Source stack" in architect
     assert "Enrichment stack" in architect
+    assert "Choose connected" in architect
+    assert "No connected" in architect
     assert "requires a connection name" in architect
     assert ".filter((stage) => stage.connection_name.trim())" not in architect
     assert "disabled={mode === 'architect' && !architectReady}" in architect

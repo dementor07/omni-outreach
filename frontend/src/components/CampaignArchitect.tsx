@@ -8,6 +8,7 @@ import {
   type CampaignSourceProvider,
   type CampaignSpec,
   type CampaignTemplateInfo,
+  type Connection,
   type EnrichmentProvider,
   type MessageChannel,
   type ObjectiveMetric,
@@ -68,6 +69,7 @@ interface BuildResult {
 
 interface Props {
   templates: CampaignTemplateInfo[]
+  connections?: Connection[]
   onCreated: (detail: WorkflowDetail) => void
   onCancel: () => void
 }
@@ -100,7 +102,7 @@ const DEFAULT_CLASSIC: ClassicDraft = {
   maxSpend: '',
 }
 
-export default function CampaignArchitect({ templates, onCreated, onCancel }: Props) {
+export default function CampaignArchitect({ templates, connections = [], onCreated, onCancel }: Props) {
   const toast = useToast()
   const [mode, setMode] = useState<AuthoringMode>('architect')
   const [name, setName] = useState('500 real contacts from stacked sources')
@@ -294,6 +296,7 @@ export default function CampaignArchitect({ templates, onCreated, onCancel }: Pr
                       key={index}
                       index={index}
                       stage={stage}
+                      connections={connections}
                       onChange={(next) => setEnrichment((current) => replaceAt(current, index, next))}
                       onRemove={() => setEnrichment((current) => current.filter((_, itemIndex) => itemIndex !== index))}
                     />
@@ -576,18 +579,53 @@ function SourceRow({ index, source, onChange, onRemove }: { index: number; sourc
   )
 }
 
-function EnrichmentRow({ index, stage, onChange, onRemove }: { index: number; stage: DraftEnrichment; onChange: (stage: DraftEnrichment) => void; onRemove: () => void }) {
+function EnrichmentRow({
+  index,
+  stage,
+  connections,
+  onChange,
+  onRemove,
+}: {
+  index: number
+  stage: DraftEnrichment
+  connections: Connection[]
+  onChange: (stage: DraftEnrichment) => void
+  onRemove: () => void
+}) {
+  const providerConnections = connections.filter((connection) => connection.provider === stage.provider)
   return (
     <div className="grid gap-3 rounded-xl border border-slate-100 p-3 dark:border-slate-800 md:grid-cols-[180px_1fr_40px]">
       <Field label={`Stage ${index + 1}`}>
-        <select value={stage.provider} onChange={(event) => onChange({ ...stage, provider: event.target.value as EnrichmentProvider })} className={inputClass}>
+        <select
+          value={stage.provider}
+          onChange={(event) => {
+            const provider = event.target.value as EnrichmentProvider
+            const firstConnection = connections.find((connection) => connection.provider === provider)
+            onChange({ provider, connection_name: firstConnection?.name ?? '' })
+          }}
+          className={inputClass}
+        >
           <option value="proxycurl">Proxycurl</option>
           <option value="hunter">Hunter</option>
           <option value="apollo">Apollo</option>
         </select>
       </Field>
       <Field label="Connection name">
-        <input value={stage.connection_name} onChange={(event) => onChange({ ...stage, connection_name: event.target.value })} placeholder={`${stage.provider}-prod`} className={inputClass} />
+        {providerConnections.length > 0 ? (
+          <select value={stage.connection_name} onChange={(event) => onChange({ ...stage, connection_name: event.target.value })} className={inputClass}>
+            <option value="">Choose connected {providerLabel(stage.provider)} account</option>
+            {providerConnections.map((connection) => (
+              <option key={connection.id} value={connection.name}>{connection.name}</option>
+            ))}
+          </select>
+        ) : (
+          <>
+            <input value={stage.connection_name} onChange={(event) => onChange({ ...stage, connection_name: event.target.value })} placeholder={`${stage.provider}-prod`} className={inputClass} />
+            <p className="mt-1 text-[11px] leading-relaxed text-amber-600 dark:text-amber-300">
+              No connected {providerLabel(stage.provider)} account found. Type the connection name now, or add it in Integrations first.
+            </p>
+          </>
+        )}
       </Field>
       <button type="button" onClick={onRemove} className="mt-6 rounded-lg p-2 text-slate-300 hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-950/30" aria-label={`Remove enrichment ${index + 1}`}>
         <Trash2 size={16} />
