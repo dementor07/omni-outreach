@@ -326,6 +326,9 @@ def test_campaign_creation_has_architect_and_preserves_classic_goal_flow():
     assert "Enrichment stack" in architect
     assert "Choose connected" in architect
     assert "No connected" in architect
+    assert "Choose connected Serper account" in architect
+    assert "No connection needed" in architect
+    assert "connectionsForProvider(connections, 'serper')" in architect
     assert "requires a connection name" in architect
     assert ".filter((stage) => stage.connection_name.trim())" not in architect
     assert "disabled={mode === 'architect' && !architectReady}" in architect

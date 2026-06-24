@@ -135,6 +135,7 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
   const [maxIterations, setMaxIterations] = useState('5')
   const [maxSpend, setMaxSpend] = useState('')
   const [classic, setClassic] = useState<ClassicDraft>(DEFAULT_CLASSIC)
+  const serperConnections = connectionsForProvider(connections, 'serper')
 
   const buildResult = useMemo(() => buildSpec({
     name,
@@ -262,6 +263,7 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
                       key={index}
                       index={index}
                       source={source}
+                      connections={connections}
                       onChange={(next) => setSources((current) => replaceAt(current, index, next))}
                       onRemove={() => setSources((current) => current.filter((_, itemIndex) => itemIndex !== index))}
                     />
@@ -281,7 +283,25 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
                     </select>
                   </Field>
                   <Field label="Connection">
-                    <input value={peopleConnection} onChange={(event) => setPeopleConnection(event.target.value)} placeholder="Required for Serper" className={inputClass} />
+                    {peopleProvider === 'serper_people' && serperConnections.length > 0 ? (
+                      <select value={peopleConnection} onChange={(event) => setPeopleConnection(event.target.value)} className={inputClass}>
+                        <option value="">Choose connected Serper account</option>
+                        {serperConnections.map((connection) => (
+                          <option key={connection.id} value={connection.name}>{connection.name}</option>
+                        ))}
+                      </select>
+                    ) : peopleProvider === 'serper_people' ? (
+                      <>
+                        <input value={peopleConnection} onChange={(event) => setPeopleConnection(event.target.value)} placeholder="serper-prod" className={inputClass} />
+                        <p className="mt-1 text-[11px] leading-relaxed text-amber-600 dark:text-amber-300">
+                          No connected Serper account found. Type the connection name now, or add it in Integrations first.
+                        </p>
+                      </>
+                    ) : (
+                      <p className="mt-1 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-900">
+                        SearXNG people search uses the free self-hosted search service. No connection needed.
+                      </p>
+                    )}
                   </Field>
                   <Field label="People per company">
                     <input type="number" min={1} value={maxPerCompany} onChange={(event) => setMaxPerCompany(event.target.value)} className={inputClass} />
@@ -498,6 +518,10 @@ function providerLabel(provider: EnrichmentProvider): string {
   }[provider]
 }
 
+function connectionsForProvider(connections: Connection[], provider: string): Connection[] {
+  return connections.filter((connection) => connection.provider === provider)
+}
+
 function replaceAt<T>(items: T[], index: number, next: T): T[] {
   return items.map((item, itemIndex) => (itemIndex === index ? next : item))
 }
@@ -549,11 +573,35 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
-function SourceRow({ index, source, onChange, onRemove }: { index: number; source: DraftSource; onChange: (source: DraftSource) => void; onRemove: () => void }) {
+function SourceRow({
+  index,
+  source,
+  connections,
+  onChange,
+  onRemove,
+}: {
+  index: number
+  source: DraftSource
+  connections: Connection[]
+  onChange: (source: DraftSource) => void
+  onRemove: () => void
+}) {
+  const serperConnections = connectionsForProvider(connections, 'serper')
   return (
     <div className="grid gap-3 rounded-xl border border-slate-100 p-3 dark:border-slate-800 md:grid-cols-[120px_1fr_130px_40px]">
       <Field label={`Source ${index + 1}`}>
-        <select value={source.provider} onChange={(event) => onChange({ ...source, provider: event.target.value as CampaignSourceProvider })} className={inputClass}>
+        <select
+          value={source.provider}
+          onChange={(event) => {
+            const provider = event.target.value as CampaignSourceProvider
+            onChange({
+              ...source,
+              provider,
+              connection_name: provider === 'serper_search' ? (serperConnections[0]?.name ?? '') : '',
+            })
+          }}
+          className={inputClass}
+        >
           <option value="naukri">Naukri companies</option>
           <option value="searxng">SearXNG companies</option>
           <option value="serper_search">Serper companies</option>
@@ -571,7 +619,21 @@ function SourceRow({ index, source, onChange, onRemove }: { index: number; sourc
       {source.provider === 'serper_search' && (
         <div className="md:col-span-4">
           <Field label="Serper connection name">
-            <input value={source.connection_name} onChange={(event) => onChange({ ...source, connection_name: event.target.value })} placeholder="serper-prod" className={inputClass} />
+            {serperConnections.length > 0 ? (
+              <select value={source.connection_name} onChange={(event) => onChange({ ...source, connection_name: event.target.value })} className={inputClass}>
+                <option value="">Choose connected Serper account</option>
+                {serperConnections.map((connection) => (
+                  <option key={connection.id} value={connection.name}>{connection.name}</option>
+                ))}
+              </select>
+            ) : (
+              <>
+                <input value={source.connection_name} onChange={(event) => onChange({ ...source, connection_name: event.target.value })} placeholder="serper-prod" className={inputClass} />
+                <p className="mt-1 text-[11px] leading-relaxed text-amber-600 dark:text-amber-300">
+                  No connected Serper account found. Type the connection name now, or add it in Integrations first.
+                </p>
+              </>
+            )}
           </Field>
         </div>
       )}
