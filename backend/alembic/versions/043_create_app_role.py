@@ -1,7 +1,7 @@
 """create app role
 
-Revision ID: 026
-Revises: 025
+Revision ID: 043
+Revises: 042
 Create Date: 2026-06-25 00:00:00.000000
 
 """
@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision = '026'
-down_revision = '025'
+revision = '043'
+down_revision = '042'
 branch_labels = None
 depends_on = None
 
