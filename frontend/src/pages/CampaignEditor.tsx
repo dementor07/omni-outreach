@@ -1026,11 +1026,11 @@ function WorkflowPoolSettings({ workflowId, poolQ }: { workflowId: string, poolQ
   
   useEffect(() => {
     if (poolQ.data) {
-      setDraftPool(new Set(poolQ.data.map(a => a.id)))
+      setDraftPool(new Set(poolQ.data.map((a: any) => a.id)))
     }
   }, [poolQ.data])
 
-  const savedPool = new Set((poolQ.data || []).map(a => a.id))
+  const savedPool = new Set((poolQ.data || []).map((a: any) => a.id))
   const isDirty = draftPool.size !== savedPool.size || Array.from(draftPool).some(id => !savedPool.has(id))
 
   const setMut = useMutation({

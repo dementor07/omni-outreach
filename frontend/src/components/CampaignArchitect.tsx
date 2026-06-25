@@ -181,8 +181,6 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
     maxIterations,
     maxSpend,
   }), [
-    maxPerCompany, enrichment, messages, verificationThreshold, maxIterations, maxSpend,
-  }), [
     name, targetContacts, audience, titles, sources, enableScreening, screeningConnection, screeningPrompt, peopleProvider, peopleConnection,
     maxPerCompany, enrichment, messages, verificationThreshold, maxIterations, maxSpend,
   ])
