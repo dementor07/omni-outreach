@@ -46,7 +46,7 @@ services:
       context: ./backend-rust
     environment:
       KAFKA_BROKERS: redpanda:9092
-      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
+      DATABASE_URL: postgresql://omni_app_role:omni_app_password@db:5432/outreach
       CONTROL_PLANE_URL: http://backend:8000
       MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
       RUST_LOG: execution_engine=info
@@ -129,7 +129,8 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
+      DATABASE_URL: postgresql://omni_app_role:omni_app_password@db:5432/outreach
+      ALEMBIC_DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
       REDIS_URL: redis://:d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17@redis:6379
       REDIS_PASSWORD: d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17
       KAFKA_BROKERS: redpanda:9092
@@ -158,7 +159,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
+      DATABASE_URL: postgresql://omni_app_role:omni_app_password@db:5432/outreach
       KAFKA_BROKERS: redpanda:9092
       DB_PASSWORD: OmniOutreach2026
       SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
