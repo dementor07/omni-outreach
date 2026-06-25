@@ -70,6 +70,7 @@ async def execute(ctx: NodeContext) -> NodeResult:
                 "screening_prompt": cfg.screening_prompt,
                 "company_name": company.get("company_name"),
                 "sector": company.get("sector") or company.get("industry"),
+                "description": company.get("description"),
                 "on_error_handle": "accept",  # fail-open
                 "correlation_id": correlation_id,
             },

@@ -41,6 +41,11 @@ class SearxngPeopleSourceConfig(BaseModel):
         "people",
         description="custom_fields key where the deduped profile list lands",
     )
+
+    company_name_field: str | None = Field(
+        None,
+        description="custom_fields key holding the company name string to search for "
+    )
     searxng_url: str | None = Field(None, description="Override SearXNG base URL (else SEARXNG_URL env)")
 
 
@@ -69,6 +74,8 @@ async def execute(ctx: NodeContext) -> NodeResult:
             "entity_type": "lead",
             "entity_id": ctx.lead.get("id"),
             "payload": {
+                "company_field": cfg.company_field,
+                "company_name_field": cfg.company_name_field,
                 "provider": "searxng",
                 "searxng_url": cfg.searxng_url or "",
                 "company_name": company.get("company_name"),

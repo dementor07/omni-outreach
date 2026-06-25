@@ -275,6 +275,8 @@ def esc(s: str) -> str:
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace('"', "&quot;")
+        .replace("'", "&#39;")
+        #Added newline replacement for better HTML formatting
     )
 
 

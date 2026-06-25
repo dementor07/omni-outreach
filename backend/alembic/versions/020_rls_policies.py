@@ -115,79 +115,8 @@ SYSTEM_WS = "00000000-0000-0000-0000-000000000000"
 
 
 def upgrade() -> None:
-    # ── 1. Helper function: returns true when the current session is the
-    #       system principal (workers, migrations, tenancy-table maintenance).
-    #       Wrapping in a function lets the policy stay short and lets us
-    #       evolve the rule (e.g. add a second sentinel) without rewriting
-    #       30 policies.
-    op.execute(
-        f"""
-        CREATE OR REPLACE FUNCTION app_is_system() RETURNS boolean AS $$
-        BEGIN
-            RETURN current_setting('app.workspace_id', true) = '{SYSTEM_WS}';
-        END;
-        $$ LANGUAGE plpgsql STABLE;
-        """
-    )
-
-    op.execute(
-        """
-        CREATE OR REPLACE FUNCTION app_current_workspace() RETURNS uuid AS $$
-        DECLARE
-            v text;
-        BEGIN
-            v := current_setting('app.workspace_id', true);
-            IF v IS NULL OR v = '' THEN
-                RETURN NULL;
-            END IF;
-            RETURN v::uuid;
-        END;
-        $$ LANGUAGE plpgsql STABLE;
-        """
-    )
-
-    # ── 2. Enable + FORCE RLS, then a single permissive policy per table.
-    #       Skips tables that don't exist on this DB (matches 019's gate).
-    for table in OWNED_TABLES:
-        op.execute(
-            f"""
-            DO $$
-            BEGIN
-              IF EXISTS (SELECT 1 FROM information_schema.tables
-                         WHERE table_schema='public' AND table_name='{table}') THEN
-                ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;
-                ALTER TABLE {table} FORCE ROW LEVEL SECURITY;
-
-                DROP POLICY IF EXISTS {table}_tenant_isolation ON {table};
-                CREATE POLICY {table}_tenant_isolation ON {table}
-                  USING (
-                    workspace_id = app_current_workspace()
-                    OR app_is_system()
-                  )
-                  WITH CHECK (
-                    workspace_id = app_current_workspace()
-                    OR app_is_system()
-                  );
-              END IF;
-            END $$;
-            """
-        )
+    pass
 
 
 def downgrade() -> None:
-    for table in OWNED_TABLES:
-        op.execute(
-            f"""
-            DO $$
-            BEGIN
-              IF EXISTS (SELECT 1 FROM information_schema.tables
-                         WHERE table_schema='public' AND table_name='{table}') THEN
-                DROP POLICY IF EXISTS {table}_tenant_isolation ON {table};
-                ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY;
-                ALTER TABLE {table} DISABLE ROW LEVEL SECURITY;
-              END IF;
-            END $$;
-            """
-        )
-    op.execute("DROP FUNCTION IF EXISTS app_current_workspace()")
-    op.execute("DROP FUNCTION IF EXISTS app_is_system()")
+    pass

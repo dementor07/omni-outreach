@@ -60,6 +60,8 @@ MANIFEST = NodeManifest(
     capabilities=("connection:serper",),
     side_effect=SideEffect.NETWORK,
     icon="users",
+    primary_fields=("connection_name",),
+    advanced_fields=("company_field", "titles", "max_per_company", "people_key"),
 )
 
 

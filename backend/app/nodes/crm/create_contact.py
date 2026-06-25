@@ -31,6 +31,7 @@ from app.nodes import (
     SideEffect,
     register,
 )
+from app.db import fetch_one
 
 
 class CreateContactConfig(BaseModel):
@@ -58,10 +59,57 @@ MANIFEST = NodeManifest(
     output_handles=(NodeHandle("default", "Contact event emitted"),),
     side_effect=SideEffect.MUTATE,
     icon="user-plus",
+    primary_fields=("person_field",),
+    advanced_fields=("source", "email", "linkedin_url", "first_name", "last_name", "company", "headline", "phone"),
 )
 
 
+async def _is_contact_cap_reached(workspace_id: str, workflow_id: str) -> bool:
+    objective = await fetch_one(
+        """
+        SELECT target
+        FROM omni_campaign_objectives
+        WHERE workspace_id = $1 AND workflow_id = $2 AND metric = 'contacts'
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        workspace_id,
+        workflow_id,
+    )
+    if not objective or int(objective.get("target") or 0) <= 0:
+        return False
+
+    attached_row = await fetch_one(
+        """
+        SELECT count(DISTINCT contact_id) as n
+        FROM omni_leads
+        WHERE workspace_id = $1
+          AND workflow_id = $2
+          AND contact_id IS NOT NULL
+        """,
+        workspace_id,
+        workflow_id,
+    )
+    attached = attached_row.get("n", 0) if attached_row else 0
+    return int(attached) >= int(objective.get("target") or 0)
+
+
 async def execute(ctx: NodeContext) -> NodeResult:
+    if ctx.workflow_id:
+        # Pre-flight check to prevent emitting contact.created when the goal cap is already met
+        if await _is_contact_cap_reached(ctx.workspace_id, ctx.workflow_id):
+            return NodeResult(
+                handle="default",
+                events=[
+                    {
+                        "event_type": "lead.sequence_ended",
+                        "entity_type": "lead",
+                        "entity_id": str(ctx.lead["id"]) if ctx.lead.get("id") else None,
+                        "payload": {"reason": "contact_target_reached"},
+                    }
+                ] if ctx.lead.get("id") else [],
+            )
+
     cfg = CreateContactConfig(**ctx.config)
     person = (ctx.lead.get("custom_fields") or {}).get(cfg.person_field) or {}
     identity = _merge_identity(cfg, person)

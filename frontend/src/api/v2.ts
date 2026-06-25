@@ -480,6 +480,11 @@ export interface MessageStepSpec {
   delay_after?: { amount: number; unit: 'minutes' | 'hours' | 'days' } | null
 }
 
+export interface CompanyScreeningSpec {
+  connection_name: string
+  prompt: string
+}
+
 export interface CampaignSpec {
   name: string
   timezone?: string
@@ -487,6 +492,7 @@ export interface CampaignSpec {
   sources: CampaignSourceSpec[]
   people?: PeopleDiscoverySpec
   enrichment?: EnrichmentStageSpec[]
+  company_screening?: CompanyScreeningSpec
   messages?: MessageStepSpec[]
   bounds?: ObjectiveBounds
   audience?: ObjectiveAudience

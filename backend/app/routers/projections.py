@@ -100,6 +100,7 @@ class LeadOut(BaseModel):
     identity: str
     stage: str
     fields: dict[str, Any]
+    status_reason: str | None = None
 
 
 class LeadColumnOut(BaseModel):
@@ -420,11 +421,16 @@ async def list_leads(
     select = """
         SELECT l.id, l.contact_id, l.workflow_id, l.current_node_id, l.status,
                l.custom_fields, l.created_at, l.updated_at,
+               l.fanout_total, l.fanout_done, l.origin_node_id,
+               n.node_type AS current_node_type,
+               o.node_type AS origin_node_type,
                c.first_name AS c_first_name, c.last_name AS c_last_name,
                c.email AS c_email, c.company AS c_company, c.headline AS c_headline,
                c.linkedin_url AS c_linkedin_url, c.phone AS c_phone
         FROM omni_leads l
         LEFT JOIN omni_contacts c ON c.id = l.contact_id AND c.workspace_id = l.workspace_id
+        LEFT JOIN omni_workflow_nodes n ON n.id = l.current_node_id
+        LEFT JOIN omni_workflow_nodes o ON o.id = l.origin_node_id
     """
     where, args = _lead_filters(workflow_id, include_source_batches)
     args.append(limit)
@@ -535,8 +541,11 @@ def _status_reason(lead: dict[str, Any], origin_type: str | None, last_event: st
         done = lead.get("fanout_done") or 0
         if total and total > 0:
             kind = "branches" if origin_type == "flow.race" else "child leads"
-            return f"Parked at a {origin_type or 'fan-out'} node — waiting for {done}/{total} {kind} to finish."
-        return "Parked (waiting for a delay/approval/schedule window before the next step)."
+            return f"Waiting for {done}/{total} {kind} to finish."
+        current_node_type = lead.get("current_node_type")
+        if current_node_type in ("flow.delay", "flow.wait_until"):
+            return "Waiting for a delay/schedule window."
+        return "Parked (waiting on limits)."
     if status == "errored":
         return "A node failed and no on-error path was wired; the lead stopped here."
     if status == "suppressed":
@@ -700,6 +709,7 @@ def _lead_out(row: dict[str, Any], columns: list[lead_columns.ColumnSpec]) -> Le
         identity=identity,
         stage=stage,
         fields=fields,
+        status_reason=_status_reason(row, row.get("origin_node_type"), None),
     )
 
 

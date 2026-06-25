@@ -16,28 +16,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute(
-        """
-        DO $$
-        BEGIN
-            IF EXISTS (
-                SELECT 1
-                FROM information_schema.columns
-                WHERE table_schema = 'public'
-                  AND table_name = 'email_accounts'
-                  AND column_name = 'resend_api_key'
-            ) THEN
-                UPDATE email_accounts
-                SET resend_api_key = ''
-                WHERE resend_api_key IS NULL;
-
-                ALTER TABLE email_accounts
-                    ALTER COLUMN resend_api_key SET DEFAULT '',
-                    ALTER COLUMN resend_api_key DROP NOT NULL;
-            END IF;
-        END $$;
-        """
-    )
+    pass
 
 
 def downgrade() -> None:

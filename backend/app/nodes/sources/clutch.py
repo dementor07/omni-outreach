@@ -57,6 +57,8 @@ MANIFEST = NodeManifest(
     ),
     side_effect=SideEffect.NETWORK,
     icon="building",
+    primary_fields=("directory_url",),
+    advanced_fields=("titles", "max_results", "companies_key"),
 )
 
 

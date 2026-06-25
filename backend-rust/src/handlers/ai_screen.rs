@@ -153,10 +153,12 @@ fn build_user_message(command: &ActionCommand) -> String {
         // Company screen.
         let name = common::s(command, "company_name");
         let sector = common::opt_s(command, "sector").unwrap_or_default();
+        let description = common::opt_s(command, "description").unwrap_or_default();
         format!(
             "Evaluate this company against the ICP rubric.\n\
              Name: {name}\n\
              Sector: {sector}\n\
+             Description: {description}\n\
              Respond with exactly: ACCEPT or REJECT, followed by a one-sentence reason."
         )
     }

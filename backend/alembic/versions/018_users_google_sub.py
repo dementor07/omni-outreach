@@ -29,17 +29,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT")
-    op.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub "
-        "ON users(google_sub) WHERE google_sub IS NOT NULL"
-    )
-    # Allow NULL password_hash for Google-only users. If the column was
-    # already NOT NULL we relax it; existing rows are untouched.
-    op.execute("ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL")
+    pass
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE users ALTER COLUMN password_hash SET NOT NULL")
-    op.execute("DROP INDEX IF EXISTS idx_users_google_sub")
-    op.execute("ALTER TABLE users DROP COLUMN IF EXISTS google_sub")
+    pass

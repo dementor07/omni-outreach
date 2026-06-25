@@ -20,10 +20,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS instagram_username TEXT")
-    op.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS telegram_username TEXT")
+    pass
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE leads DROP COLUMN IF EXISTS telegram_username")
-    op.execute("ALTER TABLE leads DROP COLUMN IF EXISTS instagram_username")
+    pass

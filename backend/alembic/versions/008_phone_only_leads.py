@@ -22,14 +22,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute(
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_unique_phone
-        ON leads(campaign_id, phone)
-        WHERE linkedin_url IS NULL AND email IS NULL AND phone IS NOT NULL
-        """
-    )
+    pass
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS idx_leads_unique_phone")
+    pass

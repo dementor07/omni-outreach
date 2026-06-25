@@ -99,6 +99,11 @@ class MessageStepSpec(BaseModel):
         return self
 
 
+class CompanyScreeningSpec(BaseModel):
+    connection_name: str
+    prompt: str
+
+
 class CampaignSpec(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     timezone: str = Field("UTC", max_length=64)
@@ -106,6 +111,7 @@ class CampaignSpec(BaseModel):
     sources: list[CampaignSourceSpec] = Field(min_length=1)
     people: PeopleDiscoverySpec = Field(default_factory=PeopleDiscoverySpec)
     enrichment: list[EnrichmentStageSpec] = Field(default_factory=list)
+    company_screening: CompanyScreeningSpec | None = None
     messages: list[MessageStepSpec] = Field(default_factory=list)
     bounds: dict[str, Any] = Field(default_factory=dict)
     audience: dict[str, Any] = Field(default_factory=dict)
@@ -179,14 +185,28 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
         add_edge(loop_key, no_companies_key, "empty")
 
     add_node("resolve_company", "crm.resolve_company", 680, 250, {"item_field": "item"})
-    add_edge("resolve_company", "people_discovery", "new")
+
+    if spec.company_screening:
+        add_node("screen_company", "ai.screen_company", 840, 250, {
+            "connection_name": spec.company_screening.connection_name,
+            "screening_prompt": spec.company_screening.prompt,
+            "company_field": "item"
+        })
+        add_edge("resolve_company", "screen_company", "new")
+        add_edge("screen_company", "people_discovery", "accept")
+        add_edge("screen_company", rejected_key, "reject")
+        people_x = 1160
+    else:
+        add_edge("resolve_company", "people_discovery", "new")
+        people_x = 1000
+
     # Match the currently working starter template: known companies still flow
     # through people discovery until a dedicated cached-people node exists.
     add_edge("resolve_company", "people_discovery", "known")
     add_edge("resolve_company", rejected_key, "rejected")
 
-    add_node("people_discovery", _people_node_type(spec.people.provider), 1000, 250, _people_config(spec.people))
-    add_node("people_loop", "flow.for_each", 1320, 250, {
+    add_node("people_discovery", _people_node_type(spec.people.provider), people_x, 250, _people_config(spec.people))
+    add_node("people_loop", "flow.for_each", people_x + 320, 250, {
         "items_key": "people",
         "item_field": "item",
         "max_items": max(1, spec.people.max_per_company),
@@ -197,7 +217,7 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
     add_edge("people_loop", source_done_key, "done")
     add_edge("people_loop", no_people_key, "empty")
 
-    add_node("verify_person", "condition.verify_person", 1640, 250, {"pass_threshold": spec.verification_threshold})
+    add_node("verify_person", "condition.verify_person", people_x + 640, 250, {"pass_threshold": spec.verification_threshold})
     add_edge("verify_person", "post_verify_0", "verified")
     add_edge("verify_person", rejected_key, "rejected")
 
@@ -209,7 +229,7 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
         for index, stage in enumerate(spec.enrichment):
             key = "post_verify_0" if index == 0 else f"enrich_{index + 1}"
             next_key = f"enrich_{index + 2}" if index < len(spec.enrichment) - 1 else "create_contact"
-            add_node(key, "ai.enrich", 1960 + index * 280, 250, {
+            add_node(key, "ai.enrich", people_x + 960 + index * 280, 250, {
                 "enrich_source": stage.provider,
                 "connection_name": stage.connection_name,
                 "merge_policy": stage.merge_policy,
@@ -219,7 +239,7 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
             add_edge(key, next_key, "on_error")
         previous = "create_contact"
     else:
-        add_node("post_verify_0", "flow.continue", 1960, 250, {})
+        add_node("post_verify_0", "flow.continue", people_x + 960, 250, {})
         add_edge("post_verify_0", "create_contact")
         previous = "create_contact"
 
@@ -303,7 +323,11 @@ def _people_config(people: PeopleDiscoverySpec) -> dict[str, Any]:
 
 
 def _contact_x(spec: CampaignSpec) -> float:
-    return 1960 + max(0, len(spec.enrichment)) * 280
+    base = 1160 if spec.company_screening else 1000
+    base += 960
+    if spec.enrichment:
+        return base + len(spec.enrichment) * 280
+    return base + 280
 
 
 def _message_x(spec: CampaignSpec, index: int) -> float:

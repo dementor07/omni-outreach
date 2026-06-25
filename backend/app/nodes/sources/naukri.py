@@ -79,6 +79,8 @@ MANIFEST = NodeManifest(
     # not a per-workspace API key. Hence no capabilities=("connection:...",).
     side_effect=SideEffect.NETWORK,
     icon="search",
+    primary_fields=("keyword", "location"),
+    advanced_fields=("max_pages", "max_results", "companies_key", "min_results"),
 )
 
 

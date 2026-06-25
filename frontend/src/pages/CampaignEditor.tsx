@@ -800,6 +800,7 @@ export default function CampaignEditor() {
                 earliestHour={wf?.earliest_hour ?? null}
                 latestHour={wf?.latest_hour ?? null}
                 daysOfWeek={wf?.days_of_week ?? null}
+                rfNodes={rfNodes}
                 onSaved={() => qc.invalidateQueries({ queryKey: ['workflow', id] })}
               />
             </Card>
@@ -825,11 +826,12 @@ function localInputToIso(local: string): string | null {
 }
 
 function WorkflowSettings({
-  workflowId, name, status, timezone, startAt, endAt, dailyCap, earliestHour, latestHour, daysOfWeek, onSaved
+  workflowId, name, status, timezone, startAt, endAt, dailyCap, earliestHour, latestHour, daysOfWeek, rfNodes, onSaved
 }: {
   workflowId?: string; name: string; status: WorkflowStatus; timezone: string;
   startAt: string | null; endAt: string | null;
   dailyCap: number | null; earliestHour: number | null; latestHour: number | null; daysOfWeek: number[] | null;
+  rfNodes: OmniRfNode[];
   onSaved: () => void;
 }) {
   const [draftName, setDraftName] = useState(name)
@@ -850,6 +852,33 @@ function WorkflowSettings({
     setDraftLatest(latestHour == null ? '' : String(latestHour))
     setDraftDays(daysOfWeek || [0, 1, 2, 3, 4])
   }, [name, status, timezone, startAt, endAt, dailyCap, earliestHour, latestHour, daysOfWeek])
+
+  const toast = useToast()
+  const poolQ = useQuery({
+    queryKey: ['workflow', workflowId, 'accounts'],
+    queryFn: () => canvas.pool(workflowId!),
+    enabled: !!workflowId,
+  })
+
+  const handleSave = () => {
+    // Sender-Account Validation (Pre-flight checklist)
+    if (draftStatus === 'active') {
+      const messageNodes = rfNodes.filter(n => n.data.manifest.type.startsWith('message.'))
+      if (messageNodes.length > 0) {
+        // Are there any message nodes without an explicit connection?
+        const needsPool = messageNodes.some(n => !n.data.config.connection_name && !n.data.config.sending_account_id)
+        
+        if (needsPool) {
+          const poolAccounts = poolQ.data ?? []
+          if (poolAccounts.length === 0) {
+            toast.error('Cannot activate campaign: Outbound message nodes require a sender account, but the campaign sender pool is empty.')
+            return
+          }
+        }
+      }
+    }
+    mut.mutate()
+  }
 
   const mut = useMutation({
     mutationFn: () => {
@@ -973,25 +1002,20 @@ function WorkflowSettings({
         </div>
       </div>
 
-      <Button variant="primary" size="md" icon={Save} onClick={() => mut.mutate()} isLoading={mut.isPending} disabled={!dirty || !draftName.trim() || scheduleInvalid}>
+      <Button variant="primary" size="md" icon={Save} onClick={handleSave} isLoading={mut.isPending} disabled={!dirty || !draftName.trim() || scheduleInvalid}>
         Save settings
       </Button>
 
       <hr className="my-6 border-slate-200 dark:border-slate-800" />
       
-      {workflowId && <WorkflowPoolSettings workflowId={workflowId} />}
+      {workflowId && <WorkflowPoolSettings workflowId={workflowId} poolQ={poolQ} />}
     </div>
   )
 }
 
-function WorkflowPoolSettings({ workflowId }: { workflowId: string }) {
+function WorkflowPoolSettings({ workflowId, poolQ }: { workflowId: string, poolQ: any }) {
   const qc = useQueryClient()
   const toast = useToast()
-
-  const poolQ = useQuery({
-    queryKey: ['workflow', workflowId, 'accounts'],
-    queryFn: () => canvas.pool(workflowId)
-  })
 
   const accsQ = useQuery({
     queryKey: ['integrations', 'accounts'],

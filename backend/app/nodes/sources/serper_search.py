@@ -58,6 +58,8 @@ MANIFEST = NodeManifest(
     capabilities=("connection:serper",),
     side_effect=SideEffect.NETWORK,
     icon="search",
+    primary_fields=("connection_name", "query"),
+    advanced_fields=("titles", "max_results", "companies_key"),
 )
 
 

@@ -24,10 +24,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE job_search_configs ADD COLUMN IF NOT EXISTS min_employees INT")
-    op.execute("ALTER TABLE job_search_configs ADD COLUMN IF NOT EXISTS max_employees INT")
+    pass
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE job_search_configs DROP COLUMN IF EXISTS min_employees")
-    op.execute("ALTER TABLE job_search_configs DROP COLUMN IF EXISTS max_employees")
+    pass

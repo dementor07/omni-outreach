@@ -24,10 +24,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE lead_gen_configs ADD COLUMN IF NOT EXISTS credit_budget INT")
-    op.execute("ALTER TABLE lead_gen_runs ADD COLUMN IF NOT EXISTS credits_consumed INT NOT NULL DEFAULT 0")
+    pass
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE lead_gen_configs DROP COLUMN IF EXISTS credit_budget")
-    op.execute("ALTER TABLE lead_gen_runs DROP COLUMN IF EXISTS credits_consumed")
+    pass

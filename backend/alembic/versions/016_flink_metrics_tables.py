@@ -20,41 +20,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute(
-        """
-        CREATE TABLE IF NOT EXISTS flink_metrics_daily (
-            window_day    TEXT NOT NULL,
-            status        TEXT NOT NULL,
-            total_events  BIGINT NOT NULL,
-            updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            PRIMARY KEY (window_day, status)
-        )
-        """
-    )
-    op.execute(
-        """
-        CREATE TABLE IF NOT EXISTS flink_metrics_channel_mix (
-            window_hour   TEXT NOT NULL,
-            channel       TEXT NOT NULL,
-            status        TEXT NOT NULL,
-            total_events  BIGINT NOT NULL,
-            updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            PRIMARY KEY (window_hour, channel, status)
-        )
-        """
-    )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_flink_metrics_daily_day "
-        "ON flink_metrics_daily(window_day DESC)"
-    )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_flink_metrics_channel_mix_hour "
-        "ON flink_metrics_channel_mix(window_hour DESC)"
-    )
+    pass
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS idx_flink_metrics_channel_mix_hour")
-    op.execute("DROP INDEX IF EXISTS idx_flink_metrics_daily_day")
-    op.execute("DROP TABLE IF EXISTS flink_metrics_channel_mix")
-    op.execute("DROP TABLE IF EXISTS flink_metrics_daily")
+    pass

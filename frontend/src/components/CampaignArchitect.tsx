@@ -130,6 +130,9 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
   const [peopleProvider, setPeopleProvider] = useState<'searxng_people' | 'serper_people'>('serper_people')
   const [peopleConnection, setPeopleConnection] = useState('')
   const [maxPerCompany, setMaxPerCompany] = useState('4')
+  const [enableScreening, setEnableScreening] = useState(false)
+  const [screeningConnection, setScreeningConnection] = useState('')
+  const [screeningPrompt, setScreeningPrompt] = useState('Looking for B2B SaaS companies.')
   const [enrichment, setEnrichment] = useState<DraftEnrichment[]>([])
   const [messages, setMessages] = useState<DraftMessage[]>([])
   const [verificationThreshold, setVerificationThreshold] = useState('40')
@@ -137,6 +140,7 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
   const [maxSpend, setMaxSpend] = useState('')
   const [classic, setClassic] = useState<ClassicDraft>(DEFAULT_CLASSIC)
   const serperConnections = useMemo(() => connectionsForProvider(connections, 'serper'), [connections])
+  const anthropicConnections = useMemo(() => connectionsForProvider(connections, 'anthropic'), [connections])
   const connectedEnrichmentProviders = useMemo(
     () => (['proxycurl', 'hunter', 'apollo'] as EnrichmentProvider[]).filter((provider) => connections.some((connection) => connection.provider === provider)),
     [connections],
@@ -153,12 +157,21 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
     )))
   }, [serperConnections])
 
+  useEffect(() => {
+    const firstAnthropic = anthropicConnections[0]?.name
+    if (!firstAnthropic) return
+    setScreeningConnection((current) => current || firstAnthropic)
+  }, [anthropicConnections])
+
   const buildResult = useMemo(() => buildSpec({
     name,
     targetContacts,
     audience,
     titles,
     sources,
+    enableScreening,
+    screeningConnection,
+    screeningPrompt,
     peopleProvider,
     peopleConnection,
     maxPerCompany,
@@ -168,7 +181,9 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
     maxIterations,
     maxSpend,
   }), [
-    name, targetContacts, audience, titles, sources, peopleProvider, peopleConnection,
+    maxPerCompany, enrichment, messages, verificationThreshold, maxIterations, maxSpend,
+  }), [
+    name, targetContacts, audience, titles, sources, enableScreening, screeningConnection, screeningPrompt, peopleProvider, peopleConnection,
     maxPerCompany, enrichment, messages, verificationThreshold, maxIterations, maxSpend,
   ])
   const architectReady = Boolean(buildResult.spec)
@@ -287,6 +302,48 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
                   <Button variant="secondary" size="sm" icon={Plus} onClick={() => setSources((current) => [...current, { ...DEFAULT_SOURCE, keyword: audience || DEFAULT_SOURCE.keyword }])}>
                     Add source
                   </Button>
+                </div>
+              </ArchitectSection>
+
+              <ArchitectSection icon={ShieldCheck} title="Company validation" subtitle="Optionally screen companies using Claude before discovering people">
+                <div className="rounded-xl border border-slate-100 p-4 dark:border-slate-800">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={enableScreening} 
+                      onChange={(e) => setEnableScreening(e.target.checked)} 
+                      className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                    />
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">Enable AI Company Screening</span>
+                  </label>
+                  
+                  {enableScreening && (
+                    <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_250px]">
+                      <Field label="Screening Prompt">
+                        <textarea
+                          value={screeningPrompt}
+                          onChange={(e) => setScreeningPrompt(e.target.value)}
+                          rows={3}
+                          placeholder="e.g., Only accept B2B SaaS companies. Reject agencies, e-commerce, and B2C."
+                          className={inputClass}
+                        />
+                      </Field>
+                      <Field label="Anthropic Connection">
+                        {anthropicConnections.length > 0 ? (
+                          <select value={screeningConnection} onChange={(e) => setScreeningConnection(e.target.value)} className={inputClass}>
+                            <option value="">Choose connection</option>
+                            {anthropicConnections.map((conn) => (
+                              <option key={conn.id} value={conn.name}>{conn.name}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <p className="mt-1 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
+                            No Anthropic connection found. Add one in Integrations.
+                          </p>
+                        )}
+                      </Field>
+                    </div>
+                  )}
                 </div>
               </ArchitectSection>
 
@@ -432,6 +489,9 @@ function buildSpec(input: {
   audience: string
   titles: string
   sources: DraftSource[]
+  enableScreening: boolean
+  screeningConnection: string
+  screeningPrompt: string
   peopleProvider: 'searxng_people' | 'serper_people'
   peopleConnection: string
   maxPerCompany: string
@@ -473,6 +533,12 @@ function buildSpec(input: {
   if (sources.length === 0) issues.push({ severity: 'error', message: 'Add at least one source.' })
   if (input.peopleProvider === 'serper_people' && !input.peopleConnection.trim()) {
     issues.push({ severity: 'error', message: 'Serper people discovery requires a connection name.' })
+  }
+  if (input.enableScreening && !input.screeningConnection.trim()) {
+    issues.push({ severity: 'error', message: 'Anthropic connection is required for AI Company Screening.' })
+  }
+  if (input.enableScreening && !input.screeningPrompt.trim()) {
+    issues.push({ severity: 'error', message: 'A screening prompt is required for AI Company Screening.' })
   }
   const enrichment = input.enrichment.map((stage, index) => {
     const connectionName = stage.connection_name.trim()
@@ -523,6 +589,12 @@ function buildSpec(input: {
         ...(Number(input.maxSpend) > 0 ? { max_spend_usd: Number(input.maxSpend) } : {}),
       },
       sources,
+      ...(input.enableScreening ? {
+        company_screening: {
+          connection_name: input.screeningConnection,
+          prompt: input.screeningPrompt,
+        }
+      } : {}),
       people: {
         provider: input.peopleProvider,
         connection_name: input.peopleConnection.trim() || undefined,
