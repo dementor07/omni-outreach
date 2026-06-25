@@ -100,17 +100,54 @@ def validate_graph(
                 )
             )
 
-        if node_type == "ai.enrich" and connections is not None:
-            provider = str(config.get("enrich_source") or "")
-            connection_name = str(config.get("connection_name") or "")
-            if provider and connection_name and (provider, connection_name) not in connections:
-                issues.append(
-                    _issue(
-                        "ENRICHMENT_CONNECTION_MISMATCH",
-                        f"{connection_name!r} is not a connected {provider} account.",
-                        node_id=node_id,
+        if connections is not None:
+            # 1. Enrichment nodes
+            if node_type == "ai.enrich":
+                provider = str(config.get("enrich_source") or "")
+                connection_name = str(config.get("connection_name") or "")
+                if provider and connection_name and (provider, connection_name) not in connections:
+                    issues.append(
+                        _issue(
+                            "ENRICHMENT_CONNECTION_MISMATCH",
+                            f"{connection_name!r} is not a connected {provider} account.",
+                            node_id=node_id,
+                        )
                     )
-                )
+
+            # 2. Serper sources
+            if node_type in ("source.serper_search", "source.serper_people"):
+                connection_name = str(config.get("connection_name") or "")
+                if connection_name and ("serper", connection_name) not in connections:
+                    issues.append(
+                        _issue(
+                            "SOURCE_CONNECTION_MISMATCH",
+                            f"{connection_name!r} is not a connected serper account.",
+                            node_id=node_id,
+                        )
+                    )
+
+            # 3. Communication channels
+            if node_type == "channel.linkedin":
+                connection_name = str(config.get("connection_name") or "")
+                if connection_name and ("unipile", connection_name) not in connections:
+                    issues.append(
+                        _issue(
+                            "ACTION_CONNECTION_MISMATCH",
+                            f"{connection_name!r} is not a connected unipile account.",
+                            node_id=node_id,
+                        )
+                    )
+
+            if node_type == "channel.email":
+                connection_name = str(config.get("connection_name") or "")
+                if connection_name and ("smtp", connection_name) not in connections:
+                    issues.append(
+                        _issue(
+                            "ACTION_CONNECTION_MISMATCH",
+                            f"{connection_name!r} is not a connected smtp account.",
+                            node_id=node_id,
+                        )
+                    )
 
     valid_edges: list[tuple[str, str, str]] = []
     routes: Counter[tuple[str, str]] = Counter()

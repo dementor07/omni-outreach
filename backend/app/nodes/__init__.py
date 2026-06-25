@@ -39,6 +39,7 @@ class NodeCategory(StrEnum):
     CRM = "crm"
     SINK = "sink"
     TRANSFORM = "transform"
+    EVENT = "event"
 
 
 class SideEffect(StrEnum):
