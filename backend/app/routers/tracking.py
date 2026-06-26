@@ -18,9 +18,12 @@ from fastapi.responses import RedirectResponse
 
 from app.config import settings
 from app.db import system_scope
-from app.services import bus, email_tracking
+from app.services import bus, email_tracking, event_resume
 
 router = APIRouter()
+
+# tracking hit kind -> the EVENT-PARK-001 resume signal it can wake a lead on
+_RESUME_SIGNAL = {"open": "email_opened", "click": "link_clicked"}
 
 _GIF_HEADERS = {"Cache-Control": "no-store, no-cache, must-revalidate, private", "Pragma": "no-cache"}
 
@@ -47,6 +50,11 @@ async def _log_hit(token: str, event_type: str, url: str | None) -> None:
             )
     except Exception:  # noqa: BLE001 — never let logging break the pixel/redirect
         pass
+    # EVENT-PARK-001: if a lead is parked at an event.email_opened / event.link_clicked
+    # node awaiting this exact hit, resume it. No-op when the lead isn't waiting on it.
+    signal = _RESUME_SIGNAL.get(event_type)
+    if signal:
+        await event_resume.resume_on_signal(claims["workspace_id"], claims.get("lead_id"), signal)
 
 
 @router.get("/open/{token}.gif", summary="Email open pixel (logs an open)")
