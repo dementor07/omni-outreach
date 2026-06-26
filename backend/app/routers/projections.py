@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.auth import AuthContext, get_current_workspace
-from app.db import fetch_all, fetch_one, system_scope
+from app.db import fetch_all, fetch_one
 from app.execution import lead_columns
 from app.services.bus import publish_event
 
@@ -570,72 +570,84 @@ def _status_reason(lead: dict[str, Any], origin_type: str | None, last_event: st
     summary="Reconstruct one lead's full journey: timeline, lineage, cost, why-stuck",
 )
 async def lead_journey(
-    lead_id: uuid.UUID, _: AuthContext = Depends(get_current_workspace)
+    lead_id: uuid.UUID, ctx: AuthContext = Depends(get_current_workspace)
 ) -> LeadJourneyOut:
-    async with system_scope():
-        lead = await fetch_one(
-            """
-            SELECT l.id, l.contact_id, l.workflow_id, l.current_node_id, l.status,
-                   l.custom_fields, l.created_at, l.updated_at,
-                   l.parent_lead_id, l.origin_node_id, l.fanout_total, l.fanout_done,
-                   c.first_name AS c_first_name, c.last_name AS c_last_name,
-                   c.email AS c_email, c.company AS c_company, c.headline AS c_headline,
-                   c.linkedin_url AS c_linkedin_url, c.phone AS c_phone
-            FROM omni_leads l
-            LEFT JOIN omni_contacts c ON c.id = l.contact_id AND c.workspace_id = l.workspace_id
-            WHERE l.id = $1
-            """,
-            lead_id,
-        )
+    # TENANT-LEAK-001: this route is authenticated and tenant-scoped, so it must
+    # run under the REQUEST tenant (RLS filters cross-tenant rows) — NOT
+    # system_scope(), which sets the all-zero system workspace and BYPASSES RLS.
+    # The old code wrapped every query in system_scope() with no workspace_id
+    # filter, so any logged-in user could read ANY workspace's lead (PII, cost,
+    # lineage) by guessing a lead UUID. Every query below now also carries an
+    # explicit workspace_id guard as defence-in-depth behind RLS.
+    ws = ctx.workspace_id
+    lead = await fetch_one(
+        """
+        SELECT l.id, l.contact_id, l.workflow_id, l.current_node_id, l.status,
+               l.custom_fields, l.created_at, l.updated_at,
+               l.parent_lead_id, l.origin_node_id, l.fanout_total, l.fanout_done,
+               c.first_name AS c_first_name, c.last_name AS c_last_name,
+               c.email AS c_email, c.company AS c_company, c.headline AS c_headline,
+               c.linkedin_url AS c_linkedin_url, c.phone AS c_phone
+        FROM omni_leads l
+        LEFT JOIN omni_contacts c ON c.id = l.contact_id AND c.workspace_id = l.workspace_id
+        WHERE l.id = $1 AND l.workspace_id = $2
+        """,
+        lead_id,
+        ws,
+    )
     if not lead:
         raise HTTPException(status_code=404, detail="lead not found")
     lead = dict(lead)
 
     # Timeline: every archived event whose entity is this lead, oldest first,
     # with the node UUID resolved to its human node_type. (idx on entity.)
-    async with system_scope():
-        events = await fetch_all(
-            """
-            SELECT a.occurred_at, a.event_type, a.payload, a.correlation_id,
-                   n.node_type AS node_label
-            FROM omni_events_archive a
-            LEFT JOIN omni_workflow_nodes n
-                   ON n.id = NULLIF(a.payload->>'node_id', '')::uuid
-            WHERE a.entity_type = 'lead' AND a.entity_id = $1
-            ORDER BY a.occurred_at ASC, a.kafka_offset ASC
-            """,
-            lead_id,
+    events = await fetch_all(
+        """
+        SELECT a.occurred_at, a.event_type, a.payload, a.correlation_id,
+               n.node_type AS node_label
+        FROM omni_events_archive a
+        LEFT JOIN omni_workflow_nodes n
+               ON n.id = NULLIF(a.payload->>'node_id', '')::uuid
+        WHERE a.entity_type = 'lead' AND a.entity_id = $1 AND a.workspace_id = $2
+        ORDER BY a.occurred_at ASC, a.kafka_offset ASC
+        """,
+        lead_id,
+        ws,
+    )
+    # Lineage — parent (if a fan-out child) + direct children (fan-out).
+    parent_row = None
+    if lead.get("parent_lead_id"):
+        parent_row = await fetch_one(
+            "SELECT id, status, contact_id, custom_fields FROM omni_leads WHERE id = $1 AND workspace_id = $2",
+            lead["parent_lead_id"],
+            ws,
         )
-        # Lineage — parent (if a fan-out child) + direct children (fan-out).
-        parent_row = None
-        if lead.get("parent_lead_id"):
-            parent_row = await fetch_one(
-                "SELECT id, status, contact_id, custom_fields FROM omni_leads WHERE id = $1",
-                lead["parent_lead_id"],
-            )
-        children = await fetch_all(
-            "SELECT id, status, contact_id, custom_fields FROM omni_leads "
-            "WHERE parent_lead_id = $1 ORDER BY created_at ASC LIMIT 200",
-            lead_id,
+    children = await fetch_all(
+        "SELECT id, status, contact_id, custom_fields FROM omni_leads "
+        "WHERE parent_lead_id = $1 AND workspace_id = $2 ORDER BY created_at ASC LIMIT 200",
+        lead_id,
+        ws,
+    )
+    # The fan-out node's type (drives the waiting status_reason wording).
+    origin_type = None
+    if lead.get("origin_node_id"):
+        origin = await fetch_one(
+            "SELECT node_type FROM omni_workflow_nodes WHERE id = $1 AND workspace_id = $2",
+            lead["origin_node_id"],
+            ws,
         )
-        # The fan-out node's type (drives the waiting status_reason wording).
-        origin_type = None
-        if lead.get("origin_node_id"):
-            origin = await fetch_one(
-                "SELECT node_type FROM omni_workflow_nodes WHERE id = $1", lead["origin_node_id"]
-            )
-            origin_type = (origin or {}).get("node_type")
+        origin_type = (origin or {}).get("node_type")
 
     # Cost: AI jobs for every correlation_id this lead's events touched.
     cids = {str(e["correlation_id"]) for e in events if e.get("correlation_id")}
     by_kind: dict[str, float] = {}
     calls = 0
     if cids:
-        async with system_scope():
-            jobs = await fetch_all(
-                "SELECT kind, cost_usd FROM omni_ai_jobs WHERE correlation_id = ANY($1::uuid[])",
-                list(cids),
-            )
+        jobs = await fetch_all(
+            "SELECT kind, cost_usd FROM omni_ai_jobs WHERE correlation_id = ANY($1::uuid[]) AND workspace_id = $2",
+            list(cids),
+            ws,
+        )
         for j in jobs:
             calls += 1
             by_kind[j["kind"]] = round(by_kind.get(j["kind"], 0.0) + float(j.get("cost_usd") or 0), 6)
