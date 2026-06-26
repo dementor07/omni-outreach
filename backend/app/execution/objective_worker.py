@@ -34,7 +34,7 @@ import uuid
 from aiokafka import AIOKafkaConsumer
 
 from app.config import settings
-from app.db import close_pool, execute, fetch_all, fetch_one, init_pool, system_scope
+from app.db import assert_rls_enforcing_role, close_pool, execute, fetch_all, fetch_one, init_pool, system_scope
 from app.services import bus, objective_controller
 
 log = logging.getLogger("objective_worker")
@@ -329,6 +329,7 @@ async def _watchdog_loop(stop: asyncio.Event) -> None:
 
 async def run() -> None:
     await init_pool(settings.database_url)
+    await assert_rls_enforcing_role()
     await bus.init_producer()
     # Re-seed fires the entry node via run.seed_and_run, which needs the node
     # registry populated — discover the nodes at startup (same as the transition

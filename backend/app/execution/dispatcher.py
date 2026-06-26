@@ -34,7 +34,7 @@ from aiokafka import AIOKafkaConsumer
 
 from app.config import settings
 from app.core.events import ChannelType
-from app.db import close_pool, fetch_one, init_pool, system_scope
+from app.db import assert_rls_enforcing_role, close_pool, fetch_one, init_pool, system_scope
 from app.execution import commands
 from app.services import bus
 
@@ -191,6 +191,7 @@ async def handle_event(env: dict) -> None:
 
 async def run() -> None:
     await init_pool(settings.database_url)
+    await assert_rls_enforcing_role()
     await bus.init_producer()
     consumer = AIOKafkaConsumer(
         EVENTS_TOPIC,
