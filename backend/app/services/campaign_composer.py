@@ -19,7 +19,28 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-SourceProvider = Literal["naukri", "searxng", "serper_search"]
+SourceProvider = Literal[
+    "naukri",
+    "indeed",
+    "linkedin_jobs",
+    "greenhouse",
+    "ashby",
+    "smartrecruiters",
+    "bamboohr",
+    "workday",
+    "icims",
+    "lever",
+    "workable",
+    "recruitee",
+    "personio",
+    "rippling",
+    "breezy",
+    "searxng",
+    "serper_search",
+    "apollo",
+    "clutch",
+    "producthunt",
+]
 PeopleProvider = Literal["searxng_people", "serper_people"]
 EnrichmentProvider = Literal["apollo", "proxycurl", "hunter"]
 MessageChannel = Literal["email", "linkedin"]
@@ -29,11 +50,11 @@ class CampaignSourceSpec(BaseModel):
     provider: SourceProvider
     query: str | None = Field(
         None,
-        description="Company-search query for searxng/serper_search",
+        description="Company-search query for search/directory sources",
     )
     keyword: str | None = Field(
         None,
-        description="Role keyword for Naukri",
+        description="Role keyword for job boards",
     )
     connection_name: str | None = Field(
         None,
@@ -48,9 +69,9 @@ class CampaignSourceSpec(BaseModel):
 
     @model_validator(mode="after")
     def validate_provider_shape(self) -> CampaignSourceSpec:
-        if self.provider == "naukri" and not self.keyword:
-            raise ValueError("naukri sources require keyword")
-        if self.provider in {"searxng", "serper_search"} and not self.query:
+        if self.provider in {"naukri", "indeed", "linkedin_jobs"} and not self.keyword:
+            raise ValueError(f"{self.provider} sources require keyword")
+        if self.provider in {"searxng", "serper_search", "apollo", "clutch", "producthunt"} and not self.query:
             raise ValueError(f"{self.provider} sources require query")
         if self.provider == "serper_search" and not self.connection_name:
             raise ValueError("serper_search sources require connection_name")
@@ -173,16 +194,25 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
         source_key = f"source_{index + 1}"
         loop_key = f"company_loop_{index + 1}"
         add_node(source_key, _source_node_type(source.provider), 0, y, _source_config(source, companies_key))
-        add_node(loop_key, "flow.for_each", 320, y, {
-            "items_key": companies_key,
-            "item_field": "item",
-            "max_items": source.max_results,
-        })
-        add_edge(source_key, loop_key, "default")
-        add_edge(source_key, no_companies_key, "empty")
-        add_edge(loop_key, "resolve_company", "each")
-        add_edge(loop_key, source_done_key, "done")
-        add_edge(loop_key, no_companies_key, "empty")
+        
+        if source.provider == "producthunt":
+            # Producthunt emits contacts directly. We don't fan out companies.
+            # We just connect it directly to source_done_key so the campaign graph is valid.
+            # Downstream logic happens via contact.created trigger hooks.
+            add_edge(source_key, source_done_key, "default")
+            add_edge(source_key, source_done_key, "empty")
+            add_edge(source_key, source_done_key, "on_error")
+        else:
+            add_node(loop_key, "flow.for_each", 320, y, {
+                "items_key": companies_key,
+                "item_field": "item",
+                "max_items": source.max_results,
+            })
+            add_edge(source_key, loop_key, "default")
+            add_edge(source_key, no_companies_key, "empty")
+            add_edge(loop_key, "resolve_company", "each")
+            add_edge(loop_key, source_done_key, "done")
+            add_edge(loop_key, no_companies_key, "empty")
 
     add_node("resolve_company", "crm.resolve_company", 680, 250, {"item_field": "item"})
 
@@ -271,12 +301,7 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
 
 
 def _source_node_type(provider: SourceProvider) -> str:
-    return {
-        "naukri": "source.naukri",
-        "searxng": "source.searxng",
-        "serper_search": "source.serper_search",
-    }[provider]
-
+    return f"source.{provider}"
 
 def _people_node_type(provider: PeopleProvider) -> str:
     return {
@@ -286,13 +311,35 @@ def _people_node_type(provider: PeopleProvider) -> str:
 
 
 def _source_config(source: CampaignSourceSpec, companies_key: str) -> dict[str, Any]:
-    if source.provider == "naukri":
+    ats_providers = {
+        "greenhouse", "ashby", "smartrecruiters", "bamboohr", "workday",
+        "icims", "lever", "workable", "recruitee", "personio", "rippling", "breezy"
+    }
+    job_board_providers = {"naukri", "indeed", "linkedin_jobs"}
+    
+    if source.provider in ats_providers:
+        return {
+            "max_companies": source.max_results,
+            "companies_key": companies_key,
+        }
+    if source.provider in job_board_providers:
         return {
             "keyword": source.keyword,
             "location": source.location,
             "max_pages": max(1, min(50, source.max_results // 20 or 1)),
             "max_results": source.max_results,
             "companies_key": companies_key,
+        }
+    if source.provider == "clutch":
+        return {
+            "directory_url": source.query,
+            "titles": source.titles,
+            "max_results": source.max_results,
+            "companies_key": companies_key,
+        }
+    if source.provider == "producthunt":
+        return {
+            "max_posts": min(20, max(1, source.max_results)),
         }
     if source.provider == "searxng":
         return {

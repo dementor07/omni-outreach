@@ -441,7 +441,10 @@ export interface GoalWorkflowCreate {
   template_id?: string | null
 }
 
-export type CampaignSourceProvider = 'naukri' | 'searxng' | 'serper_search'
+export type CampaignSourceProvider = 
+  | 'naukri' | 'indeed' | 'linkedin_jobs'
+  | 'greenhouse' | 'ashby' | 'smartrecruiters' | 'bamboohr' | 'workday' | 'icims' | 'lever' | 'workable' | 'recruitee' | 'personio' | 'rippling' | 'breezy'
+  | 'searxng' | 'serper_search' | 'apollo' | 'clutch' | 'producthunt'
 export type PeopleDiscoveryProvider = 'searxng_people' | 'serper_people'
 export type EnrichmentProvider = 'apollo' | 'proxycurl' | 'hunter'
 export type MessageChannel = 'email' | 'linkedin'

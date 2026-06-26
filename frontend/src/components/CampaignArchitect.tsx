@@ -74,6 +74,12 @@ interface Props {
   onCancel: () => void
 }
 
+
+const ATS_PROVIDERS = new Set(['greenhouse', 'ashby', 'smartrecruiters', 'bamboohr', 'workday', 'icims', 'lever', 'workable', 'recruitee', 'personio', 'rippling', 'breezy'])
+const NO_QUERY_PROVIDERS = new Set([...ATS_PROVIDERS, 'producthunt'])
+const JOB_BOARD_PROVIDERS = new Set(['naukri', 'indeed', 'linkedin_jobs'])
+const SEARCH_PROVIDERS = new Set(['searxng', 'serper_search', 'apollo', 'clutch'])
+
 const DEFAULT_SOURCE: DraftSource = {
   provider: 'naukri',
   query: '',
@@ -226,17 +232,18 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
 
   return (
     <Card padding="none" className="overflow-hidden">
-      <div className="border-b border-slate-100 bg-gradient-to-br from-slate-950 via-slate-900 to-brand-950 px-6 py-6 text-white dark:border-slate-800">
+      <div className="relative overflow-hidden border-b border-slate-100 bg-gradient-to-br from-slate-950 via-slate-900 to-brand-950 px-6 py-8 text-white dark:border-slate-800">
+        <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-brand-500/20 blur-3xl"></div>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-brand-200">Goal campaign builder</p>
-            <h2 className="mt-2 text-2xl font-black tracking-tight">Build a real multi-source campaign, then edit it on the canvas.</h2>
+            <h2 className="mt-2 bg-gradient-to-r from-white to-slate-400 bg-clip-text text-2xl font-black tracking-tight text-transparent">Build a real multi-source campaign, then edit it on the canvas.</h2>
             <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">
               Stack company sources, pick the people-finding API, add connected enrichment only when it exists, and optionally add message templates.
               The result is still a normal editable graph.
             </p>
           </div>
-          <div className="grid gap-2 rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-slate-200 sm:grid-cols-3 lg:w-[420px]">
+          <div className="relative grid gap-2 rounded-2xl border border-white/10 bg-white/5 p-4 text-xs text-slate-200 shadow-xl backdrop-blur-md sm:grid-cols-3 lg:w-[420px]">
             <SummaryStat label="Sources" value={String(sources.length)} />
             <SummaryStat label="Enrichment" value={String(enrichment.length)} />
             <SummaryStat label="Messages" value={String(messages.length)} />
@@ -457,7 +464,7 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
             />
           )}
 
-          <div className="sticky bottom-0 -mx-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
+          <div className="sticky bottom-0 -mx-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100/50 bg-white/80 px-5 py-5 backdrop-blur-xl dark:border-slate-800/50 dark:bg-slate-950/80">
             <p className="text-xs text-slate-500">
               {mode === 'architect'
                 ? 'Create the campaign, then inspect or tune the generated canvas.'
@@ -507,14 +514,13 @@ function buildSpec(input: {
   if (titles.length === 0) issues.push({ severity: 'error', message: 'Add at least one buyer title.' })
   const sources = input.sources.map((source, index) => {
     const sourceNumber = index + 1
-    const query = source.provider === 'naukri' ? undefined : source.query.trim()
-    const keyword = source.provider === 'naukri' ? source.keyword.trim() : undefined
+    const query = SEARCH_PROVIDERS.has(source.provider) ? source.query.trim() : (source.provider === 'producthunt' ? undefined : source.query.trim())
+    const keyword = JOB_BOARD_PROVIDERS.has(source.provider) ? source.keyword.trim() : undefined
     const connectionName = source.connection_name.trim() || undefined
     const maxResults = Number(source.max_results) || 25
-    if (source.provider === 'naukri' && !keyword) issues.push({ severity: 'error', message: `Source ${sourceNumber} (Naukri) requires a role keyword.` })
-    if (source.provider === 'searxng' && !query) issues.push({ severity: 'error', message: `Source ${sourceNumber} (SearXNG) requires a search query.` })
+    if (JOB_BOARD_PROVIDERS.has(source.provider) && !keyword) issues.push({ severity: 'error', message: `Source ${sourceNumber} (${source.provider}) requires a role keyword.` })
+    if (SEARCH_PROVIDERS.has(source.provider) && !query) issues.push({ severity: 'error', message: `Source ${sourceNumber} (${source.provider}) requires a search query.` })
     if (source.provider === 'serper_search') {
-      if (!query) issues.push({ severity: 'error', message: `Source ${sourceNumber} (Serper) requires a search query.` })
       if (!connectionName) issues.push({ severity: 'error', message: `Source ${sourceNumber} (Serper) requires a connection name.` })
     }
     if (!Number.isFinite(maxResults) || maxResults <= 0) issues.push({ severity: 'error', message: `Source ${sourceNumber} max results must be positive.` })
@@ -630,7 +636,7 @@ function replaceAt<T>(items: T[], index: number, next: T): T[] {
   return items.map((item, itemIndex) => (itemIndex === index ? next : item))
 }
 
-const inputClass = 'mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900'
+const inputClass = 'mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm shadow-sm transition-all focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/10 dark:border-slate-700/80 dark:bg-slate-900/50'
 
 function SummaryStat({ label, value }: { label: string; value: string }) {
   return (
@@ -643,8 +649,8 @@ function SummaryStat({ label, value }: { label: string; value: string }) {
 
 function ModeButton({ active, icon: Icon, title, body, onClick }: { active: boolean; icon: typeof Sparkles; title: string; body: string; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className={`w-full rounded-2xl border p-3 text-left transition-colors ${active ? 'border-brand-300 bg-white shadow-sm dark:border-brand-800 dark:bg-slate-950' : 'border-transparent hover:border-slate-200 dark:hover:border-slate-800'}`}>
-      <Icon size={16} className={active ? 'text-brand-500' : 'text-slate-400'} />
+    <button type="button" onClick={onClick} className={`group w-full rounded-2xl border p-3 text-left transition-all duration-300 ${active ? 'border-brand-300 bg-white shadow-md dark:border-brand-800 dark:bg-slate-950/80 dark:shadow-brand-900/10' : 'border-transparent hover:scale-[1.02] hover:bg-white/50 dark:hover:bg-slate-900/30'}`}>
+      <Icon size={16} className={`transition-transform duration-300 group-hover:scale-110 ${active ? 'text-brand-500' : 'text-slate-400'}`} />
       <span className="mt-2 block text-sm font-bold text-slate-900 dark:text-white">{title}</span>
       <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">{body}</span>
     </button>
@@ -653,10 +659,10 @@ function ModeButton({ active, icon: Icon, title, body, onClick }: { active: bool
 
 function ArchitectSection({ icon: Icon, title, subtitle, children }: { icon: typeof Target; title: string; subtitle: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
-      <div className="mb-4 flex items-start gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600 dark:bg-brand-950/40">
-          <Icon size={17} />
+    <section className="group rounded-3xl border border-slate-200 bg-white/40 p-5 shadow-sm transition-shadow hover:shadow-md dark:border-slate-800/60 dark:bg-slate-900/20">
+      <div className="mb-5 flex items-start gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-brand-50 text-brand-600 transition-transform duration-500 group-hover:-rotate-6 group-hover:scale-110 dark:bg-brand-950/40">
+          <Icon size={18} />
         </span>
         <div>
           <h3 className="text-sm font-bold text-slate-900 dark:text-white">{title}</h3>
@@ -691,8 +697,12 @@ function SourceRow({
   onRemove: () => void
 }) {
   const serperConnections = connectionsForProvider(connections, 'serper')
+  const isJobBoard = JOB_BOARD_PROVIDERS.has(source.provider)
+  const isSearch = SEARCH_PROVIDERS.has(source.provider)
+  const isATS = NO_QUERY_PROVIDERS.has(source.provider)
+  
   return (
-    <div className="grid gap-3 rounded-xl border border-slate-100 p-3 dark:border-slate-800 md:grid-cols-[120px_1fr_130px_40px]">
+    <div className="group relative grid gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900/50 md:grid-cols-[160px_1fr_130px_40px]">
       <Field label={`Source ${index + 1}`}>
         <select
           value={source.provider}
@@ -704,34 +714,72 @@ function SourceRow({
               connection_name: provider === 'serper_search' ? (serperConnections[0]?.name ?? '') : '',
             })
           }}
-          className={inputClass}
+          className={`${inputClass} font-medium text-slate-800 dark:text-slate-100`}
         >
-          <option value="naukri">Naukri companies</option>
-          <option value="searxng">SearXNG companies</option>
-          <option value="serper_search">Serper companies</option>
+          <optgroup label="Search & Directories">
+            <option value="searxng">SearXNG</option>
+            <option value="serper_search">Serper (Google)</option>
+            <option value="apollo">Apollo.io</option>
+            <option value="clutch">Clutch</option>
+            <option value="producthunt">Product Hunt</option>
+          </optgroup>
+          <optgroup label="Job Boards">
+            <option value="linkedin_jobs">LinkedIn Jobs</option>
+            <option value="indeed">Indeed</option>
+            <option value="naukri">Naukri</option>
+          </optgroup>
+          <optgroup label="ATS (Hiring Companies)">
+            <option value="greenhouse">Greenhouse</option>
+            <option value="ashby">Ashby</option>
+            <option value="lever">Lever</option>
+            <option value="workday">Workday</option>
+            <option value="smartrecruiters">SmartRecruiters</option>
+            <option value="bamboohr">BambooHR</option>
+            <option value="icims">iCIMS</option>
+            <option value="workable">Workable</option>
+            <option value="recruitee">Recruitee</option>
+            <option value="personio">Personio</option>
+            <option value="rippling">Rippling</option>
+            <option value="breezy">Breezy</option>
+          </optgroup>
         </select>
       </Field>
-      <Field label={source.provider === 'naukri' ? 'Role keyword' : 'Search query'}>
-        <input value={source.provider === 'naukri' ? source.keyword : source.query} onChange={(event) => onChange(source.provider === 'naukri' ? { ...source, keyword: event.target.value } : { ...source, query: event.target.value })} className={inputClass} />
-      </Field>
+      
+      {isATS ? (
+        <div className="flex items-center rounded-xl bg-slate-50 px-4 text-xs leading-relaxed text-slate-500 dark:bg-slate-900/60 dark:text-slate-400">
+          This source pulls directly from a global index or feed. No keyword required.
+        </div>
+      ) : (
+        <Field label={isJobBoard ? 'Role keyword' : 'Search query'}>
+          <input 
+            value={isJobBoard ? source.keyword : source.query} 
+            onChange={(event) => onChange(isJobBoard ? { ...source, keyword: event.target.value } : { ...source, query: event.target.value })} 
+            placeholder={isJobBoard ? 'e.g. Software Engineer' : 'e.g. B2B SaaS companies'}
+            className={`${inputClass} transition-shadow focus:ring-2 focus:ring-brand-500/20`} 
+          />
+        </Field>
+      )}
+
       <Field label="Max results">
-        <input type="number" min={1} value={source.max_results} onChange={(event) => onChange({ ...source, max_results: event.target.value })} className={inputClass} />
+        <input type="number" min={1} value={source.max_results} onChange={(event) => onChange({ ...source, max_results: event.target.value })} className={`${inputClass} transition-shadow focus:ring-2 focus:ring-brand-500/20`} />
       </Field>
-      <button type="button" onClick={onRemove} className="mt-6 rounded-lg p-2 text-slate-300 hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-950/30" aria-label={`Remove source ${index + 1}`}>
+
+      <button type="button" onClick={onRemove} className="mt-6 flex h-9 w-9 items-center justify-center rounded-xl text-slate-300 opacity-0 transition-all group-hover:opacity-100 hover:bg-rose-50 hover:text-rose-500 dark:text-slate-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-400" aria-label={`Remove source ${index + 1}`}>
         <Trash2 size={16} />
       </button>
+
       {source.provider === 'serper_search' && (
-        <div className="md:col-span-4">
+        <div className="md:col-span-4 mt-2">
           <Field label="Serper connection name">
             {serperConnections.length > 0 ? (
-              <select value={source.connection_name} onChange={(event) => onChange({ ...source, connection_name: event.target.value })} className={inputClass}>
+              <select value={source.connection_name} onChange={(event) => onChange({ ...source, connection_name: event.target.value })} className={`${inputClass} max-w-sm`}>
                 <option value="">Choose connected Serper account</option>
                 {serperConnections.map((connection) => (
                   <option key={connection.id} value={connection.name}>{connection.name}</option>
                 ))}
               </select>
             ) : (
-              <p className="mt-1 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
+              <p className="mt-1 rounded-xl bg-amber-50/50 px-4 py-3 text-xs font-medium text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
                 No connected Serper account found. Add Serper in Integrations or remove this Serper source.
               </p>
             )}
@@ -760,7 +808,7 @@ function EnrichmentRow({
     (provider) => connections.some((connection) => connection.provider === provider),
   )
   return (
-    <div className="grid gap-3 rounded-xl border border-slate-100 p-3 dark:border-slate-800 md:grid-cols-[180px_1fr_40px]">
+    <div className="group relative grid gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900/50 md:grid-cols-[180px_1fr_40px]">
       <Field label={`Stage ${index + 1}`}>
         <select
           value={stage.provider}
@@ -790,7 +838,7 @@ function EnrichmentRow({
           </p>
         )}
       </Field>
-      <button type="button" onClick={onRemove} className="mt-6 rounded-lg p-2 text-slate-300 hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-950/30" aria-label={`Remove enrichment ${index + 1}`}>
+      <button type="button" onClick={onRemove} className="mt-6 flex h-9 w-9 items-center justify-center rounded-xl text-slate-300 opacity-0 transition-all group-hover:opacity-100 hover:bg-rose-50 hover:text-rose-500 dark:text-slate-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-400" aria-label={`Remove enrichment ${index + 1}`}>
         <Trash2 size={16} />
       </button>
     </div>
@@ -799,7 +847,7 @@ function EnrichmentRow({
 
 function MessageRow({ index, message, onChange, onRemove }: { index: number; message: DraftMessage; onChange: (message: DraftMessage) => void; onRemove: () => void }) {
   return (
-    <div className="space-y-3 rounded-xl border border-slate-100 p-3 dark:border-slate-800">
+    <div className="group relative space-y-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900/50">
       <div className="grid gap-3 md:grid-cols-[150px_1fr_130px_40px]">
         <Field label={`Message ${index + 1}`}>
           <select value={message.channel} onChange={(event) => onChange({ ...message, channel: event.target.value as MessageChannel })} className={inputClass}>
@@ -825,7 +873,7 @@ function MessageRow({ index, message, onChange, onRemove }: { index: number; mes
             </select>
           </div>
         </Field>
-        <button type="button" onClick={onRemove} className="mt-6 rounded-lg p-2 text-slate-300 hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-950/30" aria-label={`Remove message ${index + 1}`}>
+        <button type="button" onClick={onRemove} className="mt-6 flex h-9 w-9 items-center justify-center rounded-xl text-slate-300 opacity-0 transition-all group-hover:opacity-100 hover:bg-rose-50 hover:text-rose-500 dark:text-slate-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-400" aria-label={`Remove message ${index + 1}`}>
           <Trash2 size={16} />
         </button>
       </div>
