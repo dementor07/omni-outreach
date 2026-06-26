@@ -146,6 +146,42 @@ async def init_pool(dsn: str, *, retries: int = 30, backoff_s: float = 2.0) -> N
     raise RuntimeError(f"could not establish DB pool after {retries} attempts") from last_err
 
 
+async def assert_rls_enforcing_role() -> None:
+    """Fail loud if the app connected as a role that BYPASSES RLS.
+
+    The entire tenant boundary (this module's docstring) rests on RLS being
+    enforced against the connecting role. Postgres exempts a **superuser** and
+    any **BYPASSRLS** role from row-level security unconditionally — and even
+    ``FORCE ROW LEVEL SECURITY`` does not bind a superuser. So if the app
+    connects as the DB owner/superuser ``outreach`` (the config default when
+    ``DATABASE_URL`` is unset, config.py:get_asyncpg_dsn), RLS is silently void
+    and every workspace can read every other workspace's rows — a critical
+    multi-tenant breach that no test or query would surface.
+
+    Production wires ``DATABASE_URL`` to the non-owner ``omni_app_role``
+    (rolsuper=f, rolbypassrls=f) so RLS applies. This startup probe makes the
+    safe state mandatory instead of incidental: a misconfigured deploy that
+    falls back to the superuser DSN crashes on boot with a clear message rather
+    than running wide-open. Uses acquire_raw (no tenant context needed)."""
+    async with acquire_raw() as conn:
+        row = await conn.fetchrow(
+            "SELECT current_user AS role, "
+            "rolsuper, rolbypassrls "
+            "FROM pg_roles WHERE rolname = current_user"
+        )
+    if not row:
+        raise RuntimeError("RLS guard: could not resolve current_user role")
+    if row["rolsuper"] or row["rolbypassrls"]:
+        raise RuntimeError(
+            f"RLS guard: app connected as role {row['role']!r} which is "
+            f"superuser={row['rolsuper']} bypassrls={row['rolbypassrls']} — "
+            "this BYPASSES row-level security and voids tenant isolation. "
+            "Set DATABASE_URL to a non-owner, non-superuser role "
+            "(e.g. omni_app_role). Refusing to start wide-open."
+        )
+    log.info("[db] RLS guard ok: connected as %r (non-superuser, non-bypassrls)", row["role"])
+
+
 async def init_redis(url: str = "redis://redis:6379") -> None:
     global redis_client
     redis_client = aioredis.from_url(url, decode_responses=True)

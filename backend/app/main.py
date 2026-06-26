@@ -18,7 +18,7 @@ from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
-from app.db import close_pool, close_redis, init_pool, init_redis
+from app.db import assert_rls_enforcing_role, close_pool, close_redis, init_pool, init_redis
 from app.logging_config import get_logger, setup_logging
 from app.nodes import discover as discover_nodes
 from app.routers import (
@@ -86,6 +86,7 @@ async def _credential_sweep_loop(interval_seconds: int = 3600) -> None:
 async def lifespan(app: FastAPI):
     logger.info("Starting Omni v2 backend")
     await init_pool(settings.get_asyncpg_dsn())
+    await assert_rls_enforcing_role()  # refuse to run if connected as a superuser (RLS void)
     await init_redis(settings.get_redis_url())
     await init_producer()
     discover_nodes()
