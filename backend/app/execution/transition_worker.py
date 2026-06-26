@@ -33,7 +33,7 @@ from aiokafka import AIOKafkaConsumer
 
 import app.nodes as noderegistry
 from app.config import settings
-from app.db import acquire, close_pool, execute, fetch_all, fetch_one, init_pool, system_scope
+from app.db import acquire, assert_rls_enforcing_role, close_pool, execute, fetch_all, fetch_one, init_pool, system_scope
 from app.execution import commands
 from app.services import bus, company_kg, email_verification, send_policy, suppression
 
@@ -1390,6 +1390,27 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
     # re-discovery (the KG moat that was previously inert — cache_person had no
     # caller). The node has no DB handle, so the worker does it (same pattern as
     # the resolve_company injection above).
+    # CONTACT-CAP-002: crm.create_contact reports goal_capped when the campaign's
+    # contact target is already met (it did NOT emit contact.created, so no orphan
+    # contact). Terminalize the lead through _terminalize_lead — NOT a bare status
+    # write or a side-channel lead.sequence_ended event — so a capped fan-out CHILD
+    # still decrements its parent's join barrier (SM-5; a side-channel end would
+    # strand the parent in 'waiting' forever). Stamp the goal_cap marker for the
+    # Leads/Analytics views. This is the single cap enforcement point (the
+    # duplicate projector cap was removed).
+    if node_type == "crm.create_contact" and (result.telemetry or {}).get("goal_capped"):
+        async with system_scope():
+            await execute(
+                "UPDATE omni_leads SET custom_fields = COALESCE(custom_fields,'{}'::jsonb) || "
+                "jsonb_build_object('goal_cap', jsonb_build_object('metric','contacts','reason','contact_target_reached')), "
+                "updated_at=NOW() WHERE id=$1 AND workspace_id=$2",
+                str(lead["id"]),
+                workspace_id,
+            )
+        await _terminalize_lead(workspace_id, str(lead["id"]), "ended", correlation_id)
+        log.info("lead %s: contact goal cap reached — ended (no contact created)", lead["id"])
+        return
+
     if node_type == "crm.create_contact" and not result.error:
         person = node_custom_fields.get("item") or {}
         resolution = node_custom_fields.get("company_resolution") or {}
@@ -1419,6 +1440,26 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
     if result.park:
         await _advance_lead(workspace_id, str(lead["id"]), str(node["id"]), status="waiting")
         log.info("lead %s parked at %s (%s)", lead["id"], node["id"], node_type)
+        # EVENT-PARK-001: an event.* node parks to await an external signal (open/
+        # click/invite-accepted) which the resume bridge (services.event_resume,
+        # called from tracking.py / webhooks_in.py) delivers as a transition on the
+        # success handle. But the signal may never come — so schedule a timeout
+        # escape: a delayed transition on the `timeout` handle (the same processing-
+        # time-timer mechanism flow.race's timeout uses). Without this the lead would
+        # strand forever if never opened/clicked. The success-handle resume and this
+        # timeout race; whichever fires first while the lead is still 'waiting' at
+        # this node wins (the loser sees status!=waiting and no-ops).
+        timeout_seconds = (result.telemetry or {}).get("timeout_seconds")
+        if timeout_seconds:
+            await _emit_synthetic_result(
+                workspace_id, str(lead["id"]), str(node["id"]), "timeout",
+                correlation_id, delay_seconds=float(timeout_seconds),
+                extra_metadata={
+                    "command_id": f"event-timeout:{node['id']}",
+                    "retry_attempt": 0,
+                },
+            )
+            log.info("lead %s: scheduled %ss timeout escape for %s", lead["id"], timeout_seconds, node_type)
         return
 
     # Decide how the lead advances past this node:
@@ -2040,10 +2081,13 @@ async def handle_transition(t: dict) -> None:
             log.warning("retry for lead %s: node/lead gone; dropping", lead_id)
         return
 
-    # flow.race timeout: the delayed timeout transition only fires the `timeout`
-    # arm if the parent is STILL parked at the race (no arm won). A winner already
-    # flipped the parent to 'active' and advanced it, so a late timeout is a stale
-    # no-op. Also cancel any still-running arms when the timeout actually fires.
+    # Delayed `timeout` transition — fired by flow.race's timeout arm OR an
+    # event.* node's EVENT-PARK-001 timeout escape. Either way it only fires the
+    # `timeout` handle if the lead is STILL parked here: a race winner (or the
+    # event's success-handle resume) already flipped it 'active' and advanced it,
+    # so a late timeout is a stale no-op. The race case additionally cancels any
+    # still-running sibling arms (the cancel query keys on parent_lead_id=this
+    # lead, so an event node with no children is an empty no-op).
     # SM-4: no intermediate `active + current_node_id=NULL` write here — the
     # positional claim below moves the parent waiting→active→target atomically,
     # so a crash mid-timeout leaves a state a redelivery can resume from.
@@ -2060,7 +2104,7 @@ async def handle_transition(t: dict) -> None:
             and str(prow.get("current_node_id") or "") == str(source_node_id)
         )
         if not still_waiting:
-            log.info("race timeout for lead %s ignored — already resolved", lead_id)
+            log.info("timeout for lead %s ignored — already resolved/resumed", lead_id)
             return
         async with system_scope():
             await execute(
@@ -2155,6 +2199,7 @@ async def handle_transition(t: dict) -> None:
 
 async def run() -> None:
     await init_pool(settings.database_url)
+    await assert_rls_enforcing_role()
     await bus.init_producer()
     noderegistry.discover()
     consumer = AIOKafkaConsumer(

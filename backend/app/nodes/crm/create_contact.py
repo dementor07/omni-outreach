@@ -31,7 +31,7 @@ from app.nodes import (
     SideEffect,
     register,
 )
-from app.db import fetch_one
+from app.db import acquire
 
 
 class CreateContactConfig(BaseModel):
@@ -56,7 +56,10 @@ MANIFEST = NodeManifest(
     category=NodeCategory.CRM,
     summary="Create a contact in the CRM (emits contact.created; projection picks up)",
     config_schema=CreateContactConfig,
-    output_handles=(NodeHandle("default", "Contact event emitted"),),
+    output_handles=(
+        NodeHandle("default", "Contact event emitted"),
+        NodeHandle("goal_capped", "Campaign contact target already reached — lead ended without creating a contact"),
+    ),
     side_effect=SideEffect.MUTATE,
     icon="user-plus",
     primary_fields=("person_field",),
@@ -65,50 +68,57 @@ MANIFEST = NodeManifest(
 
 
 async def _is_contact_cap_reached(workspace_id: str, workflow_id: str) -> bool:
-    objective = await fetch_one(
-        """
-        SELECT target
-        FROM omni_campaign_objectives
-        WHERE workspace_id = $1 AND workflow_id = $2 AND metric = 'contacts'
-        ORDER BY created_at DESC
-        LIMIT 1
-        """,
-        workspace_id,
-        workflow_id,
-    )
-    if not objective or int(objective.get("target") or 0) <= 0:
-        return False
+    """CONTACT-CAP-002: has this campaign already attached its target number of
+    distinct contacts? Enforced HERE (before contact.created is emitted) so a
+    capped run never mints an orphan contact — the projector cap could only end
+    the lead AFTER the contact row already existed.
 
-    attached_row = await fetch_one(
-        """
-        SELECT count(DISTINCT contact_id) as n
-        FROM omni_leads
-        WHERE workspace_id = $1
-          AND workflow_id = $2
-          AND contact_id IS NOT NULL
-        """,
-        workspace_id,
-        workflow_id,
-    )
-    attached = attached_row.get("n", 0) if attached_row else 0
-    return int(attached) >= int(objective.get("target") or 0)
+    Wrapped in a per-(workspace, workflow) advisory lock + counted in the SAME
+    committed transaction so concurrent fan-out branches serialize on the count
+    instead of all reading "under target" at once and overshooting. This is the
+    same lock key the projector used; with the projector cap removed this is the
+    single enforcement point."""
+    async with acquire() as conn:
+        objective = await conn.fetchrow(
+            """
+            SELECT target
+            FROM omni_campaign_objectives
+            WHERE workspace_id = $1 AND workflow_id = $2 AND metric = 'contacts'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            workspace_id,
+            workflow_id,
+        )
+        if not objective or int(objective["target"] or 0) <= 0:
+            return False
+        # Serialize the read against parallel branches creating contacts at once.
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtext($1))",
+            f"lead-contact-cap:{workspace_id}:{workflow_id}",
+        )
+        attached = await conn.fetchval(
+            """
+            SELECT count(DISTINCT contact_id)
+            FROM omni_leads
+            WHERE workspace_id = $1 AND workflow_id = $2 AND contact_id IS NOT NULL
+            """,
+            workspace_id,
+            workflow_id,
+        )
+    return int(attached or 0) >= int(objective["target"] or 0)
 
 
 async def execute(ctx: NodeContext) -> NodeResult:
-    if ctx.workflow_id:
-        # Pre-flight check to prevent emitting contact.created when the goal cap is already met
-        if await _is_contact_cap_reached(ctx.workspace_id, ctx.workflow_id):
-            return NodeResult(
-                handle="default",
-                events=[
-                    {
-                        "event_type": "lead.sequence_ended",
-                        "entity_type": "lead",
-                        "entity_id": str(ctx.lead["id"]) if ctx.lead.get("id") else None,
-                        "payload": {"reason": "contact_target_reached"},
-                    }
-                ] if ctx.lead.get("id") else [],
-            )
+    if ctx.workflow_id and await _is_contact_cap_reached(ctx.workspace_id, ctx.workflow_id):
+        # Goal already met — do NOT emit contact.created (no orphan contact).
+        # Signal the worker to TERMINALIZE this lead via _terminalize_lead (which
+        # accounts it at any fan-out parent's barrier — a bare lead.sequence_ended
+        # event would strand the parent). The worker reads telemetry.goal_capped.
+        return NodeResult(
+            handle="goal_capped",
+            telemetry={"goal_capped": True, "reason": "contact_target_reached"},
+        )
 
     cfg = CreateContactConfig(**ctx.config)
     person = (ctx.lead.get("custom_fields") or {}).get(cfg.person_field) or {}
