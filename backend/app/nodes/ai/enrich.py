@@ -88,10 +88,18 @@ async def execute(ctx: NodeContext) -> NodeResult:
         handle="default",
         events=[
             {
-                "event_type": "lead.enrichment_requested",
+                # ENRICH-INTENT-001: this MUST be a dot-separated ".requested"
+                # intent or the dispatcher's _is_intent (endswith ".requested")
+                # rejects it and the muscle never runs — enrichment silently
+                # no-ops. The old name "lead.enrichment_requested" ends in
+                # "_requested" (underscore), so it was NEVER routed. The
+                # dispatcher resolves the node from payload.node_id, so the
+                # event name only needs to (a) pass _is_intent and (b) carry
+                # node_id/lead_id — the node_type drives ChannelType.ENRICH.
+                "event_type": "ai.enrich.requested",
                 "entity_type": "lead",
                 "entity_id": ctx.lead.get("id"),
-                "payload": payload,
+                "payload": {**payload, "node_id": ctx.node_id, "lead_id": ctx.lead.get("id")},
             }
         ],
         telemetry={"correlation_id": correlation_id, "provider": cfg.enrich_source},
