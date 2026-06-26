@@ -130,7 +130,9 @@ function CampaignCard({ c }: { c: Workflow }) {
                   Restore
                 </Button>
                 <Button variant="ghost" size="sm" icon={Trash2}
-                  onClick={(e) => { stop(e); setConfirmDelete(true) }} aria-label={`Delete ${c.name}`} />
+                  onClick={(e) => { stop(e); setConfirmDelete(true) }} aria-label={`Delete ${c.name} permanently`}>
+                  Delete
+                </Button>
               </>
             )}
           </div>

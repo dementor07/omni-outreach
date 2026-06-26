@@ -899,6 +899,19 @@ async def run_workflow(
         error = failures[0].error if failures else "workflow has no entry node"
         status_code = 400 if failures and not failures[0].lead_id else 422
         raise HTTPException(status_code=status_code, detail=f"entry node error: {error}")
+    # CAMPAIGN-STATUS-001: a campaign's status was only ever 'draft' (on create)
+    # or 'archived' — nothing flipped it 'active' when a run actually started, so a
+    # running campaign read "Draft" forever in the UI. On a successful run, promote
+    # a draft to active. Only from 'draft' — never reactivate an 'archived' campaign
+    # or override a deliberate 'paused' — so this reflects "it has run" without
+    # clobbering operator intent.
+    await execute(
+        "UPDATE omni_workflows SET status = 'active', updated_at = NOW() "
+        "WHERE id = $1 AND workspace_id = $2 AND status = 'draft'",
+        workflow_id,
+        ctx.workspace_id,
+    )
+
     outcome = successes[0]
     return RunResponse(
         lead_id=uuid.UUID(outcome.lead_id),
