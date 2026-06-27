@@ -1910,40 +1910,102 @@ async def _emit_pipeline_metric(
         log.exception("failed to emit pipeline.metric for run %s (%s)", run_id, collector)
 
 
-async def _emit_sender_delivery_result(
+# LinkedIn sub-action lives in the node config / queued intent, surfaced on the
+# result metadata as "mode". Other channels have no sub-mode.
+def _send_provider_ids(meta: dict, lead_mutations: dict) -> dict:
+    """The provider's own handles for this send, for threading + reconciliation:
+    chat_id (DM thread), invitation_id (invite), message_id, provider_id. The
+    muscle returns these in lead_mutations (chat_id/provider_id) and result
+    details (invitation_id/message_id)."""
+    details = meta.get("details") if isinstance(meta.get("details"), dict) else {}
+    out: dict[str, str] = {}
+    for key in ("chat_id", "ig_chat_id", "tg_chat_id", "provider_id", "invitation_id", "message_id"):
+        val = (lead_mutations or {}).get(key) or details.get(key)
+        if val:
+            out[key] = str(val)
+    return out
+
+
+async def _emit_send_outcome(
     workspace_id: str,
     node_type: str,
+    lead_id: str,
+    lead_row: dict,
     meta: dict,
+    lead_mutations: dict,
     correlation_id: str | None,
 ) -> None:
-    """Project transport health from real muscle outcomes, idempotently."""
-    account_id = meta.get("sending_account_id")
-    if node_type != "channel.email" or not account_id:
+    """OBSERVABILITY-001: a durable, per-lead, cross-queryable record of EVERY
+    outbound send attempt (all channels, not just email) — status, the failure
+    REASON, and the provider's handles (chat_id / invitation_id). Without this
+    a LinkedIn invite/DM outcome (e.g. a 403 reason) evaporated. Emits a
+    `send.outcome` the projector writes to omni_send_outcomes, idempotent on
+    (command_id, attempt). Mirrors how enrichment records enrichment_history.
+
+    Also re-emits the email-only `sender.delivery_result` (the deliverability
+    transport-health rollup the existing projector/Analytics consume) so that
+    surface is unchanged."""
+    if node_type not in _OUTBOUND_SEND_CHANNELS:
         return
     status = str(meta.get("status") or "").lower()
-    if status not in {"sent", "failed"}:
+    if status not in {"sent", "failed", "skipped"}:
         return
     command_id = str(meta.get("command_id") or "")
-    retry_attempt = int(meta.get("retry_attempt") or 0)
-    error_code = str(meta.get("error") or "") or None
-    result_key = f"{command_id}:{retry_attempt}:{status}:{error_code or ''}"
+    attempt = int(meta.get("retry_attempt") or 0)
+    error_detail = str(meta.get("error") or "") or None
+    # The muscle's error string is "<code> HTTP <status>: <body>" shaped; keep the
+    # whole thing as detail and lift a short code for filtering.
+    error_code = (error_detail.split(":", 1)[0].strip()[:120] if error_detail else None)
     try:
         await bus.publish_event(
             workspace_id=workspace_id,
-            event_type="sender.delivery_result",
-            entity_type="sending_account",
-            entity_id=str(account_id),
+            event_type="send.outcome",
+            entity_type="lead",
+            entity_id=str(lead_id),
             payload={
-                "result_key": result_key,
                 "command_id": command_id,
+                "attempt": attempt,
+                "channel": node_type.split(".", 1)[-1],
+                "mode": meta.get("mode"),
                 "status": status,
+                "lead_id": str(lead_id),
+                "contact_id": str(lead_row.get("contact_id")) if lead_row.get("contact_id") else None,
+                "workflow_id": str(lead_row.get("workflow_id")) if lead_row.get("workflow_id") else None,
+                "node_id": str(meta.get("node_id") or "") or None,
+                "sending_account_id": str(meta.get("sending_account_id") or "") or None,
+                "provider": meta.get("provider"),
+                "provider_status_code": meta.get("provider_status_code"),
                 "error_code": error_code,
+                "error_detail": error_detail,
+                "provider_ids": _send_provider_ids(meta, lead_mutations),
                 "retriable": bool(meta.get("is_retriable")),
             },
             correlation_id=correlation_id,
         )
-    except Exception:  # noqa: BLE001
-        log.exception("failed to emit sender.delivery_result for account %s", account_id)
+    except Exception:  # noqa: BLE001 — observability must never wedge the spine
+        log.exception("failed to emit send.outcome for lead %s", lead_id)
+
+    # Preserve the email transport-health rollup (unchanged consumers).
+    account_id = meta.get("sending_account_id")
+    if node_type == "channel.email" and account_id and status in {"sent", "failed"}:
+        result_key = f"{command_id}:{attempt}:{status}:{error_code or ''}"
+        try:
+            await bus.publish_event(
+                workspace_id=workspace_id,
+                event_type="sender.delivery_result",
+                entity_type="sending_account",
+                entity_id=str(account_id),
+                payload={
+                    "result_key": result_key,
+                    "command_id": command_id,
+                    "status": status,
+                    "error_code": error_code,
+                    "retriable": bool(meta.get("is_retriable")),
+                },
+                correlation_id=correlation_id,
+            )
+        except Exception:  # noqa: BLE001
+            log.exception("failed to emit sender.delivery_result for account %s", account_id)
 
 
 async def handle_transition(t: dict) -> None:
@@ -2031,10 +2093,13 @@ async def handle_transition(t: dict) -> None:
             correlation_id,
         )
     if firing_node:
-        await _emit_sender_delivery_result(
+        await _emit_send_outcome(
             workspace_id,
             str(firing_node.get("node_type") or ""),
+            str(lead_id),
+            dict(row),
             meta,
+            lead_mutations,
             correlation_id,
         )
 

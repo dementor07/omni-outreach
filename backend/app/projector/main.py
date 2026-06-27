@@ -307,6 +307,43 @@ async def _project_pipeline_metric(env: dict[str, Any]) -> None:
     )
 
 
+async def _project_send_outcome(env: dict[str, Any]) -> None:
+    """OBSERVABILITY-001: persist one outbound send attempt to the durable,
+    cross-queryable ledger. Idempotent on (workspace_id, command_id, attempt) so
+    a Kafka redelivery of the result doesn't double-record. entity_id = lead_id."""
+    p = env.get("payload") or {}
+    await execute(
+        """
+        INSERT INTO omni_send_outcomes (
+            workspace_id, lead_id, contact_id, workflow_id, node_id, channel, mode,
+            sending_account_id, command_id, attempt, status, provider,
+            provider_status_code, error_code, error_detail, provider_ids,
+            retriable, occurred_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17,$18)
+        ON CONFLICT (workspace_id, command_id, attempt) DO NOTHING
+        """,
+        env["workspace_id"],
+        p.get("lead_id") or env.get("entity_id"),
+        p.get("contact_id"),
+        p.get("workflow_id"),
+        p.get("node_id"),
+        p.get("channel") or "",
+        p.get("mode"),
+        p.get("sending_account_id"),
+        p.get("command_id") or "",
+        int(p.get("attempt") or 0),
+        p.get("status") or "failed",
+        p.get("provider"),
+        p.get("provider_status_code"),
+        p.get("error_code"),
+        p.get("error_detail"),
+        json.dumps(p.get("provider_ids") or {}),
+        bool(p.get("retriable")),
+        datetime.fromisoformat(env["occurred_at"]),
+    )
+
+
 async def _project_sender_delivery_result(env: dict[str, Any]) -> None:
     """Persist a deduplicated transport outcome for sender-health rollups."""
     payload = env.get("payload") or {}
@@ -673,6 +710,10 @@ async def _apply_projection(env: dict[str, Any]) -> None:
         return
     if et == "sender.delivery_result" and env.get("entity_id"):
         await _project_sender_delivery_result(env)
+        return
+    # OBSERVABILITY-001: the durable per-lead send-outcome ledger (all channels).
+    if et == "send.outcome" and env.get("entity_id"):
+        await _project_send_outcome(env)
         return
     # Task status flips (entity_type 'task' but NOT the create path).
     if et in ("task.completed", "task.reopened") and env.get("entity_id"):

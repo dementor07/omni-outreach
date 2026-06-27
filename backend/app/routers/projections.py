@@ -513,12 +513,26 @@ class JourneyCost(BaseModel):
     calls: int
 
 
+class SendOutcomeOut(BaseModel):
+    """One outbound send attempt — the durable, queryable record (OBSERVABILITY-001).
+    This is what makes 'why did this send fail?' a query instead of a log hunt."""
+    occurred_at: datetime
+    channel: str
+    mode: str | None
+    status: str
+    error_code: str | None
+    error_detail: str | None
+    provider_ids: dict[str, Any]
+    retriable: bool
+
+
 class LeadJourneyOut(BaseModel):
     lead: LeadOut
     parent: LineageLead | None
     children: list[LineageLead]
     timeline: list[JourneyEvent]
     cost: JourneyCost
+    sends: list[SendOutcomeOut]
     status_reason: str
 
 
@@ -653,6 +667,34 @@ async def lead_journey(
             by_kind[j["kind"]] = round(by_kind.get(j["kind"], 0.0) + float(j.get("cost_usd") or 0), 6)
     cost = JourneyCost(total_usd=round(sum(by_kind.values()), 6), by_kind=by_kind, calls=calls)
 
+    # OBSERVABILITY-001: every outbound send attempt for this lead, newest first —
+    # status + the failure reason + provider handles. RLS-scoped + ws-filtered.
+    send_rows = await fetch_all(
+        """
+        SELECT occurred_at, channel, mode, status, error_code, error_detail,
+               provider_ids, retriable
+        FROM omni_send_outcomes
+        WHERE workspace_id = $1 AND lead_id = $2
+        ORDER BY occurred_at DESC
+        LIMIT 100
+        """,
+        ws,
+        lead_id,
+    )
+    sends = [
+        SendOutcomeOut(
+            occurred_at=s["occurred_at"],
+            channel=s["channel"],
+            mode=s.get("mode"),
+            status=s["status"],
+            error_code=s.get("error_code"),
+            error_detail=s.get("error_detail"),
+            provider_ids=s.get("provider_ids") or {},
+            retriable=bool(s.get("retriable")),
+        )
+        for s in send_rows
+    ]
+
     timeline = [
         JourneyEvent(
             occurred_at=e["occurred_at"],
@@ -671,6 +713,7 @@ async def lead_journey(
         children=[_lineage_lead(dict(c)) for c in children],
         timeline=timeline,
         cost=cost,
+        sends=sends,
         status_reason=_status_reason(lead, origin_type, last_event),
     )
 
