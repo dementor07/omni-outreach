@@ -69,11 +69,16 @@ def upgrade() -> None:
     )
     op.execute("ALTER TABLE omni_send_outcomes ENABLE ROW LEVEL SECURITY")
     op.execute("ALTER TABLE omni_send_outcomes FORCE ROW LEVEL SECURITY")
+    # The projector (a background worker) writes this table under system_scope(),
+    # so the policy MUST permit the system scope via app_is_system() — exactly
+    # like the sibling omni_sender_delivery_results / deliverability tables. The
+    # raw current_setting(...) form (used by request-only tables like the
+    # objectives table) would reject every projector INSERT under RLS.
     op.execute(
         """
         CREATE POLICY omni_send_outcomes_workspace_isolation ON omni_send_outcomes
-            USING (workspace_id = current_setting('app.workspace_id', true)::uuid)
-            WITH CHECK (workspace_id = current_setting('app.workspace_id', true)::uuid)
+            USING (workspace_id = app_current_workspace() OR app_is_system())
+            WITH CHECK (workspace_id = app_current_workspace() OR app_is_system())
         """
     )
     # Explicit grant: the app connects as the non-owner omni_app_role. 043's

@@ -29,6 +29,9 @@ TW_SRC = (REPO / "backend/app/execution/transition_worker.py").read_text(encodin
 PROJ_SRC = (REPO / "backend/app/projector/main.py").read_text(encoding="utf-8")
 PROJECTIONS_SRC = (REPO / "backend/app/routers/projections.py").read_text(encoding="utf-8")
 MIGRATION = (REPO / "backend/alembic/versions/045_send_outcomes.py").read_text(encoding="utf-8")
+MIGRATION_RLS_FIX = (
+    REPO / "backend/alembic/versions/046_send_outcomes_rls_system_scope.py"
+).read_text(encoding="utf-8")
 
 
 def _func_body(src: str, name: str) -> str:
@@ -50,9 +53,26 @@ def test_migration_creates_isolated_idempotent_ledger():
     # tenant isolation: RLS enabled AND forced (the owner is not exempt).
     assert "ENABLE ROW LEVEL SECURITY" in MIGRATION
     assert "FORCE ROW LEVEL SECURITY" in MIGRATION
-    assert "current_setting('app.workspace_id', true)::uuid" in MIGRATION
     # the app connects as the non-owner role — a new table is invisible without a grant.
     assert "GRANT ALL PRIVILEGES ON omni_send_outcomes TO omni_app_role" in MIGRATION
+
+
+def test_policy_permits_the_system_scope_projector_writer():
+    # THE bug live-verify caught: omni_send_outcomes is written by the PROJECTOR,
+    # a background worker running under system_scope() (app.workspace_id = the
+    # all-zero UUID). A policy in the raw current_setting(...) form rejects every
+    # such INSERT ("new row violates RLS"), leaving the ledger silently empty.
+    # The policy MUST permit the system scope via app_is_system() — the canonical
+    # projector-written pattern (cf. omni_sender_delivery_results).
+    effective = MIGRATION + MIGRATION_RLS_FIX
+    assert "app_is_system()" in effective, (
+        "the projector writes under system_scope(); the RLS policy must allow it "
+        "via app_is_system() or every projected outcome is rejected"
+    )
+    assert "app_current_workspace()" in effective
+    # and 046 must realign boxes that already ran the original 045 policy.
+    assert 'revision = "046"' in MIGRATION_RLS_FIX and 'down_revision = "045"' in MIGRATION_RLS_FIX
+    assert "DROP POLICY IF EXISTS omni_send_outcomes_workspace_isolation" in MIGRATION_RLS_FIX
 
 
 def test_migration_carries_the_failure_reason_columns():
