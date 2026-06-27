@@ -63,6 +63,15 @@ _LEAF_TERMINAL_STATUS: dict[str, str] = {
     "empty": "ended",
     "no_results": "ended",
     "none": "ended",
+    # RELGATE-001: a DM held because the recipient isn't a 1st-degree connection
+    # is not a failure and not a success — if the campaign didn't wire a
+    # `not_connected` branch (e.g. loop back to invite), end the lead honestly
+    # rather than record a false 'completed'.
+    "not_connected": "ended",
+    # NOCHAT-001: a DM that opened a chat but got no chat_id back is degraded —
+    # the send likely went but we can't thread a follow-up. Unwired, end the
+    # lead honestly (not 'completed') so the degradation is visible.
+    "no_thread": "ended",
 }
 
 

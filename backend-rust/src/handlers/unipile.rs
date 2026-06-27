@@ -56,6 +56,50 @@ fn public_id_from_linkedin_url(url: &str) -> String {
     url.trim().trim_end_matches('/').split("/in/").last().unwrap_or("").to_string()
 }
 
+/// RELGATE-001: a LinkedIn DM to a non-1st-degree connection 403s
+/// (subscription_required) — proven live. Before OPENING a new chat we resolve
+/// the recipient's network_distance via /users/{public_id} and only proceed if
+/// they are a 1st-degree connection. Returns:
+///   Some(true)  — confirmed 1st degree (DISTANCE_1 / FIRST_DEGREE), send.
+///   Some(false) — confirmed NOT 1st degree (2nd/3rd/out-of-network), hold.
+///   None        — could not determine (resolve failed); caller decides (we let
+///                 the send proceed so a transient resolve glitch can't wedge a
+///                 legitimately-connected recipient; the send's own 403 still
+///                 records a durable failure outcome).
+async fn linkedin_first_degree(
+    client: &reqwest::Client,
+    base: &str,
+    api_key: &str,
+    account_id: &str,
+    public_id: &str,
+) -> Option<bool> {
+    if public_id.is_empty() {
+        return None;
+    }
+    let resp = client
+        .get(format!("{}/api/v1/users/{}", base, public_id))
+        .header("X-API-KEY", api_key)
+        .query(&[("account_id", account_id)])
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: Value = resp.json().await.ok()?;
+    let distance = body
+        .get("network_distance")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_ascii_uppercase();
+    if distance.is_empty() {
+        return None;
+    }
+    // Unipile reports DISTANCE_1 / FIRST_DEGREE for connections; everything else
+    // (DISTANCE_2/3, OUT_OF_NETWORK) is not directly messageable without InMail.
+    Some(distance.contains('1') || distance.contains("FIRST"))
+}
+
 /// LinkedIn invite. Posts to /api/v1/users/invite. Sets `invited_at` on the lead.
 pub async fn handle_linkedin_invite(command: &ActionCommand) -> ExecutionResult {
     let (api_key, base) = match unipile_creds(command).await {
@@ -269,6 +313,33 @@ async fn send_chat(command: &ActionCommand, event_type: &str, chat_id_col: &str)
             None,
         )
     } else {
+        // RELGATE-001: before OPENING a LinkedIn chat, verify the recipient is a
+        // 1st-degree connection. A DM to a non-connection 403s and burns the
+        // attempt; instead we resolve network_distance and, when confirmed NOT
+        // connected, route to the `not_connected` handle so the campaign can
+        // branch (e.g. loop back to invite / hold) WITHOUT a wasted 403. Only
+        // for LinkedIn DM opening a new chat — WhatsApp/IG/TG have no such notion,
+        // and an existing chat_id already proves a live thread.
+        if chat_id_col == "chat_id" {
+            let public_id = command
+                .lead
+                .linkedin_url
+                .as_deref()
+                .map(public_id_from_linkedin_url)
+                .unwrap_or_default();
+            if let Some(false) =
+                linkedin_first_degree(&client, &base, &api_key, &unipile_account_id, &public_id).await
+            {
+                credentials::release(command.credential_ref.as_deref().unwrap_or("")).await;
+                warn!("[unipile] DM held for lead {} — recipient is not a 1st-degree connection", command.lead.id);
+                // Skipped (not Sent): the ledger must record this as a non-send,
+                // and skipped routes via metadata.next_handle in the orchestrator
+                // — same mechanism ai_screen / http_call branch on.
+                let mut result = common::skipped(command, "not_connected");
+                result.metadata.insert("next_handle".to_string(), json!("not_connected"));
+                return result;
+            }
+        }
         // Start a new chat. attendees_ids is the LinkedIn provider_id, WhatsApp
         // JID, IG provider_id, or Telegram username — sequencer resolves it.
         let attendee = command.payload["attendee_identifier"]
@@ -323,12 +394,24 @@ async fn send_chat(command: &ActionCommand, event_type: &str, chat_id_col: &str)
             } else {
                 json!({ "custom_fields": Value::Object(cf) })
             };
-            common::ok(
+            // NOCHAT-001: we OPENED a new chat and the API said success, but
+            // returned no chat_id — a soft failure. The message may have gone,
+            // but we cannot thread any follow-up onto this conversation. Record
+            // the send (status stays sent, so the outcome ledger captures it)
+            // but route to a `no_thread` degraded handle so a follow-up sequence
+            // doesn't blindly assume a healthy thread. An existing-chat send
+            // (opened_chat_id is None) already has its thread, so it's exempt.
+            let mut result = common::ok(
                 command,
                 json!({"provider": "unipile", "event": event_type, "chat_id": new_chat_id}),
                 Some(event_type),
                 mutations,
-            )
+            );
+            if opened_chat_id.is_some() && new_chat_id.is_empty() && chat_id_col == "chat_id" {
+                warn!("[unipile] new chat opened for lead {} but no chat_id returned — degraded (no_thread)", command.lead.id);
+                result.metadata.insert("next_handle".to_string(), json!("no_thread"));
+            }
+            result
         }
         Ok(r) => {
             let status = r.status();
