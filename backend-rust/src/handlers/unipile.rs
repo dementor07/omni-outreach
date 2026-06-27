@@ -112,11 +112,16 @@ pub async fn handle_linkedin_invite(command: &ActionCommand) -> ExecutionResult 
     match resp {
         Ok(r) if r.status().is_success() => {
             info!("[unipile] invite sent for lead {}", command.lead.id);
+            // Persist provider_id + invited_at under custom_fields so the sync
+            // worker's _apply_lead_mutations actually applies them (it only
+            // merges the `custom_fields` envelope). The invite-accepted webhook
+            // matches a parked lead by custom_fields.provider_id — without this
+            // the precise match has nothing to key on.
             common::ok(
                 command,
                 json!({"provider": "unipile", "channel": "linkedin_invite", "provider_id": provider_id}),
                 Some("invite_sent"),
-                json!({"invited_at": "now", "provider_id": provider_id}),
+                json!({"custom_fields": {"invited_at": "now", "provider_id": provider_id}}),
             )
         }
         Ok(r) => {
@@ -202,10 +207,20 @@ pub async fn handle_linkedin_profile_view(command: &ActionCommand) -> ExecutionR
         Ok(r) if r.status().is_success() => {
             let body: Value = r.json().await.unwrap_or(json!({}));
             let distance = body.get("network_distance").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            // Merge distance + enrichment into one mutations object.
+            // Merge distance + enrichment into ONE custom_fields envelope.
+            // profile_enrichment already returns {custom_fields: {...}} (or {}),
+            // so we add into that nested object — NOT as flat top-level keys
+            // (which _apply_lead_mutations would drop). linkedin_distance is the
+            // signal the pre-send relationship gate reads (todo #4: don't DM a
+            // non-1st-degree connection).
             let mut mutations = profile_enrichment(&body);
-            mutations["profile_viewed_at"] = json!("now");
-            mutations["linkedin_distance"] = json!(distance);
+            if !mutations.get("custom_fields").map(|v| v.is_object()).unwrap_or(false) {
+                mutations = json!({ "custom_fields": {} });
+            }
+            if let Some(cf) = mutations["custom_fields"].as_object_mut() {
+                cf.insert("profile_viewed_at".to_string(), json!("now"));
+                cf.insert("linkedin_distance".to_string(), json!(distance));
+            }
             common::ok(
                 command,
                 json!({"provider": "unipile", "channel": "linkedin_profile_view", "distance": distance}),
@@ -287,16 +302,27 @@ async fn send_chat(command: &ActionCommand, event_type: &str, chat_id_col: &str)
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            let mut mutations = json!({});
+            // Persist the chat thread id + flags under custom_fields so the sync
+            // worker's _apply_lead_mutations applies them (it only merges the
+            // `custom_fields` envelope; flat keys were silently dropped). The
+            // chat_id is what threads every follow-up onto the same conversation
+            // — losing it forces each follow-up to open a NEW chat (todo #5).
+            let mut cf = serde_json::Map::new();
             if opened_chat_id.is_some() && !new_chat_id.is_empty() {
-                mutations[chat_id_col] = json!(new_chat_id);
+                cf.insert(chat_id_col.to_string(), json!(new_chat_id));
             }
-            // event_type-specific column flips (mirrors Python dispatcher)
             match event_type {
                 "dm_sent" if chat_id_col == "chat_id" => {} // no extra flag
-                "inmail_sent" => mutations["inmail_sent_at"] = json!("now"),
+                "inmail_sent" => {
+                    cf.insert("inmail_sent_at".to_string(), json!("now"));
+                }
                 _ => {}
             }
+            let mutations = if cf.is_empty() {
+                json!({})
+            } else {
+                json!({ "custom_fields": Value::Object(cf) })
+            };
             common::ok(
                 command,
                 json!({"provider": "unipile", "event": event_type, "chat_id": new_chat_id}),

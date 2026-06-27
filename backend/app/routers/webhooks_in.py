@@ -30,9 +30,18 @@ from fastapi import APIRouter, Header, HTTPException, Request
 
 from app.config import settings
 from app.db import execute, fetch_all, fetch_one, system_scope
-from app.services import bus, reply_classifier
+from app.services import bus, event_resume, reply_classifier
 
 router = APIRouter()
+
+
+def _public_id_from_linkedin_url(url: str | None) -> str | None:
+    """The slug after /in/ — the stable identity the invite handler resolves
+    provider_id from (mirrors public_id_from_linkedin_url in unipile.rs)."""
+    if not url:
+        return None
+    slug = url.strip().rstrip("/").split("/in/")[-1].strip().lower()
+    return slug or None
 
 
 def _resolve_path(obj: Any, path: str) -> Any:
@@ -286,3 +295,173 @@ async def receive_reply(
         "source": source,
         "woke_leads": len(waiting),
     }
+
+
+async def _resolve_invite_accepted_leads(
+    ws: str, provider_id: str | None, public_id: str | None
+) -> list[dict]:
+    """Find every lead parked at event.invite_accepted awaiting THIS recipient.
+
+    Edge #10 (same person in two campaigns): we resume ALL matching parked
+    leads, each at its own node. Matching, most precise first:
+      1. the provider_id we recorded on the lead at invite time
+         (custom_fields.provider_id — set by the unipile invite handler);
+      2. the contact's linkedin_url slug == the webhook's public_id.
+    Only leads currently 'waiting' at event.invite_accepted are returned, so a
+    relation event for someone we never invited (or already advanced) is a
+    safe no-op.
+    """
+    async with system_scope():
+        if provider_id:
+            by_provider = await fetch_all(
+                """
+                SELECT l.id, l.current_node_id
+                FROM omni_leads l
+                JOIN omni_workflow_nodes n ON n.id = l.current_node_id
+                WHERE l.workspace_id = $1 AND l.status = 'waiting'
+                  AND n.node_type = 'event.invite_accepted'
+                  AND l.custom_fields->>'provider_id' = $2
+                """,
+                ws, provider_id,
+            )
+            if by_provider:
+                return list(by_provider)
+        if public_id:
+            return list(
+                await fetch_all(
+                    """
+                    SELECT l.id, l.current_node_id
+                    FROM omni_leads l
+                    JOIN omni_workflow_nodes n ON n.id = l.current_node_id
+                    JOIN omni_contacts c ON c.id = l.contact_id
+                    WHERE l.workspace_id = $1 AND l.status = 'waiting'
+                      AND n.node_type = 'event.invite_accepted'
+                      AND lower(split_part(rtrim(c.linkedin_url, '/'), '/in/', 2)) = $2
+                    """,
+                    ws, public_id,
+                )
+            )
+    return []
+
+
+@router.post(
+    "/unipile/{workspace_id}",
+    status_code=202,
+    summary="Receive a Unipile account webhook (relation accepted / message) — wake parked leads",
+    description=(
+        "Unauthenticated inbound Unipile webhook. For a new-relation event "
+        "(a connection invite was accepted) it resumes every lead parked at "
+        "event.invite_accepted for that recipient (off the 'accepted' handle); "
+        "for a message event it forwards to the reply path (classify + wake on "
+        "'replied'). Tenancy comes from the path workspace_id + HMAC. Returns 202; "
+        "an event for an unknown/already-advanced lead is a safe no-op."
+    ),
+)
+async def receive_unipile_webhook(
+    workspace_id: uuid.UUID,
+    request: Request,
+    x_omni_signature: str | None = Header(None),
+) -> dict:
+    raw = await request.body()
+    # HMAC required — relation/message events carry real recipient identity.
+    if not _verify_hmac(raw, x_omni_signature):
+        raise HTTPException(status_code=401, detail="invalid or missing webhook signature")
+    try:
+        body = await request.json()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="body must be valid JSON") from e
+
+    ws = str(workspace_id)
+    # Unipile labels the event in `event` or `type`; relation/connection events
+    # signal an accepted invite. Be liberal in what we accept (provider drift).
+    event = str(body.get("event") or body.get("type") or "").lower()
+    is_relation = (
+        "relation" in event
+        or "connection" in event
+        or body.get("new_relation") is not None
+    )
+    is_message = "message" in event or body.get("message") is not None
+
+    if is_relation:
+        # The newly-connected user's identity. Unipile nests it variously; probe
+        # the common shapes without trusting any single one.
+        rel = body.get("new_relation") if isinstance(body.get("new_relation"), dict) else body
+        provider_id = (
+            rel.get("provider_id") or rel.get("member_id") or body.get("provider_id")
+        )
+        provider_id = str(provider_id) if provider_id else None
+        public_id = (
+            rel.get("public_id")
+            or body.get("public_id")
+            or _public_id_from_linkedin_url(rel.get("public_profile_url") or rel.get("profile_url"))
+        )
+        public_id = str(public_id).strip().lower() if public_id else None
+
+        leads = await _resolve_invite_accepted_leads(ws, provider_id, public_id)
+        correlation_id = str(uuid.uuid4())
+        resumed = 0
+        for lead in leads:
+            # resume_on_signal re-checks the lead is parked at the node before
+            # firing — the single source of the resume transition (and where the
+            # exactly-one-advance claim will live, todo #3).
+            if await event_resume.resume_on_signal(
+                ws, str(lead["id"]), "invite_accepted", correlation_id=correlation_id
+            ):
+                resumed += 1
+        return {"accepted": True, "kind": "relation", "matched": len(leads), "resumed": resumed}
+
+    if is_message:
+        # A message event = an inbound reply. Reuse the reply path's contact
+        # resolution + classify + wake by normalising into its expected shape.
+        msg = body.get("message") if isinstance(body.get("message"), dict) else body
+        linkedin_url = msg.get("sender_profile_url") or msg.get("profile_url") or body.get("linkedin_url")
+        text = msg.get("text") or msg.get("body") or body.get("text") or ""
+        if not linkedin_url:
+            return {"accepted": True, "kind": "message", "matched": False}
+        # Resolve the contact + wake parked leads on 'replied' (mirrors receive_reply
+        # without re-importing it — same SM-8 contract).
+        async with system_scope():
+            contact = await fetch_one(
+                "SELECT id FROM omni_contacts WHERE workspace_id=$1 AND linkedin_url=$2 LIMIT 1",
+                ws, linkedin_url,
+            )
+        if not contact:
+            return {"accepted": True, "kind": "message", "matched": False}
+        contact_id = str(contact["id"])
+        correlation_id = str(uuid.uuid4())
+        intent, confidence, reason, source = reply_classifier.classify_reply(text)
+        await bus.publish_event(
+            workspace_id=ws,
+            event_type="message.received",
+            entity_type="message",
+            entity_id=str(uuid.uuid4()),
+            payload={
+                "contact_id": contact_id,
+                "channel": "linkedin",
+                "body": text,
+                "classification": intent,
+                "confidence": confidence,
+                "metadata": {"reason": reason, "classifier_source": source},
+            },
+            correlation_id=correlation_id,
+        )
+        async with system_scope():
+            waiting = await fetch_all(
+                "SELECT id, current_node_id FROM omni_leads "
+                "WHERE workspace_id=$1 AND contact_id=$2 AND status='waiting' AND current_node_id IS NOT NULL",
+                ws, contact_id,
+            )
+        for lead in waiting:
+            transition = {
+                "lead_id": str(lead["id"]),
+                "source_node_id": str(lead["current_node_id"]),
+                "handle": "replied",
+                "event_type": "transition",
+                "metadata": {"workspace_id": ws, "correlation_id": correlation_id, "reply_intent": intent},
+                "occurred_at": datetime.now(UTC).isoformat(),
+            }
+            await bus._producer.send_and_wait(bus.TRANSITIONS_TOPIC, value=transition, key=str(lead["id"]))  # type: ignore[union-attr]
+        return {"accepted": True, "kind": "message", "matched": True, "intent": intent, "woke_leads": len(waiting)}
+
+    # Unrecognised event type — accept (so Unipile doesn't retry) but no-op.
+    return {"accepted": True, "kind": "ignored", "event": event}
