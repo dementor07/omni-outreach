@@ -2008,6 +2008,33 @@ async def _emit_send_outcome(
             log.exception("failed to emit sender.delivery_result for account %s", account_id)
 
 
+async def _claim_parked_node(workspace_id: str, lead_id: str, node_id: str) -> bool:
+    """RACE-PARK-001: atomically claim a parked ('waiting') lead at exactly
+    `node_id`, flipping it waiting→active. Returns True only for the ONE caller
+    that wins the row.
+
+    A lead parked at an event.* / flow.race node is a target for two concurrent
+    transitions that share the same source node but route differently:
+      - the awaited signal's resume (e.g. invite-accepted webhook → 'accepted'),
+      - the EVENT-PARK-001 / race timeout escape → 'timeout'.
+    Both must not advance the lead — that double-sends down two branches. The
+    timeout path's prior check-then-act (read status, then cancel siblings /
+    reset barriers) left a window where it could run those side effects on a
+    lead the resume had already legitimately advanced. This single atomic claim
+    closes it: whoever flips waiting→active first owns the parked node; the
+    loser claims nothing and no-ops. Idempotent under Kafka redelivery."""
+    async with system_scope():
+        won = await fetch_one(
+            "UPDATE omni_leads SET status='active', updated_at=NOW() "
+            "WHERE id=$1 AND workspace_id=$2 AND status='waiting' "
+            "AND current_node_id IS NOT DISTINCT FROM $3 RETURNING id",
+            lead_id,
+            workspace_id,
+            str(node_id),
+        )
+    return won is not None
+
+
 async def handle_transition(t: dict) -> None:
     lead_id = t.get("lead_id")
     handle = t.get("handle") or "default"
@@ -2157,18 +2184,14 @@ async def handle_transition(t: dict) -> None:
     # positional claim below moves the parent waiting→active→target atomically,
     # so a crash mid-timeout leaves a state a redelivery can resume from.
     if handle == "timeout":
-        async with system_scope():
-            prow = await fetch_one(
-                "SELECT status, current_node_id FROM omni_leads WHERE id=$1 AND workspace_id=$2",
-                lead_id,
-                workspace_id,
-            )
-        still_waiting = (
-            prow
-            and (prow.get("status") or "") == "waiting"
-            and str(prow.get("current_node_id") or "") == str(source_node_id)
-        )
-        if not still_waiting:
+        # RACE-PARK-001: claim the parked node atomically (waiting→active). This
+        # is the SAME claim the success-signal resume contends for: exactly one
+        # of {timeout, resume} wins the row, so the lead can never advance down
+        # both the timeout arm AND the accepted/replied arm (a double-send). The
+        # old check-then-act read 'waiting' then ran the cancel/barrier side
+        # effects in a window where a concurrent resume had already advanced the
+        # lead. Only the claim WINNER runs those side effects + the advance.
+        if not await _claim_parked_node(workspace_id, str(lead_id), str(source_node_id)):
             log.info("timeout for lead %s ignored — already resolved/resumed", lead_id)
             return
         async with system_scope():
@@ -2188,6 +2211,21 @@ async def handle_transition(t: dict) -> None:
                 lead_id,
                 workspace_id,
             )
+
+    # RACE-PARK-001 (resume side): a success-signal resume (invite-accepted /
+    # reply / open / click) arriving at a STILL-parked lead must also win the
+    # single claim before advancing — otherwise a resume and a timeout that both
+    # observe 'waiting' could each advance. If the lead is parked here and we
+    # don't win the claim, another transition already resolved this node; drop.
+    # (Non-parked leads — normal active advances — skip this; their positional
+    # claim below is the guard.)
+    elif (row.get("status") or "") == "waiting":
+        if not await _claim_parked_node(workspace_id, str(lead_id), str(source_node_id)):
+            log.info(
+                "resume (%s) for lead %s lost the parked-node claim — already resolved; dropping",
+                handle, lead_id,
+            )
+            return
 
     target = await _target_node(workspace_id, source_node_id, handle)
     if not target:

@@ -109,9 +109,15 @@ def test_worker_park_branch_schedules_timeout_escape():
 
 def test_timeout_handle_path_is_park_safe():
     """The handle=='timeout' path must guard on the lead still being parked here,
-    so a timeout that races a success-resume is a safe no-op (not a double-advance)."""
+    so a timeout that races a success-resume is a safe no-op (not a double-advance).
+
+    RACE-PARK-001 upgraded the old check-then-act `still_waiting` read to a single
+    atomic waiting→active claim (_claim_parked_node) — exactly one of {timeout,
+    resume} wins the row. The detailed claim invariants live in
+    test_park_race_guard.py; here we just pin that the timeout path claims before
+    it acts."""
     assert 'if handle == "timeout":' in TW_SRC
     seg = TW_SRC.split('if handle == "timeout":', 1)[1][:600]
-    assert "still_waiting" in seg and "status" in seg, (
-        "timeout path lost its still-parked guard (would double-fire vs success resume)"
+    assert "_claim_parked_node(" in seg, (
+        "timeout path lost its atomic parked-node claim (would double-fire vs success resume)"
     )
