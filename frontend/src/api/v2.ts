@@ -481,6 +481,10 @@ export interface MessageStepSpec {
   connection_name?: string | null
   mode?: 'invite' | 'dm' | 'profile_view' | 'inmail'
   delay_after?: { amount: number; unit: 'minutes' | 'hours' | 'days' } | null
+  // Linkedin invite only: wait for the connection to be accepted before the next
+  // step fires (compiles an event.invite_accepted wait). Never DM before connect.
+  await_acceptance?: boolean
+  accept_timeout_hours?: number
 }
 
 export interface CompanyScreeningSpec {

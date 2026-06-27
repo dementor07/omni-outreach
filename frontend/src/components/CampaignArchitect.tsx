@@ -41,7 +41,11 @@ interface DraftMessage {
   body_template: string
   message_template: string
   delay_amount: string
-  delay_unit: 'hours' | 'days'
+  delay_unit: 'minutes' | 'hours' | 'days'
+  // LinkedIn sub-action. 'invite' + awaitAcceptance compiles the hardened
+  // invite -> wait-for-accept -> (delay ->) next-step choreography.
+  mode: 'invite' | 'dm'
+  awaitAcceptance: boolean
 }
 
 interface ClassicDraft {
@@ -96,6 +100,8 @@ const DEFAULT_MESSAGE: DraftMessage = {
   message_template: 'Hi {{contact.first_name}} — worth connecting?',
   delay_amount: '3',
   delay_unit: 'days',
+  mode: 'dm',
+  awaitAcceptance: false,
 }
 
 const DEFAULT_CLASSIC: ClassicDraft = {
@@ -558,13 +564,16 @@ function buildSpec(input: {
     if (message.channel === 'linkedin' && !message.message_template.trim()) {
       issues.push({ severity: 'error', message: `Message ${messageNumber} LinkedIn text is required.` })
     }
+    const isInvite = message.channel === 'linkedin' && message.mode === 'invite'
+    const awaitAcceptance = isInvite && message.awaitAcceptance
     return {
       channel: message.channel,
       subject_template: message.channel === 'email' ? message.subject_template : undefined,
       body_template: message.channel === 'email' ? message.body_template : undefined,
       message_template: message.channel === 'linkedin' ? message.message_template : undefined,
-      mode: message.channel === 'linkedin' ? ('dm' as const) : undefined,
+      mode: message.channel === 'linkedin' ? message.mode : undefined,
       connection_name: undefined,
+      await_acceptance: awaitAcceptance || undefined,
       delay_after: {
         amount: Number(message.delay_amount) || 3,
         unit: message.delay_unit,
@@ -867,7 +876,8 @@ function MessageRow({ index, message, onChange, onRemove }: { index: number; mes
         <Field label="Wait after">
           <div className="mt-1 flex gap-1">
             <input type="number" min={1} value={message.delay_amount} onChange={(event) => onChange({ ...message, delay_amount: event.target.value })} className="w-16 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm dark:border-slate-700 dark:bg-slate-900" />
-            <select value={message.delay_unit} onChange={(event) => onChange({ ...message, delay_unit: event.target.value as 'hours' | 'days' })} className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm dark:border-slate-700 dark:bg-slate-900">
+            <select value={message.delay_unit} onChange={(event) => onChange({ ...message, delay_unit: event.target.value as 'minutes' | 'hours' | 'days' })} className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm dark:border-slate-700 dark:bg-slate-900">
+              <option value="minutes">minutes</option>
               <option value="hours">hours</option>
               <option value="days">days</option>
             </select>
@@ -877,6 +887,22 @@ function MessageRow({ index, message, onChange, onRemove }: { index: number; mes
           <Trash2 size={16} />
         </button>
       </div>
+      {message.channel === 'linkedin' && (
+        <div className="grid gap-3 md:grid-cols-[150px_1fr]">
+          <Field label="LinkedIn action">
+            <select value={message.mode} onChange={(event) => onChange({ ...message, mode: event.target.value as 'invite' | 'dm', awaitAcceptance: event.target.value === 'invite' ? message.awaitAcceptance : false })} className={inputClass}>
+              <option value="dm">Direct message</option>
+              <option value="invite">Connection invite</option>
+            </select>
+          </Field>
+          {message.mode === 'invite' && (
+            <label className="mt-6 flex cursor-pointer items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+              <input type="checkbox" checked={message.awaitAcceptance} onChange={(event) => onChange({ ...message, awaitAcceptance: event.target.checked })} className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+              Wait for the invite to be accepted before the next step (never DM before connecting)
+            </label>
+          )}
+        </div>
+      )}
       {message.channel === 'email' && (
         <Field label="Email body">
           <textarea value={message.body_template} onChange={(event) => onChange({ ...message, body_template: event.target.value })} rows={3} className={`${inputClass} font-mono text-xs`} />
