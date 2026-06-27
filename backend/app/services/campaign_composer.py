@@ -109,6 +109,23 @@ class MessageStepSpec(BaseModel):
         None,
         description="Delay before the next message, e.g. {'amount': 3, 'unit': 'days'}",
     )
+    await_acceptance: bool = Field(
+        False,
+        description=(
+            "Only meaningful for a linkedin invite step. When true, compile an "
+            "event.invite_accepted wait after the invite so the NEXT step only "
+            "fires once the connection is accepted (and after delay_after). The "
+            "invite-acceptance webhook resumes the lead; an unaccepted invite "
+            "times out and ends. Without it the invite just flows to the next "
+            "step like any message (backward-compatible default)."
+        ),
+    )
+    accept_timeout_hours: int = Field(
+        168,
+        ge=1,
+        le=720,
+        description="When await_acceptance is set, advance on timeout (end) after this long (default 1 week).",
+    )
 
     @model_validator(mode="after")
     def validate_channel_shape(self) -> MessageStepSpec:
@@ -117,6 +134,8 @@ class MessageStepSpec(BaseModel):
                 raise ValueError("email message steps require subject_template and body_template")
         if self.channel == "linkedin" and self.mode in {"invite", "dm", "inmail"} and not self.message_template:
             raise ValueError(f"linkedin {self.mode} steps require message_template")
+        if self.await_acceptance and not (self.channel == "linkedin" and self.mode == "invite"):
+            raise ValueError("await_acceptance is only valid on a linkedin invite step")
         return self
 
 
@@ -194,7 +213,7 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
         source_key = f"source_{index + 1}"
         loop_key = f"company_loop_{index + 1}"
         add_node(source_key, _source_node_type(source.provider), 0, y, _source_config(source, companies_key))
-        
+
         if source.provider == "producthunt":
             # Producthunt emits contacts directly. We don't fan out companies.
             # We just connect it directly to source_done_key so the campaign graph is valid.
@@ -316,7 +335,7 @@ def _source_config(source: CampaignSourceSpec, companies_key: str) -> dict[str, 
         "icims", "lever", "workable", "recruitee", "personio", "rippling", "breezy"
     }
     job_board_providers = {"naukri", "indeed", "linkedin_jobs"}
-    
+
     if source.provider in ats_providers:
         return {
             "max_companies": source.max_results,
@@ -393,19 +412,46 @@ def _append_message_sequence(
     for index, message in enumerate(spec.messages):
         human_index = index + 1
         message_key = f"message_{human_index}"
-        replied_check_key = f"replied_check_{human_index}"
         x = _message_x(spec, index)
+        is_last = index == len(spec.messages) - 1
+        next_message_key = f"message_{human_index + 1}"
+        delay = message.delay_after or {"amount": 3, "unit": "days"}
         add_node(message_key, _message_node_type(message.channel), x, 250, _message_config(message))
+        add_edge(message_key, completed_key, "on_error")
+
+        # A linkedin invite with await_acceptance compiles the hardened
+        # invite -> wait-for-acceptance -> (delay ->) next-step choreography:
+        # the invite parks at event.invite_accepted; the acceptance webhook
+        # resumes it on 'accepted'; an unaccepted invite times out and ends. The
+        # next step (e.g. the first DM) only fires AFTER acceptance + delay_after,
+        # so we never DM before the connection exists. A non-await invite (and
+        # every other message) keeps the plain replied-check flow below.
+        if message.await_acceptance:
+            wait_key = f"await_accept_{human_index}"
+            add_node(wait_key, "event.invite_accepted", x + 180, 250, {
+                "timeout_hours": message.accept_timeout_hours,
+            })
+            add_edge(message_key, wait_key, "sent")
+            # A non-connection / no-thread degrade from the send ends honestly.
+            add_edge(message_key, completed_key, "not_connected")
+            add_edge(wait_key, completed_key, "timeout")
+            if is_last:
+                add_edge(wait_key, completed_key, "accepted")
+                continue
+            delay_key = f"delay_{human_index}"
+            add_node(delay_key, "flow.delay", x + 360, 250, delay)
+            add_edge(wait_key, delay_key, "accepted")
+            add_edge(delay_key, next_message_key)
+            continue
+
+        replied_check_key = f"replied_check_{human_index}"
         add_node(replied_check_key, "condition.replied", x + 180, 250, {"window_days": 365})
         add_edge(message_key, replied_check_key, "sent")
-        add_edge(message_key, completed_key, "on_error")
         add_edge(replied_check_key, replied_key, "true")
-        if index == len(spec.messages) - 1:
+        if is_last:
             add_edge(replied_check_key, completed_key, "false")
             continue
         delay_key = f"delay_{human_index}"
-        next_message_key = f"message_{human_index + 1}"
-        delay = message.delay_after or {"amount": 3, "unit": "days"}
         add_node(delay_key, "flow.delay", x + 340, 250, delay)
         add_edge(replied_check_key, delay_key, "false")
         add_edge(delay_key, next_message_key)
