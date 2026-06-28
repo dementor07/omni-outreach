@@ -44,12 +44,17 @@ def _func_body(src: str, name: str) -> str:
 # ── the webhook endpoint ──────────────────────────────────────────────────────
 
 
-def test_unipile_webhook_endpoint_registered_and_hmac_guarded():
+def test_unipile_webhook_endpoint_registered_and_url_guarded():
     body = _func_body(WEBHOOK_SRC, "receive_unipile_webhook")
     assert '"/unipile/{workspace_id}"' in WEBHOOK_SRC, "the Unipile webhook route must exist"
-    # tenancy from the path workspace_id; trust from HMAC (no JWT on webhooks).
-    assert "_verify_hmac(raw, x_omni_signature)" in body
-    assert "status_code=401" in body, "a bad/missing signature must be rejected"
+    # Unipile doesn't sign with our secret, so the opaque {workspace_id} path is
+    # the bearer credential — it MUST resolve to a real workspace (404 if not).
+    assert "SELECT id FROM workspaces WHERE id=$1" in body
+    assert "status_code=404" in body
+    # an HMAC, when PRESENT, is still verified (defense-in-depth) and a wrong one
+    # is rejected; an absent signature falls back to the opaque-URL trust.
+    assert "x_omni_signature is not None and not _verify_hmac" in body
+    assert "status_code=401" in body
 
 
 def test_relation_event_resumes_all_parked_leads_via_resume_on_signal():

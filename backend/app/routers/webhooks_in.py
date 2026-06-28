@@ -353,8 +353,10 @@ async def _resolve_invite_accepted_leads(
         "(a connection invite was accepted) it resumes every lead parked at "
         "event.invite_accepted for that recipient (off the 'accepted' handle); "
         "for a message event it forwards to the reply path (classify + wake on "
-        "'replied'). Tenancy comes from the path workspace_id + HMAC. Returns 202; "
-        "an event for an unknown/already-advanced lead is a safe no-op."
+        "'replied'). Trust comes from the opaque path workspace_id (Unipile does "
+        "not sign with our secret); an optional x-omni-signature HMAC is verified "
+        "as defense-in-depth when present. Returns 202; an event for an "
+        "unknown/already-advanced lead is a safe no-op."
     ),
 )
 async def receive_unipile_webhook(
@@ -363,15 +365,25 @@ async def receive_unipile_webhook(
     x_omni_signature: str | None = Header(None),
 ) -> dict:
     raw = await request.body()
-    # HMAC required — relation/message events carry real recipient identity.
-    if not _verify_hmac(raw, x_omni_signature):
-        raise HTTPException(status_code=401, detail="invalid or missing webhook signature")
+    ws = str(workspace_id)
+
+    # Trust model (mirrors source.webhook_in): Unipile's webhooks are NOT signed
+    # with our shared secret, so the opaque, unguessable {workspace_id} path is
+    # the bearer credential — it must resolve to a real workspace. When a caller
+    # DOES present an x-omni-signature, we additionally verify it (so a future
+    # signed integration can't be spoofed). A present-but-wrong signature is
+    # rejected; an absent signature falls back to the opaque-URL trust.
+    async with system_scope():
+        ws_row = await fetch_one("SELECT id FROM workspaces WHERE id=$1", workspace_id)
+    if not ws_row:
+        raise HTTPException(status_code=404, detail="unknown workspace")
+    if x_omni_signature is not None and not _verify_hmac(raw, x_omni_signature):
+        raise HTTPException(status_code=401, detail="invalid webhook signature")
+
     try:
         body = await request.json()
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=400, detail="body must be valid JSON") from e
-
-    ws = str(workspace_id)
     # Unipile labels the event in `event` or `type`; relation/connection events
     # signal an accepted invite. Be liberal in what we accept (provider drift).
     event = str(body.get("event") or body.get("type") or "").lower()
