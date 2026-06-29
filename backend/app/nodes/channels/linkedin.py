@@ -44,6 +44,9 @@ MANIFEST = NodeManifest(
     capabilities=("connection:unipile",),
     side_effect=SideEffect.NETWORK,
     icon="linkedin",
+    # OUTBOUND-FIRST-001: a LinkedIn outreach can START a campaign against an
+    # attached audience (invite/DM a known list), not only follow a source.
+    can_be_entry=True,
 )
 
 

@@ -66,6 +66,8 @@ MANIFEST = NodeManifest(
     display_name="Send email",
     primary_fields=("subject_template", "body_template", "verification_policy"),
     advanced_fields=("connection_name", "sending_account_id", "account_pool", "from_address"),
+    # OUTBOUND-FIRST-001: email can START a campaign against an attached audience.
+    can_be_entry=True,
 )
 
 

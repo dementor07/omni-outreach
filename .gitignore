@@ -19,6 +19,10 @@ omni-vault/.obsidian/
 # Gemini CLI — local MCP config (contains API keys)
 .gemini/settings.json
 
+# CodeGraph — local code-index (rebuilt per clone via `codegraph init`)
+.codegraph/
+GEMINI.md
+
 # Local-only vault notes (credentials, machine-specific scratch) — never push
 omni-vault/credentials.local.md
 omni-vault/*.local.md

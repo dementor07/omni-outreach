@@ -40,6 +40,7 @@ MANIFEST = NodeManifest(
     capabilities=("connection:retell",),
     side_effect=SideEffect.NETWORK,
     icon="phone",
+    can_be_entry=True,  # OUTBOUND-FIRST-001: can start a campaign against an audience
 )
 
 

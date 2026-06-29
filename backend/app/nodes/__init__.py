@@ -72,6 +72,20 @@ class NodeManifest:
     primary_fields: tuple[str, ...] = ()
     advanced_fields: tuple[str, ...] = ()
     visible_in_palette: bool = True
+    # OUTBOUND-FIRST-001: may this node ROOT a campaign (be a graph entry with no
+    # incoming edge)? None = derive from the category: a SOURCE discovers its own
+    # entities, so it's always entry-capable. An outbound CHANNEL node can also
+    # start a campaign — but only against an attached audience (the validator
+    # enforces that). Set True explicitly on such nodes; leave None elsewhere
+    # (conditions/flow/crm are not valid starting steps).
+    can_be_entry: bool | None = None
+
+    @property
+    def entry_capable(self) -> bool:
+        """Whether this node may be a campaign root. Defaults to 'is a source'."""
+        if self.can_be_entry is not None:
+            return self.can_be_entry
+        return self.category == NodeCategory.SOURCE
 
     def to_openapi(self) -> dict[str, Any]:
         """Render as a JSON-serialisable manifest for ``GET /nodes``."""
@@ -88,6 +102,7 @@ class NodeManifest:
             "primary_fields": list(self.primary_fields),
             "advanced_fields": list(self.advanced_fields),
             "visible_in_palette": self.visible_in_palette,
+            "entry_capable": self.entry_capable,
         }
 
 

@@ -709,14 +709,27 @@ async def remove_edge(
 async def _graph_validation(
     nodes: list[dict[str, Any]],
     edges: list[dict[str, Any]],
+    *,
+    has_audience: bool = False,
 ) -> GraphValidationOut:
     connection_rows = await fetch_all("SELECT provider, name FROM omni_connections")
     result = validate_graph(
         nodes,
         edges,
         connections={(str(row["provider"]), str(row["name"])) for row in connection_rows},
+        has_audience=has_audience,
     )
     return GraphValidationOut.model_validate(result)
+
+
+async def _workflow_has_audience(workflow_id: uuid.UUID) -> bool:
+    """OUTBOUND-FIRST-001: does this campaign have an attached audience? An
+    outbound-first root (a channel node with no source upstream) is runnable
+    only when contacts are attached to reach."""
+    row = await fetch_one(
+        "SELECT EXISTS(SELECT 1 FROM omni_campaign_audience WHERE workflow_id=$1) AS has", workflow_id
+    )
+    return bool(row and row["has"])
 
 
 @router.get(
@@ -733,7 +746,10 @@ async def validate_saved_graph(
         raise HTTPException(status_code=404, detail="workflow not found")
     nodes = await fetch_all("SELECT * FROM omni_workflow_nodes WHERE workflow_id=$1", workflow_id)
     edges = await fetch_all("SELECT * FROM omni_workflow_edges WHERE workflow_id=$1", workflow_id)
-    return await _graph_validation([dict(node) for node in nodes], [dict(edge) for edge in edges])
+    has_audience = await _workflow_has_audience(workflow_id)
+    return await _graph_validation(
+        [dict(node) for node in nodes], [dict(edge) for edge in edges], has_audience=has_audience
+    )
 
 
 @router.put(
@@ -930,3 +946,117 @@ async def run_workflow(
         start_node_ids=[uuid.UUID(item.node_id) for item in successes],
         node_types=[item.node_type for item in successes],
     )
+
+
+# ── Campaign audience (OUTBOUND-FIRST-001) ─────────────────────────────────────
+# The recipients an outbound-first campaign reaches. Attaching contacts here is
+# what lets a campaign START with an outbound step (invite/DM/email a known list)
+# instead of always discovering leads from a source. The run enrolls one lead per
+# attached contact (see app.execution.run.seed_and_run_audience).
+
+
+class AudienceContactOut(BaseModel):
+    contact_id: uuid.UUID
+    first_name: str | None = None
+    last_name: str | None = None
+    email: str | None = None
+    linkedin_url: str | None = None
+    company: str | None = None
+    added_at: datetime
+
+
+class AudienceAdd(BaseModel):
+    contact_ids: list[uuid.UUID] = Field(min_length=1, max_length=10_000)
+
+
+class AudienceMutationOut(BaseModel):
+    added: int = 0
+    removed: int = 0
+    total: int
+
+
+async def _audience_total(workflow_id: uuid.UUID, workspace_id: str) -> int:
+    row = await fetch_one(
+        "SELECT count(*) AS n FROM omni_campaign_audience WHERE workflow_id=$1 AND workspace_id=$2",
+        workflow_id, workspace_id,
+    )
+    return int(row["n"]) if row else 0
+
+
+@router.get(
+    "/workflows/{workflow_id}/audience",
+    response_model=list[AudienceContactOut],
+    summary="List the contacts attached to a campaign as its outbound audience",
+)
+async def list_audience(
+    workflow_id: uuid.UUID,
+    ctx: AuthContext = Depends(get_current_workspace),
+) -> list[AudienceContactOut]:
+    rows = await fetch_all(
+        """
+        SELECT a.contact_id, a.added_at,
+               c.first_name, c.last_name, c.email, c.linkedin_url, c.company
+        FROM omni_campaign_audience a
+        JOIN omni_contacts c ON c.id = a.contact_id
+        WHERE a.workflow_id=$1 AND a.workspace_id=$2
+        ORDER BY a.added_at DESC
+        """,
+        workflow_id, ctx.workspace_id,
+    )
+    return [AudienceContactOut.model_validate(dict(r)) for r in rows]
+
+
+@router.post(
+    "/workflows/{workflow_id}/audience",
+    response_model=AudienceMutationOut,
+    status_code=201,
+    summary="Attach contacts to a campaign's outbound audience",
+    description=(
+        "Adds the given contacts as recipients of this campaign. Idempotent — a "
+        "contact already attached is skipped. Only contacts in the caller's "
+        "workspace are added (a foreign id is silently ignored). The campaign can "
+        "then START with an outbound step that reaches this audience."
+    ),
+)
+async def add_audience(
+    workflow_id: uuid.UUID,
+    body: AudienceAdd,
+    ctx: AuthContext = Depends(get_current_workspace),
+) -> AudienceMutationOut:
+    wf = await fetch_one(
+        "SELECT id FROM omni_workflows WHERE id=$1 AND workspace_id=$2", workflow_id, ctx.workspace_id
+    )
+    if not wf:
+        raise HTTPException(status_code=404, detail="workflow not found")
+    # Only attach contacts that exist in this workspace (RLS already scopes the
+    # SELECT; the INSERT…SELECT makes a foreign/absent id a no-op instead of an FK error).
+    ids = [str(cid) for cid in body.contact_ids]
+    result = await execute(
+        """
+        INSERT INTO omni_campaign_audience (workspace_id, workflow_id, contact_id)
+        SELECT $1, $2, c.id FROM omni_contacts c
+        WHERE c.workspace_id=$1 AND c.id = ANY($3::uuid[])
+        ON CONFLICT (workflow_id, contact_id) DO NOTHING
+        """,
+        ctx.workspace_id, workflow_id, ids,
+    )
+    added = int(str(result).split()[-1]) if result else 0
+    return AudienceMutationOut(added=added, total=await _audience_total(workflow_id, ctx.workspace_id))
+
+
+@router.delete(
+    "/workflows/{workflow_id}/audience/{contact_id}",
+    response_model=AudienceMutationOut,
+    summary="Remove a contact from a campaign's outbound audience",
+)
+async def remove_audience(
+    workflow_id: uuid.UUID,
+    contact_id: uuid.UUID,
+    ctx: AuthContext = Depends(get_current_workspace),
+) -> AudienceMutationOut:
+    result = await execute(
+        "DELETE FROM omni_campaign_audience WHERE workflow_id=$1 AND contact_id=$2 AND workspace_id=$3",
+        workflow_id, contact_id, ctx.workspace_id,
+    )
+    removed = int(str(result).split()[-1]) if result else 0
+    return AudienceMutationOut(removed=removed, total=await _audience_total(workflow_id, ctx.workspace_id))

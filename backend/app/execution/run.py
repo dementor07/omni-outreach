@@ -70,6 +70,113 @@ async def entry_node(workflow_id: str, workspace_id: str) -> dict | None:
     return roots[0] if roots else None
 
 
+def _is_source_node(node_type: str) -> bool:
+    return str(node_type or "").startswith("source.")
+
+
+async def _audience_contacts(workflow_id: str, workspace_id: str) -> list[dict]:
+    """OUTBOUND-FIRST-001: the contacts attached to this campaign as its
+    audience, with the identity an outbound channel needs to reach them.
+    Empty when no audience is bound (the source-first case)."""
+    async with system_scope():
+        rows = await fetch_all(
+            """
+            SELECT c.id, c.first_name, c.last_name, c.email, c.linkedin_url,
+                   c.phone, c.company, c.headline
+            FROM omni_campaign_audience a
+            JOIN omni_contacts c ON c.id = a.contact_id
+            WHERE a.workflow_id=$1 AND a.workspace_id=$2
+            ORDER BY a.added_at
+            """,
+            workflow_id, workspace_id,
+        )
+    return [dict(r) for r in rows]
+
+
+def _contact_to_lead_fields(contact: dict) -> dict[str, Any]:
+    """The recipient identity an outbound lead carries in custom_fields so the
+    dispatcher/muscle can resolve who to message — mirrors what a source writes
+    onto a discovered person."""
+    keys = ("first_name", "last_name", "email", "linkedin_url", "phone", "company", "headline")
+    return {k: contact[k] for k in keys if contact.get(k)}
+
+
+async def seed_and_run_audience(
+    *,
+    workspace_id: str,
+    workflow_id: str,
+    start_node: dict,
+    contacts: list[dict],
+    actor_user_id: str | None = None,
+    correlation_id: str | None = None,
+) -> list[RunOutcome]:
+    """OUTBOUND-FIRST-001: enroll one lead PER audience contact at an outbound
+    entry node — each lead bound to its contact_id and carrying the recipient's
+    identity — then fire the node for each. This is the outbound-first analogue
+    of a source seeding discovered leads: here the "discovery" is the attached
+    audience. Returns one RunOutcome per contact."""
+    run_correlation_id = correlation_id or str(uuid.uuid4())
+    node_type = str(start_node["node_type"])
+    node_id = str(start_node["id"])
+    try:
+        _manifest, execute_fn = noderegistry.get(node_type)
+    except KeyError:
+        return [RunOutcome("", node_id, node_type, run_correlation_id, "", 0, error=f"entry node {node_type!r} not registered")]
+
+    outcomes: list[RunOutcome] = []
+    for contact in contacts:
+        lead_id = str(uuid.uuid4())
+        contact_id = str(contact["id"])
+        lead_fields = {
+            **_contact_to_lead_fields(contact),
+            "_run_correlation_id": run_correlation_id,
+            "_audience_contact_id": contact_id,
+        }
+        async with system_scope():
+            await execute(
+                "INSERT INTO omni_leads (id, workspace_id, contact_id, workflow_id, current_node_id, status, custom_fields) "
+                "VALUES ($1, $2, $3, $4, $5, 'active', $6::jsonb)",
+                lead_id, workspace_id, contact_id, workflow_id, node_id, json.dumps(lead_fields),
+            )
+        node_ctx = noderegistry.NodeContext(
+            workspace_id=workspace_id,
+            workflow_id=str(workflow_id),
+            node_id=node_id,
+            config=dict(start_node.get("config") or {}),
+            lead={"id": lead_id, "contact_id": contact_id, "custom_fields": lead_fields},
+            correlation_id=run_correlation_id,
+        )
+        result = await execute_fn(node_ctx)
+        if result.error:
+            async with system_scope():
+                await execute(
+                    "UPDATE omni_leads SET status='errored', current_node_id=NULL, updated_at=NOW() "
+                    "WHERE id=$1 AND workspace_id=$2",
+                    lead_id, workspace_id,
+                )
+            outcomes.append(RunOutcome(lead_id, node_id, node_type, run_correlation_id, result.handle, 0, error=result.error))
+            continue
+        published = 0
+        for ev in result.events:
+            payload = dict(ev.get("payload") or {})
+            payload.setdefault("node_id", node_id)
+            payload.setdefault("lead_id", lead_id)
+            payload.setdefault("correlation_id", run_correlation_id)
+            await bus.publish_event(
+                workspace_id=workspace_id,
+                event_type=ev["event_type"],
+                entity_type="lead" if ev.get("entity_type") in (None, "workflow") else ev["entity_type"],
+                entity_id=lead_id if ev.get("entity_type") in (None, "workflow") else ev.get("entity_id"),
+                payload=payload,
+                actor_user_id=actor_user_id,
+                correlation_id=run_correlation_id,
+            )
+            published += 1
+        outcomes.append(RunOutcome(lead_id, node_id, node_type, run_correlation_id, result.handle, published))
+    log.info("seed_and_run_audience %s: enrolled %d audience leads at %s (%s)", workflow_id, len(outcomes), node_id, node_type)
+    return outcomes
+
+
 async def seed_and_run_many(
     *,
     workspace_id: str,
@@ -89,8 +196,37 @@ async def seed_and_run_many(
     if not roots:
         return [RunOutcome("", "", "", "", "", 0, error="workflow has no entry node")]
     run_correlation_id = correlation_id or str(uuid.uuid4())
+
+    # OUTBOUND-FIRST-001: a non-source entry node (an outbound channel rooting the
+    # campaign) has no upstream to supply leads — it reaches an ATTACHED audience.
+    # Fetch it once; each non-source root enrolls one lead per audience contact.
+    # Source roots keep the discover-and-fan-out empty-root seeding unchanged.
+    has_outbound_root = any(not _is_source_node(r["node_type"]) for r in roots)
+    audience = await _audience_contacts(workflow_id, workspace_id) if has_outbound_root else []
+
     outcomes: list[RunOutcome] = []
     for index, root in enumerate(roots):
+        if not _is_source_node(root["node_type"]):
+            # Outbound-first root → enroll the audience (one lead per contact).
+            if not audience:
+                outcomes.append(
+                    RunOutcome(
+                        "", str(root["id"]), str(root["node_type"]), run_correlation_id, "", 0,
+                        error="outbound entry node has no attached audience to reach",
+                    )
+                )
+                continue
+            outcomes.extend(
+                await seed_and_run_audience(
+                    workspace_id=workspace_id,
+                    workflow_id=workflow_id,
+                    start_node=root,
+                    contacts=audience,
+                    actor_user_id=actor_user_id,
+                    correlation_id=run_correlation_id,
+                )
+            )
+            continue
         outcomes.append(
             await seed_and_run(
                 workspace_id=workspace_id,

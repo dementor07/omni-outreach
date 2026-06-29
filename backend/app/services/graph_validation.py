@@ -37,6 +37,7 @@ def validate_graph(
     edges: Iterable[dict[str, Any]],
     *,
     connections: set[tuple[str, str]] | None = None,
+    has_audience: bool = False,
 ) -> dict[str, Any]:
     node_rows = [dict(node) for node in nodes]
     edge_rows = [dict(edge) for edge in edges]
@@ -209,26 +210,55 @@ def validate_graph(
         issues.append(
             _issue(
                 "ENTRY_NODE_COUNT",
-                "The campaign needs at least one starting source.",
+                "The campaign needs at least one starting step.",
             )
         )
     else:
+        # OUTBOUND-FIRST-001: a campaign may start with a SOURCE (discovers its
+        # own leads) OR an entry-capable outbound CHANNEL (reaches out to an
+        # attached audience) — lead-gen, outbound, or any mix. A root is valid
+        # when its manifest is entry_capable; an outbound (non-source) root
+        # additionally needs an attached audience, since it has no upstream to
+        # supply recipients. Non-entry roots (a condition/flow/crm with no
+        # incoming edge) are a wiring mistake.
+        outbound_roots = 0
         for root in roots:
-            if not str(by_id[root].get("node_type") or "").startswith("source."):
+            manifest = manifests.get(root)
+            node_type = str(by_id[root].get("node_type") or "")
+            if manifest is None:
+                continue  # already flagged UNKNOWN_NODE_TYPE
+            if not manifest.entry_capable:
                 issues.append(
                     _issue(
-                        "ENTRY_NOT_SOURCE",
-                        "Every starting step must be a source so each branch has people or companies to process.",
+                        "ENTRY_NOT_CAPABLE",
+                        f"{manifest.display_name or manifest.type} can't start a campaign. "
+                        "Begin with a source (to find leads) or an outbound step "
+                        "(to reach an attached audience).",
                         node_id=root,
                     )
                 )
-        if len(roots) > 1 and all(
-            str(by_id[root].get("node_type") or "").startswith("source.") for root in roots
-        ):
+                continue
+            is_source = node_type.startswith("source.")
+            if not is_source:
+                outbound_roots += 1
+                if not has_audience:
+                    issues.append(
+                        _issue(
+                            "OUTBOUND_NEEDS_AUDIENCE",
+                            f"{manifest.display_name or manifest.type} starts this campaign, "
+                            "so it needs an audience to reach. Attach contacts to the campaign.",
+                            node_id=root,
+                        )
+                    )
+        source_roots = [
+            r for r in roots
+            if str(by_id[r].get("node_type") or "").startswith("source.")
+        ]
+        if len(source_roots) > 1 and outbound_roots == 0:
             issues.append(
                 _issue(
                     "MULTI_SOURCE_START",
-                    f"This run starts {len(roots)} sources together. Results keep source provenance and converge through downstream deduplication.",
+                    f"This run starts {len(source_roots)} sources together. Results keep source provenance and converge through downstream deduplication.",
                     severity="warning",
                 )
             )

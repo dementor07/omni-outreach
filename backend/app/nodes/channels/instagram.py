@@ -37,6 +37,7 @@ MANIFEST = NodeManifest(
     capabilities=("connection:instagram",),
     side_effect=SideEffect.NETWORK,
     icon="instagram",
+    can_be_entry=True,  # OUTBOUND-FIRST-001: can start a campaign against an audience
 )
 
 

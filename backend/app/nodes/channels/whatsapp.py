@@ -38,6 +38,7 @@ MANIFEST = NodeManifest(
     capabilities=("connection:whatsapp",),
     side_effect=SideEffect.NETWORK,
     icon="message-circle",
+    can_be_entry=True,  # OUTBOUND-FIRST-001: can start a campaign against an audience
 )
 
 

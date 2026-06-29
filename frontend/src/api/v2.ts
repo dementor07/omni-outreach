@@ -506,6 +506,23 @@ export interface CampaignSpec {
   verification_threshold?: number
 }
 
+// OUTBOUND-FIRST-001: a contact attached to a campaign as an outbound recipient.
+export interface AudienceContact {
+  contact_id: UUID
+  first_name?: string | null
+  last_name?: string | null
+  email?: string | null
+  linkedin_url?: string | null
+  company?: string | null
+  added_at: ISODate
+}
+
+export interface AudienceMutation {
+  added?: number
+  removed?: number
+  total: number
+}
+
 export const canvas = {
   list: () => api.get<Workflow[]>('/canvas/workflows').then((r) => r.data),
   create: (name: string, timezone = 'UTC') =>
@@ -532,6 +549,19 @@ export const canvas = {
     api.get<SendingAccount[]>(`/canvas/workflows/${workflowId}/accounts`).then((r) => r.data),
   setPool: (workflowId: UUID, sendingAccountIds: UUID[]) =>
     api.put<SendingAccount[]>(`/canvas/workflows/${workflowId}/accounts`, { sending_account_ids: sendingAccountIds }).then((r) => r.data),
+
+  // OUTBOUND-FIRST-001: the contacts a campaign reaches when it starts with an
+  // outbound step (invite/DM/email a known list) instead of a discovery source.
+  audience: (workflowId: UUID) =>
+    api.get<AudienceContact[]>(`/canvas/workflows/${workflowId}/audience`).then((r) => r.data),
+  addAudience: (workflowId: UUID, contactIds: UUID[]) =>
+    api
+      .post<AudienceMutation>(`/canvas/workflows/${workflowId}/audience`, { contact_ids: contactIds })
+      .then((r) => r.data),
+  removeAudience: (workflowId: UUID, contactId: UUID) =>
+    api
+      .delete<AudienceMutation>(`/canvas/workflows/${workflowId}/audience/${contactId}`)
+      .then((r) => r.data),
 
   addNode: (
     workflowId: UUID,

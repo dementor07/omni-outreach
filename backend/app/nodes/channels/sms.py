@@ -37,6 +37,7 @@ MANIFEST = NodeManifest(
     capabilities=("connection:twilio",),
     side_effect=SideEffect.NETWORK,
     icon="message-square",
+    can_be_entry=True,  # OUTBOUND-FIRST-001: can start a campaign against an audience
 )
 
 
