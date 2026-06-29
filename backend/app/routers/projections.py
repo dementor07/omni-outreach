@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.auth import AuthContext, get_current_workspace
-from app.db import fetch_all, fetch_one
+from app.db import fetch_all, fetch_one, system_scope
 from app.execution import lead_columns
 from app.services.bus import publish_event
 
@@ -232,6 +232,86 @@ async def get_contact(
     row = await fetch_one("SELECT * FROM omni_contacts WHERE id = $1", contact_id)
     if not row:
         raise HTTPException(status_code=404, detail="contact not found")
+    return ContactOut.model_validate(row)
+
+
+class ContactCreate(BaseModel):
+    email: str | None = None
+    linkedin_url: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    company: str | None = None
+    headline: str | None = None
+    phone: str | None = None
+    source: str = "manual"
+
+
+@router.post(
+    "/contacts",
+    response_model=ContactOut,
+    status_code=201,
+    summary="Manually add a contact to the CRM",
+    description=(
+        "Create (or upsert) a single contact by hand — the recipient an "
+        "outbound-first campaign reaches, or any person you want in the CRM. "
+        "The id is DETERMINISTIC (UUIDv5 of workspace + linkedin/email, the same "
+        "key crm.create_contact uses) so manually adding someone a source later "
+        "discovers converges on ONE row instead of duplicating. Requires an email "
+        "or a linkedin_url."
+    ),
+)
+async def create_contact(
+    body: ContactCreate, ctx: AuthContext = Depends(get_current_workspace)
+) -> ContactOut:
+    # Reuse the canonical deterministic-id + emit path so manual + discovered
+    # contacts share identity (DEDUP-001) and the projector owns the write.
+    from app.nodes.crm.create_contact import _contact_id
+    from app.services import bus
+
+    if not body.email and not body.linkedin_url:
+        raise HTTPException(status_code=422, detail="a contact needs an email or a linkedin_url")
+
+    contact_id = _contact_id(str(ctx.workspace_id), body.linkedin_url, body.email)
+    await bus.publish_event(
+        workspace_id=str(ctx.workspace_id),
+        event_type="contact.created",
+        entity_type="contact",
+        entity_id=contact_id,
+        payload={
+            "email": body.email,
+            "linkedin_url": body.linkedin_url,
+            "first_name": body.first_name,
+            "last_name": body.last_name,
+            "company": body.company,
+            "headline": body.headline,
+            "phone": body.phone,
+            "source": body.source,
+        },
+        actor_user_id=ctx.user_id,
+    )
+    # The projector writes asynchronously; upsert here too so the API returns the
+    # row immediately (idempotent — same ON CONFLICT(id) shape as the projector).
+    async with system_scope():
+        row = await fetch_one(
+            """
+            INSERT INTO omni_contacts (id, workspace_id, email, first_name, last_name,
+                                  company, headline, linkedin_url, phone, source)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+            ON CONFLICT (id) DO UPDATE SET
+              email        = COALESCE(EXCLUDED.email,        omni_contacts.email),
+              first_name   = COALESCE(EXCLUDED.first_name,   omni_contacts.first_name),
+              last_name    = COALESCE(EXCLUDED.last_name,    omni_contacts.last_name),
+              company      = COALESCE(EXCLUDED.company,      omni_contacts.company),
+              headline     = COALESCE(EXCLUDED.headline,     omni_contacts.headline),
+              linkedin_url = COALESCE(EXCLUDED.linkedin_url, omni_contacts.linkedin_url),
+              phone        = COALESCE(EXCLUDED.phone,        omni_contacts.phone),
+              source       = COALESCE(EXCLUDED.source,       omni_contacts.source),
+              updated_at   = NOW()
+            RETURNING *
+            """,
+            contact_id, str(ctx.workspace_id), body.email, body.first_name, body.last_name,
+            body.company, body.headline, body.linkedin_url, body.phone, body.source,
+        )
     return ContactOut.model_validate(row)
 
 

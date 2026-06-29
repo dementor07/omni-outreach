@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Contact as ContactIcon, Mail, Building2, AtSign, Users, Trash2, Download } from 'lucide-react'
-import { projections, canvas, type Contact } from '../api/v2'
+import { Contact as ContactIcon, Mail, Building2, AtSign, Users, Trash2, Download, Plus, X } from 'lucide-react'
+import { projections, canvas, type Contact, type ContactCreateInput } from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import StatCard from '../components/StatCard'
 import Card from '../components/Card'
+import Button from '../components/Button'
 import Avatar from '../components/Avatar'
 import Badge from '../components/Badge'
 import EmptyState from '../components/EmptyState'
@@ -99,6 +100,18 @@ export default function Contacts() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['contacts'] }),
   })
 
+  const [showAdd, setShowAdd] = useState(false)
+  const addMut = useMutation({
+    mutationFn: (input: ContactCreateInput) => projections.createContact(input),
+    onSuccess: (c) => {
+      qc.invalidateQueries({ queryKey: ['contacts'] })
+      qc.invalidateQueries({ queryKey: ['contacts-summary'] })
+      setShowAdd(false)
+      toast.success(`Added ${fullName(c) || c.email || c.linkedin_url || 'contact'}`)
+    },
+    onError: () => toast.error('Could not add contact — a contact needs an email or LinkedIn URL'),
+  })
+
   async function deleteMany(ids: string[]) {
     let ok = 0
     for (const id of ids) {
@@ -147,17 +160,34 @@ export default function Contacts() {
         title="Contacts"
         description="Every person in your CRM, enriched and deduplicated from all your sources."
         meta={
-          contacts.length > 0 ? (
+          <div className="flex items-center gap-2">
+            {contacts.length > 0 && (
+              <button
+                type="button"
+                onClick={() => exportCsv(filtered)}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-100 px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
+              >
+                <Download size={13} /> Export CSV
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => exportCsv(filtered)}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-100 px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
+              onClick={() => setShowAdd(true)}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-brand-700"
             >
-              <Download size={13} /> Export CSV
+              <Plus size={13} /> Add contact
             </button>
-          ) : null
+          </div>
         }
       />
+
+      {showAdd && (
+        <AddContactModal
+          saving={addMut.isPending}
+          onCancel={() => setShowAdd(false)}
+          onSave={(input) => addMut.mutate(input)}
+        />
+      )}
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label={anyFilter ? 'Matching contacts' : 'Total contacts'} value={summaryQ.isLoading ? '—' : summary?.total ?? 0} icon={Users} accent="brand" />
@@ -302,6 +332,79 @@ export default function Contacts() {
             </table>
           </div>
         )}
+      </Card>
+    </div>
+  )
+}
+
+const modalInputClass =
+  'mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white'
+
+function AddContactModal({
+  saving,
+  onCancel,
+  onSave,
+}: {
+  saving: boolean
+  onCancel: () => void
+  onSave: (input: ContactCreateInput) => void
+}) {
+  const [form, setForm] = useState<ContactCreateInput>({ source: 'manual' })
+  const set = (patch: Partial<ContactCreateInput>) => setForm((f) => ({ ...f, ...patch }))
+  // A contact needs at least an email or a LinkedIn URL (the identity keys).
+  const valid = !!(form.email?.trim() || form.linkedin_url?.trim())
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault()
+    if (valid && !saving) onSave(form)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onCancel}>
+      <Card padding="none" className="w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+        <form onSubmit={submit}>
+          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Add contact</h2>
+            <button type="button" onClick={onCancel} title="Close" aria-label="Close" className="rounded p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+              <X size={16} />
+            </button>
+          </div>
+          <div className="space-y-3 p-4">
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+                First name
+                <input className={modalInputClass} value={form.first_name ?? ''} onChange={(e) => set({ first_name: e.target.value })} placeholder="Navin" autoFocus />
+              </label>
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+                Last name
+                <input className={modalInputClass} value={form.last_name ?? ''} onChange={(e) => set({ last_name: e.target.value })} placeholder="Antony" />
+              </label>
+            </div>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+              LinkedIn URL <span className="text-slate-400">(or email below)</span>
+              <input className={modalInputClass} value={form.linkedin_url ?? ''} onChange={(e) => set({ linkedin_url: e.target.value })} placeholder="https://www.linkedin.com/in/…" />
+            </label>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+              Email
+              <input className={modalInputClass} type="email" value={form.email ?? ''} onChange={(e) => set({ email: e.target.value })} placeholder="name@company.com" />
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+                Company <span className="text-slate-400">(optional)</span>
+                <input className={modalInputClass} value={form.company ?? ''} onChange={(e) => set({ company: e.target.value })} placeholder="Acme" />
+              </label>
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+                Title <span className="text-slate-400">(optional)</span>
+                <input className={modalInputClass} value={form.headline ?? ''} onChange={(e) => set({ headline: e.target.value })} placeholder="Founder" />
+              </label>
+            </div>
+            <p className="text-xs text-slate-400">A contact needs at least a LinkedIn URL or an email so we can reach them.</p>
+          </div>
+          <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-4 py-3 dark:border-slate-800">
+            <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={saving}>Cancel</Button>
+            <Button type="submit" variant="primary" size="sm" disabled={!valid || saving}>{saving ? 'Adding…' : 'Add contact'}</Button>
+          </div>
+        </form>
       </Card>
     </div>
   )

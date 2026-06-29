@@ -14,7 +14,7 @@ import { clsx } from 'clsx'
 import {
   ArrowLeft, Search, GitBranch, Save, Undo2, Redo2, Maximize2, Minimize2, Plus,
   Users, Settings as SettingsIcon, Trash2, Play, Target, Layers3, ArrowUp, ArrowDown, X,
-  AlertTriangle, CheckCircle2,
+  AlertTriangle, CheckCircle2, UserPlus,
 } from 'lucide-react'
 import {
   canvas,
@@ -22,7 +22,9 @@ import {
   projections,
   integrations,
   objectives,
+  type AudienceContact,
   type Connection as IntegrationConnection,
+  type Contact,
   type GraphValidation,
   type Lead,
   type NodeManifest,
@@ -675,6 +677,7 @@ export default function CampaignEditor() {
             onChange={(v) => setActiveTab(v)}
             items={[
               { value: 'sequence', label: 'Sequence', icon: GitBranch },
+              { value: 'audience', label: 'Audience', icon: UserPlus },
               { value: 'goal', label: 'Goal', icon: Target },
               { value: 'leads', label: 'Leads', icon: Users },
               { value: 'settings', label: 'Settings', icon: SettingsIcon },
@@ -786,6 +789,8 @@ export default function CampaignEditor() {
               />
             </Card>
           )}
+
+          {activeTab === 'audience' && id && <AudiencePanel workflowId={id} />}
 
           {activeTab === 'settings' && (
             <Card padding="lg" className="h-full overflow-auto">
@@ -1528,5 +1533,137 @@ function EnrichmentStackDialog({
       </div>
     </div>,
     document.body,
+  )
+}
+
+// OUTBOUND-FIRST-001: attach contacts a campaign reaches when it starts with an
+// outbound step. Without an audience, an outbound-rooted campaign can't run.
+function AudiencePanel({ workflowId }: { workflowId: string }) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [search, setSearch] = useState('')
+
+  const audienceQ = useQuery({
+    queryKey: ['audience', workflowId],
+    queryFn: () => canvas.audience(workflowId),
+  })
+  const contactsQ = useQuery({
+    queryKey: ['contacts', { q: search, limit: 50 }],
+    queryFn: () => projections.contacts({ q: search.trim() || undefined, limit: 50 }),
+  })
+
+  const attachedIds = useMemo(
+    () => new Set((audienceQ.data ?? []).map((a: AudienceContact) => a.contact_id)),
+    [audienceQ.data],
+  )
+
+  const addMut = useMutation({
+    mutationFn: (contactId: string) => canvas.addAudience(workflowId, [contactId]),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['audience', workflowId] })
+      qc.invalidateQueries({ queryKey: ['workflow', workflowId, 'validation'] })
+    },
+    onError: () => toast.error('Could not add contact to the audience'),
+  })
+  const removeMut = useMutation({
+    mutationFn: (contactId: string) => canvas.removeAudience(workflowId, contactId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['audience', workflowId] })
+      qc.invalidateQueries({ queryKey: ['workflow', workflowId, 'validation'] })
+    },
+  })
+
+  const audience = audienceQ.data ?? []
+  const candidates = (contactsQ.data ?? []).filter((c: Contact) => !attachedIds.has(c.id))
+
+  return (
+    <div className="grid h-full grid-cols-1 gap-4 overflow-auto p-1 lg:grid-cols-2">
+      {/* Attached audience */}
+      <Card padding="lg" className="flex flex-col overflow-hidden">
+        <div className="mb-3">
+          <h2 className="text-[15px] font-semibold text-slate-900 dark:text-white">
+            Audience <span className="text-slate-400">({audience.length})</span>
+          </h2>
+          <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">
+            The people this campaign reaches. Required when the sequence starts with an outbound
+            step (invite / DM / email) instead of a discovery source.
+          </p>
+        </div>
+        {audienceQ.isLoading ? (
+          <div className="space-y-2">{[0, 1, 2].map((i) => <div key={i} className="h-12 skeleton rounded-lg" />)}</div>
+        ) : audience.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400 dark:border-slate-700">
+            No audience yet. Add contacts from the right to reach them.
+          </div>
+        ) : (
+          <ul className="space-y-1.5 overflow-auto">
+            {audience.map((a: AudienceContact) => (
+              <li key={a.contact_id} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2 dark:border-slate-800">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
+                    {[a.first_name, a.last_name].filter(Boolean).join(' ') || a.email || a.linkedin_url || 'Contact'}
+                  </p>
+                  <p className="truncate text-xs text-slate-500">{a.linkedin_url || a.email || a.company || '—'}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeMut.mutate(a.contact_id)}
+                  title="Remove from audience"
+                  aria-label="Remove from audience"
+                  className="ml-2 rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-900/30"
+                >
+                  <X size={15} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      {/* Add contacts */}
+      <Card padding="lg" className="flex flex-col overflow-hidden">
+        <div className="mb-3">
+          <h2 className="text-[15px] font-semibold text-slate-900 dark:text-white">Add contacts</h2>
+          <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">
+            Search your CRM and attach people to this campaign. Create new contacts on the Contacts page.
+          </p>
+        </div>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search contacts by name, email, company…"
+          className="mb-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+        />
+        {contactsQ.isLoading ? (
+          <div className="space-y-2">{[0, 1, 2].map((i) => <div key={i} className="h-12 skeleton rounded-lg" />)}</div>
+        ) : candidates.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400 dark:border-slate-700">
+            {search.trim() ? 'No matching contacts.' : 'No more contacts to add.'}
+          </div>
+        ) : (
+          <ul className="space-y-1.5 overflow-auto">
+            {candidates.map((c: Contact) => (
+              <li key={c.id} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2 dark:border-slate-800">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
+                    {[c.first_name, c.last_name].filter(Boolean).join(' ') || c.email || c.linkedin_url || 'Contact'}
+                  </p>
+                  <p className="truncate text-xs text-slate-500">{c.linkedin_url || c.email || c.company || '—'}</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={addMut.isPending}
+                  onClick={() => addMut.mutate(c.id)}
+                >
+                  <Plus size={14} /> Add
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
   )
 }

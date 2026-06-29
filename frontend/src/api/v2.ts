@@ -719,6 +719,17 @@ export interface ContactFilters {
   limit?: number
 }
 
+export interface ContactCreateInput {
+  email?: string | null
+  linkedin_url?: string | null
+  first_name?: string | null
+  last_name?: string | null
+  company?: string | null
+  headline?: string | null
+  phone?: string | null
+  source?: string
+}
+
 export interface ContactSummary {
   total: number
   with_email: number
@@ -750,6 +761,10 @@ export const projections = {
   contactSummary: (filters: Omit<ContactFilters, 'limit'> = {}) =>
     api.get<ContactSummary>('/projections/contacts/summary', { params: filters }).then((r) => r.data),
   contact: (id: UUID) => api.get<Contact>(`/projections/contacts/${id}`).then((r) => r.data),
+  // OUTBOUND-FIRST-001: manually add a contact (deterministic id — upserts if the
+  // person is later discovered by a source). The missing "add a contact" path.
+  createContact: (input: ContactCreateInput) =>
+    api.post<Contact>('/projections/contacts', input).then((r) => r.data),
   contactSources: () => api.get<string[]>('/projections/contacts/sources').then((r) => r.data),
   companies: (filters: CompanyFilters | number = 100) => {
     const params = typeof filters === 'number' ? { limit: filters } : filters
