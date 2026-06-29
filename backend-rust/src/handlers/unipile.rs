@@ -56,48 +56,59 @@ fn public_id_from_linkedin_url(url: &str) -> String {
     url.trim().trim_end_matches('/').split("/in/").last().unwrap_or("").to_string()
 }
 
-/// RELGATE-001: a LinkedIn DM to a non-1st-degree connection 403s
-/// (subscription_required) — proven live. Before OPENING a new chat we resolve
-/// the recipient's network_distance via /users/{public_id} and only proceed if
-/// they are a 1st-degree connection. Returns:
-///   Some(true)  — confirmed 1st degree (DISTANCE_1 / FIRST_DEGREE), send.
-///   Some(false) — confirmed NOT 1st degree (2nd/3rd/out-of-network), hold.
-///   None        — could not determine (resolve failed); caller decides (we let
-///                 the send proceed so a transient resolve glitch can't wedge a
-///                 legitimately-connected recipient; the send's own 403 still
-///                 records a durable failure outcome).
-async fn linkedin_first_degree(
+/// One /users/{public_id} lookup that answers BOTH questions a new LinkedIn DM
+/// needs: is the recipient a 1st-degree connection (RELGATE-001), and what is
+/// their provider_id (the attendee id required to OPEN a chat — DM-ATTENDEE-001).
+/// Returns (degree, provider_id):
+///   degree = Some(true)  confirmed 1st degree (DISTANCE_1 / FIRST_DEGREE)
+///            Some(false) confirmed NOT 1st degree (hold — non-connection 403s)
+///            None        could not determine (resolve failed) — caller proceeds
+///                        (a transient glitch must not wedge a real connection;
+///                        the send's own failure is still recorded durably).
+///   provider_id = the resolved member id, or None when the lookup failed.
+async fn linkedin_profile_check(
     client: &reqwest::Client,
     base: &str,
     api_key: &str,
     account_id: &str,
     public_id: &str,
-) -> Option<bool> {
+) -> (Option<bool>, Option<String>) {
     if public_id.is_empty() {
-        return None;
+        return (None, None);
     }
-    let resp = client
+    let resp = match client
         .get(format!("{}/api/v1/users/{}", base, public_id))
         .header("X-API-KEY", api_key)
         .query(&[("account_id", account_id)])
         .send()
         .await
-        .ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    let body: Value = resp.json().await.ok()?;
+    {
+        Ok(r) if r.status().is_success() => r,
+        _ => return (None, None),
+    };
+    let body: Value = match resp.json().await {
+        Ok(v) => v,
+        Err(_) => return (None, None),
+    };
+    let provider_id = body
+        .get("provider_id")
+        .or_else(|| body.get("id"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
     let distance = body
         .get("network_distance")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_ascii_uppercase();
-    if distance.is_empty() {
-        return None;
-    }
-    // Unipile reports DISTANCE_1 / FIRST_DEGREE for connections; everything else
-    // (DISTANCE_2/3, OUT_OF_NETWORK) is not directly messageable without InMail.
-    Some(distance.contains('1') || distance.contains("FIRST"))
+    let degree = if distance.is_empty() {
+        None
+    } else {
+        // Unipile reports DISTANCE_1 / FIRST_DEGREE for connections; everything
+        // else (DISTANCE_2/3, OUT_OF_NETWORK) needs InMail, not a plain DM.
+        Some(distance.contains('1') || distance.contains("FIRST"))
+    };
+    (degree, provider_id)
 }
 
 /// LinkedIn invite. Posts to /api/v1/users/invite. Sets `invited_at` on the lead.
@@ -320,6 +331,9 @@ async fn send_chat(command: &ActionCommand, event_type: &str, chat_id_col: &str)
         // branch (e.g. loop back to invite / hold) WITHOUT a wasted 403. Only
         // for LinkedIn DM opening a new chat — WhatsApp/IG/TG have no such notion,
         // and an existing chat_id already proves a live thread.
+        // Resolve provider_id once for LinkedIn: it answers the relationship gate
+        // AND supplies the attendee id needed to open the chat.
+        let mut resolved_provider_id: Option<String> = None;
         if chat_id_col == "chat_id" {
             let public_id = command
                 .lead
@@ -327,9 +341,11 @@ async fn send_chat(command: &ActionCommand, event_type: &str, chat_id_col: &str)
                 .as_deref()
                 .map(public_id_from_linkedin_url)
                 .unwrap_or_default();
-            if let Some(false) =
-                linkedin_first_degree(&client, &base, &api_key, &unipile_account_id, &public_id).await
-            {
+            let (degree, provider_id) =
+                linkedin_profile_check(&client, &base, &api_key, &unipile_account_id, &public_id).await;
+            resolved_provider_id = provider_id;
+            // RELGATE-001: a confirmed non-connection is held (a DM to it 403s).
+            if let Some(false) = degree {
                 credentials::release(command.credential_ref.as_deref().unwrap_or("")).await;
                 warn!("[unipile] DM held for lead {} — recipient is not a 1st-degree connection", command.lead.id);
                 // Skipped (not Sent): the ledger must record this as a non-send,
@@ -341,13 +357,18 @@ async fn send_chat(command: &ActionCommand, event_type: &str, chat_id_col: &str)
             }
         }
         // Start a new chat. attendees_ids is the LinkedIn provider_id, WhatsApp
-        // JID, IG provider_id, or Telegram username — sequencer resolves it.
+        // JID, IG provider_id, or Telegram username. DM-ATTENDEE-001: prefer an
+        // explicit payload id (a follow-up or a sequencer-resolved id), else fall
+        // back to the provider_id we just resolved from the lead's linkedin_url —
+        // without this an outbound-first DM (which only carries linkedin_url) had
+        // no attendee and failed "no attendee identifier available".
         let attendee = command.payload["attendee_identifier"]
             .as_str()
             .filter(|s| !s.is_empty())
-            .or_else(|| command.payload["provider_id"].as_str())
-            .unwrap_or("")
-            .to_string();
+            .or_else(|| command.payload["provider_id"].as_str().filter(|s| !s.is_empty()))
+            .map(|s| s.to_string())
+            .or_else(|| resolved_provider_id.clone())
+            .unwrap_or_default();
         if attendee.is_empty() {
             return common::fail(command, "no attendee identifier available", false);
         }
