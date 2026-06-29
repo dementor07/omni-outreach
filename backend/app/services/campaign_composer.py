@@ -437,10 +437,17 @@ def _append_message_sequence(
             add_edge(wait_key, completed_key, "timeout")
             if is_last:
                 add_edge(wait_key, completed_key, "accepted")
+                # SMART-INVITE-001: an existing connection skips the invite — go
+                # straight to the terminal (there's no next step here).
+                add_edge(message_key, completed_key, "already_connected")
                 continue
             delay_key = f"delay_{human_index}"
             add_node(delay_key, "flow.delay", x + 360, 250, delay)
             add_edge(wait_key, delay_key, "accepted")
+            # SMART-INVITE-001: already connected → skip the invite AND the wait,
+            # navigate straight to the same delay->next-step the accepted path
+            # uses. So invite->await->DM auto-handles connected AND cold people.
+            add_edge(message_key, delay_key, "already_connected")
             add_edge(delay_key, next_message_key)
             continue
 

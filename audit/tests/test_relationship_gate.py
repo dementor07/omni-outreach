@@ -78,6 +78,34 @@ def test_gate_runs_before_the_chat_post():
     )
 
 
+def test_invite_skips_when_already_connected():
+    # SMART-INVITE-001: an invite to an existing 1st-degree connection is a
+    # redundant no-op that strands the lead at await-acceptance. The handler must
+    # resolve distance FIRST and, when already connected, SKIP the invite and
+    # route via the `already_connected` handle (the engine owns this invariant).
+    body = _rs_fn("handle_linkedin_invite")
+    assert "linkedin_profile_check(" in body, "the invite must resolve distance before firing"
+    assert "already_connected" in body
+    # the skip must come BEFORE the /users/invite POST (don't fire a redundant invite).
+    skip = body.find("already_connected")
+    invite_post = body.find("/api/v1/users/invite")
+    assert skip != -1 and invite_post != -1 and skip < invite_post, (
+        "the already-connected skip must precede the invite POST"
+    )
+    # it's a skipped (non-send) routed via next_handle, and it persists the
+    # resolved provider_id + distance so downstream nodes see them.
+    assert 'common::skipped(command, "already_connected")' in body
+    assert 'next_handle".to_string(), json!("already_connected")' in body
+    assert "linkedin_distance" in body and "provider_id" in body
+
+
+def test_linkedin_manifest_declares_smart_handles():
+    # the validator/composer need these handles declared on the node.
+    src = (REPO / "backend/app/nodes/channels/linkedin.py").read_text(encoding="utf-8")
+    for h in ("already_connected", "not_connected", "no_thread"):
+        assert f'NodeHandle("{h}"' in src, f"channel.linkedin must declare the {h} handle"
+
+
 def test_unwired_not_connected_handle_ends_honestly_not_completed():
     # a held lead whose campaign didn't wire a not_connected branch must NOT be
     # recorded as 'completed' (a false success polluting metrics + the objective

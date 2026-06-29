@@ -112,6 +112,17 @@ async fn linkedin_profile_check(
 }
 
 /// LinkedIn invite. Posts to /api/v1/users/invite. Sets `invited_at` on the lead.
+///
+/// SMART-INVITE-001: an invite to someone you're ALREADY connected to is a
+/// redundant no-op that then strands the lead at event.invite_accepted (no new
+/// acceptance event ever fires — they're already a connection — so it parks
+/// until the timeout). "Don't re-invite an existing connection, navigate
+/// straight to messaging" is a correctness INVARIANT, not a per-campaign choice,
+/// so it lives here in the engine: we resolve network_distance first and, when
+/// already 1st-degree, SKIP the invite and route the lead via the
+/// `already_connected` handle (the composer wires that straight to the next
+/// step). The recipient's existing first message etc. is untouched — we advance
+/// PAST the invite, we don't re-send anything.
 pub async fn handle_linkedin_invite(command: &ActionCommand) -> ExecutionResult {
     let (api_key, base) = match unipile_creds(command).await {
         Ok(v) => v,
@@ -122,37 +133,40 @@ pub async fn handle_linkedin_invite(command: &ActionCommand) -> ExecutionResult 
         return common::fail(command, "unipile_account_id missing in payload", false);
     }
 
-    // Resolve provider_id — prefer payload, else look it up via /users/{public_id}.
-    let mut provider_id = common::s(command, "provider_id");
     let client = ProxyManager::create_client(command.lead.proxy_settings.clone())
         .unwrap_or_else(|_| reqwest::Client::new());
-    if provider_id.is_empty() {
+
+    // Resolve provider_id — prefer payload, else look it up. The profile check
+    // returns BOTH the network distance (for the smart skip) and the provider_id
+    // (needed to POST the invite) from ONE /users/{public_id} call.
+    let mut provider_id = common::s(command, "provider_id");
+    let mut already_connected = false;
+    if provider_id.is_empty() || command.lead.linkedin_url.is_some() {
         let public_id = command.lead.linkedin_url.as_deref().map(public_id_from_linkedin_url).unwrap_or_default();
-        if public_id.is_empty() {
+        if provider_id.is_empty() && public_id.is_empty() {
             return common::fail(command, "neither provider_id nor linkedin_url available", false);
         }
-        match client
-            .get(format!("{}/api/v1/users/{}", base, public_id))
-            .header("X-API-KEY", &api_key)
-            .query(&[("account_id", &unipile_account_id)])
-            .send()
-            .await
-        {
-            Ok(r) if r.status().is_success() => {
-                let body: Value = r.json().await.unwrap_or(json!({}));
-                provider_id = body
-                    .get("provider_id")
-                    .or_else(|| body.get("id"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-            }
-            Ok(r) => return common::fail(command, format!("profile resolve HTTP {}", r.status()), true),
-            Err(e) => return common::fail(command, format!("profile resolve network: {e}"), true),
-        }
+        let (degree, resolved) =
+            linkedin_profile_check(&client, &base, &api_key, &unipile_account_id, &public_id).await;
+        already_connected = matches!(degree, Some(true));
         if provider_id.is_empty() {
-            return common::fail(command, "could not resolve provider_id from profile", false);
+            match resolved {
+                Some(pid) => provider_id = pid,
+                None => return common::fail(command, "could not resolve provider_id from profile", false),
+            }
         }
+    }
+
+    // SMART-INVITE-001: already a 1st-degree connection → skip the invite and
+    // navigate straight to the next step. Record it (status=skipped, with the
+    // resolved provider_id + distance) and route via `already_connected`.
+    if already_connected {
+        credentials::release(command.credential_ref.as_deref().unwrap_or("")).await;
+        info!("[unipile] skipping invite for lead {} — already 1st-degree connected", command.lead.id);
+        let mut result = common::skipped(command, "already_connected");
+        result.lead_mutations = json!({"custom_fields": {"provider_id": provider_id, "linkedin_distance": "FIRST_DEGREE"}});
+        result.metadata.insert("next_handle".to_string(), json!("already_connected"));
+        return result;
     }
 
     let resp = client

@@ -40,6 +40,16 @@ MANIFEST = NodeManifest(
     output_handles=(
         NodeHandle("sent", "Action accepted by Unipile"),
         NodeHandle("on_error", "Permanent failure (account limit, blocked profile, …)"),
+        # SMART-INVITE-001: an invite to an existing 1st-degree connection is
+        # skipped and routed here so the sequence navigates straight to the next
+        # step (no redundant invite, no parking at await-acceptance).
+        NodeHandle("already_connected", "Invite skipped — recipient is already a connection"),
+        # RELGATE-001: a DM to a non-1st-degree connection is held here instead
+        # of burning a 403.
+        NodeHandle("not_connected", "DM held — recipient is not a connection yet"),
+        # NOCHAT-001: a DM opened a chat but Unipile returned no chat_id — the
+        # send happened but the thread can't be followed up; degraded path.
+        NodeHandle("no_thread", "DM sent but no chat thread to follow up on"),
     ),
     capabilities=("connection:unipile",),
     side_effect=SideEffect.NETWORK,

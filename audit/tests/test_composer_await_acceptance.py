@@ -86,6 +86,10 @@ def test_await_acceptance_compiles_the_wait_between_invite_and_next_step():
     assert not any(s == "message_1" and t == "message_2" for s, _h, t in edges)
     # a non-connection / no-thread degrade from the invite send ends honestly.
     assert ("message_1", "not_connected", "end_sequence_complete") in edges
+    # SMART-INVITE-001: an already-connected recipient skips the invite AND the
+    # wait, going straight to the same delay->next-step the accepted path uses —
+    # so invite->await->DM auto-navigates for connected people, no manual branch.
+    assert ("message_1", "already_connected", "delay_1") in edges
 
 
 def test_await_acceptance_rejected_on_non_invite_step():
