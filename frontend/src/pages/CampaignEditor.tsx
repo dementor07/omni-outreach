@@ -332,7 +332,6 @@ export default function CampaignEditor() {
 
   // Run the workflow: seed one root lead per starting source and fire them under
   // one correlation id. Discovered entities fan out into campaign leads.
-  const hasSource = useMemo(() => rfNodes.some((n) => n.data.manifest.type.startsWith('source.')), [rfNodes])
   const runMut = useMutation({
     mutationFn: () => canvas.run(id!),
     onSuccess: (r) => {
@@ -597,15 +596,13 @@ export default function CampaignEditor() {
               icon={Play}
               onClick={() => runMut.mutate()}
               isLoading={runMut.isPending}
-              disabled={dirty || !hasSource || validationQuery.data?.valid_for_run === false}
+              disabled={dirty || validationQuery.data?.valid_for_run === false}
               title={
                 dirty
                   ? 'Save the graph before running'
-                  : !hasSource
-                    ? 'Add a source node to run'
-                    : validationQuery.data?.valid_for_run === false
-                      ? 'Fix the plan issues before running'
-                      : 'Enroll a lead at the source node and start the pipeline'
+                  : validationQuery.data?.valid_for_run === false
+                    ? 'Fix the plan issues before running'
+                    : 'Enroll leads at the starting step(s) and start the pipeline'
               }
             >
               Run
