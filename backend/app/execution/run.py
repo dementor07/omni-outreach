@@ -119,9 +119,22 @@ async def seed_and_run_audience(
     node_type = str(start_node["node_type"])
     node_id = str(start_node["id"])
     try:
-        _manifest, execute_fn = noderegistry.get(node_type)
+        # Existence guard only — _fire_node does its own registry lookup + fires.
+        noderegistry.get(node_type)
     except KeyError:
         return [RunOutcome("", node_id, node_type, run_correlation_id, "", 0, error=f"entry node {node_type!r} not registered")]
+
+    # GATE-ENTRY-001: the entry node of an outbound-first campaign IS a real
+    # person-message send, so it MUST pass through the same send-seam gates every
+    # downstream send does — DNC/suppression (compliance), the rate-cap +
+    # business-hours window, the B6 schedule, and DEDUP-SEND-001. The transition
+    # worker's _fire_node owns that whole gated path. Previously this seeded the
+    # lead then called execute()+publish() directly, BYPASSING every gate — so an
+    # outbound-first campaign's first touch could message a suppressed/
+    # already-messaged/out-of-window recipient. Delegate the firing to _fire_node
+    # so there is ONE gated send path, no drift. (Imported lazily to avoid any
+    # import-time coupling with the worker module.)
+    from app.execution.transition_worker import _fire_node
 
     outcomes: list[RunOutcome] = []
     for contact in contacts:
@@ -132,47 +145,29 @@ async def seed_and_run_audience(
             "_run_correlation_id": run_correlation_id,
             "_audience_contact_id": contact_id,
         }
+        lead_row = {
+            "id": lead_id,
+            "contact_id": contact_id,
+            "workflow_id": str(workflow_id),
+            "custom_fields": lead_fields,
+        }
         async with system_scope():
             await execute(
                 "INSERT INTO omni_leads (id, workspace_id, contact_id, workflow_id, current_node_id, status, custom_fields) "
                 "VALUES ($1, $2, $3, $4, $5, 'active', $6::jsonb)",
                 lead_id, workspace_id, contact_id, workflow_id, node_id, json.dumps(lead_fields),
             )
-        node_ctx = noderegistry.NodeContext(
-            workspace_id=workspace_id,
-            workflow_id=str(workflow_id),
-            node_id=node_id,
-            config=dict(start_node.get("config") or {}),
-            lead={"id": lead_id, "contact_id": contact_id, "custom_fields": lead_fields},
-            correlation_id=run_correlation_id,
-        )
-        result = await execute_fn(node_ctx)
-        if result.error:
-            async with system_scope():
-                await execute(
-                    "UPDATE omni_leads SET status='errored', current_node_id=NULL, updated_at=NOW() "
-                    "WHERE id=$1 AND workspace_id=$2",
-                    lead_id, workspace_id,
-                )
-            outcomes.append(RunOutcome(lead_id, node_id, node_type, run_correlation_id, result.handle, 0, error=result.error))
+        # Fire through the gated path. _fire_node runs the node's execute(), then
+        # the send-seam gates (DNC, cap/window, schedule, dedupe) before publishing
+        # the intent — a held/skipped/suppressed send never ships and the lead is
+        # parked/terminalized honestly by the worker, exactly like a downstream send.
+        try:
+            await _fire_node(workspace_id, lead_row, dict(contact), dict(start_node), run_correlation_id)
+        except Exception as e:  # noqa: BLE001 — surface as a per-contact outcome, don't abort the batch
+            log.exception("seed_and_run_audience: entry fire failed for lead %s", lead_id)
+            outcomes.append(RunOutcome(lead_id, node_id, node_type, run_correlation_id, "", 0, error=str(e)))
             continue
-        published = 0
-        for ev in result.events:
-            payload = dict(ev.get("payload") or {})
-            payload.setdefault("node_id", node_id)
-            payload.setdefault("lead_id", lead_id)
-            payload.setdefault("correlation_id", run_correlation_id)
-            await bus.publish_event(
-                workspace_id=workspace_id,
-                event_type=ev["event_type"],
-                entity_type="lead" if ev.get("entity_type") in (None, "workflow") else ev["entity_type"],
-                entity_id=lead_id if ev.get("entity_type") in (None, "workflow") else ev.get("entity_id"),
-                payload=payload,
-                actor_user_id=actor_user_id,
-                correlation_id=run_correlation_id,
-            )
-            published += 1
-        outcomes.append(RunOutcome(lead_id, node_id, node_type, run_correlation_id, result.handle, published))
+        outcomes.append(RunOutcome(lead_id, node_id, node_type, run_correlation_id, "sent", 1))
     log.info("seed_and_run_audience %s: enrolled %d audience leads at %s (%s)", workflow_id, len(outcomes), node_id, node_type)
     return outcomes
 
