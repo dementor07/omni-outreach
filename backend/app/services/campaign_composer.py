@@ -43,7 +43,13 @@ SourceProvider = Literal[
 ]
 PeopleProvider = Literal["searxng_people", "serper_people"]
 EnrichmentProvider = Literal["apollo", "proxycurl", "hunter"]
-MessageChannel = Literal["email", "linkedin"]
+MessageChannel = Literal[
+    "email", "linkedin", "sms", "whatsapp", "instagram", "telegram", "voice"
+]
+# MULTI-CHANNEL-AUTHOR-001: channels whose message body is a single template
+# field (body_template) — distinct from email (subject+body), linkedin (mode +
+# message_template) and voice (a Retell agent, no text body).
+_BODY_TEMPLATE_CHANNELS = frozenset({"sms", "whatsapp", "instagram", "telegram"})
 
 
 class CampaignSourceSpec(BaseModel):
@@ -105,6 +111,24 @@ class MessageStepSpec(BaseModel):
     message_template: str | None = None
     connection_name: str | None = None
     mode: Literal["invite", "dm", "profile_view", "inmail"] = "dm"
+    # MULTI-CHANNEL-AUTHOR-001: voice steps drive a Retell agent, not a text body.
+    retell_agent_id: str | None = Field(None, description="Required for a voice step — the Retell agent id")
+    # COMPOSE-WIRE-001: when set, an ai.compose node is auto-wired BEFORE this
+    # channel send — the AI drafts a personalised message per lead and the send
+    # uses {{ai_draft}}. The operator gives a plain-language instruction; the
+    # step's own template fields become optional (the draft fills them).
+    ai_compose: str | None = Field(
+        None,
+        description=(
+            "Plain-language instruction for AI to draft this message per lead "
+            "(e.g. 'a warm 2-line intro referencing their company'). When set, an "
+            "ai.compose step is inserted before the send and the message body is "
+            "the generated {{ai_draft}}."
+        ),
+    )
+    ai_tone: Literal["professional", "casual", "warm", "direct"] = Field(
+        "professional", description="Tone for the ai_compose draft (only used when ai_compose is set)."
+    )
     delay_after: dict[str, Any] | None = Field(
         None,
         description="Delay before the next message, e.g. {'amount': 3, 'unit': 'days'}",
@@ -126,14 +150,39 @@ class MessageStepSpec(BaseModel):
         le=720,
         description="When await_acceptance is set, advance on timeout (end) after this long (default 1 week).",
     )
+    reply_window_days: int = Field(
+        30,
+        ge=1,
+        le=365,
+        description=(
+            "REPLIED-WINDOW-001: the condition.replied window for THIS step — a "
+            "reply within this many days counts as 'replied' and stops the "
+            "follow-up. Default 30 (a reply from last month is stale for a fresh "
+            "sequence); raise it to keep an old reply suppressing follow-ups."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_channel_shape(self) -> MessageStepSpec:
+        # COMPOSE-WIRE-001: an AI-composed step generates its body, so the text
+        # templates aren't required up front. Voice can't be AI-composed (it's a
+        # Retell agent call, not a text body) — and a linkedin invite still needs
+        # a real first-line, so AI-compose is rejected on invites.
+        if self.ai_compose:
+            if self.channel == "voice":
+                raise ValueError("ai_compose is not valid on a voice step")
+            if self.channel == "linkedin" and self.mode == "invite":
+                raise ValueError("ai_compose is not valid on a linkedin invite (needs a real intro line)")
         if self.channel == "email":
-            if not self.subject_template or not self.body_template:
-                raise ValueError("email message steps require subject_template and body_template")
-        if self.channel == "linkedin" and self.mode in {"invite", "dm", "inmail"} and not self.message_template:
-            raise ValueError(f"linkedin {self.mode} steps require message_template")
+            if not self.ai_compose and (not self.subject_template or not self.body_template):
+                raise ValueError("email message steps require subject_template and body_template (or ai_compose)")
+        if self.channel == "linkedin" and self.mode in {"invite", "dm", "inmail"} and not self.message_template and not self.ai_compose:
+            raise ValueError(f"linkedin {self.mode} steps require message_template (or ai_compose)")
+        # MULTI-CHANNEL-AUTHOR-001: body-template channels need a body; voice needs an agent.
+        if self.channel in _BODY_TEMPLATE_CHANNELS and not self.body_template and not self.ai_compose:
+            raise ValueError(f"{self.channel} message steps require body_template (or ai_compose)")
+        if self.channel == "voice" and not self.retell_agent_id:
+            raise ValueError("voice message steps require retell_agent_id")
         if self.await_acceptance and not (self.channel == "linkedin" and self.mode == "invite"):
             raise ValueError("await_acceptance is only valid on a linkedin invite step")
         return self
@@ -301,7 +350,7 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
         add_node(completed_key, "flow.end", _message_x(spec, len(spec.messages) + 1), 440, {
             "reason": "sequence_complete",
         })
-        add_edge("create_contact", "message_1")
+        add_edge("create_contact", _step_entry_key(1, spec.messages[0]))
         _append_message_sequence(spec, nodes, edges, add_node, add_edge, replied_key, completed_key)
     else:
         add_node(completed_key, "flow.end", _contact_x(spec) + 280, 250, {"reason": "contact_created"})
@@ -414,8 +463,25 @@ def _append_message_sequence(
         message_key = f"message_{human_index}"
         x = _message_x(spec, index)
         is_last = index == len(spec.messages) - 1
-        next_message_key = f"message_{human_index + 1}"
+        next_message_key = (
+            _step_entry_key(human_index + 1, spec.messages[human_index])
+            if not is_last else f"message_{human_index + 1}"
+        )
         delay = message.delay_after or {"amount": 3, "unit": "days"}
+        # COMPOSE-WIRE-001: if this step is AI-composed, insert an ai.compose node
+        # immediately before the send. The step's predecessor already targets the
+        # compose node (via _step_entry_key); compose --default--> the channel send,
+        # compose --on_error--> end honestly. The send body uses {{ai_draft}}.
+        if message.ai_compose:
+            compose_key = f"ai_compose_{human_index}"
+            add_node(compose_key, "ai.compose", x - 180, 250, {
+                "instruction": message.ai_compose,
+                "channel": message.channel if message.channel in ("email", "linkedin", "sms", "whatsapp") else "email",
+                "tone": message.ai_tone,
+                "target_variable": "ai_draft",
+            })
+            add_edge(compose_key, message_key, "default")
+            add_edge(compose_key, completed_key, "on_error")
         add_node(message_key, _message_node_type(message.channel), x, 250, _message_config(message))
         add_edge(message_key, completed_key, "on_error")
 
@@ -452,8 +518,11 @@ def _append_message_sequence(
             continue
 
         replied_check_key = f"replied_check_{human_index}"
-        add_node(replied_check_key, "condition.replied", x + 180, 250, {"window_days": 365})
-        add_edge(message_key, replied_check_key, "sent")
+        add_node(replied_check_key, "condition.replied", x + 180, 250, {"window_days": message.reply_window_days})
+        # MULTI-CHANNEL-AUTHOR-001: a voice step's success handle is `placed`, not
+        # `sent` — wire the continuation off the channel's real success handle or
+        # a voice step in a sequence would dead-end.
+        add_edge(message_key, replied_check_key, _success_handle(message.channel))
         add_edge(replied_check_key, replied_key, "true")
         if is_last:
             add_edge(replied_check_key, completed_key, "false")
@@ -465,20 +534,50 @@ def _append_message_sequence(
 
 
 def _message_node_type(channel: MessageChannel) -> str:
-    return "channel.email" if channel == "email" else "channel.linkedin"
+    # MULTI-CHANNEL-AUTHOR-001: every person channel maps 1:1 to its channel node.
+    return f"channel.{channel}"
+
+
+def _success_handle(channel: MessageChannel) -> str:
+    """The handle a channel node emits on a successful send. Every channel uses
+    `sent` except voice, whose Retell create-call success is `placed`."""
+    return "placed" if channel == "voice" else "sent"
+
+
+def _step_entry_key(human_index: int, message: MessageStepSpec) -> str:
+    """COMPOSE-WIRE-001: the node a step's predecessor should point at. For an
+    AI-composed step that's the ai.compose node (which then feeds the send); for
+    a plain step it's the channel node itself."""
+    return f"ai_compose_{human_index}" if message.ai_compose else f"message_{human_index}"
 
 
 def _message_config(message: MessageStepSpec) -> dict[str, Any]:
+    # COMPOSE-WIRE-001: an AI-composed step sends the generated draft. The compose
+    # node stored it under {{ai_draft}}; the body/message template references it
+    # (operator can still supply a template that wraps the draft, but the default
+    # is the bare draft).
+    body = "{{ai_draft}}" if message.ai_compose else None
     if message.channel == "email":
         return {
             "connection_name": message.connection_name,
-            "subject_template": message.subject_template,
-            "body_template": message.body_template,
+            "subject_template": message.subject_template or ("{{ai_draft_subject}}" if message.ai_compose else None),
+            "body_template": message.body_template or body,
             "verification_policy": "block_invalid",
         }
+    if message.channel == "linkedin":
+        return {
+            "connection_name": message.connection_name,
+            "mode": message.mode,
+            "message_template": message.message_template or body,
+            "subject_template": message.subject_template,
+        }
+    if message.channel == "voice":
+        return {
+            "connection_name": message.connection_name,
+            "retell_agent_id": message.retell_agent_id,
+        }
+    # sms / whatsapp / instagram / telegram — single body_template.
     return {
         "connection_name": message.connection_name,
-        "mode": message.mode,
-        "message_template": message.message_template,
-        "subject_template": message.subject_template,
+        "body_template": message.body_template or body,
     }

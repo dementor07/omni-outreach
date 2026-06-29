@@ -447,7 +447,7 @@ export type CampaignSourceProvider =
   | 'searxng' | 'serper_search' | 'apollo' | 'clutch' | 'producthunt'
 export type PeopleDiscoveryProvider = 'searxng_people' | 'serper_people'
 export type EnrichmentProvider = 'apollo' | 'proxycurl' | 'hunter'
-export type MessageChannel = 'email' | 'linkedin'
+export type MessageChannel = 'email' | 'linkedin' | 'sms' | 'whatsapp' | 'instagram' | 'telegram' | 'voice'
 
 export interface CampaignSourceSpec {
   provider: CampaignSourceProvider
@@ -480,11 +480,20 @@ export interface MessageStepSpec {
   message_template?: string | null
   connection_name?: string | null
   mode?: 'invite' | 'dm' | 'profile_view' | 'inmail'
+  // Voice (Retell agent call) only.
+  retell_agent_id?: string | null
   delay_after?: { amount: number; unit: 'minutes' | 'hours' | 'days' } | null
   // Linkedin invite only: wait for the connection to be accepted before the next
   // step fires (compiles an event.invite_accepted wait). Never DM before connect.
   await_acceptance?: boolean
   accept_timeout_hours?: number
+  // REPLIED-WINDOW-001: a reply within this many days counts as 'replied' and
+  // stops the follow-up for this step. Default 30.
+  reply_window_days?: number
+  // COMPOSE-WIRE-001: when set, an ai.compose node drafts this message per lead
+  // (the body becomes the generated {{ai_draft}}). Not valid on voice or invite.
+  ai_compose?: string | null
+  ai_tone?: 'professional' | 'casual' | 'warm' | 'direct'
 }
 
 export interface CompanyScreeningSpec {
