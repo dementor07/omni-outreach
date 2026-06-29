@@ -413,6 +413,16 @@ async def build_command(
             # CONFIRMED send (exactly-once via processed_commands). Absent = the
             # legacy connection_name path; no per-account counter to bump.
             "sending_account_id": sending_account_id_used,
+            # SEND-HANDLE-001: a successful send continues on the channel node's
+            # declared `sent` handle. The orchestrator routes a status=sent result
+            # on metadata.next_handle (default "default"); without this stamp every
+            # channel send routed on "default", so a sequence wired on `sent` (what
+            # the composer + the canvas emit) dead-ended after the first message.
+            # The muscle echoes metadata unchanged, so this round-trips. A handler
+            # that needs a DIFFERENT outcome (RELGATE not_connected / NOCHAT
+            # no_thread / SMART-INVITE already_connected) overrides next_handle on
+            # its own result, which wins.
+            "next_handle": "sent",
         },
         "occurred_at": datetime.now(UTC).isoformat(),
     }

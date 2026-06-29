@@ -120,6 +120,33 @@ def test_build_command_stamps_sending_account_id():
     )
 
 
+def test_successful_send_routes_on_the_sent_handle():
+    # SEND-HANDLE-001: a status=sent result routes on metadata.next_handle, which
+    # the orchestrator defaults to "default". build_command must stamp
+    # next_handle="sent" so a channel send continues on the node's DECLARED `sent`
+    # handle — what the composer + canvas wire the next step on. Without it every
+    # multi-step message sequence dead-ended after message 1 at runtime.
+    body = _func_body(CMD_SRC, "build_command")
+    assert '"next_handle": "sent"' in body, (
+        "build_command must stamp metadata.next_handle='sent' so a successful "
+        "channel send continues on the declared `sent` handle"
+    )
+    # the orchestrator reads metadata.next_handle for a status=sent result.
+    assert 'handle = _safe_get(data, "metadata", "next_handle", default="default")' in FLINK_SRC
+
+
+def test_send_handle_override_wins_for_degraded_outcomes():
+    # a handler that needs a different outcome (RELGATE not_connected / NOCHAT
+    # no_thread / SMART-INVITE already_connected) overrides next_handle on its own
+    # result; since the muscle clones command.metadata then inserts, the override
+    # replaces the stamped "sent". Pin that these overrides still exist in the rust.
+    rust = (REPO / "backend-rust/src/handlers/unipile.rs").read_text(encoding="utf-8")
+    for h in ("not_connected", "no_thread", "already_connected"):
+        assert f'next_handle".to_string(), json!("{h}")' in rust, (
+            f"the {h} degraded path must override next_handle (it wins over the stamp)"
+        )
+
+
 def test_flink_forwards_sending_account_id():
     # the orchestrator only forwards an allowlist of metadata keys into the
     # transition; sending_account_id MUST be on it or the stamp is lost in transit.
