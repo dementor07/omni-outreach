@@ -72,6 +72,10 @@ _LEAF_TERMINAL_STATUS: dict[str, str] = {
     # the send likely went but we can't thread a follow-up. Unwired, end the
     # lead honestly (not 'completed') so the degradation is visible.
     "no_thread": "ended",
+    # DEDUP-SEND-001: a send skipped because the contact was already messaged on
+    # this channel (dedupe_action=skip_step) with no wired continuation ends
+    # honestly — it's neither a fresh send nor a failure.
+    "already_messaged": "ended",
 }
 
 
@@ -105,6 +109,19 @@ _OUTBOUND_SEND_CHANNELS = frozenset(
         "channel.email", "channel.sms", "channel.voice", "channel.linkedin",
         "channel.whatsapp", "channel.instagram", "channel.telegram",
         "channel.slack", "channel.webhook_out",
+    }
+)
+
+# DEDUP-SEND-001: the channels that address a PERSON (a contact) — the subset of
+# the send channels where "don't message the same person twice" is meaningful.
+# slack (a team alert) and webhook_out (an HTTP sink) carry no contact recipient,
+# so the dedupe guard never applies to them. The channel token stored in
+# omni_send_outcomes.channel is the bare suffix ("linkedin", "email", …), which
+# is what the guard matches a prior send on.
+_PERSON_MESSAGE_CHANNELS = frozenset(
+    {
+        "channel.email", "channel.sms", "channel.voice", "channel.linkedin",
+        "channel.whatsapp", "channel.instagram", "channel.telegram",
     }
 )
 
@@ -913,6 +930,85 @@ async def _workflow_send_controls(workspace_id: str, workflow_id: str | None) ->
     return dict(row) if row else {}
 
 
+async def _dedupe_send(
+    workspace_id: str,
+    lead: dict,
+    contact: dict | None,
+    node: dict,
+    node_type: str,
+    workflow_id: str | None,
+    correlation_id: str | None,
+) -> bool:
+    """DEDUP-SEND-001: hold a send to a contact we've already messaged.
+
+    Opt-in per node (``dedupe_action`` defaults ``off`` → returns False, no
+    behaviour change). When on, consults the durable send ledger
+    (``omni_send_outcomes``, one row per confirmed send across ALL channels) for a
+    prior ``status='sent'`` to this contact on this channel; ``dedupe_scope``
+    chooses whether to look across all campaigns (``channel``) or only this
+    workflow (``campaign``).
+
+    On a prior touch:
+      * ``skip_step`` — route the lead onward via the ``already_messaged`` handle
+        (skip THIS send, run the rest of the sequence). Unwired → ends honestly.
+      * ``end_lead``  — terminalize the lead 'ended' (never re-touch this person).
+
+    Returns True when the send was handled here (caller must return without
+    sending), False when the send may proceed. Only applies to person-addressable
+    channels; a contact-less lead (no contact_id) can't be deduped → proceeds."""
+    if node_type not in _PERSON_MESSAGE_CHANNELS:
+        return False
+    cfg = node.get("config") or {}
+    action = str(cfg.get("dedupe_action") or "off").lower()
+    if action not in ("skip_step", "end_lead"):
+        return False
+    contact_id = lead.get("contact_id") or (contact or {}).get("id")
+    if not contact_id:
+        # No contact row to dedupe against (a discovered person pre-contact) —
+        # nothing to compare a prior send to. Proceed with the send.
+        return False
+
+    channel = node_type.split(".", 1)[-1]  # "channel.linkedin" -> "linkedin"
+    scope = str(cfg.get("dedupe_scope") or "channel").lower()
+    async with system_scope():
+        if scope == "campaign" and workflow_id:
+            row = await fetch_one(
+                "SELECT 1 FROM omni_send_outcomes "
+                "WHERE workspace_id=$1 AND contact_id=$2 AND channel=$3 "
+                "AND workflow_id=$4 AND status='sent' LIMIT 1",
+                workspace_id, str(contact_id), channel, workflow_id,
+            )
+        else:
+            row = await fetch_one(
+                "SELECT 1 FROM omni_send_outcomes "
+                "WHERE workspace_id=$1 AND contact_id=$2 AND channel=$3 "
+                "AND status='sent' LIMIT 1",
+                workspace_id, str(contact_id), channel,
+            )
+    if not row:
+        return False  # never messaged on this channel — proceed.
+
+    log.info(
+        "lead %s: DEDUP-SEND-001 skip — contact %s already messaged on %s (scope=%s, action=%s)",
+        lead["id"], contact_id, channel, scope, action,
+    )
+    if action == "end_lead":
+        await _terminalize_lead(workspace_id, str(lead["id"]), "ended", correlation_id)
+        return True
+
+    # skip_step: route the already_messaged handle. Advance to the wired target if
+    # any; otherwise the lead falls off the graph here and ends honestly
+    # (_leaf_terminal_status maps already_messaged -> 'ended').
+    edge = await _outgoing_edge(workspace_id, str(node["id"]), "already_messaged")
+    if edge:
+        await _advance_and_fire(
+            workspace_id, str(lead["id"]), str(edge["target_node_id"]), correlation_id
+        )
+    else:
+        await _terminalize_lead(workspace_id, str(lead["id"]), "ended", correlation_id)
+    return True
+
+
 async def _gate_send(
     workspace_id: str,
     lead: dict,
@@ -1306,6 +1402,16 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
                     "retry_attempt": int(start_at.timestamp()),
                 },
             )
+            return
+
+        # DEDUP-SEND-001: skip a send to a contact already messaged on this
+        # channel (opt-in per node; default off). Runs BEFORE the cap/window gate
+        # and DNC — a send we're going to skip shouldn't consume a cap evaluation
+        # or a suppression query. Routes the already_messaged handle (skip_step)
+        # or terminalizes the lead (end_lead); returns True when it handled it.
+        if await _dedupe_send(
+            workspace_id, lead, contact, node, node_type, workflow_id, correlation_id
+        ):
             return
 
         # Rate-limit + business-hours gate (campaign-level). Sits between the B6

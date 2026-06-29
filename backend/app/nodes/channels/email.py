@@ -28,11 +28,12 @@ from app.nodes import (
     SideEffect,
     register,
 )
+from app.nodes.channels.dedupe import SendDedupeConfig
 
 log = logging.getLogger(__name__)
 
 
-class EmailChannelConfig(BaseModel):
+class EmailChannelConfig(SendDedupeConfig):
     connection_name: str | None = Field(None, description="Name of the email connection (configured on Settings → Integrations)")
     sending_account_id: str | None = None
     account_pool: Literal["campaign", "round_robin", "single"] | None = None
@@ -59,6 +60,9 @@ MANIFEST = NodeManifest(
     output_handles=(
         NodeHandle("sent", "Message accepted by the SMTP server"),
         NodeHandle("on_error", "Permanent send failure (invalid recipient, auth, etc.)"),
+        # DEDUP-SEND-001: this contact was already emailed (per the node's
+        # dedupe_action/scope) — the send was skipped, continue here.
+        NodeHandle("already_messaged", "Skipped — this contact was already messaged"),
     ),
     capabilities=("connection:smtp",),
     side_effect=SideEffect.NETWORK,

@@ -16,9 +16,10 @@ from app.nodes import (
     SideEffect,
     register,
 )
+from app.nodes.channels.dedupe import SendDedupeConfig
 
 
-class WhatsAppChannelConfig(BaseModel):
+class WhatsAppChannelConfig(SendDedupeConfig):
     connection_name: str | None = Field(None, description="WhatsApp connection name (Settings → Integrations)")
     sending_account_id: str | None = None
     account_pool: Literal["campaign", "round_robin", "single"] | None = None
@@ -34,6 +35,8 @@ MANIFEST = NodeManifest(
     output_handles=(
         NodeHandle("sent", "Provider accepted the message"),
         NodeHandle("on_error", "Permanent failure (no opt-in, invalid number, …)"),
+        # DEDUP-SEND-001: contact already messaged on this channel — skipped, continue here.
+        NodeHandle("already_messaged", "Skipped — this contact was already messaged"),
     ),
     capabilities=("connection:whatsapp",),
     side_effect=SideEffect.NETWORK,

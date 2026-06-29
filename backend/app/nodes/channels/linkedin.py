@@ -21,9 +21,10 @@ from app.nodes import (
     SideEffect,
     register,
 )
+from app.nodes.channels.dedupe import SendDedupeConfig
 
 
-class LinkedInChannelConfig(BaseModel):
+class LinkedInChannelConfig(SendDedupeConfig):
     connection_name: str | None = Field(None, description="Unipile connection name (Settings → Integrations)")
     sending_account_id: str | None = None
     account_pool: Literal["campaign", "round_robin", "single"] | None = None
@@ -50,6 +51,9 @@ MANIFEST = NodeManifest(
         # NOCHAT-001: a DM opened a chat but Unipile returned no chat_id — the
         # send happened but the thread can't be followed up; degraded path.
         NodeHandle("no_thread", "DM sent but no chat thread to follow up on"),
+        # DEDUP-SEND-001: this contact was already messaged on this channel (per
+        # the node's dedupe_action/scope) — the send was skipped, continue here.
+        NodeHandle("already_messaged", "Skipped — this contact was already messaged"),
     ),
     capabilities=("connection:unipile",),
     side_effect=SideEffect.NETWORK,

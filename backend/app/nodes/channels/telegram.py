@@ -16,9 +16,10 @@ from app.nodes import (
     SideEffect,
     register,
 )
+from app.nodes.channels.dedupe import SendDedupeConfig
 
 
-class TelegramChannelConfig(BaseModel):
+class TelegramChannelConfig(SendDedupeConfig):
     connection_name: str | None = Field(None, description="Telegram bot connection name (Settings → Integrations)")
     sending_account_id: str | None = None
     account_pool: Literal["campaign", "round_robin", "single"] | None = None
@@ -33,6 +34,8 @@ MANIFEST = NodeManifest(
     output_handles=(
         NodeHandle("sent", "Bot API accepted the message"),
         NodeHandle("on_error", "Permanent failure (user has not started the bot, …)"),
+        # DEDUP-SEND-001: contact already messaged on this channel — skipped, continue here.
+        NodeHandle("already_messaged", "Skipped — this contact was already messaged"),
     ),
     capabilities=("connection:telegram",),
     side_effect=SideEffect.NETWORK,

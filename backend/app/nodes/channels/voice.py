@@ -16,9 +16,10 @@ from app.nodes import (
     SideEffect,
     register,
 )
+from app.nodes.channels.dedupe import SendDedupeConfig
 
 
-class VoiceChannelConfig(BaseModel):
+class VoiceChannelConfig(SendDedupeConfig):
     connection_name: str | None = Field(None, description="Retell connection name (Settings → Integrations)")
     sending_account_id: str | None = None
     account_pool: Literal["campaign", "round_robin", "single"] | None = None
@@ -36,6 +37,8 @@ MANIFEST = NodeManifest(
     output_handles=(
         NodeHandle("placed", "Retell accepted the create-call request"),
         NodeHandle("on_error", "Permanent failure (invalid phone, no credit, agent missing)"),
+        # DEDUP-SEND-001: contact already called on this channel — skipped, continue here.
+        NodeHandle("already_messaged", "Skipped — this contact was already messaged"),
     ),
     capabilities=("connection:retell",),
     side_effect=SideEffect.NETWORK,

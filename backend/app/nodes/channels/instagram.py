@@ -16,9 +16,10 @@ from app.nodes import (
     SideEffect,
     register,
 )
+from app.nodes.channels.dedupe import SendDedupeConfig
 
 
-class InstagramChannelConfig(BaseModel):
+class InstagramChannelConfig(SendDedupeConfig):
     connection_name: str | None = Field(None, description="Instagram connection name (Settings → Integrations)")
     sending_account_id: str | None = None
     account_pool: Literal["campaign", "round_robin", "single"] | None = None
@@ -33,6 +34,8 @@ MANIFEST = NodeManifest(
     output_handles=(
         NodeHandle("sent", "Graph API accepted the DM"),
         NodeHandle("on_error", "Permanent failure (outside messaging window, no handle, …)"),
+        # DEDUP-SEND-001: contact already messaged on this channel — skipped, continue here.
+        NodeHandle("already_messaged", "Skipped — this contact was already messaged"),
     ),
     capabilities=("connection:instagram",),
     side_effect=SideEffect.NETWORK,
