@@ -53,9 +53,12 @@ def test_handle_transition_guards_terminal_leads():
     and branch on TERMINAL_STATUSES before any routing."""
     body = _func_body(TW_SRC, "handle_transition")
     # The entry fetch must read status + lineage (the barrier carve-out) before
-    # branching. workflow_id was later added for the confirmed-send rate-counter
-    # increment — additive to the same fetch, doesn't weaken the guard.
-    assert "SELECT workspace_id, status, parent_lead_id, origin_node_id, workflow_id FROM omni_leads" in body
+    # branching. workflow_id was added for the confirmed-send rate-counter
+    # increment, contact_id for DEDUP-DATA-001 (the send ledger + dedupe guard
+    # need it) — both additive to the same fetch, neither weakens the guard.
+    assert "status" in body and "parent_lead_id" in body and "origin_node_id" in body
+    assert "contact_id" in body, "DEDUP-DATA-001: entry fetch must read contact_id for the send ledger"
+    assert "FROM omni_leads WHERE id=$1" in body
     guard_at = body.find("in TERMINAL_STATUSES")
     assert guard_at != -1, "terminal-state guard missing from handle_transition"
     retry_at = body.find('handle == "__retry__"')

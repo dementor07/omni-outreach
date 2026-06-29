@@ -2171,7 +2171,12 @@ async def handle_transition(t: dict) -> None:
     # result; refuse the transition rather than acting in the echoed tenant.
     async with system_scope():
         row = await fetch_one(
-            "SELECT workspace_id, status, parent_lead_id, origin_node_id, workflow_id FROM omni_leads WHERE id=$1",
+            # DEDUP-DATA-001: contact_id MUST be selected — _emit_send_outcome reads
+            # lead_row["contact_id"] to stamp the send ledger, and DEDUP-SEND-001's
+            # guard matches prior sends on it. Omitting it wrote every outcome with a
+            # NULL contact_id, so dedupe could never find a prior send and was inert.
+            "SELECT workspace_id, status, contact_id, parent_lead_id, origin_node_id, workflow_id "
+            "FROM omni_leads WHERE id=$1",
             lead_id,
         )
     workspace_id = str(row["workspace_id"]) if row else None
