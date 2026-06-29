@@ -61,3 +61,6 @@ frontend/src/pages/_legacy/
 /plugin_architecture_*
 /sota_grid_structure.md
 /python_tutorial/
+
+# PMB local memory workspace marker (per-machine, never committed)
+.pmb/
