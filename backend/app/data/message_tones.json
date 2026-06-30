@@ -1,0 +1,1086 @@
+[
+  {
+    "tone_id": 1,
+    "tone": "Product Feature Highlight",
+    "description": "Educational, specific, capability-focused. Shows how it works and why it matters.",
+    "personality_traits": [
+      "Clear, explanatory style",
+      "Demonstrates understanding",
+      "Connects feature to benefit",
+      "Educational without being condescending",
+      "Shows rather than tells"
+    ],
+    "word_count": {
+      "min": 80,
+      "max": 130,
+      "recommended": 100,
+      "rationale": "Space for explanation and impact demonstration"
+    },
+    "opening_styles": [
+      "Feature introduction with context",
+      "Problem-solution framework",
+      "Use case scenario",
+      "Capability spotlight"
+    ],
+    "value_delivery": [
+      "Explain feature clearly",
+      "Connect to specific outcome",
+      "Use concrete examples",
+      "Show the 'how' and 'why'",
+      "Demonstrate uniqueness"
+    ],
+    "closing_approaches": [
+      "Hands-on demonstration offer",
+      "Specific example for their use case",
+      "Interactive walkthrough invitation",
+      "Trial or preview access"
+    ],
+    "followup_strategies": [
+      {
+        "approach": "complementary_feature",
+        "description": "Introduce another powerful capability",
+        "techniques": [
+          "Related feature",
+          "Integration highlight",
+          "Workflow enhancement"
+        ]
+      },
+      {
+        "approach": "use_case_deep_dive",
+        "description": "Show feature in action for their scenario",
+        "techniques": [
+          "Industry example",
+          "Role-specific application",
+          "Customer story"
+        ]
+      },
+      {
+        "approach": "technical_detail",
+        "description": "Satisfy technical curiosity",
+        "techniques": [
+          "Architecture note",
+          "Security/compliance",
+          "Integration options"
+        ]
+      }
+    ],
+    "personalization_hooks": [
+      "Current workflow challenges",
+      "Tool stack integration needs",
+      "Technical requirements",
+      "Team collaboration patterns",
+      "Scale considerations"
+    ],
+    "avoid": [
+      "Technical jargon overload",
+      "Feature without benefit",
+      "Assuming technical knowledge",
+      "Overwhelming with details",
+      "Ignoring business context"
+    ]
+  },
+  {
+    "tone_id": 2,
+    "tone": "Event Trigger-Based",
+    "description": "Feels like a sharp peer reaching out after noticing something specific. Built to spark a reply, not explain a solution. Curiosity-led, minimal, and human — never salesy or complete.",
+    "personality_traits": [
+      "Opens ONLY with a concrete, specific, verifiable trigger",
+      "Feels like a real observation that couldn't be mass-sent",
+      "Leads with curiosity, not conclusions or claims",
+      "Avoids assumptions — explores via questions instead",
+      "Keeps sentences short, slightly informal, and natural",
+      "Intentionally leaves gaps to create curiosity",
+      "Sounds like a quick note, not a structured message"
+    ],
+    "word_count": {
+      "min": 40,
+      "max": 75,
+      "recommended": 55,
+      "rationale": "Optimized for 2–3 second scanning — enough to hook, not enough to pitch"
+    },
+    "opening_styles": [
+      "Saw you {{specific, verifiable trigger}} — quick thought",
+      "Noticed you're hiring {{exact role}} — curious how you're approaching {{area}}",
+      "Came across your {{specific launch/update}} — had a quick question",
+      "Saw {{very specific event with detail}} — made me wonder something"
+    ],
+    "trigger_quality_rules": [
+      "MUST reference a specific, recent, verifiable event (funding amount, role, feature, named hire, etc.)",
+      "MUST appear in the first sentence",
+      "MUST pass: 'could this be sent to 1000 people?' → if yes, reject",
+      "MUST NOT include vague phrases like 'growing', 'scaling', 'traction'",
+      "If trigger is weak or generic → REWRITE before generating rest of email",
+      "If no valid trigger exists → DO NOT generate email"
+    ],
+    "trigger_types": [
+      "Funding round with amount/stage",
+      "Exact hiring roles or number of openings",
+      "Named leadership hire",
+      "Specific product or feature launch",
+      "Direct quote or insight from LinkedIn post",
+      "Press/news mention with detail",
+      "Expansion to specific geography or segment"
+    ],
+    "value_delivery": [
+      "Follow trigger with a QUESTION (not a statement)",
+      "Bridge trigger → possible situation lightly (no strong assumptions)",
+      "Hint at insight without explaining the solution",
+      "Limit value mention to ONE short sentence",
+      "Avoid describing product, features, or workflow",
+      "Primary goal = spark curiosity, not deliver value upfront"
+    ],
+    "anti_pitch_rules": [
+      "Do NOT mention product or company name",
+      "Do NOT include any links",
+      "Do NOT explain features, platform, or process",
+      "Do NOT include structured benefits or bullet points",
+      "Do NOT include metrics or proof unless extremely subtle",
+      "If any selling is detected before curiosity → REMOVE and REWRITE",
+      "Email must feel intentionally incomplete"
+    ],
+    "credibility_rules": [
+      "Avoid generic social proof (e.g., '200+ companies', '3x results')",
+      "Avoid bold or unverified claims",
+      "Use soft phrasing: 'we've been seeing', 'a few teams', 'some patterns'",
+      "Credibility should feel implied, not asserted"
+    ],
+    "closing_approaches": [
+      "Curiosity-led: 'Worth sharing what we're seeing?'",
+      "Exploratory: 'Curious how you're thinking about this?'",
+      "Soft offer: 'Happy to share if useful'",
+      "Timing check: 'Is this something you're looking at right now?'"
+    ],
+    "cta_rules": [
+      "Exactly ONE question in the email",
+      "Must be easy to reply to in under 5 seconds",
+      "No meeting links or scheduling asks",
+      "No 'book a demo' or calendar mentions",
+      "CTA should feel optional and low-pressure"
+    ],
+    "followup_strategies": [
+      {
+        "approach": "add_context",
+        "description": "Deepen relevance tied to the same trigger without pitching",
+        "techniques": [
+          "Share one pattern seen after similar triggers",
+          "Highlight one common mistake teams make at this stage",
+          "Add one short insight (no product mention)"
+        ]
+      },
+      {
+        "approach": "light_case",
+        "description": "Introduce proof subtly and conversationally",
+        "techniques": [
+          "Mention a similar company casually (no metrics dump)",
+          "Share a one-line before/after change",
+          "Keep tone informal and non-promotional"
+        ]
+      },
+      {
+        "approach": "breakup_soft",
+        "description": "Close loop without pressure",
+        "techniques": [
+          "Acknowledge timing or silence naturally",
+          "Offer to revisit later",
+          "Keep tone friendly and human (no guilt or push)"
+        ]
+      }
+    ],
+    "personalization_hooks": [
+      "Exact funding amount and stage",
+      "Specific open roles or hiring trends",
+      "Named leadership hires",
+      "Detailed feature or product updates",
+      "Founder or exec LinkedIn posts (with context)",
+      "Recent announcements with specific details or quotes"
+    ],
+    "avoid": [
+      "Generic triggers ('growing fast', 'scaling quickly', 'gaining traction')",
+      "Any form of pitching in first email",
+      "Product mentions or links",
+      "Multiple ideas or long explanations",
+      "Heavy claims or statistics",
+      "Assumptions about their process or problems",
+      "Corporate, buzzword-heavy, or marketing language"
+    ],
+    "example_template": {
+      "subject": "Quick thought on {{specific trigger}}",
+      "body": "Hey {{First Name}},\n\nSaw you {{specific, verifiable trigger}} — quick thought.\n\nCurious — how are you currently handling {{relevant area tied to trigger}}?\n\nWe've been noticing a few interesting patterns with teams at this stage — happy to share if useful.\n\n— {{Your Name}}"
+    },
+    "validation_checks": [
+      "Is there a specific, verifiable trigger in the FIRST sentence?",
+      "Would this opening feel unique to this company (not mass-sendable)?",
+      "Is the second line a curiosity-driven question (not a statement)?",
+      "Is there ZERO pitching, product mention, or links?",
+      "Is the email under 75 words?",
+      "Is there only ONE clear idea?",
+      "Is the CTA a low-friction reply question?"
+    ]
+  },
+  {
+    "tone_id": 3,
+    "tone": "Problem and Solution",
+    "description": "Problem-led, empathetic, and structured. Starts by highlighting a relatable pain point, then smoothly transitions into a credible solution.",
+    "personality_traits": [
+      "Leads with a clear, relevant problem statement",
+      "Feels empathetic and grounded in real-world challenges",
+      "Uses phrases like 'most teams I talk to', 'we're seeing', 'especially when'",
+      "Logical flow: problem → impact → solution",
+      "Confident but not aggressive",
+      "Sounds like a consultant, not a salesperson"
+    ],
+    "word_count": {
+      "min": 60,
+      "max": 100,
+      "recommended": 75,
+      "rationale": "Needs enough space to clearly establish the problem and connect it to a meaningful solution"
+    },
+    "opening_styles": [
+      "Common problem framing (Most {{role}} teams...)",
+      "Observation-based pain point",
+      "Industry-wide challenge",
+      "Growth-stage problem trigger"
+    ],
+    "value_delivery": [
+      "Clearly articulate a specific pain point",
+      "Show understanding of when/why the problem occurs",
+      "Introduce solution through a real example",
+      "Use one strong, measurable outcome",
+      "Keep focus on business impact, not features"
+    ],
+    "closing_approaches": [
+      "Direct CTA (Interested in a 10-min walkthrough?)",
+      "Soft consultative ask (Worth exploring how this could work for you?)",
+      "Curiosity hook (Want me to share how we approached this?)",
+      "Low-friction invite (Open to a quick chat on this?)"
+    ],
+    "followup_strategies": [
+      {
+        "approach": "problem_deepening",
+        "description": "Expand on the pain point with more context or consequences",
+        "techniques": [
+          "Highlight hidden costs of the problem",
+          "Quantify impact (time, revenue, inefficiency)",
+          "Share industry benchmark or trend"
+        ]
+      },
+      {
+        "approach": "solution_breakdown",
+        "description": "Give more clarity on how the solution works",
+        "techniques": [
+          "Share 1–2 steps from the approach",
+          "Explain what changed vs before",
+          "Keep it simple and actionable"
+        ]
+      },
+      {
+        "approach": "case_proof",
+        "description": "Strengthen credibility with a stronger example",
+        "techniques": [
+          "Add more detail to the case study",
+          "Mention timeframe to results",
+          "Compare before vs after state"
+        ]
+      }
+    ],
+    "personalization_hooks": [
+      "Role-specific pain points (sales, marketing, ops)",
+      "Growth stage indicators (hiring, expansion)",
+      "Industry-specific challenges",
+      "Recent scaling efforts",
+      "Team structure or GTM motion"
+    ],
+    "avoid": [
+      "Generic or vague problem statements",
+      "Listing multiple unrelated problems",
+      "Jumping to solution too quickly",
+      "Feature-heavy explanations",
+      "Overly long case studies",
+      "Aggressive or pushy CTAs"
+    ],
+    "example_template": {
+      "subject": "Idea for reducing {{specific problem}} at {{Company}}",
+      "body": "Hey {{First Name}},\n\nMost {{role}} teams I talk to are struggling with {{common pain}} — especially {{context like growth or scale}}.\n\nWe helped {{Similar Company}} solve this and {{specific measurable result}}.\n\nInterested in a quick walkthrough of how this could work for {{Company}}?\n\n— {{Your Name}}"
+    }
+  },
+  {
+    "tone_id": 4,
+    "tone": "Social Proof Driven",
+    "description": "Feels like a peer sharing a relevant market observation about the recipient's space. Uses industry patterns and social proof to spark curiosity — without naming competitors.",
+    "personality_traits": [
+      "Opens with an observation about the recipient's space or company",
+      "Avoids explicit competitor mentions",
+      "Sounds informed about the market, not salesy",
+      "Uses phrases like 'looks like teams in your space...', 'seeing a shift toward...'",
+      "Bridges industry insight → broader trend → relevance",
+      "Focuses on starting a discussion, not pitching"
+    ],
+    "word_count": {
+      "min": 50,
+      "max": 80,
+      "recommended": 65,
+      "rationale": "Short enough to stay conversational, long enough to connect insight to value"
+    },
+    "opening_styles": [
+      "Looks like {{Company}} is leaning into {{initiative}}",
+      "Seeing a shift in how teams like {{Company}} are approaching {{area}}",
+      "Noticed more teams in your space focusing on {{topic}}",
+      "Seems like {{industry}} teams are doubling down on {{area}} lately"
+    ],
+    "value_delivery": [
+      "Start with an industry trend or company-relevant observation",
+      "Position insight as 'what's happening in your space'",
+      "Introduce value through how similar (unnamed) companies are adapting",
+      "Include one clear outcome (e.g., reply rate lift, efficiency gain)",
+      "Keep it observational, not product-heavy"
+    ],
+    "closing_approaches": [
+      "Curiosity-based question (Curious how you're approaching this?)",
+      "Soft comparison (Worth seeing how others are handling it?)",
+      "Peer-style ask (How are you thinking about this right now?)",
+      "Low-pressure hook (Happy to share what we're seeing across similar teams)"
+    ],
+    "followup_strategies": [
+      {
+        "approach": "trend_expansion",
+        "description": "Broaden the insight beyond a single example",
+        "techniques": [
+          "Mention multiple companies or patterns without naming them",
+          "Highlight a clear market shift",
+          "Add a simple data point or observation"
+        ]
+      },
+      {
+        "approach": "comparison_angle",
+        "description": "Position your approach as an alternative",
+        "techniques": [
+          "Contrast manual vs scalable approaches",
+          "Highlight inefficiencies in current methods",
+          "Keep comparison subtle, not aggressive"
+        ]
+      },
+      {
+        "approach": "light_proof",
+        "description": "Reinforce with soft social proof",
+        "techniques": [
+          "Mention 'teams we work with' instead of naming competitors",
+          "Add one metric (e.g., 2–3x improvement)",
+          "Avoid overloading with stats"
+        ]
+      }
+    ],
+    "personalization_hooks": [
+      "Company initiatives or recent activity",
+      "Industry trends affecting their category",
+      "Role-specific challenges within their team",
+      "Growth signals (hiring, expansion, scaling)",
+      "Product or GTM motion",
+      "Public content or LinkedIn activity"
+    ],
+    "avoid": [
+      "Mentioning competitor names",
+      "Turning the email into a product pitch",
+      "Aggressive CTAs like 'book a demo'",
+      "Generic 'others are doing this' statements without context",
+      "Too many metrics or claims",
+      "Sounding vague or fabricated"
+    ]
+  },
+  {
+    "tone_id": 5,
+    "tone": "Direct Outreach",
+    "description": "Personalized, insight-driven, and grounded in the recipient's actual business context. Feels like the sender understands what the company does and where they are, not just their category.",
+    "personality_traits": [
+      "Opens with a company-specific observation (not generic industry statement)",
+      "Shows clear understanding of what the company does",
+      "Feels researched and intentional",
+      "Uses natural phrasing like 'noticed', 'saw', 'looks like'",
+      "Connects business context to a likely challenge",
+      "Sounds like a peer who has done their homework"
+    ],
+    "word_count": {
+      "min": 50,
+      "max": 90,
+      "recommended": 65,
+      "rationale": "Enough to establish context + value while staying concise and readable"
+    },
+    "opening_styles": [
+      "Noticed {{Company}} is {{specific business context}}",
+      "Saw you're {{specific activity: hiring / launching / growing}}",
+      "Looks like {{Company}} is focused on {{product / market / motion}}",
+      "Came across {{Company}}'s {{product / feature / positioning}}"
+    ],
+    "value_delivery": [
+      "Tie the company's specific context to a likely challenge",
+      "Show understanding of their growth stage or GTM motion",
+      "Introduce solution through a relevant example",
+      "Use one strong, measurable outcome",
+      "Keep it focused and contextual — not generic"
+    ],
+    "closing_approaches": [
+      "Soft curiosity hook (Worth sharing what worked?)",
+      "Relevance check (Does this sound familiar?)",
+      "Low-pressure ask (Happy to walk you through it)",
+      "Peer-style CTA (Curious how you're approaching this?)"
+    ],
+    "followup_strategies": [
+      {
+        "approach": "context_expansion",
+        "description": "Deepen the business-specific insight",
+        "techniques": [
+          "Add another observation about their product or GTM",
+          "Reference hiring or team structure",
+          "Highlight a likely bottleneck at their stage"
+        ]
+      },
+      {
+        "approach": "case_alignment",
+        "description": "Strengthen similarity with proof",
+        "techniques": [
+          "Use a closer comparable company",
+          "Explain why the situation was similar",
+          "Add timeline or scale context"
+        ]
+      },
+      {
+        "approach": "light_nudge",
+        "description": "Follow up without losing personalization",
+        "techniques": [
+          "Re-reference the original observation",
+          "Keep it short and natural",
+          "Avoid adding generic content"
+        ]
+      }
+    ],
+    "personalization_hooks": [
+      "What the company actually does (product/category)",
+      "Growth signals (hiring, traction, expansion)",
+      "GTM motion (PLG, outbound, inbound)",
+      "Recent launches or features",
+      "Website positioning or messaging",
+      "Founder or team activity on LinkedIn",
+      "Target audience or ICP clues"
+    ],
+    "avoid": [
+      "Generic phrases like 'companies like yours'",
+      "Only industry-level personalization",
+      "Vague statements like 'you seem to be growing'",
+      "Copy-paste sounding observations",
+      "Multiple disconnected ideas",
+      "Jumping to pitch without context"
+    ],
+    "example_template": {
+      "subject": "Quick thought on {{Company}}",
+      "body": "Hey {{First Name}},\n\nNoticed {{Company}} is {{specific business context}} — at this stage, teams often run into {{relevant challenge tied to that context}}.\n\nWe worked with a similar company and helped them {{specific result}}.\n\nWorth sharing what worked?\n\n— {{Your Name}}"
+    }
+  },
+  {
+    "tone_id": 6,
+    "tone": "Reverse Pitch",
+    "description": "Honest, slightly contrarian, and non-pushy. Creates intrigue by downplaying fit, which lowers resistance and builds trust.",
+    "personality_traits": [
+      "Opens with uncertainty or disqualification",
+      "Feels honest and transparent",
+      "Uses phrases like 'not sure we're a fit', 'might be off here'",
+      "Removes pressure instead of pushing a pitch",
+      "Calm, confident, and respectful tone",
+      "Sounds like a peer, not a salesperson"
+    ],
+    "word_count": {
+      "min": 40,
+      "max": 80,
+      "recommended": 60,
+      "rationale": "Short enough to feel effortless, but allows space to explain positioning and intent"
+    },
+    "opening_styles": [
+      "Not sure we're a fit for {{Company}}",
+      "Might be off here —",
+      "Not certain this is relevant for you",
+      "We may not be the right solution for {{Company}}"
+    ],
+    "value_delivery": [
+      "Clearly define who you typically help",
+      "State the problem you solve in simple terms",
+      "Let the reader self-qualify",
+      "Avoid explaining the full solution",
+      "Position through relevance, not persuasion"
+    ],
+    "closing_approaches": [
+      "Low-pressure offer (Happy to share more if relevant)",
+      "Open-ended (If this is something you're exploring...)",
+      "Graceful exit (If not, no worries at all)",
+      "Soft curiosity (Let me know either way)"
+    ],
+    "followup_strategies": [
+      {
+        "approach": "gentle_checkin",
+        "description": "Follow up without breaking the low-pressure tone",
+        "techniques": [
+          "Reiterate uncertainty about fit",
+          "Keep it short and neutral",
+          "Avoid adding urgency"
+        ]
+      },
+      {
+        "approach": "clarify_fit",
+        "description": "Help the prospect self-identify relevance",
+        "techniques": [
+          "Expand slightly on ideal customer profile",
+          "Mention 1–2 scenarios where it works best",
+          "Keep tone informative, not persuasive"
+        ]
+      },
+      {
+        "approach": "light_close",
+        "description": "Gracefully close the loop",
+        "techniques": [
+          "Acknowledge no response respectfully",
+          "Offer to reconnect later",
+          "Leave door open without pressure"
+        ]
+      }
+    ],
+    "personalization_hooks": [
+      "Company type or segment",
+      "Growth stage or scale",
+      "Team structure (sales/marketing)",
+      "Observed GTM motion",
+      "Product category or use case",
+      "Recent activity or direction"
+    ],
+    "avoid": [
+      "Sounding passive or unsure of your value",
+      "Over-explaining your product",
+      "Adding urgency or pressure",
+      "Contradicting the low-pressure tone",
+      "Generic statements without context",
+      "Turning it into a hidden pitch"
+    ],
+    "example_template": {
+      "subject": "Not sure we're a fit",
+      "body": "Hey {{First Name}},\n\nNot sure we're the right fit for {{Company}} —\n\nWe typically help {{specific type of company}} with {{problem}}.\n\nIf this is something you're exploring, happy to share more.\n\nIf not, no worries at all.\n\n— {{Your Name}}"
+    }
+  },
+  {
+    "tone_id": 7,
+    "tone": "Analytical Insights",
+    "description": "Data-driven and contextual. Combines a strong statistic with clear understanding of the recipient's business, making the insight feel directly applicable.",
+    "personality_traits": [
+      "Opens with a compelling data point",
+      "Connects the stat to the company's specific context",
+      "Feels research-backed and tailored",
+      "Uses phrases like 'given what you're doing', 'at your stage', 'in your space'",
+      "Logical flow: data → relevance → proof",
+      "Encourages self-reflection without pressure"
+    ],
+    "word_count": {
+      "min": 70,
+      "max": 110,
+      "recommended": 85,
+      "rationale": "Allows space to introduce the stat, connect it to their business, and establish relevance"
+    },
+    "opening_styles": [
+      "{{X%}} of {{industry}} teams miss this",
+      "We analyzed {{industry}} companies and found...",
+      "{{X%}} of companies like {{Company}} are losing...",
+      "Interesting stat — especially relevant for {{Company}}..."
+    ],
+    "value_delivery": [
+      "Lead with a clear, relevant data point",
+      "Explicitly connect the stat to the company's product, stage, or GTM motion",
+      "Explain why this issue likely applies to them",
+      "Introduce proof via a similar company example",
+      "Focus on measurable business impact"
+    ],
+    "closing_approaches": [
+      "Self-diagnosis question (Curious if this is happening at {{Company}} too?)",
+      "Relevance check (Does this align with what you're seeing?)",
+      "Curiosity hook (Worth taking a quick look together?)",
+      "Low-pressure ask (Happy to share how this played out for a similar team)"
+    ],
+    "followup_strategies": [
+      {
+        "approach": "relevance_expansion",
+        "description": "Deepen why the stat applies specifically to them",
+        "techniques": [
+          "Reference their product or GTM motion again",
+          "Highlight a likely bottleneck based on their stage",
+          "Tie stat to their team structure or goals"
+        ]
+      },
+      {
+        "approach": "benchmarking",
+        "description": "Help them compare themselves to peers",
+        "techniques": [
+          "Share what top performers do differently",
+          "Highlight gap vs industry average",
+          "Frame opportunity cost clearly"
+        ]
+      },
+      {
+        "approach": "case_proof",
+        "description": "Reinforce with real-world example",
+        "techniques": [
+          "Expand on similar company example",
+          "Add timeframe and scale",
+          "Show before vs after results"
+        ]
+      }
+    ],
+    "personalization_hooks": [
+      "What the company actually does (product/category)",
+      "Growth stage (early traction, scaling, enterprise)",
+      "GTM motion (PLG, outbound, inbound)",
+      "Role-specific KPIs",
+      "Industry benchmarks relevant to them",
+      "Recent company activity (launch, hiring, expansion)"
+    ],
+    "avoid": [
+      "Generic stats without context",
+      "Failing to explain why the stat matters to them",
+      "Overloading with multiple data points",
+      "Sounding like a generic report",
+      "Unverifiable or exaggerated claims",
+      "Disconnect between stat and company context"
+    ],
+    "example_template": {
+      "subject": "{{X%}} of {{industry}} teams miss this",
+      "body": "Hey {{First Name}},\n\n{{X%}} of {{industry}} companies we analyzed are losing {{specific metric}} due to {{problem}}.\n\nGiven {{Company}} is {{specific business context}}, this usually shows up as {{relevant impact tied to them}}.\n\nWe helped {{Similar Company}} fix this and saw {{result}} within {{timeframe}}.\n\nCurious if this is happening at {{Company}} too?\n\n— {{Your Name}}"
+    }
+  },
+  {
+    "tone_id": 8,
+    "tone": "Consultative Outreach",
+    "description": "Highly tailored and observation-driven. Feels like a quick expert audit of the company with clear understanding of their business and why specific improvements matter to them.",
+    "personality_traits": [
+      "Opens with clear indication of research ('took a look at {{Company}}')",
+      "Highlights specific, tangible observations",
+      "Feels thoughtful and tailored, not templated",
+      "Uses concise bullet-style insights",
+      "Connects observations to business impact",
+      "Sounds like a consultant offering value upfront"
+    ],
+    "word_count": {
+      "min": 80,
+      "max": 130,
+      "recommended": 100,
+      "rationale": "Needs space to show multiple observations, explain relevance, and build credibility"
+    },
+    "opening_styles": [
+      "Took a quick look at {{Company}} and noticed:",
+      "Spent a couple of minutes going through {{Company}}'s {{site/product}}",
+      "Had a look at {{Company}}'s {{flow/page}} — a couple of things stood out:",
+      "Quick audit of {{Company}} — noticed a few opportunities:"
+    ],
+    "value_delivery": [
+      "Call out 1–2 highly specific observations",
+      "Tie each observation to a clear business impact",
+      "Explain why this matters given their product, stage, or GTM motion",
+      "Show understanding of their positioning or audience",
+      "Support with a relevant example and measurable result",
+      "Keep insights practical and actionable"
+    ],
+    "closing_approaches": [
+      "Consultative ask (Want me to share what I'd do here?)",
+      "Curiosity hook (Happy to walk through how I'd approach this)",
+      "Low-pressure offer (Can share a quick teardown if useful)",
+      "Peer-style CTA (Worth a quick look together?)"
+    ],
+    "followup_strategies": [
+      {
+        "approach": "deeper_audit",
+        "description": "Expand on the initial observations",
+        "techniques": [
+          "Add 1–2 more specific insights",
+          "Break down impact of each issue",
+          "Prioritize what to fix first"
+        ]
+      },
+      {
+        "approach": "quick_fix",
+        "description": "Give actionable value upfront",
+        "techniques": [
+          "Suggest a simple change they can implement",
+          "Show before vs after idea",
+          "Keep it tactical and easy to apply"
+        ]
+      },
+      {
+        "approach": "case_alignment",
+        "description": "Strengthen credibility with similar example",
+        "techniques": [
+          "Reference a closely matched company",
+          "Explain similarity in context",
+          "Highlight measurable outcome"
+        ]
+      }
+    ],
+    "personalization_hooks": [
+      "Specific website pages (homepage, pricing, onboarding)",
+      "Product positioning or messaging",
+      "Conversion flows (signup, checkout, demo booking)",
+      "Target audience or ICP clues",
+      "GTM motion (PLG, sales-led, hybrid)",
+      "UX/UI or friction points",
+      "Recent launches or feature updates"
+    ],
+    "avoid": [
+      "Generic or vague observations",
+      "Too many points (keep it to 1–2 strong insights)",
+      "Overly critical tone",
+      "Technical jargon",
+      "Long explanations",
+      "Sounding like a generic audit report"
+    ],
+    "example_template": {
+      "subject": "2 quick ideas for {{Company}}",
+      "body": "Hey {{First Name}},\n\nTook a couple of minutes to look at {{Company}} — given you're {{specific business context}}, a couple of things stood out:\n\n1. {{Specific observation}} → this could be impacting {{relevant metric/outcome}}\n2. {{Specific gap/opportunity}} → especially important since {{why this matters to their stage/product}}\n\nWe've fixed similar things for {{Similar Company}} and saw {{result}}.\n\nHappy to share exactly what I'd do here if useful.\n\n— {{Your Name}}"
+    }
+  },
+  {
+    "tone_id": 9,
+    "tone": "Fresh Perspective",
+    "description": "Challenges conventional thinking while showing clear understanding of the company's context. Feels like a strategic insight tailored to their situation, not a generic opinion.",
+    "personality_traits": [
+      "Opens with a widely accepted belief or approach",
+      "Introduces a thoughtful contradiction",
+      "Feels confident but not provocative for the sake of it",
+      "Connects insight directly to the company's context",
+      "Uses phrases like 'most teams', 'we're seeing', 'in your space'",
+      "Sounds like a strategic peer or advisor"
+    ],
+    "word_count": {
+      "min": 70,
+      "max": 110,
+      "recommended": 85,
+      "rationale": "Needs space to establish the common belief, introduce the contrarian view, and connect it to the company"
+    },
+    "opening_styles": [
+      "Most {{role}} teams try to fix {{problem}} by {{common approach}}",
+      "Common thinking in {{industry}} is to {{approach}}",
+      "Most teams at your stage focus on {{approach}}",
+      "The usual way to solve {{problem}} is {{approach}}"
+    ],
+    "value_delivery": [
+      "Start with a familiar or widely accepted approach",
+      "Introduce a clear contrarian perspective",
+      "Tie the insight to the company's product, stage, or GTM motion",
+      "Explain why the common approach may not work for them specifically",
+      "Support with a real example and measurable outcome",
+      "Position the alternative as a smarter path"
+    ],
+    "closing_approaches": [
+      "Curiosity hook (Want me to share what we changed?)",
+      "Insight-driven ask (Happy to walk you through what's working instead)",
+      "Soft CTA (Worth exploring if this applies to {{Company}}?)",
+      "Peer-level question (Curious how you're approaching this today?)"
+    ],
+    "followup_strategies": [
+      {
+        "approach": "insight_expansion",
+        "description": "Deepen the contrarian perspective",
+        "techniques": [
+          "Explain why the common approach fails",
+          "Highlight hidden inefficiencies",
+          "Share pattern across similar companies"
+        ]
+      },
+      {
+        "approach": "relevance_focus",
+        "description": "Strengthen why this applies specifically to them",
+        "techniques": [
+          "Reference their product or GTM motion again",
+          "Tie insight to their growth stage",
+          "Highlight a likely bottleneck unique to them"
+        ]
+      },
+      {
+        "approach": "case_proof",
+        "description": "Reinforce with a strong example",
+        "techniques": [
+          "Expand on similar company case",
+          "Show before vs after",
+          "Add timeline and measurable results"
+        ]
+      }
+    ],
+    "personalization_hooks": [
+      "Company's product or category",
+      "Growth stage (early, scaling, enterprise)",
+      "GTM motion (PLG, outbound, inbound)",
+      "Role-specific priorities (sales, marketing, growth)",
+      "Recent initiatives or changes",
+      "Market positioning or audience"
+    ],
+    "avoid": [
+      "Being controversial without substance",
+      "Generic contrarian statements",
+      "Not connecting the insight to the company",
+      "Overly aggressive tone",
+      "Multiple conflicting ideas",
+      "Lack of proof or credibility"
+    ],
+    "example_template": {
+      "subject": "Most teams get this wrong",
+      "body": "Hey {{First Name}},\n\nMost {{role}} teams try to fix {{problem}} by {{common approach}} —\n\nBut from what I've seen, especially with {{Company}} being {{specific business context}}, that approach often leads to {{specific limitation or bottleneck}}.\n\nWe're seeing the opposite work better.\n\nWe helped {{Similar Company}} achieve {{result}} by doing {{unexpected approach}}.\n\nWant me to share what we changed and why it worked in a setup like yours?\n\n— {{Your Name}}"
+    }
+  },
+  {
+    "tone_id": 10,
+    "tone": "Curiosity-Driven",
+    "description": "Light, intrigue-driven, and minimally revealing. Uses a specific observation about the company to create a curiosity gap while making the idea feel personally relevant.",
+    "personality_traits": [
+      "Opens with a soft, thoughtful observation",
+      "Creates curiosity without revealing the full idea",
+      "Feels personal and lightly speculative",
+      "Uses phrases like 'had a quick thought', 'might be wrong', 'not sure if this applies'",
+      "Avoids sounding like a pitch",
+      "Feels like a peer sharing an idea, not selling"
+    ],
+    "word_count": {
+      "min": 50,
+      "max": 90,
+      "recommended": 65,
+      "rationale": "Enough to establish context and intrigue, without over-explaining the idea"
+    },
+    "opening_styles": [
+      "Had a quick thought about {{Company}}'s {{area}}",
+      "Was looking at {{Company}}'s {{specific area}} — quick idea",
+      "Might be off, but something stood out about {{Company}}'s {{area}}",
+      "Quick thought — especially given {{Company}} is {{specific context}}"
+    ],
+    "value_delivery": [
+      "Anchor the idea in a specific company context (product, flow, GTM)",
+      "Hint at a clear benefit or improvement",
+      "Explain why this likely matters for their stage or setup",
+      "Keep the actual solution partially hidden",
+      "Focus on outcome, not mechanism"
+    ],
+    "closing_approaches": [
+      "Permission-based (Worth sharing?)",
+      "Curiosity hook (Want me to send over the idea?)",
+      "Soft ask (Happy to share if useful)",
+      "Low-pressure check (Does this sound relevant?)"
+    ],
+    "followup_strategies": [
+      {
+        "approach": "reveal_partial",
+        "description": "Reveal part of the idea while maintaining curiosity",
+        "techniques": [
+          "Share one element of the tweak",
+          "Keep implementation vague",
+          "Maintain intrigue for next step"
+        ]
+      },
+      {
+        "approach": "context_reinforcement",
+        "description": "Re-emphasize why this applies specifically to them",
+        "techniques": [
+          "Reference their product or flow again",
+          "Highlight a likely inefficiency",
+          "Tie back to their growth stage"
+        ]
+      },
+      {
+        "approach": "light_nudge",
+        "description": "Follow up without breaking tone",
+        "techniques": [
+          "Keep it very short",
+          "Restate curiosity angle",
+          "Avoid adding pressure or pitch"
+        ]
+      }
+    ],
+    "personalization_hooks": [
+      "Specific product or feature area",
+      "User flow (signup, onboarding, checkout)",
+      "GTM motion (PLG, outbound, inbound)",
+      "Conversion points or friction areas",
+      "Target audience or ICP",
+      "Recent changes or launches",
+      "Website or UX observations"
+    ],
+    "avoid": [
+      "Revealing the full solution upfront",
+      "Generic or vague observations",
+      "Sounding like a hidden pitch",
+      "Over-explaining the idea",
+      "Multiple ideas in one email",
+      "Aggressive or direct CTAs"
+    ],
+    "example_template": {
+      "subject": "Quick idea (might be wrong)",
+      "body": "Hey {{First Name}},\n\nHad a quick thought about {{Company}}'s {{area}} — given you're {{specific business context}}, there's usually a small tweak that can improve {{relevant metric}} without adding headcount.\n\nWe've seen similar setups benefit from this.\n\nNot sure if it applies here, but worth sharing?\n\n— {{Your Name}}"
+    }
+  },
+  {
+    "tone_id": 11,
+    "tone": "Stakeholder Routing",
+    "description": "Light, respectful, and low-friction. Designed to identify the right contact while showing enough understanding of the company to feel intentional, not random.",
+    "personality_traits": [
+      "Opens with humility ('might be off here')",
+      "Feels non-intrusive and respectful of time",
+      "Uses simple, direct language",
+      "Subtly shows awareness of the company's context",
+      "Avoids sounding like a pitch",
+      "Easy to reply to or forward internally"
+    ],
+    "word_count": {
+      "min": 30,
+      "max": 70,
+      "recommended": 45,
+      "rationale": "Short enough to feel effortless, while allowing a hint of relevance and context"
+    },
+    "opening_styles": [
+      "Might be off here —",
+      "Quick one —",
+      "Not sure if you're the right person for this —",
+      "Apologies if this isn't your area —"
+    ],
+    "value_delivery": [
+      "Briefly reference the company's context or area of focus",
+      "Mention the relevant problem or function clearly",
+      "Subtly indicate why this area matters for them",
+      "Avoid pitching the solution at this stage",
+      "Keep it focused on identifying ownership"
+    ],
+    "closing_approaches": [
+      "Direct redirect ask (Could you point me to the right person?)",
+      "Polite ask (Would you mind redirecting me?)",
+      "Soft close (Appreciate any guidance here)",
+      "Gratitude-based close (Thanks in advance!)"
+    ],
+    "followup_strategies": [
+      {
+        "approach": "gentle_nudge",
+        "description": "Follow up without adding pressure",
+        "techniques": [
+          "Keep it under 20–25 words",
+          "Restate the ask simply",
+          "Avoid adding new information"
+        ]
+      },
+      {
+        "approach": "add_context",
+        "description": "Add slight clarity to improve redirection",
+        "techniques": [
+          "Clarify the problem area more specifically",
+          "Mention a use case briefly",
+          "Keep it concise and relevant"
+        ]
+      },
+      {
+        "approach": "dual_path",
+        "description": "Allow both redirect or direct engagement",
+        "techniques": [
+          "Ask if they handle it or know who does",
+          "Keep tone flexible",
+          "Avoid forcing either path"
+        ]
+      }
+    ],
+    "personalization_hooks": [
+      "Company's product or focus area",
+      "Relevant function (sales, marketing, growth, ops)",
+      "GTM motion or business model",
+      "Recent activity (hiring, scaling, launches)",
+      "Team structure hints",
+      "Industry-specific function ownership"
+    ],
+    "avoid": [
+      "Sounding like a mass email",
+      "Jumping into a pitch",
+      "Being too vague about the area",
+      "Adding multiple asks",
+      "Over-explaining context",
+      "Sounding demanding or entitled"
+    ],
+    "example_template": {
+      "subject": "Wrong person?",
+      "body": "Hey {{First Name}},\n\nMight be off here — given {{Company}} is {{specific business context}}, I was trying to reach the person handling {{problem / area}}.\n\nAre you the right person for this, or could you point me in the right direction?\n\nThanks!\n{{Your Name}}"
+    }
+  },
+  {
+    "tone_id": 12,
+    "tone": "Permission Based",
+    "description": "Soft, permission-driven, and non-intrusive. Shows clear understanding of the company's business and asks for consent before sharing more, making the message feel relevant and thoughtful rather than salesy.",
+    "personality_traits": [
+      "Opens with humility ('not sure if this is relevant')",
+      "Includes a company-specific observation early",
+      "Feels like a thoughtful note, not a pitch",
+      "Uses natural phrasing like 'given what you're doing', 'at your stage'",
+      "Avoids over-explaining or selling",
+      "Sounds like a peer asking permission, not pushing a product"
+    ],
+    "word_count": {
+      "min": 50,
+      "max": 80,
+      "recommended": 65,
+      "rationale": "Enough to establish relevance and context while keeping it light and easy to read"
+    },
+    "opening_styles": [
+      "Not sure if this is relevant — but given {{Company}} is {{specific business context}}",
+      "Might be off here — but noticed {{Company}} is {{specific activity/context}}",
+      "Quick one — given what {{Company}} is doing around {{area}}",
+      "Not sure if this applies, but with {{Company}} focused on {{context}}"
+    ],
+    "value_delivery": [
+      "Briefly connect to the company's product, stage, or GTM motion",
+      "Explain why the problem is likely relevant to them",
+      "Use only one proof point (no stacking)",
+      "Avoid mentioning product features or details",
+      "Focus on outcome, not explanation"
+    ],
+    "closing_approaches": [
+      "Permission ask (Worth sharing what worked?)",
+      "Soft opt-in (Want me to send over a quick breakdown?)",
+      "Low-pressure check (Happy to share if useful)",
+      "Curiosity-led ask (Should I send this over?)"
+    ],
+    "followup_strategies": [
+      {
+        "approach": "gentle_reminder",
+        "description": "Follow up without increasing pressure",
+        "techniques": [
+          "Restate the ask in fewer words",
+          "Keep it under 25–30 words",
+          "Avoid introducing new claims"
+        ]
+      },
+      {
+        "approach": "context_reinforcement",
+        "description": "Reinforce why this applies to them",
+        "techniques": [
+          "Reference their business context again",
+          "Mention a likely bottleneck",
+          "Keep it short and specific"
+        ]
+      },
+      {
+        "approach": "light_value_tease",
+        "description": "Add curiosity without turning into a pitch",
+        "techniques": [
+          "Hint at one insight or change",
+          "Avoid full explanation",
+          "Maintain permission-based tone"
+        ]
+      }
+    ],
+    "personalization_hooks": [
+      "What the company actually does (product/category)",
+      "Growth signals (hiring, traction, expansion)",
+      "GTM motion (PLG, outbound, inbound)",
+      "Specific area (onboarding, outbound, conversion)",
+      "Recent company activity",
+      "Target audience or ICP"
+    ],
+    "avoid": [
+      "Generic phrases like 'companies like yours'",
+      "Adding product descriptions in the first email",
+      "Including links or demo CTAs",
+      "Multiple proof points or claims",
+      "Over-explaining the solution",
+      "Turning permission email into a pitch"
+    ]
+  }
+]

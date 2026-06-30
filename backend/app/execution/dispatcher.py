@@ -51,6 +51,43 @@ def _is_intent(event_type: str) -> bool:
     return event_type.endswith(_INTENT_SUFFIXES)
 
 
+async def _resolve_tone_into_payload(workspace_id: str, command_payload: dict) -> None:
+    """TONE-PRESET-001: resolve an ai.compose tone_id into a rich system prompt.
+
+    Loads the preset (a workspace-custom tone wins over the global builtin of the
+    same tone_id), renders its spec into prompt instructions via the pure
+    tone_prompt builder, and stamps `tone_instructions` + a tone-aware `max_words`
+    into the command payload. The Rust muscle uses `tone_instructions` verbatim.
+    Best-effort: any failure leaves the payload untouched so compose still runs on
+    the flat `tone` (never wedge a send over a tone lookup)."""
+    from app.services import tone_prompt
+
+    tone_id = command_payload.get("tone_id")
+    try:
+        async with system_scope():
+            row = await fetch_one(
+                # workspace-custom first (ORDER puts a non-null workspace_id ahead),
+                # else the global builtin. RLS already scopes visibility.
+                "SELECT spec FROM omni_message_tones "
+                "WHERE tone_id=$1 AND (workspace_id=$2 OR workspace_id IS NULL) "
+                "ORDER BY workspace_id NULLS LAST LIMIT 1",
+                int(tone_id),
+                workspace_id,
+            )
+        if not row or not row.get("spec"):
+            log.warning("tone_id=%s not found; compose falls back to flat tone", tone_id)
+            return
+        spec = row["spec"]
+        if isinstance(spec, str):
+            spec = json.loads(spec)
+        channel = command_payload.get("channel") or "email"
+        command_payload["tone_instructions"] = tone_prompt.build_tone_system_prompt(spec, channel)
+        recommended, maximum = tone_prompt.word_count_bounds(spec, fallback=int(command_payload.get("max_words") or 120))
+        command_payload["max_words"] = maximum
+    except Exception:  # noqa: BLE001 — never wedge a compose over a tone lookup
+        log.exception("failed resolving tone_id=%s; compose falls back to flat tone", tone_id)
+
+
 async def _resolve_node(workspace_id: str, node_id: str) -> dict | None:
     async with system_scope():
         return await fetch_one(
@@ -173,6 +210,16 @@ async def handle_event(env: dict) -> None:
             lead_id or str(node_id),
         )
     synthetic_lead = lead or {"id": lead_id or str(node_id), "workflow_id": payload.get("workflow_id")}
+
+    # TONE-PRESET-001: an ai.compose with a tone_id gets its preset resolved HERE
+    # (Python side, with DB access) into a rich system prompt, because the Rust
+    # muscle is a stateless executor and can't load the preset itself. Stamp
+    # `tone_instructions` (+ a tone-aware max_words ceiling) into the payload; the
+    # muscle uses it verbatim, else falls back to the flat `tone` string. No
+    # tone_id → unchanged (backward-compatible).
+    if channel == ChannelType.AI_COMPOSE and command_payload.get("tone_id"):
+        await _resolve_tone_into_payload(workspace_id, command_payload)
+
     command = await commands.build_command(
         workspace_id=workspace_id,
         channel=channel,

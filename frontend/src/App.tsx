@@ -25,6 +25,7 @@ import AiStudio from './pages/AiStudio'
 import Integrations from './pages/Integrations'
 import LeadSources from './pages/LeadSources'
 import Templates from './pages/Templates'
+import Tones from './pages/Tones'
 import Blacklist from './pages/Blacklist'
 import Deliverability from './pages/Deliverability'
 import Settings from './pages/Settings'
@@ -73,6 +74,7 @@ export default function App() {
         <Route path="/integrations" element={<Integrations />} />
         <Route path="/lead-sources" element={<LeadSources />} />
         <Route path="/templates" element={<Templates />} />
+        <Route path="/tones" element={<Tones />} />
         <Route path="/blacklist" element={<Blacklist />} />
         <Route path="/deliverability" element={<Deliverability />} />
         <Route path="/settings" element={<Settings />} />

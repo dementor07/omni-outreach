@@ -117,11 +117,25 @@ pub async fn handle_ai_compose(command: &ActionCommand) -> ExecutionResult {
         Ok(k) => k,
         Err(e) => return common::fail(command, e, true),
     };
-    let system = format!(
-        "You write {tone} outbound {channel} messages for B2B outreach. \
-         Output is the message body only — no subject lines, no signatures, no preamble. \
-         Keep it under {max_words} words. Reference the lead's facts only if they are present and relevant."
-    );
+    // TONE-PRESET-001: when the dispatcher resolved a tone preset it stamps
+    // `tone_instructions` — a rich, structured system prompt (voice, word-count
+    // rules, opening styles, avoid/anti-pitch rules). Use it verbatim. Absent
+    // (no tone_id / legacy graph), fall back to the flat one-liner from `tone`.
+    let tone_instructions = command
+        .payload
+        .get("tone_instructions")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+    let system = match tone_instructions {
+        Some(rich) => format!(
+            "{rich}\n\nReference the lead's facts only if they are present and relevant."
+        ),
+        None => format!(
+            "You write {tone} outbound {channel} messages for B2B outreach. \
+             Output is the message body only — no subject lines, no signatures, no preamble. \
+             Keep it under {max_words} words. Reference the lead's facts only if they are present and relevant."
+        ),
+    };
 
     let facts = json!({
         "first_name": command.lead.first_name,

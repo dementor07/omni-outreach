@@ -40,6 +40,7 @@ from app.routers import (
     sources,
     suppression,
     templates,
+    tones,
     tracking,
     webhooks_in,
     workspaces,
@@ -149,6 +150,7 @@ app.include_router(approvals.router, prefix="/approvals", tags=["approvals"])
 app.include_router(suppression.router, prefix="/suppression", tags=["suppression"])
 app.include_router(deliverability.router, prefix="/deliverability", tags=["deliverability"])
 app.include_router(templates.router, prefix="/templates", tags=["templates"])
+app.include_router(tones.router, prefix="/tones", tags=["tones"])
 app.include_router(objectives.router, prefix="/objectives", tags=["objectives"])
 
 # Inbound webhooks (source.webhook_in runtime). UNAUTHENTICATED by design —

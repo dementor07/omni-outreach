@@ -164,6 +164,42 @@ export const templates = {
   remove: (id: UUID) => api.delete<void>(`/templates/${id}`).then(() => undefined),
 }
 
+// ── Message tone presets (TONE-PRESET-001) ───────────────────────────────────
+export interface ToneWordCount {
+  min?: number
+  max?: number
+  recommended?: number
+  rationale?: string
+}
+
+export interface ToneSpec {
+  tone_id: number
+  tone: string
+  description?: string
+  personality_traits?: string[]
+  word_count?: ToneWordCount
+  opening_styles?: string[]
+  value_delivery?: string[]
+  closing_approaches?: string[]
+  personalization_hooks?: string[]
+  avoid?: string[]
+  example_template?: { subject?: string; body?: string }
+  [key: string]: unknown
+}
+
+export interface Tone {
+  tone_id: number
+  tone: string
+  description: string
+  spec: ToneSpec
+  is_builtin: boolean
+}
+
+export const tones = {
+  list: () => api.get<Tone[]>('/tones').then((r) => r.data),
+  get: (toneId: number) => api.get<Tone>(`/tones/${toneId}`).then((r) => r.data),
+}
+
 // ── Campaign objectives (the goal a workflow pursues) ─────────────────────────
 // Mirrors backend/app/routers/objectives.py. One objective per workflow; the
 // objective_controller widens the audience + re-runs until reached or the
@@ -494,6 +530,8 @@ export interface MessageStepSpec {
   // (the body becomes the generated {{ai_draft}}). Not valid on voice or invite.
   ai_compose?: string | null
   ai_tone?: 'professional' | 'casual' | 'warm' | 'direct'
+  // TONE-PRESET-001: a structured tone preset (GET /tones); overrides ai_tone.
+  ai_tone_id?: number | null
 }
 
 export interface CompanyScreeningSpec {

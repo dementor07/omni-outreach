@@ -127,7 +127,12 @@ class MessageStepSpec(BaseModel):
         ),
     )
     ai_tone: Literal["professional", "casual", "warm", "direct"] = Field(
-        "professional", description="Tone for the ai_compose draft (only used when ai_compose is set)."
+        "professional", description="Flat tone for the ai_compose draft (used when ai_tone_id is not set)."
+    )
+    # TONE-PRESET-001: pick one of the structured tone presets (GET /tones).
+    # Overrides ai_tone — the dispatcher resolves the preset's full instructions.
+    ai_tone_id: int | None = Field(
+        None, description="Tone preset id for the ai_compose draft; overrides ai_tone when set."
     )
     delay_after: dict[str, Any] | None = Field(
         None,
@@ -478,6 +483,7 @@ def _append_message_sequence(
                 "instruction": message.ai_compose,
                 "channel": message.channel if message.channel in ("email", "linkedin", "sms", "whatsapp") else "email",
                 "tone": message.ai_tone,
+                "tone_id": message.ai_tone_id,
                 "target_variable": "ai_draft",
             })
             add_edge(compose_key, message_key, "default")

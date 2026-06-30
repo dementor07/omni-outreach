@@ -51,6 +51,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/integrations', label: 'Integrations', icon: Plug },
       { to: '/lead-sources', label: 'Lead Sources', icon: Database },
       { to: '/templates', label: 'Templates', icon: FileText },
+      { to: '/tones', label: 'Tones', icon: Sparkles },
       { to: '/blacklist', label: 'Blacklist', icon: ShieldOff },
       { to: '/deliverability', label: 'Deliverability', icon: ShieldCheck },
     ],
