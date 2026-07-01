@@ -70,6 +70,7 @@ const NODE_LABELS: Record<string, string> = {
   'channel.telegram': 'Telegram message',
   'channel.slack': 'Slack message',
   'channel.webhook_out': 'Outbound webhook',
+  'channel.n8n': 'n8n workflow',
 
   // Conditions
   'condition.company_filter': 'Filter companies',

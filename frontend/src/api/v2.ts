@@ -1082,3 +1082,75 @@ export const ai = {
   runJob: (body: AiJobCreate) =>
     api.post<{ job_id: UUID; kind: string; status: string; correlation_id: UUID }>('/ai/jobs', body).then((r) => r.data),
 }
+
+// ── Developer: API keys + outbound webhook subscriptions (N8N-001) ────────────
+export interface ApiKey {
+  id: UUID
+  name: string
+  key_prefix: string
+  last_used_at: ISODate | null
+  revoked_at: ISODate | null
+  created_at: ISODate
+}
+
+export interface ApiKeyCreated {
+  id: UUID
+  name: string
+  key: string // the RAW key — shown ONCE
+  key_prefix: string
+  created_at: ISODate
+}
+
+export interface WebhookSubscription {
+  id: UUID
+  url: string
+  event_types: string[]
+  active: boolean
+  last_delivery_at: ISODate | null
+  last_status: number | null
+  created_at: ISODate
+  secret?: string | null // returned only on create
+}
+
+export interface WebhookSubscriptionCreate {
+  url: string
+  event_types?: string[]
+  secret?: string
+}
+
+export interface WebhookSubscriptionUpdate {
+  url?: string
+  event_types?: string[]
+  active?: boolean
+}
+
+// The customer-facing events an outbound webhook can subscribe to. Mirrors the
+// backend allow-list (app.services.webhook_events.ALLOWED_EVENTS, minus ping).
+export const WEBHOOK_EVENT_TYPES = [
+  'lead.replied',
+  'invite.accepted',
+  'campaign.run.completed',
+  'lead.enriched',
+  'lead.hot',
+] as const
+
+export const apiKeys = {
+  list: () => api.get<ApiKey[]>('/api-keys').then((r) => r.data),
+  create: (name: string) => api.post<ApiKeyCreated>('/api-keys', { name }).then((r) => r.data),
+  revoke: (id: UUID) => api.delete<void>(`/api-keys/${id}`).then(() => undefined),
+}
+
+export const webhookSubscriptions = {
+  list: () => api.get<WebhookSubscription[]>('/webhook-subscriptions').then((r) => r.data),
+  create: (body: WebhookSubscriptionCreate) =>
+    api.post<WebhookSubscription>('/webhook-subscriptions', body).then((r) => r.data),
+  update: (id: UUID, body: WebhookSubscriptionUpdate) =>
+    api.patch<WebhookSubscription>(`/webhook-subscriptions/${id}`, body).then((r) => r.data),
+  remove: (id: UUID) => api.delete<void>(`/webhook-subscriptions/${id}`).then(() => undefined),
+  test: (id: UUID) =>
+    api
+      .post<{ delivered: boolean; status_code: number | null; error: string | null }>(
+        `/webhook-subscriptions/${id}/test`,
+      )
+      .then((r) => r.data),
+}

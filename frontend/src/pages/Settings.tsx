@@ -1,10 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { FormEvent, useState } from 'react'
 import {
-  Building2, Check, KeyRound, Moon, Pencil, Plus, Sun, User, Users as UsersIcon,
+  Building2, Check, Code2, Copy, KeyRound, Moon, Pencil, Plus, Send, Sun, Trash2,
+  User, Users as UsersIcon, Webhook,
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { auth, workspaces } from '../api/v2'
+import {
+  apiKeys, auth, webhookSubscriptions, workspaces, WEBHOOK_EVENT_TYPES,
+} from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Button from '../components/Button'
@@ -430,6 +433,251 @@ function AppearanceTab() {
   )
 }
 
+function ApiKeysCard() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const keysQ = useQuery({ queryKey: ['api-keys'], queryFn: apiKeys.list })
+
+  const [name, setName] = useState('')
+  const [newKey, setNewKey] = useState<string | null>(null)
+
+  const createMut = useMutation({
+    mutationFn: () => apiKeys.create(name.trim()),
+    onSuccess: (data) => {
+      setNewKey(data.key)
+      setName('')
+      qc.invalidateQueries({ queryKey: ['api-keys'] })
+      toast.success('API key created — copy it now, it will not be shown again')
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not create key'),
+  })
+  const revokeMut = useMutation({
+    mutationFn: (id: string) => apiKeys.revoke(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['api-keys'] })
+      toast.success('API key revoked')
+    },
+  })
+
+  function copy(value: string) {
+    navigator.clipboard?.writeText(value).then(
+      () => toast.success('Copied'),
+      () => toast.error('Copy failed'),
+    )
+  }
+
+  const keys = keysQ.data ?? []
+  return (
+    <Card className="p-4">
+      <div className="flex items-center gap-2">
+        <KeyRound size={14} className="text-slate-400" />
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">API keys</p>
+      </div>
+      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+        Authenticate the public API (<code>/public/v1</code>) with{' '}
+        <code>Authorization: Bearer &lt;key&gt;</code>. Keys are stored hashed and shown once.
+      </p>
+
+      <div className="mt-3 flex items-center gap-2">
+        <input
+          aria-label="API key name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Key name (e.g. n8n production)"
+          className={clsx('flex-1', inputClass)}
+        />
+        <Button
+          variant="primary" size="sm" icon={Plus}
+          onClick={() => createMut.mutate()}
+          isLoading={createMut.isPending} disabled={!name.trim()}
+        >
+          Create
+        </Button>
+      </div>
+
+      {newKey && (
+        <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-900/20">
+          <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+            Copy this key now — it will never be shown again.
+          </p>
+          <div className="mt-2 flex items-center gap-2">
+            <code className="flex-1 break-all rounded bg-white px-2 py-1 text-xs dark:bg-slate-800">{newKey}</code>
+            <Button size="sm" variant="secondary" icon={Copy} onClick={() => copy(newKey)}>
+              Copy
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4 space-y-2">
+        {keys.length === 0 && <p className="text-xs text-slate-400">No API keys yet.</p>}
+        {keys.map((k) => (
+          <div key={k.id} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2 dark:border-slate-800">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">{k.name || 'Unnamed key'}</p>
+              <p className="text-xs text-slate-400">
+                <code>{k.key_prefix}…</code>
+                {k.last_used_at ? ` · last used ${new Date(k.last_used_at).toLocaleDateString()}` : ' · never used'}
+              </p>
+            </div>
+            {k.revoked_at ? (
+              <Badge variant="danger" label="Revoked" />
+            ) : (
+              <Button size="sm" variant="ghost" icon={Trash2} onClick={() => revokeMut.mutate(k.id)}>
+                Revoke
+              </Button>
+            )}
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+function WebhookSubscriptionsCard() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const subsQ = useQuery({ queryKey: ['webhook-subs'], queryFn: webhookSubscriptions.list })
+
+  const [url, setUrl] = useState('')
+  const [selected, setSelected] = useState<string[]>([])
+  const [newSecret, setNewSecret] = useState<string | null>(null)
+
+  const createMut = useMutation({
+    mutationFn: () => webhookSubscriptions.create({ url: url.trim(), event_types: selected }),
+    onSuccess: (data) => {
+      setNewSecret(data.secret ?? null)
+      setUrl('')
+      setSelected([])
+      qc.invalidateQueries({ queryKey: ['webhook-subs'] })
+      toast.success('Webhook subscription created')
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not create subscription'),
+  })
+  const toggleMut = useMutation({
+    mutationFn: ({ id, active }: { id: string; active: boolean }) =>
+      webhookSubscriptions.update(id, { active }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['webhook-subs'] }),
+  })
+  const removeMut = useMutation({
+    mutationFn: (id: string) => webhookSubscriptions.remove(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['webhook-subs'] })
+      toast.success('Subscription deleted')
+    },
+  })
+  const testMut = useMutation({
+    mutationFn: (id: string) => webhookSubscriptions.test(id),
+    onSuccess: (res) =>
+      res.delivered
+        ? toast.success(`Ping delivered (HTTP ${res.status_code})`)
+        : toast.error(`Ping failed: ${res.error ?? 'unknown'}`),
+  })
+
+  function toggleEvent(evt: string) {
+    setSelected((prev) => (prev.includes(evt) ? prev.filter((e) => e !== evt) : [...prev, evt]))
+  }
+  function copy(value: string) {
+    navigator.clipboard?.writeText(value).then(() => toast.success('Copied'))
+  }
+
+  const subs = subsQ.data ?? []
+  return (
+    <Card className="p-4">
+      <div className="flex items-center gap-2">
+        <Webhook size={14} className="text-slate-400" />
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Outbound webhooks</p>
+      </div>
+      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+        Deliver domain events (lead replied, invite accepted, campaign completed, lead enriched,
+        hot lead) to your URL. Each delivery is HMAC-signed (<code>X-Omni-Signature</code>).
+      </p>
+
+      <div className="mt-3 space-y-2">
+        <input
+          aria-label="Webhook URL"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://your-app.n8n.cloud/webhook/omni"
+          className={inputClass}
+        />
+        <div className="flex flex-wrap gap-2">
+          {WEBHOOK_EVENT_TYPES.map((evt) => (
+            <button
+              key={evt}
+              type="button"
+              onClick={() => toggleEvent(evt)}
+              className={clsx(
+                'rounded-full border px-3 py-1 text-xs',
+                selected.includes(evt)
+                  ? 'border-brand-400 bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300'
+                  : 'border-slate-200 text-slate-500 dark:border-slate-700',
+              )}
+            >
+              {evt}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-slate-400">No events selected = deliver all supported events.</p>
+        <Button
+          variant="primary" size="sm" icon={Plus}
+          onClick={() => createMut.mutate()}
+          isLoading={createMut.isPending} disabled={!url.trim()}
+        >
+          Add subscription
+        </Button>
+      </div>
+
+      {newSecret && (
+        <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-900/20">
+          <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+            Signing secret — copy it now to verify deliveries.
+          </p>
+          <div className="mt-2 flex items-center gap-2">
+            <code className="flex-1 break-all rounded bg-white px-2 py-1 text-xs dark:bg-slate-800">{newSecret}</code>
+            <Button size="sm" variant="secondary" icon={Copy} onClick={() => copy(newSecret)}>Copy</Button>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4 space-y-2">
+        {subs.length === 0 && <p className="text-xs text-slate-400">No webhook subscriptions yet.</p>}
+        {subs.map((s) => (
+          <div key={s.id} className="rounded-lg border border-slate-100 px-3 py-2 dark:border-slate-800">
+            <div className="flex items-center justify-between gap-2">
+              <p className="min-w-0 truncate text-sm font-medium">{s.url}</p>
+              <div className="flex shrink-0 items-center gap-1">
+                <Badge variant={s.active ? 'success' : 'neutral'} label={s.active ? 'Active' : 'Paused'} />
+                <Button size="sm" variant="ghost" icon={Send} onClick={() => testMut.mutate(s.id)}>Test</Button>
+                <Button
+                  size="sm" variant="ghost"
+                  onClick={() => toggleMut.mutate({ id: s.id, active: !s.active })}
+                >
+                  {s.active ? 'Pause' : 'Resume'}
+                </Button>
+                <Button size="sm" variant="ghost" icon={Trash2} onClick={() => removeMut.mutate(s.id)}>Delete</Button>
+              </div>
+            </div>
+            <p className="mt-1 text-xs text-slate-400">
+              {s.event_types.length ? s.event_types.join(', ') : 'all events'}
+              {s.last_status != null ? ` · last status ${s.last_status}` : ''}
+            </p>
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+function DeveloperTab() {
+  return (
+    <div className="space-y-6">
+      <ApiKeysCard />
+      <WebhookSubscriptionsCard />
+    </div>
+  )
+}
+
 export default function Settings() {
   const [tab, setTab] = useState('account')
   return (
@@ -443,6 +691,7 @@ export default function Settings() {
         items={[
           { value: 'account', label: 'Account', icon: User },
           { value: 'workspace', label: 'Workspace', icon: Building2 },
+          { value: 'developer', label: 'Developer', icon: Code2 },
           { value: 'appearance', label: 'Appearance', icon: Sun },
         ]}
         value={tab}
@@ -450,6 +699,7 @@ export default function Settings() {
       />
       {tab === 'account' && <AccountTab />}
       {tab === 'workspace' && <WorkspaceTab />}
+      {tab === 'developer' && <DeveloperTab />}
       {tab === 'appearance' && <AppearanceTab />}
     </div>
   )
