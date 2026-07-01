@@ -1154,3 +1154,31 @@ export const webhookSubscriptions = {
       )
       .then((r) => r.data),
 }
+
+// ── Unipile control plane (UNIPILE-FULL group C/D) ────────────────────────────
+// Workspace-level Unipile reads/CRUD the frontend calls directly (account
+// health, inbox reads, inmail-balance, native webhook CRUD). Shapes are
+// passthrough Unipile JSON, so they're typed loosely as `unknown`.
+export const unipile = {
+  accounts: () => api.get<unknown>('/unipile/accounts').then((r) => r.data),
+  account: (accountId: string) => api.get<unknown>(`/unipile/accounts/${accountId}`).then((r) => r.data),
+  resync: (accountId: string) => api.post<unknown>(`/unipile/accounts/${accountId}/resync`).then((r) => r.data),
+  reconnect: (accountId: string) =>
+    api.post<unknown>(`/unipile/accounts/${accountId}/reconnect`).then((r) => r.data),
+  restart: (accountId: string) => api.post<unknown>(`/unipile/accounts/${accountId}/restart`).then((r) => r.data),
+  inmailBalance: (accountId: string) =>
+    api.get<unknown>('/unipile/inmail-balance', { params: { account_id: accountId } }).then((r) => r.data),
+  companyProfile: (companyId: string, accountId: string) =>
+    api.get<unknown>(`/unipile/company/${companyId}`, { params: { account_id: accountId } }).then((r) => r.data),
+  chats: (accountId: string, params: { cursor?: string; limit?: number } = {}) =>
+    api.get<unknown>('/unipile/chats', { params: { account_id: accountId, ...params } }).then((r) => r.data),
+  chatMessages: (chatId: string, params: { cursor?: string; limit?: number } = {}) =>
+    api.get<unknown>(`/unipile/chats/${chatId}/messages`, { params }).then((r) => r.data),
+  chatAttendees: (chatId: string) =>
+    api.get<unknown>(`/unipile/chats/${chatId}/attendees`).then((r) => r.data),
+  webhooks: () => api.get<unknown>('/unipile/webhooks').then((r) => r.data),
+  registerWebhook: (events?: string[]) =>
+    api.post<unknown>('/unipile/webhooks', { events }).then((r) => r.data),
+  deleteWebhook: (webhookId: string) =>
+    api.delete<void>(`/unipile/webhooks/${webhookId}`).then(() => undefined),
+}
