@@ -35,6 +35,7 @@ const NODE_LABELS: Record<string, string> = {
   'source.clutch': 'Clutch directory',
   'source.serper_people': 'Find people (Serper)',
   'source.searxng_people': 'Find people (free)',
+  'source.linkedin_search': 'LinkedIn search (Unipile)',
   'source.linkfinder_leads': 'Leads finder AI (LinkFinder)',
   'source.linkfinder_employees': 'Company employees (LinkFinder)',
   'source.linkfinder_post_reactions': 'Post reactions (LinkFinder)',
@@ -71,6 +72,14 @@ const NODE_LABELS: Record<string, string> = {
   'channel.slack': 'Slack message',
   'channel.webhook_out': 'Outbound webhook',
   'channel.n8n': 'n8n workflow',
+  'channel.linkedin_react_post': 'React to LinkedIn post',
+  'channel.linkedin_comment_post': 'Comment on LinkedIn post',
+  'channel.linkedin_endorse': 'Endorse LinkedIn skill',
+  'channel.linkedin_follow': 'Follow LinkedIn member',
+  'channel.message_react': 'React to message',
+  'channel.invite_cancel': 'Cancel LinkedIn invite',
+  'enrich.linkedin_company': 'LinkedIn company profile (Unipile)',
+  'enrich.linkedin_member': 'LinkedIn profile (Unipile)',
 
   // Conditions
   'condition.company_filter': 'Filter companies',

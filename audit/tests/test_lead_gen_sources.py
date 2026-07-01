@@ -49,6 +49,7 @@ PEOPLE_SOURCES = [
     "source.linkfinder_leads",
     "source.linkfinder_employees",
     "source.linkfinder_post_reactions",
+    "source.linkedin_search",
 ]
 COMPANY_SOURCES = [
     "source.searxng",
@@ -260,6 +261,14 @@ def _config_for(node_type: str, companies_key: str = "companies") -> dict[str, A
             "post_url": "https://www.linkedin.com/posts/acme_123",
             "people_key": "people",
         }
+    if node_type == "source.linkedin_search":
+        return {
+            "connection_name": "unipile-test",
+            "unipile_account_id": "acct-1",
+            "keywords": "Head of Growth fintech",
+            "fetch_count": 5,
+            "people_key": "people",
+        }
     raise AssertionError(f"missing test config for {node_type}")
 
 
@@ -344,6 +353,16 @@ def _payload_keys_for(node_type: str) -> set[str]:
             "people_key",
             "correlation_id",
         } | ({"fetch_count"} if node_type != "source.linkfinder_post_reactions" else set())
+    if node_type == "source.linkedin_search":
+        return {
+            "provider",
+            "connection_name",
+            "unipile_account_id",
+            "keywords",
+            "fetch_count",
+            "people_key",
+            "correlation_id",
+        }
     raise AssertionError(f"missing payload contract for {node_type}")
 
 
@@ -353,7 +372,7 @@ def test_every_expected_lead_gen_source_is_registered_once():
     source_types = sorted(manifest.type for manifest in manifests() if manifest.category == NodeCategory.SOURCE)
 
     assert source_types == EXPECTED_SOURCE_TYPES
-    assert len(source_types) == 28
+    assert len(source_types) == 29
 
 
 @pytest.mark.asyncio
