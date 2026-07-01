@@ -35,7 +35,24 @@ const NODE_LABELS: Record<string, string> = {
   'source.clutch': 'Clutch directory',
   'source.serper_people': 'Find people (Serper)',
   'source.searxng_people': 'Find people (free)',
-  'source.leads_finder': 'Find people (LinkFinder)',
+  'source.linkfinder_leads': 'Leads finder AI (LinkFinder)',
+  'source.linkfinder_employees': 'Company employees (LinkFinder)',
+  'source.linkfinder_post_reactions': 'Post reactions (LinkFinder)',
+
+  // LinkFinder enrichment nodes
+  'linkfinder.company_website': 'Company website (LinkFinder)',
+  'linkfinder.company_phone': 'Company phone (LinkFinder)',
+  'linkfinder.company_email': 'Company email (LinkFinder)',
+  'linkfinder.company_employee_count': 'Company employee count (LinkFinder)',
+  'linkfinder.company_linkedin': 'Company LinkedIn (LinkFinder)',
+  'linkfinder.profile_info': 'Profile info (LinkFinder)',
+  'linkfinder.profile_email': 'Email from LinkedIn (LinkFinder)',
+  'linkfinder.profile_phone': 'Phone from LinkedIn (LinkFinder)',
+  'linkfinder.company_page_info': 'Company page info (LinkFinder)',
+  'linkfinder.company_page_employees': 'Company page employees (LinkFinder)',
+  'linkfinder.name_to_linkedin': 'Name to LinkedIn (LinkFinder)',
+  'linkfinder.email_to_linkedin': 'Email to LinkedIn (LinkFinder)',
+  'linkfinder.instagram_info': 'Instagram info (LinkFinder)',
 
   // AI
   'ai.compose': 'AI compose message',

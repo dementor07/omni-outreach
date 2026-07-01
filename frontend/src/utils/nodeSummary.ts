@@ -55,14 +55,18 @@ export function nodeConfigSummary(
     const provider = String(config.enrich_source ?? 'Provider')
     const connection = String(config.connection_name ?? '')
     const policy = config.merge_policy === 'overwrite' ? 'may overwrite' : 'fills missing fields'
-    const lookup = provider === 'linkfinder' && config.linkfinder_type ? ` · ${short(config.linkfinder_type, 30)}` : ''
-    return `${provider.charAt(0).toUpperCase()}${provider.slice(1)} · ${policy}${lookup}${connection ? ` · ${connection}` : ''}`
+    return `${provider.charAt(0).toUpperCase()}${provider.slice(1)} · ${policy}${connection ? ` · ${connection}` : ''}`
   }
 
-  if (manifest.type === 'source.leads_finder') {
-    const lookup = short(config.finder_type ?? 'LinkFinder')
-    const input = short(config.input_data ?? '', 30)
-    return input ? `${lookup} · ${input}` : lookup
+  if (manifest.type.startsWith('linkfinder.')) {
+    const connection = String(config.connection_name ?? '')
+    const input = short(config.company_name ?? config.linkedin_company_url ?? config.instagram_profile_url ?? '', 30)
+    return input ? `${input}${connection ? ` · ${connection}` : ''}` : (connection || 'LinkFinder')
+  }
+
+  if (manifest.type.startsWith('source.linkfinder_')) {
+    const input = short(config.query ?? config.domain ?? config.post_url ?? '', 30)
+    return input ? `LinkFinder · ${input}` : 'LinkFinder source'
   }
 
   const keys = Object.keys(config)
