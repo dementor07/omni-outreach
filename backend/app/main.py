@@ -45,6 +45,7 @@ from app.routers import (
     templates,
     tones,
     tracking,
+    unipile,
     webhooks_in,
     webhooks_out,
     workspaces,
@@ -156,6 +157,10 @@ app.include_router(deliverability.router, prefix="/deliverability", tags=["deliv
 app.include_router(templates.router, prefix="/templates", tags=["templates"])
 app.include_router(tones.router, prefix="/tones", tags=["tones"])
 app.include_router(objectives.router, prefix="/objectives", tags=["objectives"])
+
+# Unipile control plane (UNIPILE-FULL group C/D): account health, inbox reads,
+# inmail-balance, native webhook CRUD — synchronous Unipile API reads (not muscle).
+app.include_router(unipile.router, prefix="/unipile", tags=["unipile"])
 
 # Developer / public API surface (N8N-001). API-key CRUD is JWT-authed; the
 # public action API + webhook subscriptions accept an API key OR a JWT.
