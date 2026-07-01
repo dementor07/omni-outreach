@@ -8,6 +8,10 @@ use crate::handlers::common;
 use crate::http::OUTBOUND;
 use crate::models::{ActionCommand, ExecutionResult};
 use serde_json::{json, Value};
+use std::time::Duration;
+
+const LINKFINDER_URL: &str = "https://api.linkfinderai.com";
+const LINKFINDER_MAX_RETRIES: u32 = 3;
 
 pub async fn handle_enrich(command: &ActionCommand) -> ExecutionResult {
     let provider = common::s(command, "enrich_source");
@@ -36,6 +40,7 @@ pub async fn handle_enrich(command: &ActionCommand) -> ExecutionResult {
         "apollo" => apollo(command).await,
         "hunter" => hunter(command).await,
         "proxycurl" => proxycurl(command).await,
+        "linkfinder" => linkfinder(command).await,
         "" => common::fail(command, "enrich_source missing", false),
         other => common::fail(command, format!("unknown enrich provider {other}"), false),
     }
@@ -57,7 +62,32 @@ fn enrichment_complete(command: &ActionCommand, provider: &str) -> bool {
                 && has(&command.lead.headline)
                 && has(&command.lead.company)
         }
+        "linkfinder" => {
+            let lf_type = common::s(command, "linkfinder_type");
+            match linkfinder_target_field(&lf_type) {
+                Some("email") => has(&command.lead.email),
+                Some("phone") => has(&command.lead.phone),
+                Some("linkedin_url") => has(&command.lead.linkedin_url),
+                Some("profile") => {
+                    has(&command.lead.first_name)
+                        && has(&command.lead.last_name)
+                        && has(&command.lead.headline)
+                        && has(&command.lead.company)
+                }
+                _ => false,
+            }
+        }
         _ => false,
+    }
+}
+
+fn linkfinder_target_field(lf_type: &str) -> Option<&'static str> {
+    match lf_type {
+        "linkedin_profile_to_email" | "linkedin_url_to_email" | "company_name_to_email" | "name_and_company_to_email" | "phone_to_email" => Some("email"),
+        "linkedin_profile_to_phone" | "linkedin_url_to_phone" | "company_name_to_phone" | "email_to_phone" => Some("phone"),
+        "email_to_linkedin_url" | "phone_to_linkedin_url" | "lead_full_name_to_linkedin_url" | "name_and_company_to_linkedin" | "company_name_to_linkedin_url" => Some("linkedin_url"),
+        "linkedin_profile_to_linkedin_info" | "linkedin_url_to_profile" | "email_to_profile" | "phone_to_profile" | "name_and_company_to_profile" | "domain_to_company_profile" | "linkedin_company_to_linkedin_info" | "linkedin_company_url_to_profile" | "instagram_profile_to_instagram_info" => Some("profile"),
+        _ => None,
     }
 }
 
@@ -252,6 +282,202 @@ async fn proxycurl(command: &ActionCommand) -> ExecutionResult {
         Some("lead_enriched"),
         mutations,
     )
+}
+
+async fn linkfinder(command: &ActionCommand) -> ExecutionResult {
+    let cred_ref = match command.credential_ref.as_ref() {
+        Some(r) => r.clone(),
+        None => return common::fail(command, "linkfinder missing credential_ref", false),
+    };
+    let api_key = match credentials::redeem_field(&cred_ref, "api_key").await {
+        Ok(Some(k)) => k,
+        Ok(None) => {
+            credentials::release(&cred_ref).await;
+            return common::fail(command, "linkfinder bundle missing api_key", false);
+        }
+        Err(e) => return common::fail(command, e, true),
+    };
+    let requested_type = common::s(command, "linkfinder_type");
+    if requested_type.is_empty() {
+        credentials::release(&cred_ref).await;
+        return common::fail(command, "linkfinder_type missing", false);
+    }
+    let lf_type = canonical_linkfinder_type(&requested_type);
+    let input_data = match build_linkfinder_input(command, &requested_type) {
+        Some(v) => v,
+        None => {
+            credentials::release(&cred_ref).await;
+            return common::fail(command, "LINKFINDER_INPUT_MISSING", false);
+        }
+    };
+    let body = json!({"type": lf_type, "input_data": input_data});
+    let payload = match post_linkfinder(&api_key, &body).await {
+        Ok(v) => v,
+        Err(err) => {
+            credentials::release(&cred_ref).await;
+            return common::fail(command, err.code, err.retriable);
+        }
+    };
+    credentials::release(&cred_ref).await;
+
+    let result = payload.get("result").cloned().unwrap_or(Value::Null);
+    let matched = payload.get("status").and_then(|v| v.as_str()) == Some("success") && !result.is_null();
+    let fields = if matched {
+        normalise_linkfinder_fields(&result)
+    } else {
+        json!({})
+    };
+    let mutations = enrichment_mutations(
+        command,
+        "linkfinder",
+        fields,
+        json!({"matched": matched, "type": lf_type, "requested_type": requested_type}),
+    );
+    common::ok(
+        command,
+        json!({"provider": "linkfinder", "type": lf_type, "matched": matched}),
+        Some("lead_enriched"),
+        mutations,
+    )
+}
+
+struct LinkFinderError {
+    code: &'static str,
+    retriable: bool,
+}
+
+async fn post_linkfinder(api_key: &str, body: &Value) -> Result<Value, LinkFinderError> {
+    let mut attempt: u32 = 0;
+    loop {
+        let resp = OUTBOUND
+            .post(LINKFINDER_URL)
+            .bearer_auth(api_key)
+            .header("Content-Type", "application/json")
+            .json(body)
+            .send()
+            .await;
+        match resp {
+            Ok(r) if r.status().is_success() => {
+                return Ok(r.json::<Value>().await.unwrap_or(json!({"status": "error", "result": null})));
+            }
+            Ok(r) if r.status().as_u16() == 429 && attempt + 1 < LINKFINDER_MAX_RETRIES => {
+                let wait = 1u64 << attempt;
+                tracing::warn!("linkfinder 429, retrying in {wait}s");
+                tokio::time::sleep(Duration::from_secs(wait)).await;
+                attempt += 1;
+            }
+            Ok(r) if r.status().as_u16() == 500 && attempt + 1 < LINKFINDER_MAX_RETRIES => {
+                let wait = 1u64 << attempt;
+                tracing::warn!("linkfinder 500, retrying in {wait}s");
+                tokio::time::sleep(Duration::from_secs(wait)).await;
+                attempt += 1;
+            }
+            Ok(r) => {
+                return Err(match r.status().as_u16() {
+                    401 => LinkFinderError { code: "LINKFINDER_AUTH", retriable: false },
+                    402 => LinkFinderError { code: "LINKFINDER_NO_CREDITS", retriable: false },
+                    422 => LinkFinderError { code: "LINKFINDER_BAD_REQUEST", retriable: false },
+                    429 => LinkFinderError { code: "LINKFINDER_RATE_LIMITED", retriable: true },
+                    500..=599 => LinkFinderError { code: "LINKFINDER_SERVER_ERROR", retriable: true },
+                    _ => LinkFinderError { code: "LINKFINDER_HTTP_ERROR", retriable: false },
+                });
+            }
+            Err(_) if attempt + 1 < LINKFINDER_MAX_RETRIES => {
+                let wait = 1u64 << attempt;
+                tokio::time::sleep(Duration::from_secs(wait)).await;
+                attempt += 1;
+            }
+            Err(_) => return Err(LinkFinderError { code: "LINKFINDER_NETWORK_ERROR", retriable: true }),
+        }
+    }
+}
+
+fn canonical_linkfinder_type(lf_type: &str) -> &str {
+    match lf_type {
+        "linkedin_url_to_email" => "linkedin_profile_to_email",
+        "linkedin_url_to_phone" => "linkedin_profile_to_phone",
+        "linkedin_url_to_profile" => "linkedin_profile_to_linkedin_info",
+        "name_and_company_to_linkedin" => "lead_full_name_to_linkedin_url",
+        "company_name_to_domain" => "company_name_to_website",
+        "linkedin_company_url_to_profile" => "linkedin_company_to_linkedin_info",
+        other => other,
+    }
+}
+
+fn full_name(command: &ActionCommand) -> String {
+    format!(
+        "{} {}",
+        command.lead.first_name.as_deref().unwrap_or(""),
+        command.lead.last_name.as_deref().unwrap_or("")
+    )
+    .trim()
+    .to_string()
+}
+
+fn build_linkfinder_input(command: &ActionCommand, lf_type: &str) -> Option<Value> {
+    let s = |value: &Option<String>| value.as_deref().filter(|v| !v.trim().is_empty()).map(|v| json!(v));
+    match lf_type {
+        t if t.starts_with("linkedin_profile_to_") || t.starts_with("linkedin_url_to_") => s(&command.lead.linkedin_url),
+        "email_to_linkedin_url" | "email_to_profile" | "email_to_phone" => s(&command.lead.email),
+        "phone_to_linkedin_url" | "phone_to_profile" | "phone_to_email" => s(&command.lead.phone),
+        "lead_full_name_to_linkedin_url" | "name_and_company_to_linkedin" | "name_and_company_to_email" | "name_and_company_to_profile" => {
+            let name = full_name(command);
+            let company = command.lead.company.clone().or_else(|| common::opt_s(command, "company_name"));
+            if name.is_empty() || company.as_deref().unwrap_or("").trim().is_empty() {
+                None
+            } else {
+                Some(json!(format!("{} {}", name, company.unwrap())))
+            }
+        }
+        "company_name_to_website" | "company_name_to_phone" | "company_name_to_email" | "company_name_to_employee_count" | "company_name_to_linkedin_url" | "company_name_to_domain" => {
+            let company = common::opt_s(command, "company_name").or_else(|| command.lead.company.clone());
+            company.filter(|v| !v.trim().is_empty()).map(|v| json!(v))
+        }
+        "domain_to_company_profile" => common::opt_s(command, "domain").map(|v| json!(v)),
+        "linkedin_company_to_linkedin_info" | "linkedin_company_to_employee_count" | "linkedin_company_url_to_profile" => common::opt_s(command, "linkedin_company_url").map(|v| json!(v)),
+        "instagram_profile_to_instagram_info" => command.lead.instagram_username.as_ref().map(|v| json!(v)),
+        _ => None,
+    }
+}
+
+fn str_from(src: &Value, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Some(s) = src.get(*key).and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()) {
+            return Some(s.to_string());
+        }
+    }
+    None
+}
+
+fn normalise_linkfinder_fields(result: &Value) -> Value {
+    let mut out = pick_mutations(result, &["first_name", "last_name", "email", "headline", "company", "phone", "linkedin_url"]);
+    if out.get("linkedin_url").is_none() {
+        if let Some(linkedin) = str_from(result, &["linkedin", "linkedin_profile", "profile_url"]) {
+            out["linkedin_url"] = json!(linkedin);
+        }
+    }
+    if out.get("company").is_none() {
+        if let Some(company) = str_from(result, &["company_name", "company"]) {
+            out["company"] = json!(company);
+        }
+    }
+    if out.get("headline").is_none() {
+        if let Some(headline) = str_from(result, &["job_title", "title", "headline"]) {
+            out["headline"] = json!(headline);
+        }
+    }
+    if out.as_object().map(|o| o.is_empty()).unwrap_or(true) {
+        if let Some(s) = result.as_str().filter(|s| !s.trim().is_empty()) {
+            if s.contains('@') {
+                out["email"] = json!(s);
+            } else if s.contains("linkedin.com/") {
+                out["linkedin_url"] = json!(s);
+            } else if s.chars().any(|c| c.is_ascii_digit()) {
+                out["phone"] = json!(s);
+            }
+        }
+    }
+    out
 }
 
 fn pick_mutations(src: &Value, fields: &[&str]) -> Value {
