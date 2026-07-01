@@ -1724,6 +1724,26 @@ def _clean_enrichment_fields(value: object) -> dict[str, str]:
     return clean
 
 
+def _clean_enrichment_custom_fields(value: object) -> dict[str, object]:
+    """Accept simple provider facts that do not belong in contact identity columns."""
+    if not isinstance(value, dict):
+        return {}
+    clean: dict[str, object] = {}
+    for raw_key, raw_value in value.items():
+        key = str(raw_key).strip()
+        if not key or len(key) > 120:
+            continue
+        if isinstance(raw_value, str) and raw_value.strip():
+            clean[key] = raw_value.strip()
+        elif isinstance(raw_value, (int, float, bool)) and not isinstance(raw_value, bool):
+            clean[key] = raw_value
+        elif isinstance(raw_value, bool):
+            clean[key] = raw_value
+        elif isinstance(raw_value, dict):
+            clean[key] = raw_value
+    return clean
+
+
 def _enrichment_history(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
         return []
@@ -1745,6 +1765,7 @@ async def _apply_enrichment_mutation(
     if not isinstance(envelope, dict):
         return
     fields = _clean_enrichment_fields(envelope.get("fields"))
+    custom_fields = _clean_enrichment_custom_fields(envelope.get("custom_fields"))
     provider = str(envelope.get("provider") or "unknown")[:80]
     attempt_id = str(envelope.get("attempt_id") or "")[:120]
     merge_policy = "overwrite" if envelope.get("merge_policy") == "overwrite" else "fill_missing"
@@ -1770,6 +1791,8 @@ async def _apply_enrichment_mutation(
                     return
 
                 lead_cf = dict(lead["custom_fields"] or {})
+                if custom_fields:
+                    lead_cf.update(custom_fields)
                 lead_history = _enrichment_history(lead_cf.get("enrichment_history"))
                 if attempt_id and any(
                     isinstance(item, dict) and item.get("attempt_id") == attempt_id

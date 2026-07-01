@@ -33,6 +33,7 @@ pub async fn handle_enrich(command: &ActionCommand) -> ExecutionResult {
                 &provider,
                 json!({}),
                 json!({"skipped": true, "reason": "already_complete"}),
+                json!({}),
             ),
         );
     }
@@ -83,10 +84,10 @@ fn enrichment_complete(command: &ActionCommand, provider: &str) -> bool {
 
 fn linkfinder_target_field(lf_type: &str) -> Option<&'static str> {
     match lf_type {
-        "linkedin_profile_to_email" | "linkedin_url_to_email" | "company_name_to_email" | "name_and_company_to_email" | "phone_to_email" => Some("email"),
-        "linkedin_profile_to_phone" | "linkedin_url_to_phone" | "company_name_to_phone" | "email_to_phone" => Some("phone"),
-        "email_to_linkedin_url" | "phone_to_linkedin_url" | "lead_full_name_to_linkedin_url" | "name_and_company_to_linkedin" | "company_name_to_linkedin_url" => Some("linkedin_url"),
-        "linkedin_profile_to_linkedin_info" | "linkedin_url_to_profile" | "email_to_profile" | "phone_to_profile" | "name_and_company_to_profile" | "domain_to_company_profile" | "linkedin_company_to_linkedin_info" | "linkedin_company_url_to_profile" | "instagram_profile_to_instagram_info" => Some("profile"),
+        "linkedin_profile_to_email" => Some("email"),
+        "linkedin_profile_to_phone" => Some("phone"),
+        "email_to_linkedin_url" | "lead_full_name_to_linkedin_url" => Some("linkedin_url"),
+        "linkedin_profile_to_linkedin_info" => Some("profile"),
         _ => None,
     }
 }
@@ -159,6 +160,7 @@ async fn apollo(command: &ActionCommand) -> ExecutionResult {
         "apollo",
         fields,
         json!({"matched": !person.as_object().map(|o| o.is_empty()).unwrap_or(true)}),
+        json!({}),
     );
     common::ok(
         command,
@@ -224,6 +226,7 @@ async fn hunter(command: &ActionCommand) -> ExecutionResult {
         "hunter",
         pick_mutations(&data, &["email", "linkedin_url"]),
         json!({"score": data.get("score")}),
+        json!({}),
     );
     common::ok(
         command,
@@ -275,7 +278,7 @@ async fn proxycurl(command: &ActionCommand) -> ExecutionResult {
     if let Some(email) = p.get("personal_emails").and_then(|v| v.as_array()).and_then(|a| a.first()).and_then(|v| v.as_str()) {
         fields["email"] = json!(email);
     }
-    let mutations = enrichment_mutations(command, "proxycurl", fields, json!({}));
+    let mutations = enrichment_mutations(command, "proxycurl", fields, json!({}), json!({}));
     common::ok(
         command,
         json!({"provider": "proxycurl"}),
@@ -302,8 +305,8 @@ async fn linkfinder(command: &ActionCommand) -> ExecutionResult {
         credentials::release(&cred_ref).await;
         return common::fail(command, "linkfinder_type missing", false);
     }
-    let lf_type = canonical_linkfinder_type(&requested_type);
-    let input_data = match build_linkfinder_input(command, &requested_type) {
+    let lf_type = requested_type.as_str();
+    let input_data = match build_linkfinder_input(command, lf_type) {
         Some(v) => v,
         None => {
             credentials::release(&cred_ref).await;
@@ -322,16 +325,17 @@ async fn linkfinder(command: &ActionCommand) -> ExecutionResult {
 
     let result = payload.get("result").cloned().unwrap_or(Value::Null);
     let matched = payload.get("status").and_then(|v| v.as_str()) == Some("success") && !result.is_null();
-    let fields = if matched {
-        normalise_linkfinder_fields(&result)
+    let (fields, custom_fields) = if matched {
+        normalise_linkfinder_fields(&result, lf_type)
     } else {
-        json!({})
+        (json!({}), json!({}))
     };
     let mutations = enrichment_mutations(
         command,
         "linkfinder",
         fields,
         json!({"matched": matched, "type": lf_type, "requested_type": requested_type}),
+        custom_fields,
     );
     common::ok(
         command,
@@ -392,18 +396,6 @@ async fn post_linkfinder(api_key: &str, body: &Value) -> Result<Value, LinkFinde
     }
 }
 
-fn canonical_linkfinder_type(lf_type: &str) -> &str {
-    match lf_type {
-        "linkedin_url_to_email" => "linkedin_profile_to_email",
-        "linkedin_url_to_phone" => "linkedin_profile_to_phone",
-        "linkedin_url_to_profile" => "linkedin_profile_to_linkedin_info",
-        "name_and_company_to_linkedin" => "lead_full_name_to_linkedin_url",
-        "company_name_to_domain" => "company_name_to_website",
-        "linkedin_company_url_to_profile" => "linkedin_company_to_linkedin_info",
-        other => other,
-    }
-}
-
 fn full_name(command: &ActionCommand) -> String {
     format!(
         "{} {}",
@@ -417,10 +409,9 @@ fn full_name(command: &ActionCommand) -> String {
 fn build_linkfinder_input(command: &ActionCommand, lf_type: &str) -> Option<Value> {
     let s = |value: &Option<String>| value.as_deref().filter(|v| !v.trim().is_empty()).map(|v| json!(v));
     match lf_type {
-        t if t.starts_with("linkedin_profile_to_") || t.starts_with("linkedin_url_to_") => s(&command.lead.linkedin_url),
-        "email_to_linkedin_url" | "email_to_profile" | "email_to_phone" => s(&command.lead.email),
-        "phone_to_linkedin_url" | "phone_to_profile" | "phone_to_email" => s(&command.lead.phone),
-        "lead_full_name_to_linkedin_url" | "name_and_company_to_linkedin" | "name_and_company_to_email" | "name_and_company_to_profile" => {
+        t if t.starts_with("linkedin_profile_to_") => s(&command.lead.linkedin_url),
+        "email_to_linkedin_url" => s(&command.lead.email),
+        "lead_full_name_to_linkedin_url" => {
             let name = full_name(command);
             let company = command.lead.company.clone().or_else(|| common::opt_s(command, "company_name"));
             if name.is_empty() || company.as_deref().unwrap_or("").trim().is_empty() {
@@ -429,13 +420,14 @@ fn build_linkfinder_input(command: &ActionCommand, lf_type: &str) -> Option<Valu
                 Some(json!(format!("{} {}", name, company.unwrap())))
             }
         }
-        "company_name_to_website" | "company_name_to_phone" | "company_name_to_email" | "company_name_to_employee_count" | "company_name_to_linkedin_url" | "company_name_to_domain" => {
+        "company_name_to_website" | "company_name_to_phone" | "company_name_to_email" | "company_name_to_employee_count" | "company_name_to_linkedin_url" => {
             let company = common::opt_s(command, "company_name").or_else(|| command.lead.company.clone());
             company.filter(|v| !v.trim().is_empty()).map(|v| json!(v))
         }
-        "domain_to_company_profile" => common::opt_s(command, "domain").map(|v| json!(v)),
-        "linkedin_company_to_linkedin_info" | "linkedin_company_to_employee_count" | "linkedin_company_url_to_profile" => common::opt_s(command, "linkedin_company_url").map(|v| json!(v)),
-        "instagram_profile_to_instagram_info" => command.lead.instagram_username.as_ref().map(|v| json!(v)),
+        "linkedin_company_to_linkedin_info" | "linkedin_company_to_employee_count" => common::opt_s(command, "linkedin_company_url").map(|v| json!(v)),
+        "instagram_profile_to_instagram_info" => common::opt_s(command, "instagram_profile_url")
+            .map(|v| json!(v))
+            .or_else(|| command.lead.instagram_username.as_ref().map(|v| json!(v))),
         _ => None,
     }
 }
@@ -449,8 +441,31 @@ fn str_from(src: &Value, keys: &[&str]) -> Option<String> {
     None
 }
 
-fn normalise_linkfinder_fields(result: &Value) -> Value {
-    let mut out = pick_mutations(result, &["first_name", "last_name", "email", "headline", "company", "phone", "linkedin_url"]);
+fn value_from(src: &Value, keys: &[&str]) -> Option<Value> {
+    for key in keys {
+        if let Some(v) = src.get(*key) {
+            if v.is_string() || v.is_number() || v.is_boolean() {
+                return Some(v.clone());
+            }
+        }
+    }
+    None
+}
+
+fn normalise_linkfinder_fields(result: &Value, lf_type: &str) -> (Value, Value) {
+    let person_identity_type = matches!(
+        lf_type,
+        "linkedin_profile_to_linkedin_info"
+            | "linkedin_profile_to_email"
+            | "linkedin_profile_to_phone"
+            | "lead_full_name_to_linkedin_url"
+            | "email_to_linkedin_url"
+    );
+    let mut out = if person_identity_type {
+        pick_mutations(result, &["first_name", "last_name", "email", "headline", "company", "phone", "linkedin_url"])
+    } else {
+        json!({})
+    };
     if out.get("linkedin_url").is_none() {
         if let Some(linkedin) = str_from(result, &["linkedin", "linkedin_profile", "profile_url"]) {
             out["linkedin_url"] = json!(linkedin);
@@ -466,7 +481,7 @@ fn normalise_linkfinder_fields(result: &Value) -> Value {
             out["headline"] = json!(headline);
         }
     }
-    if out.as_object().map(|o| o.is_empty()).unwrap_or(true) {
+    if person_identity_type && out.as_object().map(|o| o.is_empty()).unwrap_or(true) {
         if let Some(s) = result.as_str().filter(|s| !s.trim().is_empty()) {
             if s.contains('@') {
                 out["email"] = json!(s);
@@ -477,9 +492,44 @@ fn normalise_linkfinder_fields(result: &Value) -> Value {
             }
         }
     }
-    out
-}
 
+    let mut custom = json!({});
+    match lf_type {
+        "company_name_to_website" => {
+            if let Some(v) = value_from(result, &["website", "domain", "company_url", "url"]).or_else(|| result.as_str().map(|s| json!(s))) {
+                custom["company_website"] = v;
+            }
+        }
+        "company_name_to_phone" => {
+            if let Some(v) = value_from(result, &["phone", "phone_number", "company_phone"]).or_else(|| result.as_str().map(|s| json!(s))) {
+                custom["company_phone"] = v;
+            }
+        }
+        "company_name_to_email" => {
+            if let Some(v) = value_from(result, &["email", "company_email"]).or_else(|| result.as_str().map(|s| json!(s))) {
+                custom["company_email"] = v;
+            }
+        }
+        "company_name_to_employee_count" | "linkedin_company_to_employee_count" => {
+            if let Some(v) = value_from(result, &["employee_count", "employees", "staff_count"]).or_else(|| result.as_i64().map(|n| json!(n))) {
+                custom["employee_count"] = v;
+            }
+        }
+        "company_name_to_linkedin_url" => {
+            if let Some(v) = value_from(result, &["linkedin_url", "linkedin", "company_linkedin_url", "url"]).or_else(|| result.as_str().map(|s| json!(s))) {
+                custom["company_linkedin_url"] = v;
+            }
+        }
+        "linkedin_company_to_linkedin_info" => {
+            custom["linkfinder_company_info"] = result.clone();
+        }
+        "instagram_profile_to_instagram_info" => {
+            custom["linkfinder_instagram_info"] = result.clone();
+        }
+        _ => {}
+    }
+    (out, custom)
+}
 fn pick_mutations(src: &Value, fields: &[&str]) -> Value {
     let mut out = json!({});
     for f in fields {
@@ -495,6 +545,7 @@ fn enrichment_mutations(
     provider: &str,
     fields: Value,
     metadata: Value,
+    custom_fields: Value,
 ) -> Value {
     let merge_policy = match common::s(command, "merge_policy").as_str() {
         "overwrite" => "overwrite",
@@ -507,6 +558,7 @@ fn enrichment_mutations(
             "observed_at": chrono::Utc::now().to_rfc3339(),
             "merge_policy": merge_policy,
             "fields": fields,
+            "custom_fields": custom_fields,
             "metadata": metadata,
         }
     })

@@ -56,7 +56,17 @@ pub async fn handle_leads_finder(command: &ActionCommand) -> ExecutionResult {
     if lf_type == "company_domain_to_employees" {
         // Live docs call this knob employee_count; keep fetch_count too for the
         // brief contract and send the documented alias for the API.
-        body["employee_count"] = json!(fetch_count);
+        body["employee_count"] = command
+            .payload
+            .get("employee_count")
+            .cloned()
+            .unwrap_or_else(|| json!(fetch_count));
+        if let Some(department) = common::opt_s(command, "department") {
+            body["department"] = json!(department);
+        }
+        if let Some(seniority) = common::opt_s(command, "seniority") {
+            body["seniority"] = json!(seniority);
+        }
     }
 
     let payload = match post_linkfinder(&api_key, &body).await {
@@ -91,7 +101,7 @@ pub async fn handle_leads_finder(command: &ActionCommand) -> ExecutionResult {
     let mut result = common::ok(
         command,
         json!({"found": found.len(), "type": lf_type}),
-        Some("source.leads_finder.completed"),
+        Some("source.linkfinder.completed"),
         mutations,
     );
     let handle = if found.is_empty() { "empty" } else { "default" };
