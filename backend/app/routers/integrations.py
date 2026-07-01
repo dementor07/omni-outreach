@@ -12,6 +12,7 @@ they also land in ``connections``.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
 from typing import Any
@@ -22,9 +23,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.auth import AuthContext, get_current_workspace
+from app.config import settings
 from app.db import execute, fetch_all, fetch_one
 from app.services.encryption import decrypt, encrypt
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -307,5 +310,61 @@ async def sync_accounts(connection_id: uuid.UUID, ctx: AuthContext = Depends(get
         )
         synced += 1
 
+    # UNIPILE-FULL: auto-register omni's inbound URL as a native Unipile webhook
+    # (message_received + account_status) so we stop relying only on polling.
+    # Best-effort + idempotent: skip if a webhook id is already recorded on the
+    # connection metadata; a failure here must not fail the seat sync.
+    await _ensure_unipile_webhook(ctx, connection_id, conn_row.get("metadata"), api_key, base_url)
+
     rows = await fetch_all("SELECT * FROM omni_sending_accounts WHERE connection_id = $1 ORDER BY created_at DESC", connection_id)
     return SyncResult(synced=synced, accounts=[SendingAccountOut.model_validate(r) for r in rows])
+
+
+async def _ensure_unipile_webhook(
+    ctx: AuthContext, connection_id, metadata, api_key: str, base_url: str
+) -> None:
+    """Register omni's inbound URL as a Unipile native webhook, once per connection.
+
+    Stores the returned webhook id in the connection's metadata.unipile_webhook_id
+    so a re-sync doesn't duplicate it (and a later DELETE can find it). Fully
+    best-effort — never raises into the sync path."""
+    import json as _json
+
+    meta = metadata
+    if isinstance(meta, str):
+        try:
+            meta = _json.loads(meta)
+        except _json.JSONDecodeError:
+            meta = {}
+    meta = meta or {}
+    if meta.get("unipile_webhook_id"):
+        return  # already registered
+
+    inbound_url = f"{settings.get_public_base_url()}/api/webhooks/unipile/{ctx.workspace_id}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{base_url.rstrip('/')}/api/v1/webhooks",
+                headers={"X-API-KEY": api_key, "content-type": "application/json"},
+                json={
+                    "request_url": inbound_url,
+                    "source": "messaging",
+                    "events": ["message_received", "account_status"],
+                    "name": "omni-inbound",
+                },
+            )
+        if resp.status_code >= 400:
+            logger.warning("[unipile] webhook auto-register HTTP %s: %s", resp.status_code, resp.text[:200])
+            return
+        body = resp.json() if resp.content else {}
+        webhook_id = body.get("webhook_id") or body.get("id")
+        if not webhook_id:
+            return
+        new_meta = {**meta, "unipile_webhook_id": str(webhook_id)}
+        await execute(
+            "UPDATE omni_connections SET metadata = $1 WHERE id = $2",
+            _json.dumps(new_meta), connection_id,
+        )
+        logger.info("[unipile] registered native webhook %s for connection %s", webhook_id, connection_id)
+    except Exception:  # noqa: BLE001 — never fail the sync over webhook registration
+        logger.exception("[unipile] webhook auto-register failed for connection %s", connection_id)
