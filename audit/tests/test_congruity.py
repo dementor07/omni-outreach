@@ -201,6 +201,21 @@ def test_source_indeed_channel_congruent_python_and_rust():
     assert "pub mod indeed;" in mod_rs
 
 
+def test_source_leads_finder_channel_congruent_python_and_rust():
+    """LinkFinder fan-out source must route to its dedicated Rust muscle channel."""
+    from app.core.events import ChannelType as PyChannel
+
+    assert dispatcher.commands.NODE_CHANNEL.get("source.leads_finder") == PyChannel.LEADS_FINDER
+    assert PyChannel.LEADS_FINDER.value == "leads.finder"
+
+    models_rs = (REPO / "backend-rust/src/models.rs").read_text(encoding="utf-8")
+    assert 'rename = "leads.finder"' in models_rs and "LeadsFinder," in models_rs
+    assert 'ChannelType::LeadsFinder => "leads.finder"' in models_rs
+    mod_rs = (REPO / "backend-rust/src/handlers/mod.rs").read_text(encoding="utf-8")
+    assert "ChannelType::LeadsFinder => leads_finder::handle_leads_finder(command).await" in mod_rs
+    assert "pub mod leads_finder;" in mod_rs
+
+
 _ATS_PLATFORMS = (
     "greenhouse", "ashby", "smartrecruiters", "bamboohr", "workday", "icims",
     "lever", "workable", "recruitee", "personio", "rippling", "breezy",

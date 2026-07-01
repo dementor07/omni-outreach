@@ -43,7 +43,7 @@ ATS_PLATFORMS = [
 
 DIRECT_CONTACT_SOURCES = ["source.csv", "source.sheets", "source.producthunt"]
 PASSIVE_SOURCES = ["source.webhook_in"]
-PEOPLE_SOURCES = ["source.serper_people", "source.searxng_people"]
+PEOPLE_SOURCES = ["source.serper_people", "source.searxng_people", "source.leads_finder"]
 COMPANY_SOURCES = [
     "source.searxng",
     "source.serper_search",
@@ -232,6 +232,14 @@ def _config_for(node_type: str, companies_key: str = "companies") -> dict[str, A
             "people_key": "people",
             "searxng_url": "http://searxng:8080",
         }
+    if node_type == "source.leads_finder":
+        return {
+            "connection_name": "linkfinder-test",
+            "finder_type": "leads_finder_ai",
+            "input_data": "founders in fintech",
+            "fetch_count": 2,
+            "people_key": "people",
+        }
     raise AssertionError(f"missing test config for {node_type}")
 
 
@@ -307,6 +315,16 @@ def _payload_keys_for(node_type: str) -> set[str]:
             "people_key",
             "correlation_id",
         }
+    if node_type == "source.leads_finder":
+        return {
+            "provider",
+            "connection_name",
+            "linkfinder_type",
+            "input_data",
+            "fetch_count",
+            "people_key",
+            "correlation_id",
+        }
     raise AssertionError(f"missing payload contract for {node_type}")
 
 
@@ -316,7 +334,7 @@ def test_every_expected_lead_gen_source_is_registered_once():
     source_types = sorted(manifest.type for manifest in manifests() if manifest.category == NodeCategory.SOURCE)
 
     assert source_types == EXPECTED_SOURCE_TYPES
-    assert len(source_types) == 25
+    assert len(source_types) == 26
 
 
 @pytest.mark.asyncio

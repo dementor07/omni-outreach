@@ -125,3 +125,44 @@ def test_campaign_spec_can_skip_messages_and_still_create_contacts():
 
     assert ("create_contact", "default", "end_sequence_complete") in edges
     assert all(node.node_type != "channel.email" for node in graph.nodes)
+
+
+def test_campaign_spec_compiles_linkfinder_direct_people_source():
+    discover()
+    graph = compile_campaign_spec(CampaignSpec(
+        name="LinkFinder direct",
+        target_contacts=10,
+        sources=[
+            CampaignSourceSpec(
+                provider="leads_finder",
+                connection_name="linkfinder-prod",
+                finder_type="leads_finder_ai",
+                input_data="founders at fintech companies in India",
+                fetch_count=10,
+            )
+        ],
+        enrichment=[
+            EnrichmentStageSpec(
+                provider="linkfinder",
+                connection_name="linkfinder-prod",
+                linkfinder_type="email_to_profile",
+            )
+        ],
+    ))
+    by_key = {node.key: node for node in graph.nodes}
+    edges = {(edge.source, edge.source_handle, edge.target) for edge in graph.edges}
+
+    assert by_key["source_1"].node_type == "source.leads_finder"
+    assert by_key["source_1"].config["finder_type"] == "leads_finder_ai"
+    assert by_key["source_1"].config["input_data"] == "founders at fintech companies in India"
+    assert by_key["source_1"].config["people_key"] == "people"
+    assert by_key["people_loop"].config["max_items"] == 10
+    assert by_key["post_verify_0"].config["enrich_source"] == "linkfinder"
+    assert by_key["post_verify_0"].config["linkfinder_type"] == "email_to_profile"
+    assert ("source_1", "default", "people_loop") in edges
+    assert all(node.node_type != "crm.resolve_company" for node in graph.nodes)
+    assert all(node.node_type != "source.serper_people" for node in graph.nodes)
+
+    nodes, graph_edges = _rows(graph)
+    result = validate_graph(nodes, graph_edges, connections={("linkfinder", "linkfinder-prod")})
+    assert result["valid_for_run"], result["issues"]
