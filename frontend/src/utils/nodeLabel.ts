@@ -35,6 +35,7 @@ const NODE_LABELS: Record<string, string> = {
   'source.clutch': 'Clutch directory',
   'source.serper_people': 'Find people (Serper)',
   'source.searxng_people': 'Find people (free)',
+  'source.leads_finder': 'Find people (LinkFinder)',
 
   // AI
   'ai.compose': 'AI compose message',

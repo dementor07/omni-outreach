@@ -234,15 +234,18 @@ export default function NodeConfigPanel({
               <EnrichmentStageFields
                 provider={String(values.enrich_source ?? '')}
                 connectionName={String(values.connection_name ?? '')}
+                linkfinderType={String(values.linkfinder_type ?? '')}
                 connections={connections}
                 onChange={(provider, connectionName) => {
                   setField('enrich_source', provider)
                   setField('connection_name', connectionName)
+                  if (provider === 'linkfinder' && !values.linkfinder_type) setField('linkfinder_type', 'linkedin_profile_to_email')
                 }}
+                onLinkFinderTypeChange={(lookupType) => setField('linkfinder_type', lookupType)}
               />
             )}
             {primaryFields.filter((f) => (
-              manifest.type !== 'ai.enrich' || !['enrich_source', 'connection_name'].includes(f.name)
+              manifest.type !== 'ai.enrich' || !['enrich_source', 'connection_name', 'linkfinder_type'].includes(f.name)
             )).map((f) => (
               <Field key={f.name} field={f} value={values[f.name]} onChange={(v) => setField(f.name, v)} />
             ))}
@@ -263,7 +266,9 @@ export default function NodeConfigPanel({
                 </button>
                 {showAdvanced && (
                   <div className="space-y-4 border-t border-slate-100 px-3 py-3 dark:border-slate-800">
-                    {advancedFields.map((f) => (
+                    {advancedFields.filter((f) => (
+                      manifest.type !== 'ai.enrich' || f.name !== 'linkfinder_type'
+                    )).map((f) => (
                       <Field key={f.name} field={f} value={values[f.name]} onChange={(v) => setField(f.name, v)} />
                     ))}
                   </div>
@@ -330,7 +335,26 @@ const ENRICHMENT_PROVIDER_NAMES: Record<string, string> = {
   apollo: 'Apollo',
   proxycurl: 'Proxycurl',
   hunter: 'Hunter',
+  linkfinder: 'LinkFinder',
 }
+
+const LINKFINDER_LOOKUP_TYPES = [
+  'linkedin_profile_to_email',
+  'linkedin_profile_to_phone',
+  'linkedin_profile_to_linkedin_info',
+  'email_to_linkedin_url',
+  'email_to_profile',
+  'email_to_phone',
+  'phone_to_linkedin_url',
+  'phone_to_profile',
+  'phone_to_email',
+  'lead_full_name_to_linkedin_url',
+  'company_name_to_website',
+  'company_name_to_phone',
+  'company_name_to_email',
+  'company_name_to_employee_count',
+  'company_name_to_linkedin_url',
+] as const
 
 function isFailureRoute(handle: string): boolean {
   return ['on_error', 'rejected', 'timeout', 'empty', 'false'].includes(handle)
@@ -345,15 +369,19 @@ function routeFallback(handle: string): string {
 function EnrichmentStageFields({
   provider,
   connectionName,
+  linkfinderType,
   connections,
   onChange,
+  onLinkFinderTypeChange,
 }: {
   provider: string
   connectionName: string
+  linkfinderType: string
   connections: Connection[]
   onChange: (provider: string, connectionName: string) => void
+  onLinkFinderTypeChange: (lookupType: string) => void
 }) {
-  const availableProviders = ['apollo', 'proxycurl', 'hunter'].filter(
+  const availableProviders = ['apollo', 'proxycurl', 'hunter', 'linkfinder'].filter(
     (candidate) => connections.some((connection) => connection.provider === candidate)
       || candidate === provider,
   )
@@ -398,6 +426,22 @@ function EnrichmentStageFields({
           </p>
         )}
       </div>
+      {provider === 'linkfinder' && (
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-300">Lookup type</p>
+          <Select
+            className="mt-1"
+            size="sm"
+            ariaLabel="LinkFinder lookup type"
+            value={linkfinderType || 'linkedin_profile_to_email'}
+            onChange={onLinkFinderTypeChange}
+            options={LINKFINDER_LOOKUP_TYPES.map((lookupType) => ({
+              value: lookupType,
+              label: lookupType,
+            }))}
+          />
+        </div>
+      )}
       <p className="text-[11px] leading-relaxed text-slate-500">
         This stage uses one credential only. Provider failures follow the visible On error edge.
       </p>

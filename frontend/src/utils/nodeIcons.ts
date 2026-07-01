@@ -65,6 +65,7 @@ const ICON_BY_TYPE: Record<string, LucideIcon> = {
   'source.linkedin_jobs': Linkedin,
   'source.serper_people': Users,
   'source.searxng_people': Users,
+  'source.leads_finder': Users,
   // Company-discovery sources — each its own product.
   'source.searxng': Search,
   'source.serper_search': Search,

@@ -1,6 +1,6 @@
 import {
   Mail, MessageSquare, Phone, Linkedin, Slack, Search, Target, Sparkles,
-  Send, Instagram, MessageCircle, Globe, Database, FileSpreadsheet,
+  Send, Instagram, MessageCircle, Globe, Database, FileSpreadsheet, Users,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -165,6 +165,12 @@ export const PROVIDERS: ProviderSpec[] = [
     id: 'serper', name: 'Serper (Google search)', category: 'data', icon: Search,
     blurb: 'Google-search-powered company and people discovery.',
     docsUrl: 'https://serper.dev',
+    fields: [API_KEY],
+  },
+  {
+    id: 'linkfinder', name: 'LinkFinder AI', category: 'data', icon: Users,
+    blurb: 'AI lead finder and profile/company enrichment through LinkFinder.',
+    docsUrl: 'https://linkfinderai.com/api-documentation',
     fields: [API_KEY],
   },
   {

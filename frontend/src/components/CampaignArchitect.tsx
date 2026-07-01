@@ -28,11 +28,15 @@ interface DraftSource {
   connection_name: string
   location: string
   max_results: string
+  finder_type: 'leads_finder_ai' | 'company_domain_to_employees' | 'linkedin_post_to_reactions'
+  input_data: string
+  fetch_count: string
 }
 
 interface DraftEnrichment {
   provider: EnrichmentProvider
   connection_name: string
+  linkfinder_type: string
 }
 
 interface DraftMessage {
@@ -83,6 +87,24 @@ const ATS_PROVIDERS = new Set(['greenhouse', 'ashby', 'smartrecruiters', 'bamboo
 const NO_QUERY_PROVIDERS = new Set([...ATS_PROVIDERS, 'producthunt'])
 const JOB_BOARD_PROVIDERS = new Set(['naukri', 'indeed', 'linkedin_jobs'])
 const SEARCH_PROVIDERS = new Set(['searxng', 'serper_search', 'apollo', 'clutch'])
+const LINKFINDER_FINDER_TYPES = ['leads_finder_ai', 'company_domain_to_employees', 'linkedin_post_to_reactions'] as const
+const LINKFINDER_ENRICH_TYPES = [
+  'linkedin_profile_to_email',
+  'linkedin_profile_to_phone',
+  'linkedin_profile_to_linkedin_info',
+  'email_to_linkedin_url',
+  'email_to_profile',
+  'email_to_phone',
+  'phone_to_linkedin_url',
+  'phone_to_profile',
+  'phone_to_email',
+  'lead_full_name_to_linkedin_url',
+  'company_name_to_website',
+  'company_name_to_phone',
+  'company_name_to_email',
+  'company_name_to_employee_count',
+  'company_name_to_linkedin_url',
+] as const
 
 const DEFAULT_SOURCE: DraftSource = {
   provider: 'naukri',
@@ -91,6 +113,9 @@ const DEFAULT_SOURCE: DraftSource = {
   connection_name: '',
   location: 'India',
   max_results: '100',
+  finder_type: 'leads_finder_ai',
+  input_data: '',
+  fetch_count: '25',
 }
 
 const DEFAULT_MESSAGE: DraftMessage = {
@@ -129,6 +154,9 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
       connection_name: '',
       location: '',
       max_results: '20',
+      finder_type: 'leads_finder_ai',
+      input_data: '',
+      fetch_count: '25',
     },
     {
       provider: 'serper_search',
@@ -137,6 +165,9 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
       connection_name: '',
       location: '',
       max_results: '20',
+      finder_type: 'leads_finder_ai',
+      input_data: '',
+      fetch_count: '25',
     },
   ])
   const [peopleProvider, setPeopleProvider] = useState<'searxng_people' | 'serper_people'>('serper_people')
@@ -152,9 +183,10 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
   const [maxSpend, setMaxSpend] = useState('')
   const [classic, setClassic] = useState<ClassicDraft>(DEFAULT_CLASSIC)
   const serperConnections = useMemo(() => connectionsForProvider(connections, 'serper'), [connections])
+  const linkfinderConnections = useMemo(() => connectionsForProvider(connections, 'linkfinder'), [connections])
   const anthropicConnections = useMemo(() => connectionsForProvider(connections, 'anthropic'), [connections])
   const connectedEnrichmentProviders = useMemo(
-    () => (['proxycurl', 'hunter', 'apollo'] as EnrichmentProvider[]).filter((provider) => connections.some((connection) => connection.provider === provider)),
+    () => (['proxycurl', 'hunter', 'apollo', 'linkfinder'] as EnrichmentProvider[]).filter((provider) => connections.some((connection) => connection.provider === provider)),
     [connections],
   )
 
@@ -168,6 +200,16 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
         : source
     )))
   }, [serperConnections])
+
+  useEffect(() => {
+    const firstLinkFinder = linkfinderConnections[0]?.name
+    if (!firstLinkFinder) return
+    setSources((current) => current.map((source) => (
+      source.provider === 'leads_finder' && !source.connection_name
+        ? { ...source, connection_name: firstLinkFinder }
+        : source
+    )))
+  }, [linkfinderConnections])
 
   useEffect(() => {
     const firstAnthropic = anthropicConnections[0]?.name
@@ -411,7 +453,11 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
                         const provider = connectedEnrichmentProviders.find((candidate) => !enrichment.some((stage) => stage.provider === candidate))
                         if (!provider) return
                         const connection = connections.find((item) => item.provider === provider)
-                        setEnrichment((current) => [...current, { provider, connection_name: connection?.name ?? '' }])
+                        setEnrichment((current) => [...current, {
+                          provider,
+                          connection_name: connection?.name ?? '',
+                          linkfinder_type: provider === 'linkfinder' ? 'linkedin_profile_to_email' : '',
+                        }])
                       }}
                     >
                       Add connected enrichment source
@@ -520,14 +566,20 @@ function buildSpec(input: {
   if (titles.length === 0) issues.push({ severity: 'error', message: 'Add at least one buyer title.' })
   const sources = input.sources.map((source, index) => {
     const sourceNumber = index + 1
-    const query = SEARCH_PROVIDERS.has(source.provider) ? source.query.trim() : (source.provider === 'producthunt' ? undefined : source.query.trim())
+    const query = SEARCH_PROVIDERS.has(source.provider) ? source.query.trim() : (source.provider === 'producthunt' || source.provider === 'leads_finder' ? undefined : source.query.trim())
     const keyword = JOB_BOARD_PROVIDERS.has(source.provider) ? source.keyword.trim() : undefined
     const connectionName = source.connection_name.trim() || undefined
     const maxResults = Number(source.max_results) || 25
+    const fetchCount = Number(source.fetch_count) || Math.min(100, maxResults)
     if (JOB_BOARD_PROVIDERS.has(source.provider) && !keyword) issues.push({ severity: 'error', message: `Source ${sourceNumber} (${source.provider}) requires a role keyword.` })
     if (SEARCH_PROVIDERS.has(source.provider) && !query) issues.push({ severity: 'error', message: `Source ${sourceNumber} (${source.provider}) requires a search query.` })
     if (source.provider === 'serper_search') {
       if (!connectionName) issues.push({ severity: 'error', message: `Source ${sourceNumber} (Serper) requires a connection name.` })
+    }
+    if (source.provider === 'leads_finder') {
+      if (!connectionName) issues.push({ severity: 'error', message: `Source ${sourceNumber} (LinkFinder) requires a connection name.` })
+      if (!source.input_data.trim()) issues.push({ severity: 'error', message: `Source ${sourceNumber} (LinkFinder) requires input data.` })
+      if (!LINKFINDER_FINDER_TYPES.includes(source.finder_type)) issues.push({ severity: 'error', message: `Source ${sourceNumber} has an unknown LinkFinder lookup type.` })
     }
     if (!Number.isFinite(maxResults) || maxResults <= 0) issues.push({ severity: 'error', message: `Source ${sourceNumber} max results must be positive.` })
     return {
@@ -538,6 +590,11 @@ function buildSpec(input: {
       location: source.location.trim() || undefined,
       max_results: maxResults,
       titles,
+      ...(source.provider === 'leads_finder' ? {
+        finder_type: source.finder_type,
+        input_data: source.input_data.trim(),
+        fetch_count: Math.max(1, Math.min(100, fetchCount)),
+      } : {}),
     }
   })
   if (sources.length === 0) issues.push({ severity: 'error', message: 'Add at least one source.' })
@@ -553,7 +610,11 @@ function buildSpec(input: {
   const enrichment = input.enrichment.map((stage, index) => {
     const connectionName = stage.connection_name.trim()
     if (!connectionName) issues.push({ severity: 'error', message: `Enrichment stage ${index + 1} (${providerLabel(stage.provider)}) requires a connection name.` })
-    return { provider: stage.provider, connection_name: connectionName }
+    return {
+      provider: stage.provider,
+      connection_name: connectionName,
+      ...(stage.provider === 'linkfinder' ? { linkfinder_type: stage.linkfinder_type || 'linkedin_profile_to_email' } : {}),
+    }
   })
   const messages = input.messages.map((message, index) => {
     const messageNumber = index + 1
@@ -633,6 +694,7 @@ function providerLabel(provider: EnrichmentProvider): string {
   return {
     apollo: 'Apollo',
     hunter: 'Hunter',
+    linkfinder: 'LinkFinder',
     proxycurl: 'Proxycurl',
   }[provider]
 }
@@ -706,9 +768,11 @@ function SourceRow({
   onRemove: () => void
 }) {
   const serperConnections = connectionsForProvider(connections, 'serper')
+  const linkfinderConnections = connectionsForProvider(connections, 'linkfinder')
   const isJobBoard = JOB_BOARD_PROVIDERS.has(source.provider)
   const isSearch = SEARCH_PROVIDERS.has(source.provider)
   const isATS = NO_QUERY_PROVIDERS.has(source.provider)
+  const isLeadsFinder = source.provider === 'leads_finder'
   
   return (
     <div className="group relative grid gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900/50 md:grid-cols-[160px_1fr_130px_40px]">
@@ -720,7 +784,11 @@ function SourceRow({
             onChange({
               ...source,
               provider,
-              connection_name: provider === 'serper_search' ? (serperConnections[0]?.name ?? '') : '',
+              connection_name: provider === 'serper_search'
+                ? (serperConnections[0]?.name ?? '')
+                : provider === 'leads_finder'
+                  ? (linkfinderConnections[0]?.name ?? '')
+                  : '',
             })
           }}
           className={`${inputClass} font-medium text-slate-800 dark:text-slate-100`}
@@ -731,6 +799,7 @@ function SourceRow({
             <option value="apollo">Apollo.io</option>
             <option value="clutch">Clutch</option>
             <option value="producthunt">Product Hunt</option>
+            <option value="leads_finder">LinkFinder leads</option>
           </optgroup>
           <optgroup label="Job Boards">
             <option value="linkedin_jobs">LinkedIn Jobs</option>
@@ -754,7 +823,16 @@ function SourceRow({
         </select>
       </Field>
       
-      {isATS ? (
+      {isLeadsFinder ? (
+        <Field label="Input data">
+          <input
+            value={source.input_data}
+            onChange={(event) => onChange({ ...source, input_data: event.target.value })}
+            placeholder="Query, company domain, or LinkedIn post URL"
+            className={`${inputClass} transition-shadow focus:ring-2 focus:ring-brand-500/20`}
+          />
+        </Field>
+      ) : isATS ? (
         <div className="flex items-center rounded-xl bg-slate-50 px-4 text-xs leading-relaxed text-slate-500 dark:bg-slate-900/60 dark:text-slate-400">
           This source pulls directly from a global index or feed. No keyword required.
         </div>
@@ -769,8 +847,15 @@ function SourceRow({
         </Field>
       )}
 
-      <Field label="Max results">
-        <input type="number" min={1} value={source.max_results} onChange={(event) => onChange({ ...source, max_results: event.target.value })} className={`${inputClass} transition-shadow focus:ring-2 focus:ring-brand-500/20`} />
+      <Field label={isLeadsFinder ? 'Fetch count' : 'Max results'}>
+        <input
+          type="number"
+          min={1}
+          max={isLeadsFinder ? 100 : undefined}
+          value={isLeadsFinder ? source.fetch_count : source.max_results}
+          onChange={(event) => onChange(isLeadsFinder ? { ...source, fetch_count: event.target.value, max_results: event.target.value } : { ...source, max_results: event.target.value })}
+          className={`${inputClass} transition-shadow focus:ring-2 focus:ring-brand-500/20`}
+        />
       </Field>
 
       <button type="button" onClick={onRemove} className="mt-6 flex h-9 w-9 items-center justify-center rounded-xl text-slate-300 opacity-0 transition-all group-hover:opacity-100 hover:bg-rose-50 hover:text-rose-500 dark:text-slate-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-400" aria-label={`Remove source ${index + 1}`}>
@@ -795,6 +880,31 @@ function SourceRow({
           </Field>
         </div>
       )}
+      {source.provider === 'leads_finder' && (
+        <div className="md:col-span-4 mt-2 grid gap-3 md:grid-cols-[220px_1fr]">
+          <Field label="LinkFinder lookup">
+            <select value={source.finder_type} onChange={(event) => onChange({ ...source, finder_type: event.target.value as DraftSource['finder_type'] })} className={`${inputClass} max-w-sm`}>
+              <option value="leads_finder_ai">Leads finder AI</option>
+              <option value="company_domain_to_employees">Company domain to employees</option>
+              <option value="linkedin_post_to_reactions">LinkedIn post reactions</option>
+            </select>
+          </Field>
+          <Field label="LinkFinder connection name">
+            {linkfinderConnections.length > 0 ? (
+              <select value={source.connection_name} onChange={(event) => onChange({ ...source, connection_name: event.target.value })} className={inputClass}>
+                <option value="">Choose connected LinkFinder account</option>
+                {linkfinderConnections.map((connection) => (
+                  <option key={connection.id} value={connection.name}>{connection.name}</option>
+                ))}
+              </select>
+            ) : (
+              <p className="mt-1 rounded-xl bg-amber-50/50 px-4 py-3 text-xs font-medium text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
+                No connected LinkFinder account found. Add LinkFinder in Integrations or remove this source.
+              </p>
+            )}
+          </Field>
+        </div>
+      )}
     </div>
   )
 }
@@ -813,7 +923,7 @@ function EnrichmentRow({
   onRemove: () => void
 }) {
   const providerConnections = connections.filter((connection) => connection.provider === stage.provider)
-  const connectedProviders = (['proxycurl', 'hunter', 'apollo'] as EnrichmentProvider[]).filter(
+  const connectedProviders = (['proxycurl', 'hunter', 'apollo', 'linkfinder'] as EnrichmentProvider[]).filter(
     (provider) => connections.some((connection) => connection.provider === provider),
   )
   return (
@@ -824,7 +934,11 @@ function EnrichmentRow({
           onChange={(event) => {
             const provider = event.target.value as EnrichmentProvider
             const firstConnection = connections.find((connection) => connection.provider === provider)
-            onChange({ provider, connection_name: firstConnection?.name ?? '' })
+            onChange({
+              provider,
+              connection_name: firstConnection?.name ?? '',
+              linkfinder_type: provider === 'linkfinder' ? 'linkedin_profile_to_email' : '',
+            })
           }}
           className={inputClass}
         >
@@ -850,6 +964,15 @@ function EnrichmentRow({
       <button type="button" onClick={onRemove} className="mt-6 flex h-9 w-9 items-center justify-center rounded-xl text-slate-300 opacity-0 transition-all group-hover:opacity-100 hover:bg-rose-50 hover:text-rose-500 dark:text-slate-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-400" aria-label={`Remove enrichment ${index + 1}`}>
         <Trash2 size={16} />
       </button>
+      {stage.provider === 'linkfinder' && (
+        <div className="md:col-span-3">
+          <Field label="LinkFinder lookup">
+            <select value={stage.linkfinder_type || 'linkedin_profile_to_email'} onChange={(event) => onChange({ ...stage, linkfinder_type: event.target.value })} className={inputClass}>
+              {LINKFINDER_ENRICH_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+            </select>
+          </Field>
+        </div>
+      )}
     </div>
   )
 }

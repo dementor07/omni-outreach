@@ -55,7 +55,14 @@ export function nodeConfigSummary(
     const provider = String(config.enrich_source ?? 'Provider')
     const connection = String(config.connection_name ?? '')
     const policy = config.merge_policy === 'overwrite' ? 'may overwrite' : 'fills missing fields'
-    return `${provider.charAt(0).toUpperCase()}${provider.slice(1)} · ${policy}${connection ? ` · ${connection}` : ''}`
+    const lookup = provider === 'linkfinder' && config.linkfinder_type ? ` · ${short(config.linkfinder_type, 30)}` : ''
+    return `${provider.charAt(0).toUpperCase()}${provider.slice(1)} · ${policy}${lookup}${connection ? ` · ${connection}` : ''}`
+  }
+
+  if (manifest.type === 'source.leads_finder') {
+    const lookup = short(config.finder_type ?? 'LinkFinder')
+    const input = short(config.input_data ?? '', 30)
+    return input ? `${lookup} · ${input}` : lookup
   }
 
   const keys = Object.keys(config)

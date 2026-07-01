@@ -57,10 +57,11 @@ interface OmniNodeData extends Record<string, unknown> {
 }
 type OmniRfNode = Node<OmniNodeData>
 
-type EnrichmentProvider = 'apollo' | 'hunter' | 'proxycurl'
+type EnrichmentProvider = 'apollo' | 'hunter' | 'proxycurl' | 'linkfinder'
 interface EnrichmentStage {
   provider: EnrichmentProvider
   connection_name: string
+  linkfinder_type?: string
 }
 
 // ── Cycle detection ───────────────────────────────────────────────────────
@@ -416,6 +417,7 @@ export default function CampaignEditor() {
         config: {
           enrich_source: stage.provider,
           connection_name: stage.connection_name,
+          ...(stage.linkfinder_type ? { linkfinder_type: stage.linkfinder_type } : {}),
           merge_policy: 'fill_missing',
           skip_if_complete: true,
         },
@@ -1370,11 +1372,32 @@ function NodePalette({
   )
 }
 
-const ENRICHMENT_PROVIDER_ORDER: EnrichmentProvider[] = ['apollo', 'proxycurl', 'hunter']
+const LINKFINDER_ENRICH_TYPES = [
+  'linkedin_profile_to_email',
+  'linkedin_profile_to_phone',
+  'linkedin_profile_to_linkedin_info',
+  'email_to_linkedin_url',
+  'email_to_profile',
+  'email_to_phone',
+  'phone_to_linkedin_url',
+  'phone_to_profile',
+  'phone_to_email',
+  'lead_full_name_to_linkedin_url',
+  'company_name_to_website',
+  'company_name_to_phone',
+  'company_name_to_email',
+  'company_name_to_employee_count',
+  'company_name_to_linkedin_url',
+  'linkedin_company_to_linkedin_info',
+  'linkedin_company_to_employee_count',
+] as const
+
+const ENRICHMENT_PROVIDER_ORDER: EnrichmentProvider[] = ['apollo', 'proxycurl', 'hunter', 'linkfinder']
 const ENRICHMENT_PROVIDER_COPY: Record<EnrichmentProvider, { name: string; detail: string }> = {
   apollo: { name: 'Apollo', detail: 'Identity, role, company, and LinkedIn matching' },
   proxycurl: { name: 'Proxycurl', detail: 'Deep LinkedIn profile enrichment' },
   hunter: { name: 'Hunter', detail: 'Professional email discovery' },
+  linkfinder: { name: 'LinkFinder', detail: 'Email, phone, LinkedIn, and company lookups' },
 }
 
 function EnrichmentStackDialog({
@@ -1401,7 +1424,7 @@ function EnrichmentStackDialog({
     if (loading || initialized.current) return
     setStages(ENRICHMENT_PROVIDER_ORDER.flatMap((provider) => {
       const first = connections.find((connection) => connection.provider === provider)
-      return first ? [{ provider, connection_name: first.name }] : []
+      return first ? [{ provider, connection_name: first.name, ...(provider === 'linkfinder' ? { linkfinder_type: 'linkedin_profile_to_email' } : {}) }] : []
     }))
     initialized.current = true
   }, [connections, loading])
@@ -1476,6 +1499,17 @@ function EnrichmentStackDialog({
                         >
                           {options.map((connection) => <option key={connection.id} value={connection.name}>{connection.name}</option>)}
                         </select>
+                        {stage.provider === 'linkfinder' && (
+                          <select
+                            value={stage.linkfinder_type || 'linkedin_profile_to_email'}
+                            onChange={(event) => setStages((current) => current.map((item, itemIndex) => (
+                              itemIndex === index ? { ...item, linkfinder_type: event.target.value } : item
+                            )))}
+                            className="mt-1.5 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 focus:border-brand-400 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                          >
+                            {LINKFINDER_ENRICH_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                          </select>
+                        )}
                       </div>
                       <div className="flex flex-col gap-1">
                         <button type="button" onClick={() => move(index, -1)} disabled={index === 0} title="Move earlier" className="rounded p-1 text-slate-400 hover:bg-slate-100 disabled:opacity-25 dark:hover:bg-slate-800"><ArrowUp size={13} /></button>
@@ -1495,7 +1529,11 @@ function EnrichmentStackDialog({
                       <button
                         key={provider}
                         type="button"
-                        onClick={() => connection && setStages((current) => [...current, { provider, connection_name: connection.name }])}
+                        onClick={() => connection && setStages((current) => [...current, {
+                          provider,
+                          connection_name: connection.name,
+                          ...(provider === 'linkfinder' ? { linkfinder_type: 'linkedin_profile_to_email' } : {}),
+                        }])}
                         className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:border-brand-200 hover:text-brand-600 dark:border-slate-700 dark:text-slate-300"
                       >
                         + {ENRICHMENT_PROVIDER_COPY[provider].name}

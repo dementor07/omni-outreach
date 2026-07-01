@@ -480,9 +480,9 @@ export interface GoalWorkflowCreate {
 export type CampaignSourceProvider = 
   | 'naukri' | 'indeed' | 'linkedin_jobs'
   | 'greenhouse' | 'ashby' | 'smartrecruiters' | 'bamboohr' | 'workday' | 'icims' | 'lever' | 'workable' | 'recruitee' | 'personio' | 'rippling' | 'breezy'
-  | 'searxng' | 'serper_search' | 'apollo' | 'clutch' | 'producthunt'
+  | 'searxng' | 'serper_search' | 'apollo' | 'clutch' | 'producthunt' | 'leads_finder'
 export type PeopleDiscoveryProvider = 'searxng_people' | 'serper_people'
-export type EnrichmentProvider = 'apollo' | 'proxycurl' | 'hunter'
+export type EnrichmentProvider = 'apollo' | 'proxycurl' | 'hunter' | 'linkfinder'
 export type MessageChannel = 'email' | 'linkedin' | 'sms' | 'whatsapp' | 'instagram' | 'telegram' | 'voice'
 
 export interface CampaignSourceSpec {
@@ -493,6 +493,9 @@ export interface CampaignSourceSpec {
   location?: string | null
   max_results?: number
   titles?: string[]
+  finder_type?: 'leads_finder_ai' | 'company_domain_to_employees' | 'linkedin_post_to_reactions' | null
+  input_data?: string | null
+  fetch_count?: number
 }
 
 export interface PeopleDiscoverySpec {
@@ -507,6 +510,7 @@ export interface EnrichmentStageSpec {
   connection_name: string
   merge_policy?: 'fill_missing' | 'overwrite'
   skip_if_complete?: boolean
+  linkfinder_type?: string | null
 }
 
 export interface MessageStepSpec {
