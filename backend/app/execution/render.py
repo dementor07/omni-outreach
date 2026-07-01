@@ -54,6 +54,9 @@ _TEMPLATE_FIELDS: dict[str, str] = {
     "body_template": "body",
     "message_template": "body",
     "title_template": "title",
+    # UNIPILE-FULL: a LinkedIn post comment renders into `body` (the field the
+    # comment handler reads), same as a message body.
+    "comment_template": "body",
 }
 
 # Per-channel chat-session column persisted into lead.custom_fields by

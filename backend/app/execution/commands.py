@@ -87,6 +87,18 @@ NODE_CHANNEL: dict[str, ChannelType] = {
     "source.serper_search": ChannelType.SERPER_SEARCH,
     "source.apollo": ChannelType.APOLLO,
     "source.clutch": ChannelType.CLUTCH,
+    # UNIPILE-FULL: native LinkedIn search (fan-out lead-gen) + enrichment reads
+    # + per-lead social actions. Each its own ChannelType (wire contract verified
+    # in test_unipile_full + test_congruity).
+    "source.linkedin_search": ChannelType.LINKEDIN_SEARCH,
+    "enrich.linkedin_company": ChannelType.LINKEDIN_COMPANY_PROFILE,
+    "enrich.linkedin_member": ChannelType.LINKEDIN_MEMBER_PROFILE,
+    "channel.linkedin_react_post": ChannelType.LINKEDIN_REACT_POST,
+    "channel.linkedin_comment_post": ChannelType.LINKEDIN_COMMENT_POST,
+    "channel.linkedin_endorse": ChannelType.LINKEDIN_ENDORSE,
+    "channel.linkedin_follow": ChannelType.LINKEDIN_FOLLOW,
+    "channel.message_react": ChannelType.MESSAGE_REACT,
+    "channel.invite_cancel": ChannelType.INVITE_CANCEL,
     # ATS job-board sources — 12 distinct nodes, one shared muscle channel
     # (ChannelType.ATS); the muscle keys on payload.platform. All keyless.
     "source.greenhouse": ChannelType.ATS,

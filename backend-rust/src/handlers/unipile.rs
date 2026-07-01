@@ -526,6 +526,264 @@ pub async fn handle_telegram(command: &ActionCommand) -> ExecutionResult {
     send_chat(command, "dm_sent", "tg_chat_id").await
 }
 
+// ── UNIPILE-FULL: per-lead social ACTIONS + enrichment reads ────────────────────
+//
+// Each is a stateless per-lead handler that redeems the credential bundle,
+// resolves the target from the lead + payload, calls one Unipile endpoint, and
+// returns Sent/Failed. The Python nodes route these through the send-gate
+// chokepoint when fired in a campaign (they carry a contact recipient / a real
+// side effect), so no gate logic lives here.
+
+/// Small helper: POST JSON to a Unipile path with the seat's account_id in the
+/// body, returning a uniform Sent/Failed result. `action` names the telemetry.
+async fn unipile_action_post(
+    command: &ActionCommand,
+    path: &str,
+    body: Value,
+    action: &str,
+) -> ExecutionResult {
+    let (api_key, base) = match unipile_creds(command).await {
+        Ok(v) => v,
+        Err(e) => return common::fail(command, e, true),
+    };
+    let client = ProxyManager::create_client(command.lead.proxy_settings.clone())
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let resp = client
+        .post(format!("{}/api/v1/{}", base, path.trim_start_matches('/')))
+        .header("X-API-KEY", &api_key)
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await;
+    credentials::release(command.credential_ref.as_deref().unwrap_or("")).await;
+    match resp {
+        Ok(r) if r.status().is_success() => common::ok(
+            command,
+            json!({"provider": "unipile", "channel": action}),
+            Some(action),
+            json!({}),
+        ),
+        Ok(r) => {
+            let status = r.status();
+            let text = r.text().await.unwrap_or_default();
+            let retriable = status.is_server_error() || status.as_u16() == 429;
+            common::fail(
+                command,
+                format!("unipile {action} HTTP {status}: {}", text.chars().take(200).collect::<String>()),
+                retriable,
+            )
+        }
+        Err(e) => common::fail(command, format!("unipile {action} network: {e}"), true),
+    }
+}
+
+/// React to / like a post. Needs `post_id` (payload) + `reaction` (default LIKE).
+pub async fn handle_linkedin_react_post(command: &ActionCommand) -> ExecutionResult {
+    let account_id = common::s(command, "unipile_account_id");
+    let post_id = common::s(command, "post_id");
+    if account_id.is_empty() || post_id.is_empty() {
+        return common::fail(command, "unipile_account_id or post_id missing", false);
+    }
+    let reaction = common::opt_s(command, "reaction").unwrap_or_else(|| "like".to_string());
+    let body = json!({"account_id": account_id, "reaction_type": reaction});
+    unipile_action_post(command, &format!("posts/{post_id}/reactions"), body, "linkedin_react_post").await
+}
+
+/// Comment on a post. Needs `post_id` + `body` (the rendered comment text).
+pub async fn handle_linkedin_comment_post(command: &ActionCommand) -> ExecutionResult {
+    let account_id = common::s(command, "unipile_account_id");
+    let post_id = common::s(command, "post_id");
+    let text = common::s(command, "body");
+    if account_id.is_empty() || post_id.is_empty() || text.is_empty() {
+        return common::fail(command, "unipile_account_id, post_id or body missing", false);
+    }
+    let body = json!({"account_id": account_id, "text": text});
+    unipile_action_post(command, &format!("posts/{post_id}/comments"), body, "linkedin_comment_post").await
+}
+
+/// Endorse a member's skill. Resolves the member id (payload provider_id or the
+/// lead's linkedin_url) and posts the endorsement.
+pub async fn handle_linkedin_endorse(command: &ActionCommand) -> ExecutionResult {
+    let account_id = common::s(command, "unipile_account_id");
+    if account_id.is_empty() {
+        return common::fail(command, "unipile_account_id missing", false);
+    }
+    let member_id = {
+        let pid = common::s(command, "provider_id");
+        if !pid.is_empty() {
+            pid
+        } else {
+            command.lead.linkedin_url.as_deref().map(public_id_from_linkedin_url).unwrap_or_default()
+        }
+    };
+    if member_id.is_empty() {
+        return common::fail(command, "no member id (provider_id/linkedin_url) to endorse", false);
+    }
+    let mut body = json!({"account_id": account_id});
+    if let Some(skill) = common::opt_s(command, "skill") {
+        body["skill"] = json!(skill);
+    }
+    unipile_action_post(command, &format!("linkedin/members/{member_id}/endorse"), body, "linkedin_endorse").await
+}
+
+/// Follow a member. Resolves the member id and posts a follow.
+pub async fn handle_linkedin_follow(command: &ActionCommand) -> ExecutionResult {
+    let account_id = common::s(command, "unipile_account_id");
+    if account_id.is_empty() {
+        return common::fail(command, "unipile_account_id missing", false);
+    }
+    let member_id = {
+        let pid = common::s(command, "provider_id");
+        if !pid.is_empty() {
+            pid
+        } else {
+            command.lead.linkedin_url.as_deref().map(public_id_from_linkedin_url).unwrap_or_default()
+        }
+    };
+    if member_id.is_empty() {
+        return common::fail(command, "no member id (provider_id/linkedin_url) to follow", false);
+    }
+    let body = json!({"account_id": account_id, "identifier": member_id});
+    unipile_action_post(command, "users/follow", body, "linkedin_follow").await
+}
+
+/// React to a message in a chat. Needs `message_id` + `reaction` (default 👍).
+pub async fn handle_message_react(command: &ActionCommand) -> ExecutionResult {
+    let account_id = common::s(command, "unipile_account_id");
+    let message_id = common::s(command, "message_id");
+    if account_id.is_empty() || message_id.is_empty() {
+        return common::fail(command, "unipile_account_id or message_id missing", false);
+    }
+    let reaction = common::opt_s(command, "reaction").unwrap_or_else(|| "👍".to_string());
+    let body = json!({"account_id": account_id, "value": reaction});
+    unipile_action_post(command, &format!("messages/{message_id}/reaction"), body, "message_react").await
+}
+
+/// Cancel a pending sent invitation. Needs `invitation_id` (payload) — the id we
+/// recorded when the invite was sent.
+pub async fn handle_invite_cancel(command: &ActionCommand) -> ExecutionResult {
+    let account_id = common::s(command, "unipile_account_id");
+    let invitation_id = command
+        .payload
+        .get("invitation_id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            command.lead.extra_data.get("invitation_id").and_then(|v| v.as_str()).map(|s| s.to_string())
+        })
+        .unwrap_or_default();
+    if account_id.is_empty() || invitation_id.is_empty() {
+        return common::fail(command, "unipile_account_id or invitation_id missing", false);
+    }
+    let body = json!({"account_id": account_id});
+    unipile_action_post(command, &format!("users/invitations/{invitation_id}/cancel"), body, "invite_cancel").await
+}
+
+/// GET a LinkedIn company profile → enrichment.fields onto the lead. Needs
+/// `company_id` (payload) or resolves from the lead's company name is out of
+/// scope here — the node passes the id.
+pub async fn handle_linkedin_company_profile(command: &ActionCommand) -> ExecutionResult {
+    let (api_key, base) = match unipile_creds(command).await {
+        Ok(v) => v,
+        Err(e) => return common::fail(command, e, true),
+    };
+    let account_id = common::s(command, "unipile_account_id");
+    let company_id = common::s(command, "company_id");
+    if account_id.is_empty() || company_id.is_empty() {
+        return common::fail(command, "unipile_account_id or company_id missing", false);
+    }
+    let client = ProxyManager::create_client(command.lead.proxy_settings.clone())
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let resp = client
+        .get(format!("{}/api/v1/linkedin/company/{}", base, company_id))
+        .header("X-API-KEY", &api_key)
+        .query(&[("account_id", &account_id)])
+        .send()
+        .await;
+    credentials::release(command.credential_ref.as_deref().unwrap_or("")).await;
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            let body: Value = r.json().await.unwrap_or(json!({}));
+            let mut fields = serde_json::Map::new();
+            let put = |m: &mut serde_json::Map<String, Value>, k: &str, paths: &[&str]| {
+                if let Some(v) = first_str(&body, paths) {
+                    m.insert(k.to_string(), json!(v));
+                }
+            };
+            put(&mut fields, "company_name", &["name", "company_name"]);
+            put(&mut fields, "company_industry", &["industry", "industries.0"]);
+            put(&mut fields, "company_website", &["website", "websites.0"]);
+            put(&mut fields, "company_size", &["staff_count", "employee_count", "company_size"]);
+            put(&mut fields, "company_headquarters", &["headquarters", "location", "locations.0.city"]);
+            let mutations = if fields.is_empty() {
+                json!({})
+            } else {
+                json!({ "enrichment": { "fields": Value::Object(fields) } })
+            };
+            common::ok(
+                command,
+                json!({"provider": "unipile", "channel": "linkedin_company_profile"}),
+                Some("linkedin_company_profile.completed"),
+                mutations,
+            )
+        }
+        Ok(r) => common::fail(command, format!("company profile HTTP {}", r.status()), r.status().is_server_error()),
+        Err(e) => common::fail(command, format!("company profile network: {e}"), true),
+    }
+}
+
+/// GET a member profile → enrichment.fields onto the lead (reuses the profile
+/// enrichment probe). Resolves the member public_id from the lead's linkedin_url.
+pub async fn handle_linkedin_member_profile(command: &ActionCommand) -> ExecutionResult {
+    let (api_key, base) = match unipile_creds(command).await {
+        Ok(v) => v,
+        Err(e) => return common::fail(command, e, true),
+    };
+    let account_id = common::s(command, "unipile_account_id");
+    let public_id = {
+        let pid = common::s(command, "public_id");
+        if !pid.is_empty() {
+            pid
+        } else {
+            command.lead.linkedin_url.as_deref().map(public_id_from_linkedin_url).unwrap_or_default()
+        }
+    };
+    if account_id.is_empty() || public_id.is_empty() {
+        return common::fail(command, "unipile_account_id or public_id missing", false);
+    }
+    let client = ProxyManager::create_client(command.lead.proxy_settings.clone())
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let resp = client
+        .get(format!("{}/api/v1/users/{}", base, public_id))
+        .header("X-API-KEY", &api_key)
+        .query(&[("account_id", &account_id)])
+        .send()
+        .await;
+    credentials::release(command.credential_ref.as_deref().unwrap_or("")).await;
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            let body: Value = r.json().await.unwrap_or(json!({}));
+            // profile_enrichment returns {custom_fields: {profile_*}}; map those
+            // into enrichment.fields so the lead's contact columns can be updated.
+            let cf = profile_enrichment(&body);
+            let mutations = if cf.get("custom_fields").map(|v| v.is_object()).unwrap_or(false) {
+                json!({ "enrichment": { "custom_fields": cf["custom_fields"].clone() } })
+            } else {
+                json!({})
+            };
+            common::ok(
+                command,
+                json!({"provider": "unipile", "channel": "linkedin_member_profile"}),
+                Some("linkedin_member_profile.completed"),
+                mutations,
+            )
+        }
+        Ok(r) => common::fail(command, format!("member profile HTTP {}", r.status()), r.status().is_server_error()),
+        Err(e) => common::fail(command, format!("member profile network: {e}"), true),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{first_str, profile_enrichment};

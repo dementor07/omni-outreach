@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 
 from app.auth import AuthContext
 from app.auth_apikey import get_workspace_any
-from app.db import fetch_all, fetch_one, system_scope
+from app.db import fetch_all, fetch_one
 from app.services import bus
 
 router = APIRouter()

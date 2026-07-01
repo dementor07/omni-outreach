@@ -121,6 +121,35 @@ pub enum ChannelType {
     /// handler). The 12 nodes stay distinct so each shows as a real named product.
     #[serde(rename = "ats")]
     Ats,
+    // ── Unipile full surface (UNIPILE-FULL) ────────────────────────────────────
+    /// Native Unipile LinkedIn people search (fan-out lead-gen). Writes the
+    /// deduped people list to custom_fields[people_key]. source.linkedin_search.
+    #[serde(rename = "linkedin_search")]
+    LinkedinSearch,
+    /// GET /linkedin/company/{id} — company profile enrichment onto the lead.
+    #[serde(rename = "linkedin_company_profile")]
+    LinkedinCompanyProfile,
+    /// GET /users/{id}/profile — member profile enrichment onto the lead.
+    #[serde(rename = "linkedin_member_profile")]
+    LinkedinMemberProfile,
+    /// POST /posts/{id}/reactions — react/like a post (per-lead campaign action).
+    #[serde(rename = "linkedin_react_post")]
+    LinkedinReactPost,
+    /// POST /posts/{id}/comments — comment on a post (per-lead campaign action).
+    #[serde(rename = "linkedin_comment_post")]
+    LinkedinCommentPost,
+    /// POST /linkedin/members/{id}/endorse — endorse a skill (per-lead action).
+    #[serde(rename = "linkedin_endorse")]
+    LinkedinEndorse,
+    /// POST /users/follow — follow a member (per-lead campaign action).
+    #[serde(rename = "linkedin_follow")]
+    LinkedinFollow,
+    /// POST /messages/{id}/reaction — react to a message (per-lead action).
+    #[serde(rename = "message_react")]
+    MessageReact,
+    /// POST /users/invitations/{id}/cancel — cancel a pending invite.
+    #[serde(rename = "invite_cancel")]
+    InviteCancel,
     /// Any channel value the worker doesn't recognise. Deserializes here
     /// instead of failing the whole command at parse time, so dispatch can
     /// return a clean, debuggable error.
@@ -163,6 +192,15 @@ impl ChannelType {
             ChannelType::Clutch => "clutch",
             ChannelType::SearxngPeople => "searxng_people",
             ChannelType::Ats => "ats",
+            ChannelType::LinkedinSearch => "linkedin_search",
+            ChannelType::LinkedinCompanyProfile => "linkedin_company_profile",
+            ChannelType::LinkedinMemberProfile => "linkedin_member_profile",
+            ChannelType::LinkedinReactPost => "linkedin_react_post",
+            ChannelType::LinkedinCommentPost => "linkedin_comment_post",
+            ChannelType::LinkedinEndorse => "linkedin_endorse",
+            ChannelType::LinkedinFollow => "linkedin_follow",
+            ChannelType::MessageReact => "message_react",
+            ChannelType::InviteCancel => "invite_cancel",
             ChannelType::Unknown => "unknown",
         }
     }

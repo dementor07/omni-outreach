@@ -12,6 +12,19 @@ from app.nodes import get
 
 _TERMINAL_NODE_TYPES = {"flow.goal", "flow.end"}
 
+# UNIPILE-FULL nodes that require a ("unipile", connection_name) connection.
+_UNIPILE_NODES = {
+    "source.linkedin_search",
+    "enrich.linkedin_company",
+    "enrich.linkedin_member",
+    "channel.linkedin_react_post",
+    "channel.linkedin_comment_post",
+    "channel.linkedin_endorse",
+    "channel.linkedin_follow",
+    "channel.message_react",
+    "channel.invite_cancel",
+}
+
 
 def _issue(
     code: str,
@@ -151,6 +164,19 @@ def validate_graph(
 
             # 3. Communication channels
             if node_type == "channel.linkedin":
+                connection_name = str(config.get("connection_name") or "")
+                if connection_name and ("unipile", connection_name) not in connections:
+                    issues.append(
+                        _issue(
+                            "ACTION_CONNECTION_MISMATCH",
+                            f"{connection_name!r} is not a connected unipile account.",
+                            node_id=node_id,
+                        )
+                    )
+
+            # 3b. UNIPILE-FULL nodes (native search, enrichment reads, social
+            # actions) all use a Unipile connection.
+            if node_type in _UNIPILE_NODES:
                 connection_name = str(config.get("connection_name") or "")
                 if connection_name and ("unipile", connection_name) not in connections:
                     issues.append(

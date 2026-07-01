@@ -17,6 +17,7 @@ pub mod http_call;
 pub mod indeed;
 pub mod leads_finder;
 pub mod linkedin; // re-export shim, see file
+pub mod linkedin_search;
 pub mod naukri;
 pub mod serper_people;
 pub mod sms;
@@ -65,6 +66,18 @@ pub async fn dispatch(command: &ActionCommand) -> ExecutionResult {
         ChannelType::Clutch => discovery::handle_clutch(command).await,
         // ATS harvest: 12 distinct source nodes, one handler keyed by `platform`.
         ChannelType::Ats => ats::handle_ats(command).await,
+        // UNIPILE-FULL: native LinkedIn search (fan-out lead-gen) + enrichment
+        // reads + per-lead social actions. All redeem the Unipile credential
+        // bundle via unipile_creds and reuse ProxyManager.
+        ChannelType::LinkedinSearch => linkedin_search::handle_linkedin_search(command).await,
+        ChannelType::LinkedinCompanyProfile => unipile::handle_linkedin_company_profile(command).await,
+        ChannelType::LinkedinMemberProfile => unipile::handle_linkedin_member_profile(command).await,
+        ChannelType::LinkedinReactPost => unipile::handle_linkedin_react_post(command).await,
+        ChannelType::LinkedinCommentPost => unipile::handle_linkedin_comment_post(command).await,
+        ChannelType::LinkedinEndorse => unipile::handle_linkedin_endorse(command).await,
+        ChannelType::LinkedinFollow => unipile::handle_linkedin_follow(command).await,
+        ChannelType::MessageReact => unipile::handle_message_react(command).await,
+        ChannelType::InviteCancel => unipile::handle_invite_cancel(command).await,
         ChannelType::Unknown => {
             common::fail(command, format!("UNKNOWN_CHANNEL_{}", command.channel.as_str()), false)
         }

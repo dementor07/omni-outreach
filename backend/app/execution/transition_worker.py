@@ -109,6 +109,12 @@ _OUTBOUND_SEND_CHANNELS = frozenset(
         "channel.email", "channel.sms", "channel.voice", "channel.linkedin",
         "channel.whatsapp", "channel.instagram", "channel.telegram",
         "channel.slack", "channel.webhook_out",
+        # UNIPILE-FULL: per-lead social ACTIONS are real outbound side effects, so
+        # they MUST pass the same send gates (DNC/dedupe/rate) as a message when
+        # fired in a campaign — route them through the _gate_send chokepoint.
+        "channel.linkedin_react_post", "channel.linkedin_comment_post",
+        "channel.linkedin_endorse", "channel.linkedin_follow",
+        "channel.message_react", "channel.invite_cancel",
     }
 )
 

@@ -61,6 +61,17 @@ class ChannelType(StrEnum):
     CLUTCH = "clutch"  # Clutch directory scrape via Camoufox (source.clutch)
     SEARXNG_PEOPLE = "searxng_people"  # Free SearXNG per-company people search (source.searxng_people)
     ATS = "ats"  # ATS job-board harvest, 12 source nodes share it (source.greenhouse … source.rippling)
+    # UNIPILE-FULL — native LinkedIn surface. Each value MUST equal the Rust
+    # #[serde(rename = "...")] on models.rs::ChannelType or the muscle sees Unknown.
+    LINKEDIN_SEARCH = "linkedin_search"  # native people search (fan-out lead-gen)
+    LINKEDIN_COMPANY_PROFILE = "linkedin_company_profile"  # company profile enrichment
+    LINKEDIN_MEMBER_PROFILE = "linkedin_member_profile"  # member profile enrichment
+    LINKEDIN_REACT_POST = "linkedin_react_post"  # react/like a post
+    LINKEDIN_COMMENT_POST = "linkedin_comment_post"  # comment on a post
+    LINKEDIN_ENDORSE = "linkedin_endorse"  # endorse a skill
+    LINKEDIN_FOLLOW = "linkedin_follow"  # follow a member
+    MESSAGE_REACT = "message_react"  # react to a message
+    INVITE_CANCEL = "invite_cancel"  # cancel a pending invitation
 
 
 class EventType(StrEnum):
