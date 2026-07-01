@@ -201,11 +201,12 @@ def test_source_indeed_channel_congruent_python_and_rust():
     assert "pub mod indeed;" in mod_rs
 
 
-def test_source_leads_finder_channel_congruent_python_and_rust():
-    """LinkFinder fan-out source must route to its dedicated Rust muscle channel."""
+def test_linkfinder_sources_channel_congruent_python_and_rust():
+    """LinkFinder fan-out sources must route to the dedicated Rust muscle channel."""
     from app.core.events import ChannelType as PyChannel
 
-    assert dispatcher.commands.NODE_CHANNEL.get("source.leads_finder") == PyChannel.LEADS_FINDER
+    for node_type in ("source.linkfinder_leads", "source.linkfinder_employees", "source.linkfinder_post_reactions"):
+        assert dispatcher.commands.NODE_CHANNEL.get(node_type) == PyChannel.LEADS_FINDER
     assert PyChannel.LEADS_FINDER.value == "leads.finder"
 
     models_rs = (REPO / "backend-rust/src/models.rs").read_text(encoding="utf-8")

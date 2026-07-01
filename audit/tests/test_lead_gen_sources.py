@@ -43,7 +43,13 @@ ATS_PLATFORMS = [
 
 DIRECT_CONTACT_SOURCES = ["source.csv", "source.sheets", "source.producthunt"]
 PASSIVE_SOURCES = ["source.webhook_in"]
-PEOPLE_SOURCES = ["source.serper_people", "source.searxng_people", "source.leads_finder"]
+PEOPLE_SOURCES = [
+    "source.serper_people",
+    "source.searxng_people",
+    "source.linkfinder_leads",
+    "source.linkfinder_employees",
+    "source.linkfinder_post_reactions",
+]
 COMPANY_SOURCES = [
     "source.searxng",
     "source.serper_search",
@@ -232,12 +238,26 @@ def _config_for(node_type: str, companies_key: str = "companies") -> dict[str, A
             "people_key": "people",
             "searxng_url": "http://searxng:8080",
         }
-    if node_type == "source.leads_finder":
+    if node_type == "source.linkfinder_leads":
         return {
             "connection_name": "linkfinder-test",
-            "finder_type": "leads_finder_ai",
-            "input_data": "founders in fintech",
+            "query": "founders in fintech",
             "fetch_count": 2,
+            "people_key": "people",
+        }
+    if node_type == "source.linkfinder_employees":
+        return {
+            "connection_name": "linkfinder-test",
+            "domain": "acme.example",
+            "department": "sales",
+            "seniority": "vp",
+            "fetch_count": 2,
+            "people_key": "people",
+        }
+    if node_type == "source.linkfinder_post_reactions":
+        return {
+            "connection_name": "linkfinder-test",
+            "post_url": "https://www.linkedin.com/posts/acme_123",
             "people_key": "people",
         }
     raise AssertionError(f"missing test config for {node_type}")
@@ -315,16 +335,15 @@ def _payload_keys_for(node_type: str) -> set[str]:
             "people_key",
             "correlation_id",
         }
-    if node_type == "source.leads_finder":
+    if node_type in {"source.linkfinder_leads", "source.linkfinder_employees", "source.linkfinder_post_reactions"}:
         return {
             "provider",
             "connection_name",
             "linkfinder_type",
             "input_data",
-            "fetch_count",
             "people_key",
             "correlation_id",
-        }
+        } | ({"fetch_count"} if node_type != "source.linkfinder_post_reactions" else set())
     raise AssertionError(f"missing payload contract for {node_type}")
 
 
@@ -334,7 +353,7 @@ def test_every_expected_lead_gen_source_is_registered_once():
     source_types = sorted(manifest.type for manifest in manifests() if manifest.category == NodeCategory.SOURCE)
 
     assert source_types == EXPECTED_SOURCE_TYPES
-    assert len(source_types) == 26
+    assert len(source_types) == 28
 
 
 @pytest.mark.asyncio
