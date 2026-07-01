@@ -219,6 +219,27 @@ services:
       disable: true
     restart: unless-stopped
 
+  # Outbound webhook fan-out worker (N8N-001). Consumes omni.events, filters to
+  # the customer-facing allow-list (webhook_events.ALLOWED_EVENTS), and delivers
+  # HMAC-signed, SSRF-guarded envelopes to each workspace's webhook subscriptions
+  # (omni_webhook_subscriptions). Retried with backoff; never blocks the spine.
+  webhooks-out-v2:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+      args: *build-args
+    container_name: omni-v2-webhooks-out
+    command: python -m app.execution.webhook_dispatch_worker
+    env_file:
+      - .env
+    environment:
+      <<: *secret-env
+    networks:
+      - omni-outreach_default
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
   # Submits the pyflink orchestrator job (outreach.results -> outreach.transitions)
   # to the shared Flink jobmanager from the master stack. Idempotent enough:
   # if the job is already registered a duplicate submit fails and we tail; the

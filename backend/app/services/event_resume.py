@@ -35,6 +35,61 @@ _SIGNAL_RESUME: dict[str, tuple[str, str]] = {
 }
 
 
+async def resume_parked_node(
+    workspace_id: str,
+    lead_id: str,
+    node_id: str,
+    *,
+    handle: str = "resumed",
+    correlation_id: str | None = None,
+) -> bool:
+    """Resume a lead parked at a SPECIFIC node (by node_id), firing ``handle``.
+
+    Used by the n8n callback (channel.n8n wait_for_callback): the signed token
+    already identifies the exact parked node, so — unlike ``resume_on_signal``,
+    which matches by node TYPE — we resume by node id. The lead must currently be
+    parked ('waiting') at that node; otherwise it's a safe no-op (already
+    advanced / timed out / gone). Never raises — a callback's public ack must not
+    break on a resume failure."""
+    try:
+        async with system_scope():
+            row = await fetch_one(
+                """
+                SELECT current_node_id
+                FROM omni_leads
+                WHERE id = $1 AND workspace_id = $2
+                  AND status = 'waiting' AND current_node_id = $3
+                """,
+                lead_id,
+                workspace_id,
+                node_id,
+            )
+        if not row:
+            return False
+        transition = {
+            "lead_id": str(lead_id),
+            "source_node_id": str(node_id),
+            "handle": handle,
+            "event_type": "transition",
+            "metadata": {
+                "workspace_id": workspace_id,
+                "correlation_id": correlation_id,
+                "resume_signal": "n8n_callback",
+            },
+        }
+        if bus._producer is None:  # type: ignore[attr-defined]
+            log.warning("[event-resume] bus producer not ready; cannot resume lead %s at node %s", lead_id, node_id)
+            return False
+        await bus._producer.send_and_wait(  # type: ignore[union-attr]
+            bus.TRANSITIONS_TOPIC, value=transition, key=str(lead_id)
+        )
+        log.info("[event-resume] resumed lead %s at node %s -> handle %s", lead_id, node_id, handle)
+        return True
+    except Exception:  # noqa: BLE001 — never break the caller's public response
+        log.exception("[event-resume] failed resuming lead %s at node %s", lead_id, node_id)
+        return False
+
+
 async def resume_on_signal(
     workspace_id: str,
     lead_id: str | None,

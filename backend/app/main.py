@@ -23,6 +23,7 @@ from app.logging_config import get_logger, setup_logging
 from app.nodes import discover as discover_nodes
 from app.routers import (
     ai_studio,
+    api_keys,
     approvals,
     auth,
     auth_google,
@@ -32,17 +33,20 @@ from app.routers import (
     inbox,
     integrations,
     internal,
+    n8n_callback,
     nodes,
     oauth,
     oauth_producthunt,
     objectives,
     projections,
+    public,
     sources,
     suppression,
     templates,
     tones,
     tracking,
     webhooks_in,
+    webhooks_out,
     workspaces,
 )
 from app.services.bus import close_producer, init_producer
@@ -152,6 +156,16 @@ app.include_router(deliverability.router, prefix="/deliverability", tags=["deliv
 app.include_router(templates.router, prefix="/templates", tags=["templates"])
 app.include_router(tones.router, prefix="/tones", tags=["tones"])
 app.include_router(objectives.router, prefix="/objectives", tags=["objectives"])
+
+# Developer / public API surface (N8N-001). API-key CRUD is JWT-authed; the
+# public action API + webhook subscriptions accept an API key OR a JWT.
+app.include_router(api_keys.router, prefix="/api-keys", tags=["api-keys"])
+app.include_router(public.router, prefix="/public/v1", tags=["public"])
+app.include_router(webhooks_out.router, prefix="/webhook-subscriptions", tags=["webhooks"])
+
+# n8n callback resume — a parked channel.n8n lead is woken when n8n calls back.
+# Token-authed (the signed token in the path IS the credential), so no JWT dep.
+app.include_router(n8n_callback.router, prefix="/n8n", tags=["n8n"])
 
 # Inbound webhooks (source.webhook_in runtime). UNAUTHENTICATED by design —
 # external systems POST here; trust comes from the opaque ids + optional HMAC.

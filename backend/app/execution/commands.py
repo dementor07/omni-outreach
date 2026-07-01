@@ -43,6 +43,9 @@ NODE_CHANNEL: dict[str, ChannelType] = {
     "channel.telegram": ChannelType.TELEGRAM,
     "channel.slack": ChannelType.WEBHOOK,
     "channel.webhook_out": ChannelType.WEBHOOK,
+    # channel.n8n is a PRESET over webhook_out: it emits channel.webhook_out.queued
+    # and rides the same SSRF-guarded Rust handle_webhook (zero Rust change).
+    "channel.n8n": ChannelType.WEBHOOK,
     "crm.add_tag": ChannelType.ADD_TAG,
     "crm.remove_tag": ChannelType.REMOVE_TAG,
     "crm.hot_lead_alert": ChannelType.HOT_LEAD_ALERT,
