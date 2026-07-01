@@ -1,0 +1,58 @@
+{
+  "name": "n8n-nodes-omni",
+  "version": "0.1.0",
+  "description": "n8n community node for Omni — outbound outreach + CRM (contacts, campaigns, leads, enrichment) with an event trigger.",
+  "keywords": [
+    "n8n-community-node-package",
+    "omni",
+    "outreach",
+    "crm"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/omniagenticai/omni-outreach",
+  "author": {
+    "name": "Omni"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/omniagenticai/omni-outreach.git"
+  },
+  "engines": {
+    "node": ">=18.10"
+  },
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc && gulp build:icons",
+    "dev": "tsc --watch",
+    "format": "prettier nodes credentials --write",
+    "lint": "eslint nodes credentials package.json",
+    "lintfix": "eslint nodes credentials package.json --fix",
+    "prepublishOnly": "npm run build && npm run lint"
+  },
+  "files": [
+    "dist"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/OmniApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/Omni/Omni.node.js",
+      "dist/nodes/Omni/OmniTrigger.node.js"
+    ]
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@typescript-eslint/parser": "^7.15.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-n8n-nodes-base": "^1.16.1",
+    "gulp": "^4.0.2",
+    "n8n-workflow": "^1.50.0",
+    "prettier": "^3.3.2",
+    "typescript": "^5.5.3"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  }
+}
