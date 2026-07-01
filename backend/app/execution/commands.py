@@ -47,6 +47,19 @@ NODE_CHANNEL: dict[str, ChannelType] = {
     "crm.remove_tag": ChannelType.REMOVE_TAG,
     "crm.hot_lead_alert": ChannelType.HOT_LEAD_ALERT,
     "ai.enrich": ChannelType.ENRICH,
+    "linkfinder.company_website": ChannelType.ENRICH,
+    "linkfinder.company_phone": ChannelType.ENRICH,
+    "linkfinder.company_email": ChannelType.ENRICH,
+    "linkfinder.company_employee_count": ChannelType.ENRICH,
+    "linkfinder.company_linkedin": ChannelType.ENRICH,
+    "linkfinder.profile_info": ChannelType.ENRICH,
+    "linkfinder.profile_email": ChannelType.ENRICH,
+    "linkfinder.profile_phone": ChannelType.ENRICH,
+    "linkfinder.company_page_info": ChannelType.ENRICH,
+    "linkfinder.company_page_employees": ChannelType.ENRICH,
+    "linkfinder.name_to_linkedin": ChannelType.ENRICH,
+    "linkfinder.email_to_linkedin": ChannelType.ENRICH,
+    "linkfinder.instagram_info": ChannelType.ENRICH,
     "ai.compose": ChannelType.AI_COMPOSE,
     # Claude classifier handler — both screen variants share it. The asymmetric
     # error policy lives in the node's payload (on_error_handle), not here.
@@ -61,7 +74,9 @@ NODE_CHANNEL: dict[str, ChannelType] = {
     # Per-company people search (multi-pattern x titles, dedupe) — two distinct
     # nodes (paid Serper / free SearXNG), shared Rust handler.
     "source.serper_people": ChannelType.SERPER_PEOPLE,
-    "source.leads_finder": ChannelType.LEADS_FINDER,
+    "source.linkfinder_leads": ChannelType.LEADS_FINDER,
+    "source.linkfinder_employees": ChannelType.LEADS_FINDER,
+    "source.linkfinder_post_reactions": ChannelType.LEADS_FINDER,
     "source.searxng_people": ChannelType.SEARXNG_PEOPLE,
     # Company discovery — Auto-Pilot Target Mining. Four distinct sources, each
     # its own product/setup, NOT a provider toggle (handlers/discovery.rs).

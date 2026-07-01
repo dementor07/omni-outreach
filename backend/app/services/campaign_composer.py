@@ -40,11 +40,12 @@ SourceProvider = Literal[
     "apollo",
     "clutch",
     "producthunt",
-    "leads_finder",
+    "linkfinder_leads",
+    "linkfinder_employees",
+    "linkfinder_post_reactions",
 ]
 PeopleProvider = Literal["searxng_people", "serper_people"]
-EnrichmentProvider = Literal["apollo", "proxycurl", "hunter", "linkfinder"]
-LinkFinderFinderType = Literal["leads_finder_ai", "company_domain_to_employees", "linkedin_post_to_reactions"]
+EnrichmentProvider = Literal["apollo", "proxycurl", "hunter"]
 MessageChannel = Literal[
     "email", "linkedin", "sms", "whatsapp", "instagram", "telegram", "voice"
 ]
@@ -70,14 +71,14 @@ class CampaignSourceSpec(BaseModel):
     )
     location: str | None = None
     max_results: int = Field(25, ge=1, le=500)
-    finder_type: LinkFinderFinderType | None = Field(
-        None,
-        description="LinkFinder fan-out lookup to run when provider='leads_finder'",
-    )
     input_data: str | None = Field(
         None,
         description="LinkFinder query, company domain, or LinkedIn post URL",
     )
+    domain: str | None = Field(None, description="Company domain for source.linkfinder_employees")
+    department: str | None = Field(None, description="Optional LinkFinder employee department filter")
+    seniority: str | None = Field(None, description="Optional LinkFinder employee seniority filter")
+    employee_count: int | None = Field(None, ge=1, le=100, description="Optional LinkFinder employee_count filter")
     fetch_count: int | None = Field(
         None,
         ge=1,
@@ -97,13 +98,17 @@ class CampaignSourceSpec(BaseModel):
             raise ValueError(f"{self.provider} sources require query")
         if self.provider == "serper_search" and not self.connection_name:
             raise ValueError("serper_search sources require connection_name")
-        if self.provider == "leads_finder":
-            if not self.connection_name:
-                raise ValueError("leads_finder sources require connection_name")
-            if not self.finder_type:
-                raise ValueError("leads_finder sources require finder_type")
+        if self.provider in {"linkfinder_leads", "linkfinder_employees", "linkfinder_post_reactions"} and not self.connection_name:
+            raise ValueError(f"{self.provider} sources require connection_name")
+        if self.provider == "linkfinder_leads":
             if not self.input_data:
-                raise ValueError("leads_finder sources require input_data")
+                raise ValueError("linkfinder_leads sources require input_data")
+        if self.provider == "linkfinder_employees":
+            if not (self.domain or self.input_data):
+                raise ValueError("linkfinder_employees sources require domain")
+        if self.provider == "linkfinder_post_reactions":
+            if not self.input_data:
+                raise ValueError("linkfinder_post_reactions sources require input_data")
         return self
 
 
@@ -125,13 +130,6 @@ class EnrichmentStageSpec(BaseModel):
     connection_name: str
     merge_policy: Literal["fill_missing", "overwrite"] = "fill_missing"
     skip_if_complete: bool = True
-    linkfinder_type: str | None = None
-
-    @model_validator(mode="after")
-    def validate_provider_shape(self) -> EnrichmentStageSpec:
-        if self.provider == "linkfinder" and not self.linkfinder_type:
-            raise ValueError("linkfinder enrichment requires linkfinder_type")
-        return self
 
 
 class MessageStepSpec(BaseModel):
@@ -272,8 +270,9 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
     rejected_key = "end_rejected"
     replied_key = "end_replied"
     completed_key = "end_sequence_complete"
-    company_source_count = sum(1 for source in spec.sources if source.provider not in {"producthunt", "leads_finder"})
-    direct_people_source_count = sum(1 for source in spec.sources if source.provider == "leads_finder")
+    direct_linkfinder_sources = {"linkfinder_leads", "linkfinder_employees", "linkfinder_post_reactions"}
+    company_source_count = sum(1 for source in spec.sources if source.provider not in {"producthunt", *direct_linkfinder_sources})
+    direct_people_source_count = sum(1 for source in spec.sources if source.provider in direct_linkfinder_sources)
 
     def add_node(key: str, node_type: str, x: float, y: float, config: dict[str, Any] | None = None) -> str:
         nodes.append(CompiledNode(
@@ -299,8 +298,8 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
         companies_key = f"companies_{index + 1}"
         source_key = f"source_{index + 1}"
         loop_key = f"company_loop_{index + 1}"
-        if source.provider == "leads_finder":
-            add_node(source_key, "source.leads_finder", 0, y, _source_config(source, "people"))
+        if source.provider in direct_linkfinder_sources:
+            add_node(source_key, _source_node_type(source.provider), 0, y, _source_config(source, "people"))
             add_edge(source_key, "people_loop", "default")
             add_edge(source_key, no_people_key, "empty")
             add_edge(source_key, source_done_key, "on_error")
@@ -354,7 +353,7 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
         people_x = 0 if direct_people_source_count else 1000
 
     direct_people_max = max(
-        (source.fetch_count or source.max_results for source in spec.sources if source.provider == "leads_finder"),
+        (source.fetch_count or source.max_results for source in spec.sources if source.provider in direct_linkfinder_sources),
         default=0,
     )
     add_node("people_loop", "flow.for_each", people_x + 320, 250, {
@@ -386,7 +385,6 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
                 "connection_name": stage.connection_name,
                 "merge_policy": stage.merge_policy,
                 "skip_if_complete": stage.skip_if_complete,
-                **({"linkfinder_type": stage.linkfinder_type} if stage.linkfinder_type else {}),
             })
             add_edge(key, next_key, "default")
             add_edge(key, next_key, "on_error")
@@ -464,12 +462,31 @@ def _source_config(source: CampaignSourceSpec, companies_key: str) -> dict[str, 
         return {
             "max_posts": min(20, max(1, source.max_results)),
         }
-    if source.provider == "leads_finder":
+    if source.provider == "linkfinder_leads":
         return {
             "connection_name": source.connection_name,
-            "finder_type": source.finder_type,
-            "input_data": source.input_data,
+            "query": source.input_data or source.query,
             "fetch_count": source.fetch_count or min(100, max(1, source.max_results)),
+            "people_key": companies_key,
+        }
+    if source.provider == "linkfinder_employees":
+        config = {
+            "connection_name": source.connection_name,
+            "domain": source.domain or source.input_data,
+            "fetch_count": source.fetch_count or min(100, max(1, source.max_results)),
+            "people_key": companies_key,
+        }
+        if source.department:
+            config["department"] = source.department
+        if source.seniority:
+            config["seniority"] = source.seniority
+        if source.employee_count:
+            config["employee_count"] = source.employee_count
+        return config
+    if source.provider == "linkfinder_post_reactions":
+        return {
+            "connection_name": source.connection_name,
+            "post_url": source.input_data or source.query,
             "people_key": companies_key,
         }
     if source.provider == "searxng":

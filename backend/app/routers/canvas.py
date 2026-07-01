@@ -106,7 +106,7 @@ async def _assert_campaign_spec_connections(spec: CampaignSpec, workspace_id: uu
     for source in spec.sources:
         if source.provider == "serper_search" and source.connection_name:
             required.add(("serper", source.connection_name))
-        if source.provider == "leads_finder" and source.connection_name:
+        if source.provider in {"linkfinder_leads", "linkfinder_employees", "linkfinder_post_reactions"} and source.connection_name:
             required.add(("linkfinder", source.connection_name))
     if spec.people.provider == "serper_people" and spec.people.connection_name:
         required.add(("serper", spec.people.connection_name))

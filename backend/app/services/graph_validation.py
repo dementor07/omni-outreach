@@ -115,6 +115,17 @@ def validate_graph(
                         )
                     )
 
+            if node_type.startswith("linkfinder."):
+                connection_name = str(config.get("connection_name") or "")
+                if connection_name and ("linkfinder", connection_name) not in connections:
+                    issues.append(
+                        _issue(
+                            "ENRICHMENT_CONNECTION_MISMATCH",
+                            f"{connection_name!r} is not a connected linkfinder account.",
+                            node_id=node_id,
+                        )
+                    )
+
             # 2. Serper sources
             if node_type in ("source.serper_search", "source.serper_people"):
                 connection_name = str(config.get("connection_name") or "")
@@ -127,7 +138,7 @@ def validate_graph(
                         )
                     )
 
-            if node_type == "source.leads_finder":
+            if node_type.startswith("source.linkfinder_"):
                 connection_name = str(config.get("connection_name") or "")
                 if connection_name and ("linkfinder", connection_name) not in connections:
                     issues.append(
