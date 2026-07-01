@@ -15,6 +15,7 @@ pub mod email;
 pub mod enrich;
 pub mod http_call;
 pub mod indeed;
+pub mod leads_finder;
 pub mod linkedin; // re-export shim, see file
 pub mod naukri;
 pub mod serper_people;
@@ -53,6 +54,7 @@ pub async fn dispatch(command: &ActionCommand) -> ExecutionResult {
         // People discovery: two distinct nodes (serper paid / searxng free), one
         // shared multi-pattern handler that reads the provider the node emits.
         ChannelType::SerperPeople => serper_people::handle_serper_people(command).await,
+        ChannelType::LeadsFinder => leads_finder::handle_leads_finder(command).await,
         ChannelType::SearxngPeople => serper_people::handle_serper_people(command).await,
         ChannelType::Naukri => naukri::handle_naukri(command).await,
         ChannelType::Indeed => indeed::handle_indeed(command).await,

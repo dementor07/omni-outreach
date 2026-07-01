@@ -97,6 +97,12 @@ _NODE_COLUMNS: dict[str, tuple[ColumnSpec, ...]] = {
         ColumnSpec("person_title", "Title", "item.title", "text"),
         ColumnSpec("linkedin_url", "LinkedIn", "item.linkedin_url", "url"),
     ),
+    "source.leads_finder": (
+        ColumnSpec("person_title", "Title", "item.headline", "text"),
+        ColumnSpec("linkedin_url", "LinkedIn", "item.linkedin_url", "url"),
+        ColumnSpec("email", "Email", "item.email", "text"),
+        ColumnSpec("phone", "Phone", "item.phone", "text"),
+    ),
     "condition.verify_person": (
         ColumnSpec("verification_score", "Verified", "verification.score", "number"),
     ),
@@ -146,6 +152,7 @@ _PIPELINE_ORDER: tuple[str, ...] = (
     "source.clutch",
     "crm.resolve_company",
     "source.serper_people",
+    "source.leads_finder",
     "source.searxng_people",
     "condition.verify_person",
     "ai.screen_person",

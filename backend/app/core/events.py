@@ -51,6 +51,7 @@ class ChannelType(StrEnum):
     APIFY = "apify"  # Apify actor run + poll + dataset fetch (source.linkedin_jobs)
     AI_SCREEN = "ai_screen"  # Claude ACCEPT/REJECT classifier (ai.screen_company / ai.screen_person)
     SERPER_PEOPLE = "serper_people"  # Multi-pattern per-company Serper LinkedIn search
+    LEADS_FINDER = "leads.finder"  # LinkFinder AI fan-out people discovery
     NAUKRI = "naukri"  # Camoufox-driven Naukri.com job scrape (source.naukri)
     INDEED = "indeed"  # Apify-driven Indeed.com job scrape (source.indeed)
     # Company-discovery sources — each a distinct product, its own channel.

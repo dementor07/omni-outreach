@@ -127,6 +127,17 @@ def validate_graph(
                         )
                     )
 
+            if node_type == "source.leads_finder":
+                connection_name = str(config.get("connection_name") or "")
+                if connection_name and ("linkfinder", connection_name) not in connections:
+                    issues.append(
+                        _issue(
+                            "SOURCE_CONNECTION_MISMATCH",
+                            f"{connection_name!r} is not a connected linkfinder account.",
+                            node_id=node_id,
+                        )
+                    )
+
             # 3. Communication channels
             if node_type == "channel.linkedin":
                 connection_name = str(config.get("connection_name") or "")

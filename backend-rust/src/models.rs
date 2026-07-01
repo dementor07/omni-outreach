@@ -75,6 +75,10 @@ pub enum ChannelType {
     /// `source.serper_people`.
     #[serde(rename = "serper_people")]
     SerperPeople,
+    /// LinkFinder AI fan-out source. One API call returns many people/profiles
+    /// and writes them under custom_fields[people_key].
+    #[serde(rename = "leads.finder")]
+    LeadsFinder,
     /// Camoufox-driven Naukri.com job scrape. Calls the internal Camoufox
     /// microservice (anti-detect headless browser) to scrape one role keyword,
     /// dedupes by company, writes the company list to
@@ -150,6 +154,7 @@ impl ChannelType {
             ChannelType::AiScreen => "ai_screen",
             ChannelType::AiClassify => "ai_classify",
             ChannelType::SerperPeople => "serper_people",
+            ChannelType::LeadsFinder => "leads.finder",
             ChannelType::Naukri => "naukri",
             ChannelType::Indeed => "indeed",
             ChannelType::Searxng => "searxng",

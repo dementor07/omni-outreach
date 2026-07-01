@@ -61,6 +61,7 @@ NODE_CHANNEL: dict[str, ChannelType] = {
     # Per-company people search (multi-pattern x titles, dedupe) — two distinct
     # nodes (paid Serper / free SearXNG), shared Rust handler.
     "source.serper_people": ChannelType.SERPER_PEOPLE,
+    "source.leads_finder": ChannelType.LEADS_FINDER,
     "source.searxng_people": ChannelType.SEARXNG_PEOPLE,
     # Company discovery — Auto-Pilot Target Mining. Four distinct sources, each
     # its own product/setup, NOT a provider toggle (handlers/discovery.rs).
