@@ -33,7 +33,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 const SERPER_URL: &str = "https://google.serper.dev/search";
-const APOLLO_URL: &str = "https://api.apollo.io/v1/mixed_companies/search";
+const APOLLO_URL: &str = "https://api.apollo.io/api/v1/mixed_companies/search";
 const PATTERN_DELAY_MS: u64 = 1000;
 const MAX_RETRIES: u32 = 3;
 
