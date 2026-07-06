@@ -185,7 +185,7 @@ pub async fn handle_apollo_people(command: &ActionCommand) -> ExecutionResult {
         }
     }
 
-    let mutations = json!({ "custom_fields": { people_key.clone(): people.clone() } });
+    let mutations = json!({ "custom_fields": { people_key: people.clone() } });
     let mut result = common::ok(
         command,
         json!({"source": "apollo", "people_found": people.len(), "total_entries": total_entries}),
@@ -419,7 +419,7 @@ pub async fn handle_apollo_jobs(command: &ActionCommand) -> ExecutionResult {
         })
         .collect();
 
-    let mutations = json!({ "custom_fields": { jobs_key.clone(): rows.clone() } });
+    let mutations = json!({ "custom_fields": { jobs_key: rows.clone() } });
     let mut result = common::ok(
         command,
         json!({"source": "apollo", "organization_id": org_id, "postings_found": rows.len()}),
