@@ -61,6 +61,11 @@ class ChannelType(StrEnum):
     CLUTCH = "clutch"  # Clutch directory scrape via Camoufox (source.clutch)
     SEARXNG_PEOPLE = "searxng_people"  # Free SearXNG per-company people search (source.searxng_people)
     ATS = "ats"  # ATS job-board harvest, 12 source nodes share it (source.greenhouse … source.rippling)
+    # APOLLO-DATA — native Apollo data layer. Each value MUST equal the Rust
+    # #[serde(rename = "...")] on models.rs::ChannelType or the muscle sees Unknown.
+    APOLLO_PEOPLE = "apollo_people"  # native people search (fan-out lead-gen)
+    APOLLO_COMPANY_ENRICH = "apollo_company_enrich"  # org enrichment by domain
+    APOLLO_JOBS = "apollo_jobs"  # org job postings (hiring signal)
     # UNIPILE-FULL — native LinkedIn surface. Each value MUST equal the Rust
     # #[serde(rename = "...")] on models.rs::ChannelType or the muscle sees Unknown.
     LINKEDIN_SEARCH = "linkedin_search"  # native people search (fan-out lead-gen)

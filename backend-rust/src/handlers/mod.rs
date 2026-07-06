@@ -8,6 +8,7 @@
 pub mod ai_screen;
 pub mod alert;
 pub mod apify;
+pub mod apollo_data;
 pub mod ats;
 pub mod common;
 pub mod discovery;
@@ -66,6 +67,11 @@ pub async fn dispatch(command: &ActionCommand) -> ExecutionResult {
         ChannelType::Clutch => discovery::handle_clutch(command).await,
         // ATS harvest: 12 distinct source nodes, one handler keyed by `platform`.
         ChannelType::Ats => ats::handle_ats(command).await,
+        // APOLLO-DATA: native Apollo data layer — people search (fan-out lead-gen),
+        // org enrichment by domain, and org job postings (hiring signal).
+        ChannelType::ApolloPeople => apollo_data::handle_apollo_people(command).await,
+        ChannelType::ApolloCompanyEnrich => apollo_data::handle_apollo_company(command).await,
+        ChannelType::ApolloJobs => apollo_data::handle_apollo_jobs(command).await,
         // UNIPILE-FULL: native LinkedIn search (fan-out lead-gen) + enrichment
         // reads + per-lead social actions. All redeem the Unipile credential
         // bundle via unipile_creds and reuse ProxyManager.

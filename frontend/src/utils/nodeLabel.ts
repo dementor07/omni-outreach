@@ -32,6 +32,8 @@ const NODE_LABELS: Record<string, string> = {
   'source.searxng': 'Web search (free)',
   'source.serper_search': 'Web search (Serper)',
   'source.apollo': 'Apollo',
+  'source.apollo_people': 'Apollo people search',
+  'source.apollo_jobs': 'Apollo job postings',
   'source.clutch': 'Clutch directory',
   'source.serper_people': 'Find people (Serper)',
   'source.searxng_people': 'Find people (free)',
@@ -80,6 +82,7 @@ const NODE_LABELS: Record<string, string> = {
   'channel.invite_cancel': 'Cancel LinkedIn invite',
   'enrich.linkedin_company': 'LinkedIn company profile (Unipile)',
   'enrich.linkedin_member': 'LinkedIn profile (Unipile)',
+  'enrich.apollo_company': 'Apollo company enrich',
 
   // Conditions
   'condition.company_filter': 'Filter companies',

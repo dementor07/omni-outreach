@@ -12,6 +12,13 @@ from app.nodes import get
 
 _TERMINAL_NODE_TYPES = {"flow.goal", "flow.end"}
 
+# APOLLO-DATA nodes that require an ("apollo", connection_name) connection.
+_APOLLO_NODES = {
+    "source.apollo_people",
+    "enrich.apollo_company",
+    "source.apollo_jobs",
+}
+
 # UNIPILE-FULL nodes that require a ("unipile", connection_name) connection.
 _UNIPILE_NODES = {
     "source.linkedin_search",
@@ -158,6 +165,19 @@ def validate_graph(
                         _issue(
                             "SOURCE_CONNECTION_MISMATCH",
                             f"{connection_name!r} is not a connected linkfinder account.",
+                            node_id=node_id,
+                        )
+                    )
+
+            # 2b. Apollo data-layer nodes (people search, company enrich, job
+            # postings) all require an Apollo connection.
+            if node_type in _APOLLO_NODES:
+                connection_name = str(config.get("connection_name") or "")
+                if connection_name and ("apollo", connection_name) not in connections:
+                    issues.append(
+                        _issue(
+                            "SOURCE_CONNECTION_MISMATCH",
+                            f"{connection_name!r} is not a connected apollo account.",
                             node_id=node_id,
                         )
                     )

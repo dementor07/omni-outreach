@@ -50,6 +50,7 @@ PEOPLE_SOURCES = [
     "source.linkfinder_employees",
     "source.linkfinder_post_reactions",
     "source.linkedin_search",
+    "source.apollo_people",
 ]
 COMPANY_SOURCES = [
     "source.searxng",
@@ -57,6 +58,7 @@ COMPANY_SOURCES = [
     "source.naukri",
     "source.clutch",
     "source.apollo",
+    "source.apollo_jobs",
     "source.indeed",
     "source.linkedin_jobs",
     *[f"source.{platform}" for platform in ATS_PLATFORMS],
@@ -269,6 +271,25 @@ def _config_for(node_type: str, companies_key: str = "companies") -> dict[str, A
             "fetch_count": 5,
             "people_key": "people",
         }
+    if node_type == "source.apollo_people":
+        return {
+            "connection_name": "apollo-test",
+            "person_titles": ["Head of Growth", "VP Sales"],
+            "person_seniorities": ["director", "vp"],
+            "organization_num_employees_ranges": ["11,50", "51,200"],
+            "person_locations": ["United States"],
+            "organization_locations": ["United States"],
+            "q_keywords": "fintech",
+            "page": 1,
+            "per_page": 25,
+            "people_key": "people",
+        }
+    if node_type == "source.apollo_jobs":
+        return {
+            "connection_name": "apollo-test",
+            "organization_id": "org-123",
+            "jobs_key": "job_postings",
+        }
     raise AssertionError(f"missing test config for {node_type}")
 
 
@@ -363,6 +384,31 @@ def _payload_keys_for(node_type: str) -> set[str]:
             "people_key",
             "correlation_id",
         }
+    if node_type == "source.apollo_people":
+        return {
+            "provider",
+            "connection_name",
+            "person_titles",
+            "person_seniorities",
+            "organization_num_employees_ranges",
+            "person_locations",
+            "organization_locations",
+            "q_keywords",
+            "page",
+            "per_page",
+            "people_key",
+            "correlation_id",
+        }
+    if node_type == "source.apollo_jobs":
+        return {
+            "provider",
+            "connection_name",
+            "organization_id",
+            "domain",
+            "domain_field",
+            "jobs_key",
+            "correlation_id",
+        }
     raise AssertionError(f"missing payload contract for {node_type}")
 
 
@@ -372,7 +418,7 @@ def test_every_expected_lead_gen_source_is_registered_once():
     source_types = sorted(manifest.type for manifest in manifests() if manifest.category == NodeCategory.SOURCE)
 
     assert source_types == EXPECTED_SOURCE_TYPES
-    assert len(source_types) == 29
+    assert len(source_types) == 31
 
 
 @pytest.mark.asyncio

@@ -97,6 +97,20 @@ _NODE_COLUMNS: dict[str, tuple[ColumnSpec, ...]] = {
         ColumnSpec("person_title", "Title", "item.title", "text"),
         ColumnSpec("linkedin_url", "LinkedIn", "item.linkedin_url", "url"),
     ),
+    # Apollo native people search lands person rows (headline/email/linkedin).
+    "source.apollo_people": (
+        ColumnSpec("person_title", "Title", "item.headline", "text"),
+        ColumnSpec("linkedin_url", "LinkedIn", "item.linkedin_url", "url"),
+        ColumnSpec("email", "Email", "item.email", "text"),
+        ColumnSpec("company_name", "Company", "item.company_name", "text"),
+    ),
+    # Apollo job postings land per-role rows (hiring signal).
+    "source.apollo_jobs": (
+        ColumnSpec("job_title", "Role", "item.title", "text"),
+        ColumnSpec("job_location", "Location", "item.city", "text"),
+        ColumnSpec("job_url", "Posting", "item.url", "url"),
+        ColumnSpec("posted_at", "Posted", "item.posted_at", "date"),
+    ),
     **{
         src: (
             ColumnSpec("person_title", "Title", "item.headline", "text"),
@@ -152,9 +166,11 @@ _PIPELINE_ORDER: tuple[str, ...] = (
     "source.searxng",
     "source.serper_search",
     "source.apollo",
+    "source.apollo_jobs",
     "source.clutch",
     "crm.resolve_company",
     "source.serper_people",
+    "source.apollo_people",
     "source.linkfinder_leads",
     "source.linkfinder_employees",
     "source.linkfinder_post_reactions",

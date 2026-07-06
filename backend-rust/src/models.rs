@@ -121,6 +121,21 @@ pub enum ChannelType {
     /// handler). The 12 nodes stay distinct so each shows as a real named product.
     #[serde(rename = "ats")]
     Ats,
+    // ── Apollo data layer (APOLLO-DATA) ────────────────────────────────────────
+    /// Apollo native people search (fan-out lead-gen). POSTs
+    /// /api/v1/mixed_people/api_search, writes custom_fields[people_key].
+    /// source.apollo_people.
+    #[serde(rename = "apollo_people")]
+    ApolloPeople,
+    /// Apollo organization enrichment by domain. GETs
+    /// /api/v1/organizations/enrich?domain=, writes company fields onto the lead.
+    /// enrich.apollo_company.
+    #[serde(rename = "apollo_company_enrich")]
+    ApolloCompanyEnrich,
+    /// Apollo org job postings (hiring signal). GETs
+    /// /api/v1/organizations/{id}/job_postings. source.apollo_jobs.
+    #[serde(rename = "apollo_jobs")]
+    ApolloJobs,
     // ── Unipile full surface (UNIPILE-FULL) ────────────────────────────────────
     /// Native Unipile LinkedIn people search (fan-out lead-gen). Writes the
     /// deduped people list to custom_fields[people_key]. source.linkedin_search.
@@ -192,6 +207,9 @@ impl ChannelType {
             ChannelType::Clutch => "clutch",
             ChannelType::SearxngPeople => "searxng_people",
             ChannelType::Ats => "ats",
+            ChannelType::ApolloPeople => "apollo_people",
+            ChannelType::ApolloCompanyEnrich => "apollo_company_enrich",
+            ChannelType::ApolloJobs => "apollo_jobs",
             ChannelType::LinkedinSearch => "linkedin_search",
             ChannelType::LinkedinCompanyProfile => "linkedin_company_profile",
             ChannelType::LinkedinMemberProfile => "linkedin_member_profile",

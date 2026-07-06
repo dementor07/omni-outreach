@@ -85,6 +85,9 @@ const ICON_BY_TYPE: Record<string, LucideIcon> = {
   'source.searxng': Search,
   'source.serper_search': Search,
   'source.apollo': Target,
+  'source.apollo_people': Users,
+  'source.apollo_jobs': Briefcase,
+  'enrich.apollo_company': Building2,
   'source.clutch': Building2,
   // ATS job-board sources (CommonCrawl-indexed hiring companies) — all share the
   // building mark; they're distinguished by their human label in the palette.
