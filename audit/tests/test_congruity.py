@@ -245,6 +245,33 @@ def test_ats_sources_congruent_python_and_rust():
     assert "pub mod ats;" in mod_rs
 
 
+def test_apollo_data_nodes_congruent_python_and_rust():
+    """REGRESSION (APOLLO-DATA): the three Apollo data-layer nodes must route to
+    their dedicated ChannelTypes in NODE_CHANNEL, the Python enum values must
+    match the on-wire strings, and each Rust ChannelType must carry the matching
+    #[serde(rename)] + as_str arm + a dispatch arm — or the intent reaches the
+    muscle and falls into Unknown."""
+    from app.core.events import ChannelType as PyChannel
+
+    expected = {
+        "source.apollo_people": (PyChannel.APOLLO_PEOPLE, "apollo_people", "ApolloPeople",
+                                 "apollo_data::handle_apollo_people"),
+        "enrich.apollo_company": (PyChannel.APOLLO_COMPANY_ENRICH, "apollo_company_enrich",
+                                  "ApolloCompanyEnrich", "apollo_data::handle_apollo_company"),
+        "source.apollo_jobs": (PyChannel.APOLLO_JOBS, "apollo_jobs", "ApolloJobs",
+                               "apollo_data::handle_apollo_jobs"),
+    }
+    models_rs = (REPO / "backend-rust/src/models.rs").read_text(encoding="utf-8")
+    mod_rs = (REPO / "backend-rust/src/handlers/mod.rs").read_text(encoding="utf-8")
+    assert "pub mod apollo_data;" in mod_rs
+    for node_type, (channel, rename, variant, dispatch) in expected.items():
+        assert dispatcher.commands.NODE_CHANNEL.get(node_type) == channel, node_type
+        assert channel.value == rename, node_type
+        assert f'rename = "{rename}"' in models_rs and f"{variant}," in models_rs, variant
+        assert f'ChannelType::{variant} => "{rename}"' in models_rs, variant
+        assert f"ChannelType::{variant} => {dispatch}(command).await" in mod_rs, variant
+
+
 def test_ats_nodes_all_register():
     """All 12 ATS source nodes must register (one file, factory loop). A typo in
     the factory or a missing platform silently drops a source from the palette."""
