@@ -46,6 +46,23 @@ class AiEnrichConfig(BaseModel):
         max_length=255,
         description="Optional company domain for Hunter when the contact has no domain",
     )
+    # APOLLO-DATA Part 2: Apollo's OWN internal enrichment waterfall. When set
+    # (and enrich_source == "apollo"), Apollo waterfalls across its providers to
+    # fill email/phone and reveal personal emails. Ignored by other providers.
+    # `reveal_phone_number` is intentionally absent — it needs a webhook_url +
+    # async poll (documented follow-up).
+    run_waterfall_email: bool = Field(
+        False,
+        description="Apollo only: run Apollo's internal email waterfall to fill a missing email",
+    )
+    run_waterfall_phone: bool = Field(
+        False,
+        description="Apollo only: run Apollo's internal phone waterfall to fill a missing phone",
+    )
+    reveal_personal_emails: bool = Field(
+        False,
+        description="Apollo only: reveal the contact's personal emails (consumes Apollo credits)",
+    )
 
 MANIFEST = NodeManifest(
     type="ai.enrich",
@@ -61,7 +78,10 @@ MANIFEST = NodeManifest(
     side_effect=SideEffect.NETWORK,
     icon="database-zap",
     primary_fields=("enrich_source", "connection_name"),
-    advanced_fields=("merge_policy", "skip_if_complete", "domain"),
+    advanced_fields=(
+        "merge_policy", "skip_if_complete", "domain",
+        "run_waterfall_email", "run_waterfall_phone", "reveal_personal_emails",
+    ),
     visible_in_palette=False,
 )
 
@@ -82,6 +102,15 @@ async def execute(ctx: NodeContext) -> NodeResult:
     }
     if cfg.domain:
         payload["domain"] = cfg.domain
+    # Apollo's internal waterfall flags only mean anything to the Apollo handler;
+    # forward them only for that source so other providers see a clean payload.
+    if cfg.enrich_source == "apollo":
+        if cfg.run_waterfall_email:
+            payload["run_waterfall_email"] = True
+        if cfg.run_waterfall_phone:
+            payload["run_waterfall_phone"] = True
+        if cfg.reveal_personal_emails:
+            payload["reveal_personal_emails"] = True
     return NodeResult(
         handle="default",
         events=[

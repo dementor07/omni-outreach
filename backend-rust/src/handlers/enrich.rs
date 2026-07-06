@@ -121,6 +121,17 @@ async fn apollo(command: &ActionCommand) -> ExecutionResult {
             body["organization_name"] = json!(c);
         }
     }
+    // APOLLO-DATA Part 2: forward Apollo's OWN internal enrichment-waterfall flags
+    // when the node sets them. These make Apollo waterfall across its providers to
+    // fill in email/phone and reveal personal emails. `reveal_phone_number` is
+    // deliberately NOT forwarded — it needs a webhook_url + async poll (follow-up).
+    for flag in ["run_waterfall_email", "run_waterfall_phone", "reveal_personal_emails"] {
+        if let Some(v) = command.payload.get(flag).and_then(|x| x.as_bool()) {
+            if v {
+                body[flag] = json!(true);
+            }
+        }
+    }
 
     let client = &*OUTBOUND;
     let resp = client
@@ -153,6 +164,32 @@ async fn apollo(command: &ActionCommand) -> ExecutionResult {
             .filter(|s| !s.is_empty())
         {
             fields["company"] = json!(company);
+        }
+    }
+    // APOLLO-DATA Part 2: when the waterfall reveals a personal email that the
+    // top-level `email` didn't carry, adopt it (mirrors proxycurl's
+    // personal_emails handling). Apollo returns these under `personal_emails[]`.
+    if fields.get("email").is_none() {
+        if let Some(personal) = person
+            .get("personal_emails")
+            .and_then(|v| v.as_array())
+            .and_then(|a| a.iter().find_map(|v| v.as_str().filter(|s| !s.is_empty())))
+        {
+            fields["email"] = json!(personal);
+        }
+    }
+    // Adopt a waterfalled phone number if we didn't already have one.
+    if fields.get("phone").is_none() {
+        if let Some(phone) = person
+            .get("phone_numbers")
+            .and_then(|v| v.as_array())
+            .and_then(|a| a.first())
+            .and_then(|v| v.get("raw_number").or_else(|| v.get("sanitized_number")))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .or_else(|| person.get("phone").and_then(|v| v.as_str()).filter(|s| !s.is_empty()))
+        {
+            fields["phone"] = json!(phone);
         }
     }
     let mutations = enrichment_mutations(
