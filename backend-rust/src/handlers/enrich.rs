@@ -577,6 +577,60 @@ fn pick_mutations(src: &Value, fields: &[&str]) -> Value {
     out
 }
 
+// ── APOLLO-DATA #4: bulk people enrich (helper, not yet in the per-lead flow) ──
+//
+// Apollo's `POST /api/v1/people/bulk_match` enriches up to 10 people in one call
+// (`details[]` of {first_name,last_name,email,organization_name,domain,id,
+// linkedin_url}) and accepts the SAME waterfall/reveal flags as people/match,
+// returning `matches[]`. That is a batch optimisation, not a per-lead action, so
+// it is deliberately NOT wired into `handle_enrich` (which is stateless and runs
+// one lead at a time). To use it, a future batching dispatcher would collect up
+// to 10 leads, build the body via `build_bulk_match_body`, POST to
+// `APOLLO_BULK_MATCH_URL` with the x-api-key header (mirror `apollo()`), then
+// map each `matches[i]` back to its lead. Kept here as a ready-to-wire helper.
+#[allow(dead_code)]
+const APOLLO_BULK_MATCH_URL: &str = "https://api.apollo.io/api/v1/people/bulk_match";
+
+/// Build the `people/bulk_match` request body from up to 10 person `details`
+/// objects and the optional waterfall/reveal flags. Truncates to Apollo's max of
+/// 10. Each detail object should carry any of:
+/// first_name/last_name/email/organization_name/domain/id/linkedin_url.
+#[allow(dead_code)]
+fn build_bulk_match_body(details: &[Value], flags: &[&str]) -> Value {
+    let capped: Vec<Value> = details.iter().take(10).cloned().collect();
+    let mut body = json!({ "details": capped });
+    for flag in flags {
+        body[*flag] = json!(true);
+    }
+    body
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_bulk_match_body, APOLLO_BULK_MATCH_URL};
+    use serde_json::json;
+
+    #[test]
+    fn bulk_match_url_is_api_v1() {
+        assert_eq!(APOLLO_BULK_MATCH_URL, "https://api.apollo.io/api/v1/people/bulk_match");
+    }
+
+    #[test]
+    fn bulk_match_body_caps_at_ten_and_sets_flags() {
+        let details: Vec<serde_json::Value> = (0..15).map(|i| json!({"id": i.to_string()})).collect();
+        let body = build_bulk_match_body(&details, &["run_waterfall_email"]);
+        assert_eq!(body["details"].as_array().unwrap().len(), 10);
+        assert_eq!(body["run_waterfall_email"], json!(true));
+    }
+
+    #[test]
+    fn bulk_match_body_no_flags_is_details_only() {
+        let body = build_bulk_match_body(&[json!({"email": "a@b.com"})], &[]);
+        assert_eq!(body["details"].as_array().unwrap().len(), 1);
+        assert!(body.get("run_waterfall_email").is_none());
+    }
+}
+
 fn enrichment_mutations(
     command: &ActionCommand,
     provider: &str,
