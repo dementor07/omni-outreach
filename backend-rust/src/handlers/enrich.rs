@@ -37,14 +37,29 @@ pub async fn handle_enrich(command: &ActionCommand) -> ExecutionResult {
             ),
         );
     }
-    match provider.as_str() {
+    let mut result = match provider.as_str() {
         "apollo" => apollo(command).await,
         "hunter" => hunter(command).await,
         "proxycurl" => proxycurl(command).await,
         "linkfinder" => linkfinder(command).await,
         "" => common::fail(command, "enrich_source missing", false),
         other => common::fail(command, format!("unknown enrich provider {other}"), false),
+    };
+    // ENRICH-HANDLE-001: the ai.enrich node has handles `default`/`on_error`,
+    // NOT `sent`. The orchestrator derives the routing handle from the result
+    // STATUS when next_handle isn't stamped, so a successful enrich (status=Sent)
+    // routed on "sent" — for which enrich has no edge — and the lead was
+    // terminalized as a leaf instead of advancing to create_contact. Stamp the
+    // node's real handle: success -> "default", failure -> "on_error".
+    if !result.metadata.contains_key("next_handle") {
+        let handle = match result.status {
+            crate::models::TaskStatus::Sent => "default",
+            crate::models::TaskStatus::Failed => "on_error",
+            _ => "default",
+        };
+        result.metadata.insert("next_handle".to_string(), json!(handle));
     }
+    result
 }
 
 fn enrichment_complete(command: &ActionCommand, provider: &str) -> bool {
