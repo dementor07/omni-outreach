@@ -38,6 +38,7 @@ SourceProvider = Literal[
     "searxng",
     "serper_search",
     "apollo",
+    "apollo_people",
     "clutch",
     "producthunt",
     "linkfinder_leads",
@@ -79,6 +80,14 @@ class CampaignSourceSpec(BaseModel):
     department: str | None = Field(None, description="Optional LinkFinder employee department filter")
     seniority: str | None = Field(None, description="Optional LinkFinder employee seniority filter")
     employee_count: int | None = Field(None, ge=1, le=100, description="Optional LinkFinder employee_count filter")
+    employee_ranges: list[str] = Field(
+        default_factory=list,
+        description="Apollo company-size buckets, e.g. ['10,100'] for source.apollo_people",
+    )
+    seniorities: list[str] = Field(
+        default_factory=list,
+        description="Apollo seniority levels, e.g. ['c_suite', 'founder'] for source.apollo_people",
+    )
     fetch_count: int | None = Field(
         None,
         ge=1,
@@ -98,6 +107,8 @@ class CampaignSourceSpec(BaseModel):
             raise ValueError(f"{self.provider} sources require query")
         if self.provider == "serper_search" and not self.connection_name:
             raise ValueError("serper_search sources require connection_name")
+        if self.provider == "apollo_people" and not self.connection_name:
+            raise ValueError("apollo_people sources require connection_name")
         if self.provider in {"linkfinder_leads", "linkfinder_employees", "linkfinder_post_reactions"} and not self.connection_name:
             raise ValueError(f"{self.provider} sources require connection_name")
         if self.provider == "linkfinder_leads":
@@ -270,7 +281,7 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
     rejected_key = "end_rejected"
     replied_key = "end_replied"
     completed_key = "end_sequence_complete"
-    direct_linkfinder_sources = {"linkfinder_leads", "linkfinder_employees", "linkfinder_post_reactions"}
+    direct_linkfinder_sources = {"linkfinder_leads", "linkfinder_employees", "linkfinder_post_reactions", "apollo_people"}
     company_source_count = sum(1 for source in spec.sources if source.provider not in {"producthunt", *direct_linkfinder_sources})
     direct_people_source_count = sum(1 for source in spec.sources if source.provider in direct_linkfinder_sources)
 
@@ -462,6 +473,20 @@ def _source_config(source: CampaignSourceSpec, companies_key: str) -> dict[str, 
         return {
             "max_posts": min(20, max(1, source.max_results)),
         }
+    if source.provider == "apollo_people":
+        config: dict[str, Any] = {
+            "connection_name": source.connection_name,
+            "person_titles": source.titles,
+            "organization_num_employees_ranges": source.employee_ranges,
+            "person_locations": [source.location] if source.location else [],
+            "per_page": min(100, source.fetch_count or max(1, source.max_results)),
+            "people_key": companies_key,
+        }
+        if source.seniorities:
+            config["person_seniorities"] = source.seniorities
+        if source.query:
+            config["q_keywords"] = source.query
+        return config
     if source.provider == "linkfinder_leads":
         return {
             "connection_name": source.connection_name,
