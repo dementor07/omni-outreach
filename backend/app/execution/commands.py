@@ -155,6 +155,25 @@ _CHANNEL_KIND: dict[ChannelType, str] = {
     ChannelType.LINKEDIN_PROFILE_VIEW: "linkedin",
 }
 
+# ENRICH-HANDLE-001: the ChannelTypes whose NODES declare a `sent` output handle
+# — real message/side-effect sends. build_command stamps metadata.next_handle
+# ="sent" only for these; every other muscle node (enrich, tags, transforms,
+# discovery sources, social reads) advances on "default", matching the handles
+# those nodes actually declare. Getting this wrong terminalizes the lead at a
+# non-existent `sent` edge (the Apollo enrich→create_contact break).
+_SEND_HANDLE_CHANNELS: frozenset[ChannelType] = frozenset(
+    set(_CHANNEL_KIND)
+    | {
+        ChannelType.WEBHOOK,  # channel.webhook_out / slack — nodes have a `sent` handle
+        ChannelType.LINKEDIN_REACT_POST,
+        ChannelType.LINKEDIN_COMMENT_POST,
+        ChannelType.LINKEDIN_ENDORSE,
+        ChannelType.LINKEDIN_FOLLOW,
+        ChannelType.MESSAGE_REACT,
+        ChannelType.INVITE_CANCEL,
+    }
+)
+
 
 async def _load_pooled_accounts(workspace_id: str, workflow_id: str, channel_kind: str) -> list[dict[str, Any]]:
     """The campaign's pooled sending accounts for this channel family, with the
@@ -449,7 +468,7 @@ async def build_command(
             # CONFIRMED send (exactly-once via processed_commands). Absent = the
             # legacy connection_name path; no per-account counter to bump.
             "sending_account_id": sending_account_id_used,
-            # SEND-HANDLE-001: a successful send continues on the channel node's
+            # SEND-HANDLE-001: a successful SEND continues on the channel node's
             # declared `sent` handle. The orchestrator routes a status=sent result
             # on metadata.next_handle (default "default"); without this stamp every
             # channel send routed on "default", so a sequence wired on `sent` (what
@@ -458,7 +477,17 @@ async def build_command(
             # that needs a DIFFERENT outcome (RELGATE not_connected / NOCHAT
             # no_thread / SMART-INVITE already_connected) overrides next_handle on
             # its own result, which wins.
-            "next_handle": "sent",
+            #
+            # ENRICH-HANDLE-001: but this stamp is ONLY correct for real send
+            # channels whose nodes declare a `sent` handle. Non-send muscle nodes
+            # (ai.enrich, tags, transforms, discovery sources) also return
+            # status=sent, but their nodes declare `default`/`on_error` handles —
+            # NOT `sent`. Stamping "sent" on them made the orchestrator route on a
+            # `sent` edge that doesn't exist, so the lead hit a leaf and
+            # terminalized BEFORE the next node (e.g. an Apollo-enriched lead never
+            # reached create_contact). Only the send channels get "sent"; every
+            # other node advances on "default".
+            "next_handle": "sent" if channel in _SEND_HANDLE_CHANNELS else "default",
         },
         "occurred_at": datetime.now(UTC).isoformat(),
     }
