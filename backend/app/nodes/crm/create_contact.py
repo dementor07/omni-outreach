@@ -31,7 +31,7 @@ from app.nodes import (
     SideEffect,
     register,
 )
-from app.db import acquire
+from app.db import acquire, system_scope
 
 
 class CreateContactConfig(BaseModel):
@@ -77,8 +77,15 @@ async def _is_contact_cap_reached(workspace_id: str, workflow_id: str) -> bool:
     committed transaction so concurrent fan-out branches serialize on the count
     instead of all reading "under target" at once and overshooting. This is the
     same lock key the projector used; with the projector cap removed this is the
-    single enforcement point."""
-    async with acquire() as conn:
+    single enforcement point.
+
+    CONTACT-CAP-SCOPE-001: run under system_scope(). create_contact fires from
+    the transition worker's background context (a fanned-out child lead advancing
+    on the enrich 'default' handle), where no request workspace is armed — so a
+    bare acquire() raised 'no workspace context' and crashed the node BEFORE it
+    could emit contact.created. This read is workspace-filtered in SQL, so system
+    scope is safe."""
+    async with system_scope(), acquire() as conn:
         objective = await conn.fetchrow(
             """
             SELECT target
