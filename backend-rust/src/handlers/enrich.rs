@@ -104,6 +104,21 @@ async fn apollo(command: &ActionCommand) -> ExecutionResult {
     };
 
     let mut body = json!({});
+    // APOLLO-DATA: strongest match key — Apollo's own person id. The
+    // source.apollo_people search returns each person's `provider_id` (Apollo's
+    // internal id), stored on the for_each item. Passing it as `id` makes
+    // people/match an exact-record lookup instead of a fuzzy name/company match
+    // (which fails for search results that are first-name-only, no email/domain).
+    if let Some(pid) = command
+        .lead
+        .extra_data
+        .get("item")
+        .and_then(|it| it.get("provider_id"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        body["id"] = json!(pid);
+    }
     if let Some(email) = &command.lead.email {
         body["email"] = json!(email);
     }

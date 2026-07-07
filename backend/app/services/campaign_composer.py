@@ -141,6 +141,13 @@ class EnrichmentStageSpec(BaseModel):
     connection_name: str
     merge_policy: Literal["fill_missing", "overwrite"] = "fill_missing"
     skip_if_complete: bool = True
+    # Apollo only: turn on Apollo's internal waterfall so people/match actually
+    # reveals the email/phone (Apollo hides them unless asked). Defaults on for
+    # Apollo — a search-sourced person has no email until this reveals it; None
+    # here means "auto" (on for apollo, off otherwise).
+    reveal_personal_emails: bool | None = None
+    run_waterfall_email: bool | None = None
+    run_waterfall_phone: bool | None = None
 
 
 class MessageStepSpec(BaseModel):
@@ -412,12 +419,24 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
         for index, stage in enumerate(spec.enrichment):
             key = "post_verify_0" if index == 0 else f"enrich_{index + 1}"
             next_key = f"enrich_{index + 2}" if index < len(spec.enrichment) - 1 else "create_contact"
-            add_node(key, "ai.enrich", people_x + 960 + index * 280, 250, {
+            enrich_cfg = {
                 "enrich_source": stage.provider,
                 "connection_name": stage.connection_name,
                 "merge_policy": stage.merge_policy,
                 "skip_if_complete": stage.skip_if_complete,
-            })
+            }
+            if stage.provider == "apollo":
+                # Auto-on for Apollo: a search-sourced person has no email until
+                # Apollo's waterfall reveals it. An explicit spec value overrides.
+                enrich_cfg["reveal_personal_emails"] = (
+                    True if stage.reveal_personal_emails is None else stage.reveal_personal_emails
+                )
+                enrich_cfg["run_waterfall_email"] = (
+                    True if stage.run_waterfall_email is None else stage.run_waterfall_email
+                )
+                if stage.run_waterfall_phone:
+                    enrich_cfg["run_waterfall_phone"] = True
+            add_node(key, "ai.enrich", people_x + 960 + index * 280, 250, enrich_cfg)
             add_edge(key, next_key, "default")
             add_edge(key, next_key, "on_error")
         previous = "create_contact"
