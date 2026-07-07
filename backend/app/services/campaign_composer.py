@@ -249,6 +249,13 @@ class CampaignSpec(BaseModel):
     bounds: dict[str, Any] = Field(default_factory=dict)
     audience: dict[str, Any] = Field(default_factory=dict)
     verification_threshold: int = Field(40, ge=0, le=100)
+    # When True, skip the condition.verify_person quality gate — people flow
+    # straight from discovery into enrichment/create_contact. Right for
+    # provider-trusted sources (Apollo/LinkFinder people search) that return
+    # masked-but-real people the verify gate would reject before enrichment can
+    # fill them in. None = auto: skip when every source is a direct people
+    # provider (no company-resolution stage produced richer profiles).
+    skip_verification: bool | None = None
 
 
 class CompiledNode(BaseModel):
@@ -284,6 +291,12 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
     direct_linkfinder_sources = {"linkfinder_leads", "linkfinder_employees", "linkfinder_post_reactions", "apollo_people"}
     company_source_count = sum(1 for source in spec.sources if source.provider not in {"producthunt", *direct_linkfinder_sources})
     direct_people_source_count = sum(1 for source in spec.sources if source.provider in direct_linkfinder_sources)
+    # Skip the quality gate for provider-trusted sources (Apollo/LinkFinder
+    # people search return masked-but-real people that verify_person would
+    # reject BEFORE enrichment can fill in email/last_name). Auto-skip when the
+    # whole campaign is direct people sources; explicit spec flag overrides.
+    all_direct_people = company_source_count == 0 and direct_people_source_count > 0
+    skip_verify = spec.skip_verification if spec.skip_verification is not None else all_direct_people
 
     def add_node(key: str, node_type: str, x: float, y: float, config: dict[str, Any] | None = None) -> str:
         nodes.append(CompiledNode(
@@ -302,7 +315,11 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
     if company_source_count:
         add_node(no_companies_key, "flow.end", 360, -160, {"reason": "no_companies"})
     add_node(no_people_key, "flow.end", 1320, -160, {"reason": "no_people"})
-    add_node(rejected_key, "flow.end", 960, -160, {"reason": "rejected"})
+    # The 'rejected' terminal is only reached from company-screening / resolve /
+    # verify_person. When none of those exist (skip_verify + direct people
+    # source), don't emit an orphan flow.end the plan-check would flag.
+    if not skip_verify or company_source_count:
+        add_node(rejected_key, "flow.end", 960, -160, {"reason": "rejected"})
 
     for index, source in enumerate(spec.sources):
         y = 160 + index * 190
@@ -375,13 +392,17 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
     if company_source_count:
         add_edge("people_discovery", "people_loop", "default")
         add_edge("people_discovery", no_people_key, "empty")
-    add_edge("people_loop", "verify_person", "each")
     add_edge("people_loop", source_done_key, "done")
     add_edge("people_loop", no_people_key, "empty")
 
-    add_node("verify_person", "condition.verify_person", people_x + 640, 250, {"pass_threshold": spec.verification_threshold})
-    add_edge("verify_person", "post_verify_0", "verified")
-    add_edge("verify_person", rejected_key, "rejected")
+    if skip_verify:
+        # people_loop.each → straight into the enrichment/create_contact entry.
+        add_edge("people_loop", "post_verify_0", "each")
+    else:
+        add_edge("people_loop", "verify_person", "each")
+        add_node("verify_person", "condition.verify_person", people_x + 640, 250, {"pass_threshold": spec.verification_threshold})
+        add_edge("verify_person", "post_verify_0", "verified")
+        add_edge("verify_person", rejected_key, "rejected")
 
     previous = "post_verify_0"
     if spec.enrichment:
