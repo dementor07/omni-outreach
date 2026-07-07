@@ -124,6 +124,22 @@ async def execute(ctx: NodeContext) -> NodeResult:
     person = (ctx.lead.get("custom_fields") or {}).get(cfg.person_field) or {}
     identity = _merge_identity(cfg, person)
 
+    # ENRICH-CONTACT-001: an enrichment stage (e.g. ai.enrich Apollo) writes the
+    # revealed email/linkedin onto the LEAD (top-level column + custom_fields),
+    # NOT back into the per-person `item` dict the for_each produced. So when the
+    # discovered person had no email but enrichment since revealed one, fall back
+    # to the lead's own fields before deciding there's no usable identity.
+    lead_cf = ctx.lead.get("custom_fields") or {}
+    if not identity["email"]:
+        identity["email"] = ctx.lead.get("email") or lead_cf.get("email") or None
+    if not identity["linkedin_url"]:
+        identity["linkedin_url"] = ctx.lead.get("linkedin_url") or lead_cf.get("linkedin_url") or None
+    # Backfill name/company/headline from the lead too, so the enriched contact
+    # isn't just an email with no name.
+    for fld in ("first_name", "last_name", "company", "headline"):
+        if not identity.get(fld):
+            identity[fld] = ctx.lead.get(fld) or lead_cf.get(fld) or identity.get(fld)
+
     if not identity["email"] and not identity["linkedin_url"]:
         # No usable identity from config OR the discovered person — fail-closed
         # so we never emit a nameless, contactless ghost.
