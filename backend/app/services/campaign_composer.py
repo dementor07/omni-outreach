@@ -426,14 +426,18 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
                 "skip_if_complete": stage.skip_if_complete,
             }
             if stage.provider == "apollo":
-                # Auto-on for Apollo: a search-sourced person has no email until
-                # Apollo's waterfall reveals it. An explicit spec value overrides.
+                # Auto-on for Apollo: reveal personal emails on the match. NOTE:
+                # run_waterfall_email/phone are deliberately NOT set — Apollo
+                # rejects them with HTTP 400 unless a webhook_url is supplied
+                # (they deliver asynchronously). An ID-matched person already
+                # returns their work email directly, so the waterfall isn't
+                # needed here; wiring the async webhook path is a follow-up.
                 enrich_cfg["reveal_personal_emails"] = (
                     True if stage.reveal_personal_emails is None else stage.reveal_personal_emails
                 )
-                enrich_cfg["run_waterfall_email"] = (
-                    True if stage.run_waterfall_email is None else stage.run_waterfall_email
-                )
+                # Explicit opt-in only (requires webhook_url infra to work):
+                if stage.run_waterfall_email:
+                    enrich_cfg["run_waterfall_email"] = True
                 if stage.run_waterfall_phone:
                     enrich_cfg["run_waterfall_phone"] = True
             add_node(key, "ai.enrich", people_x + 960 + index * 280, 250, enrich_cfg)
