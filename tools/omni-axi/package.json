@@ -1,0 +1,33 @@
+{
+  "name": "omni-axi",
+  "version": "0.1.0",
+  "description": "Agent-ergonomic CLI over omni's public API — TOON output, built to the AXI standard (axi.md).",
+  "type": "module",
+  "bin": {
+    "omni-axi": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test dist/*.test.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "axi",
+    "agent",
+    "cli",
+    "omni",
+    "outreach",
+    "crm"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}
