@@ -21,6 +21,8 @@ import Approvals from './pages/Approvals'
 import Analytics from './pages/Analytics'
 import ActivityPage from './pages/ActivityPage'
 import AiStudio from './pages/AiStudio'
+import Views from './pages/Views'
+import DynamicView from './pages/DynamicView'
 // SETUP
 import Integrations from './pages/Integrations'
 import LeadSources from './pages/LeadSources'
@@ -69,6 +71,8 @@ export default function App() {
         <Route path="/analytics" element={<Analytics />} />
         <Route path="/activity" element={<ActivityPage />} />
         <Route path="/ai-studio" element={<AiStudio />} />
+        <Route path="/views" element={<Views />} />
+        <Route path="/views/:id" element={<DynamicView />} />
 
         {/* Setup */}
         <Route path="/integrations" element={<Integrations />} />

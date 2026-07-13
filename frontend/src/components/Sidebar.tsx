@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Megaphone, Inbox, ListTodo, UserCheck,
   Users, Building2, KanbanSquare, Contact,
-  BarChart3, Activity, Sparkles,
+  BarChart3, Activity, Sparkles, LayoutTemplate,
   Plug, Database, FileText, ShieldOff, ShieldCheck, Settings, LogOut,
 } from 'lucide-react'
 import { clsx } from 'clsx'
@@ -43,6 +43,8 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/analytics', label: 'Analytics', icon: BarChart3 },
       { to: '/activity', label: 'Activity', icon: Activity },
       { to: '/ai-studio', label: 'AI Studio', icon: Sparkles },
+      // DYNAMIC-001: user/AI-authored dashboards (interfaces-as-data).
+      { to: '/views', label: 'My Views', icon: LayoutTemplate },
     ],
   },
   {

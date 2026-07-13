@@ -46,6 +46,7 @@ from app.routers import (
     tones,
     tracking,
     unipile,
+    views,
     webhooks_in,
     webhooks_out,
     workspaces,
@@ -156,6 +157,7 @@ app.include_router(suppression.router, prefix="/suppression", tags=["suppression
 app.include_router(deliverability.router, prefix="/deliverability", tags=["deliverability"])
 app.include_router(templates.router, prefix="/templates", tags=["templates"])
 app.include_router(tones.router, prefix="/tones", tags=["tones"])
+app.include_router(views.router, prefix="/views", tags=["views"])
 app.include_router(objectives.router, prefix="/objectives", tags=["objectives"])
 
 # Unipile control plane (UNIPILE-FULL group C/D): account health, inbox reads,
