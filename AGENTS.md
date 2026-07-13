@@ -1,5 +1,35 @@
 # OmniOutreach agent guide
 
+## Read first: OPINIONS.md
+
+Before making tradeoff decisions, read [`OPINIONS.md`](./OPINIONS.md) — the durable beliefs
+about *how we work here* (verification bar, anti-bloat rules, product intent, deploy safety).
+`AGENTS.md` tells you how to run the repo; `OPINIONS.md` tells you how to decide when the spec
+runs out. When the two ever conflict, that is a bug in one of them — surface it.
+
+## Agentic workflow (Kun Chen's flow — adopted)
+
+We work as a manager-of-agents shop. The pipeline:
+
+1. **Plan** — for anything non-trivial, draft the plan and review it with **lavish**
+   (`npx -y lavish-axi <plan>.html`) instead of a wall of markdown: the human annotates an
+   interactive HTML artifact in-browser, the agent polls for feedback and iterates.
+2. **Implement** — small, committed, documented steps. For long unattended objectives, **gnhf**
+   (`gnhf "<objective>"`) runs one small committed change per fresh-context iteration onto a
+   `gnhf/<slug>` branch with a `notes.md` log, auto-rolling-back failures.
+3. **Gate — nothing merges ungated.** **no-mistakes** runs review → test → docs → lint → push
+   → PR → CI in an isolated worktree; each stage passes or stops with a finding. The binary is
+   Linux-only, so the gate lives on the deploy box (`13.140.169.62`), not this Windows machine.
+   Locally, still run the full verification below before handing a change to the gate.
+4. **Steward** — on a recurring mistake, update `OPINIONS.md` / project memory, don't re-explain.
+
+Any CLI an agent drives should follow the **AXI** principles ([axi.md](https://axi.md)):
+compact counted output, definitive empty states, structured errors, next-step hints. Prefer
+agent-ergonomic CLI surfaces over heavy structured protocols.
+
+**Anti-bloat rule (hard):** do not write function clones. Adopt/extend Kun Chen's real
+open-source tools and existing internal seams; never reimplement them as our own near-duplicate.
+
 ## Safety
 
 - This repository backs a live multi-tenant production system. Read-only inspection is
