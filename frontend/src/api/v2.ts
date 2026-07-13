@@ -1264,6 +1264,9 @@ export const views = {
     api.patch<ViewDef>(`/views/${id}`, body).then((r) => r.data),
   remove: (id: UUID) => api.delete(`/views/${id}`).then(() => undefined),
   generate: (prompt: string) => api.post<ViewDef>('/views/generate', { prompt }).then((r) => r.data),
+  // DYNAMIC-002: reshape an existing view by plain-language instruction.
+  edit: (id: UUID, instruction: string) =>
+    api.post<ViewDef>(`/views/${id}/edit`, { instruction }).then((r) => r.data),
   query: (spec: ViewQuerySpec) => api.post<ViewQueryResult>('/views/query', spec).then((r) => r.data),
   widgetCatalog: () => api.get<Record<string, unknown>>('/views/widgets').then((r) => r.data),
 }

@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 from app.auth import AuthContext, get_current_workspace
 from app.db import acquire, fetch_all, fetch_one
 from app.services.default_view import DEFAULT_LAYOUT, DEFAULT_VIEW_NAME
-from app.services.view_architect import ViewArchitectError, generate_view
+from app.services.view_architect import ViewArchitectError, edit_view, generate_view
 from app.services.view_query import QuerySpec, QueryValidationError, build_query, entity_catalog
 from app.services.view_widgets import ViewLayoutError, validate_layout, widget_manifests
 
@@ -60,6 +60,10 @@ class ViewPatch(BaseModel):
 
 class ViewGenerate(BaseModel):
     prompt: str = Field(min_length=8, max_length=2000)
+
+
+class ViewEdit(BaseModel):
+    instruction: str = Field(min_length=3, max_length=2000)
 
 
 class QueryResult(BaseModel):
@@ -213,6 +217,57 @@ async def generate_view_from_prompt(
         json.dumps(view["layout"]),
         body.prompt,
     )
+    return _row_to_out(dict(row))
+
+
+@router.post(
+    "/{view_id}/edit",
+    response_model=ViewOut,
+    summary="Edit a view with a plain-language instruction",
+    description=(
+        "DYNAMIC-002: reshape an existing view by describing the change — 'add a "
+        "failures-by-provider chart', 'make the trend weekly', 'drop the tasks "
+        "widget'. The view architect gets the current layout + the instruction and "
+        "returns the full revised layout, re-validated through the same whitelist, "
+        "then saved. This is the core dynamic interaction (and the call an external "
+        "agent / the MCP server makes). Requires an anthropic connection."
+    ),
+)
+async def edit_view_with_prompt(
+    view_id: UUID, body: ViewEdit, ctx: AuthContext = Depends(get_current_workspace)
+) -> ViewOut:
+    current = await fetch_one("SELECT * FROM omni_views WHERE id=$1", view_id)
+    if not current:
+        raise HTTPException(status_code=404, detail="view not found")
+    current_view = _row_to_out(dict(current))
+    try:
+        revised = await edit_view(
+            ctx.workspace_id,
+            {
+                "name": current_view.name,
+                "description": current_view.description,
+                "icon": current_view.icon,
+                "layout": current_view.layout,
+            },
+            body.instruction,
+        )
+    except ViewArchitectError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    row = await fetch_one(
+        """
+        UPDATE omni_views
+        SET name=$1, description=$2, icon=$3, layout=$4::jsonb, updated_at=NOW()
+        WHERE id=$5
+        RETURNING *
+        """,
+        revised["name"],
+        revised["description"],
+        revised["icon"],
+        json.dumps(revised["layout"]),
+        view_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="view not found")
     return _row_to_out(dict(row))
 
 

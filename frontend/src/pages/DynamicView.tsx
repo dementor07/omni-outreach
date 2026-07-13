@@ -5,11 +5,13 @@
  * After this page exists, new "screens" never require a frontend deploy —
  * they're rows the view architect (or the user, or an external agent) writes.
  */
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, RefreshCw, Trash2 } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Sparkles, Trash2 } from 'lucide-react'
 import { views } from '../api/v2'
 import PageHeader from '../components/PageHeader'
+import Card from '../components/Card'
 import Button from '../components/Button'
 import EmptyState from '../components/EmptyState'
 import { ViewGrid } from '../components/ViewWidgets'
@@ -20,6 +22,7 @@ export default function DynamicView() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const toast = useToast()
+  const [instruction, setInstruction] = useState('')
 
   const viewQ = useQuery({
     queryKey: ['view', id],
@@ -33,6 +36,24 @@ export default function DynamicView() {
       qc.invalidateQueries({ queryKey: ['views'] })
       toast.success('View deleted')
       navigate('/views')
+    },
+  })
+
+  // DYNAMIC-002: reshape this view by describing the change.
+  const edit = useMutation({
+    mutationFn: (text: string) => views.edit(id, text),
+    onSuccess: (updated) => {
+      qc.setQueryData(['view', id], updated)
+      qc.invalidateQueries({ queryKey: ['view-widget'] })
+      qc.invalidateQueries({ queryKey: ['views'] })
+      setInstruction('')
+      toast.success('View updated')
+    },
+    onError: (err: unknown) => {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+        'could not apply the change'
+      toast.error(detail)
     },
   })
 
@@ -84,6 +105,31 @@ export default function DynamicView() {
           </div>
         }
       />
+
+      {/* DYNAMIC-002: reshape this view by describing the change. */}
+      <Card padding="sm" className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <Sparkles size={16} className="hidden shrink-0 text-brand-500 sm:block" />
+        <input
+          value={instruction}
+          onChange={(e) => setInstruction(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && instruction.trim().length >= 3 && !edit.isPending) {
+              edit.mutate(instruction.trim())
+            }
+          }}
+          placeholder="Reshape this view — e.g. 'add a sends-by-status bar chart', 'make the trend weekly', 'drop the tasks widget'"
+          className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:ring-brand-950"
+        />
+        <Button
+          icon={Sparkles}
+          isLoading={edit.isPending}
+          disabled={instruction.trim().length < 3 || edit.isPending}
+          onClick={() => edit.mutate(instruction.trim())}
+        >
+          {edit.isPending ? 'Applying…' : 'Apply'}
+        </Button>
+      </Card>
+
       <ViewGrid layout={view.layout} />
     </div>
   )

@@ -81,16 +81,12 @@ def _validate(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def generate_view(workspace_id: str, prompt: str) -> dict[str, Any]:
-    """Prompt → validated view payload {name, description, icon, layout} (1 repair retry)."""
-    api_key = await anthropic_key(workspace_id)
-    if not api_key:
-        raise ViewArchitectError(
-            "no anthropic connection in this workspace — add one in Settings → Integrations to generate views"
-        )
-    system = _system_prompt()
+async def _run_architect(api_key: str, system: str, user: str, original: str) -> dict[str, Any]:
+    """The shared prompt→JSON→validate loop with one repair retry. Used by both
+    generate (from scratch) and edit (from a current layout) so the validation
+    and repair discipline lives in ONE place."""
     try:
-        text = await _anthropic_text(api_key, system, prompt, MAX_TOKENS)
+        text = await _anthropic_text(api_key, system, user, MAX_TOKENS)
     except AiJobError as exc:
         raise ViewArchitectError(f"model call failed: {exc}") from exc
     payload = _extract_json(text)
@@ -103,7 +99,7 @@ async def generate_view(workspace_id: str, prompt: str) -> dict[str, Any]:
             "Your previous JSON failed validation. Fix EVERY error and respond with "
             "ONLY the corrected JSON object.\n\nPrevious JSON:\n"
             f"{json.dumps(payload)}\n\nValidation errors:\n{first_errors}"
-            f"\n\nOriginal request:\n{prompt}"
+            f"\n\nOriginal request:\n{original}"
         )
         try:
             text = await _anthropic_text(api_key, system, repair, MAX_TOKENS)
@@ -117,3 +113,38 @@ async def generate_view(workspace_id: str, prompt: str) -> dict[str, Any]:
         except ViewLayoutError as second_errors:
             log.warning("view architect failed twice: %s", second_errors)
             raise ViewArchitectError(f"could not produce a valid view: {second_errors}") from second_errors
+
+
+async def _require_key(workspace_id: str) -> str:
+    api_key = await anthropic_key(workspace_id)
+    if not api_key:
+        raise ViewArchitectError(
+            "no anthropic connection in this workspace — add one in Settings → Integrations to use the view architect"
+        )
+    return api_key
+
+
+async def generate_view(workspace_id: str, prompt: str) -> dict[str, Any]:
+    """Prompt → validated view payload {name, description, icon, layout} (1 repair retry)."""
+    api_key = await _require_key(workspace_id)
+    return await _run_architect(api_key, _system_prompt(), prompt, prompt)
+
+
+async def edit_view(
+    workspace_id: str, current: dict[str, Any], instruction: str
+) -> dict[str, Any]:
+    """DYNAMIC-002 step 2: current view + a plain-language instruction → the
+    REVISED view, re-validated through the same whitelist. The model gets the
+    full current layout and must return the FULL new one (not a diff), so the
+    result always compiles as a complete view. This is the call the Tier-3 MCP
+    server will make on the user's behalf."""
+    api_key = await _require_key(workspace_id)
+    user = (
+        "Here is the CURRENT view as JSON. Apply the user's instruction and return "
+        "the COMPLETE revised view as ONE JSON object (same schema: name, "
+        "description, icon, layout) — keep everything the instruction doesn't "
+        "change, and preserve widget ids that stay.\n\n"
+        f"CURRENT VIEW:\n{json.dumps(current)}\n\n"
+        f"INSTRUCTION:\n{instruction}"
+    )
+    return await _run_architect(api_key, _system_prompt(), user, instruction)

@@ -386,3 +386,51 @@ def test_default_overview_uses_only_catalogued_fields():
         refs += [m["field"] for m in q.get("metrics", []) if m.get("field")]
         for field in refs:
             assert field in entity.columns, f"{widget['id']}: unknown field {field!r} on {q['entity']}"
+
+
+# ── DYNAMIC-002 step 2: agent edits a view ───────────────────────────────────
+
+
+def test_edit_validate_rejects_bad_model_output():
+    """The edit path runs model output through the SAME validator as generate —
+    a revised layout the model hallucinates that references an unknown field is
+    rejected, never persisted."""
+    bad = {
+        "name": "Edited",
+        "layout": [{
+            "id": "x", "type": "list", "title": "x",
+            "query": {"entity": "contacts", "select": ["ssn"]},
+        }],
+    }
+    with pytest.raises(ViewLayoutError, match="unknown field"):
+        validate_view_payload(bad)
+
+
+def test_edit_validate_accepts_a_good_revision():
+    """A revised layout that adds a valid widget passes and normalizes."""
+    good = {
+        "name": "Overview",
+        "layout": [
+            _stat("keep"),
+            {
+                "id": "sends-by-status",
+                "type": "bar_chart",
+                "title": "Sends by status",
+                "query": {"entity": "send_outcomes", "group_by": ["status"], "metrics": [{"fn": "count"}]},
+            },
+        ],
+    }
+    out = validate_view_payload(good)
+    assert [w["id"] for w in out["layout"]] == ["keep", "sends-by-status"]
+
+
+def test_view_architect_shares_one_validate_loop():
+    """generate_view and edit_view must route through the same _run_architect
+    helper (no cloned repair loop) — guards the DRY refactor."""
+    import inspect
+    from app.services import view_architect
+
+    gen_src = inspect.getsource(view_architect.generate_view)
+    edit_src = inspect.getsource(view_architect.edit_view)
+    assert "_run_architect" in gen_src
+    assert "_run_architect" in edit_src
