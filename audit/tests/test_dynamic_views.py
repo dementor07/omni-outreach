@@ -353,3 +353,36 @@ def test_view_payload_normalizes_icon_and_validates_layout():
 def test_view_payload_bad_name_rejected():
     with pytest.raises(ViewLayoutError, match="name"):
         validate_view_payload({"name": "", "layout": [_stat()]})
+
+
+# ── DYNAMIC-002 step 1: the default Overview home view ───────────────────────
+
+
+def test_default_overview_layout_compiles():
+    """The seeded home view must validate through the SAME whitelist as any
+    other view — every widget query compiles, or the frontend falls back."""
+    from app.services.default_view import DEFAULT_LAYOUT, DEFAULT_VIEW_NAME
+
+    widgets = validate_layout(DEFAULT_LAYOUT)
+    assert len(widgets) == len(DEFAULT_LAYOUT)
+    assert DEFAULT_VIEW_NAME == "Overview"
+    # It exercises a real spread of widget types (not just stats).
+    kinds = {w.type for w in widgets}
+    assert {"stat", "line_chart", "bar_chart", "table", "list"} <= kinds
+
+
+def test_default_overview_uses_only_catalogued_fields():
+    """Every field the default layout references must exist in the entity
+    catalog — a typo here would 500 the home page on a real query."""
+    from app.services.default_view import DEFAULT_LAYOUT
+    from app.services.view_query import ENTITIES
+
+    for widget in DEFAULT_LAYOUT:
+        q = widget["query"]
+        entity = ENTITIES[q["entity"]]
+        refs: list[str] = list(q.get("select", []))
+        refs += list(q.get("group_by", []))
+        refs += [f["field"] for f in q.get("filters", [])]
+        refs += [m["field"] for m in q.get("metrics", []) if m.get("field")]
+        for field in refs:
+            assert field in entity.columns, f"{widget['id']}: unknown field {field!r} on {q['entity']}"

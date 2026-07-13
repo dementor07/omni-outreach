@@ -3,20 +3,64 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   Users, Contact as ContactIcon, KanbanSquare, Inbox as InboxIcon,
-  Megaphone, Sparkles, Plus, TrendingUp, Flame,
+  Megaphone, Sparkles, Plus, TrendingUp, Flame, Pencil,
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { projections, inbox, canvas, ai, type Deal, type LeadScore } from '../api/v2'
+import { projections, inbox, canvas, ai, views, type Deal, type LeadScore } from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import StatCard from '../components/StatCard'
 import Card, { CardHeader } from '../components/Card'
 import Badge from '../components/Badge'
 import Button from '../components/Button'
 import EmptyState from '../components/EmptyState'
+import { ViewGrid } from '../components/ViewWidgets'
 
 const DEAL_STAGE_ORDER = ['lead', 'qualified', 'meeting', 'proposal', 'closed_won', 'closed_lost']
 
+/**
+ * DYNAMIC-002 step 1: the home page is a stored view (data), not this hardcoded
+ * React. We load the workspace's default Overview view and render it through the
+ * generic widget renderer. If that fails for ANY reason (endpoint down, seed
+ * error, old backend), we fall back to the original static page below — so the
+ * dynamic home is strictly additive and zero-risk.
+ */
 export default function Overview() {
+  const navigate = useNavigate()
+  const defaultViewQ = useQuery({
+    queryKey: ['default-view'],
+    queryFn: views.default,
+    retry: false,
+    staleTime: 60_000,
+  })
+
+  // While loading, show the static page (it has its own skeletons) so there's
+  // never a blank flash. On success, render the stored view. On error, the
+  // static page is the permanent fallback.
+  if (defaultViewQ.isSuccess && defaultViewQ.data.layout.length > 0) {
+    const view = defaultViewQ.data
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          screenLabel="Overview"
+          eyebrow="Mission control"
+          title={view.name}
+          description={view.description || 'Live state of your pipeline — a view you can reshape.'}
+          actions={
+            <>
+              <Button variant="secondary" size="md" icon={Pencil} onClick={() => navigate(`/views/${view.id}`)}>Edit view</Button>
+              <Button variant="primary" size="md" icon={Plus} onClick={() => navigate('/campaigns')}>New campaign</Button>
+            </>
+          }
+        />
+        <ViewGrid layout={view.layout} />
+      </div>
+    )
+  }
+
+  return <StaticOverview />
+}
+
+function StaticOverview() {
   const navigate = useNavigate()
   const contactsSummaryQ = useQuery({ queryKey: ['contacts-summary', {}], queryFn: () => projections.contactSummary() })
   const leadsSummaryQ = useQuery({ queryKey: ['leads-summary', 'all'], queryFn: () => projections.leadSummary() })

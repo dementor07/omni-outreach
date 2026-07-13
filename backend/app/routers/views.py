@@ -22,7 +22,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.auth import AuthContext, get_current_workspace
-from app.db import fetch_all, fetch_one
+from app.db import acquire, fetch_all, fetch_one
+from app.services.default_view import DEFAULT_LAYOUT, DEFAULT_VIEW_NAME
 from app.services.view_architect import ViewArchitectError, generate_view
 from app.services.view_query import QuerySpec, QueryValidationError, build_query, entity_catalog
 from app.services.view_widgets import ViewLayoutError, validate_layout, widget_manifests
@@ -98,6 +99,64 @@ def _row_to_out(row: dict) -> ViewOut:
 )
 async def get_widget_catalog(_: AuthContext = Depends(get_current_workspace)) -> dict[str, Any]:
     return {"widgets": widget_manifests(), **entity_catalog()}
+
+
+@router.get(
+    "/default",
+    response_model=ViewOut,
+    summary="The workspace's home (Overview) view — seeded on first request",
+    description=(
+        "DYNAMIC-002: the home page is a stored view, not hardcoded React. Returns "
+        "this workspace's default Overview view, lazily creating it from the "
+        "canonical layout the first time it's asked for. The frontend renders this "
+        "through the generic view renderer and falls back to the static page if "
+        "this call fails — so seeding is zero-risk."
+    ),
+)
+async def get_default_view(ctx: AuthContext = Depends(get_current_workspace)) -> ViewOut:
+    # Fast path: an Overview already exists (RLS scopes the read to this
+    # workspace, so filtering by name only is safe). The user may have edited or
+    # renamed it — we key on the seed name only for the INITIAL create.
+    existing = await fetch_one(
+        "SELECT * FROM omni_views WHERE name = $1 ORDER BY created_at LIMIT 1",
+        DEFAULT_VIEW_NAME,
+    )
+    if existing:
+        return _row_to_out(dict(existing))
+
+    # Seed once. Guard the check-then-insert against concurrent first-loads
+    # (two tabs / two teammates) with a per-workspace advisory lock — the same
+    # pattern CONTACT-CAP-002 used for a lazy-seed race — so we never mint a
+    # duplicate Overview a later edit could silently miss. validate_layout()
+    # guarantees the layout compiles; if the catalog ever drifts it raises and
+    # the frontend shows the static page (zero-risk).
+    widgets = validate_layout(DEFAULT_LAYOUT)
+    async with acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtext($1))",
+                f"seed-default-view:{ctx.workspace_id}",
+            )
+            # Re-check inside the lock: the request that lost the race sees the
+            # winner's row instead of inserting a second one.
+            row = await conn.fetchrow(
+                "SELECT * FROM omni_views WHERE name = $1 ORDER BY created_at LIMIT 1",
+                DEFAULT_VIEW_NAME,
+            )
+            if row is None:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO omni_views (workspace_id, name, description, icon, layout, created_by)
+                    VALUES ($1, $2, $3, $4, $5::jsonb, 'user')
+                    RETURNING *
+                    """,
+                    ctx.workspace_id,
+                    DEFAULT_VIEW_NAME,
+                    "Your mission control — reshape it with the view architect.",
+                    "layout-dashboard",
+                    json.dumps([w.model_dump(mode="json") for w in widgets]),
+                )
+    return _row_to_out(dict(row))
 
 
 @router.post(

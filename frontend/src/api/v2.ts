@@ -1254,6 +1254,9 @@ export interface PromptWorkflowResult {
 
 export const views = {
   list: () => api.get<ViewDef[]>('/views').then((r) => r.data),
+  // DYNAMIC-002: the home/Overview view, seeded on first request. The Overview
+  // page renders this and falls back to the static page if it fails.
+  default: () => api.get<ViewDef>('/views/default').then((r) => r.data),
   get: (id: UUID) => api.get<ViewDef>(`/views/${id}`).then((r) => r.data),
   create: (body: { name: string; description?: string; icon?: string; layout: WidgetInstance[] }) =>
     api.post<ViewDef>('/views', body).then((r) => r.data),
