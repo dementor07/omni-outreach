@@ -590,6 +590,11 @@ export const canvas = {
     api.post<WorkflowDetail>('/canvas/workflows/from-goal', input).then((r) => r.data),
   createFromSpec: (input: CampaignSpec) =>
     api.post<WorkflowDetail>('/canvas/workflows/from-spec', input).then((r) => r.data),
+  // DYNAMIC-001: plain-language prompt → validated spec → compiled campaign.
+  createFromPrompt: (prompt: string, dryRun = false) =>
+    api
+      .post<PromptWorkflowResult>('/canvas/workflows/from-prompt', { prompt, dry_run: dryRun })
+      .then((r) => r.data),
   get: (id: UUID) => api.get<WorkflowDetail>(`/canvas/workflows/${id}`).then((r) => r.data),
   validation: (id: UUID) =>
     api.get<GraphValidation>(`/canvas/workflows/${id}/validation`).then((r) => r.data),
@@ -1181,4 +1186,81 @@ export const unipile = {
     api.post<unknown>('/unipile/webhooks', { events }).then((r) => r.data),
   deleteWebhook: (webhookId: string) =>
     api.delete<void>(`/unipile/webhooks/${webhookId}`).then(() => undefined),
+}
+
+// ── Dynamic views (DYNAMIC-001) ───────────────────────────────────────────────
+// Interfaces-as-data: a view is a stored layout of widget instances, each
+// binding a constrained QuerySpec to a renderer. Views are authored by the
+// user, the AI view architect (POST /views/generate), or an external agent.
+
+export interface ViewQueryFilter {
+  field: string
+  op?: 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'in' | 'not_in' | 'is_null' | 'not_null'
+  value?: unknown
+}
+
+export interface ViewQueryMetric {
+  fn: 'count' | 'count_distinct' | 'sum' | 'avg' | 'min' | 'max'
+  field?: string
+  alias?: string
+}
+
+export interface ViewQuerySpec {
+  entity: string
+  filters?: ViewQueryFilter[]
+  select?: string[]
+  group_by?: string[]
+  metrics?: ViewQueryMetric[]
+  time_bucket?: 'day' | 'week' | 'month' | null
+  sort?: { field: string; dir: 'asc' | 'desc' }[]
+  limit?: number
+}
+
+export type WidgetType = 'stat' | 'table' | 'bar_chart' | 'line_chart' | 'list'
+
+export interface WidgetInstance {
+  id: string
+  type: WidgetType
+  title: string
+  query: ViewQuerySpec
+  width?: number
+  height?: number
+  options?: Record<string, unknown>
+}
+
+export interface ViewDef {
+  id: UUID
+  name: string
+  description: string
+  icon: string
+  layout: WidgetInstance[]
+  prompt: string | null
+  created_by: 'user' | 'ai' | 'api'
+  position: number
+  updated_at: ISODate
+}
+
+export interface ViewQueryResult {
+  columns: string[]
+  rows: Record<string, unknown>[]
+}
+
+// DYNAMIC-001: response of POST /canvas/workflows/from-prompt — the generated
+// spec plus (unless dry_run) the created workflow detail.
+export interface PromptWorkflowResult {
+  spec: CampaignSpec
+  detail: WorkflowDetail | null
+}
+
+export const views = {
+  list: () => api.get<ViewDef[]>('/views').then((r) => r.data),
+  get: (id: UUID) => api.get<ViewDef>(`/views/${id}`).then((r) => r.data),
+  create: (body: { name: string; description?: string; icon?: string; layout: WidgetInstance[] }) =>
+    api.post<ViewDef>('/views', body).then((r) => r.data),
+  update: (id: UUID, body: Partial<Pick<ViewDef, 'name' | 'description' | 'icon' | 'layout' | 'position'>>) =>
+    api.patch<ViewDef>(`/views/${id}`, body).then((r) => r.data),
+  remove: (id: UUID) => api.delete(`/views/${id}`).then(() => undefined),
+  generate: (prompt: string) => api.post<ViewDef>('/views/generate', { prompt }).then((r) => r.data),
+  query: (spec: ViewQuerySpec) => api.post<ViewQueryResult>('/views/query', spec).then((r) => r.data),
+  widgetCatalog: () => api.get<Record<string, unknown>>('/views/widgets').then((r) => r.data),
 }

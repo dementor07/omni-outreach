@@ -480,6 +480,55 @@ async def create_from_campaign_spec(
     )
 
 
+class PromptWorkflowCreate(BaseModel):
+    prompt: str = Field(min_length=8, max_length=4000)
+    dry_run: bool = Field(
+        False,
+        description="Return the generated spec WITHOUT creating the workflow (preview).",
+    )
+
+
+class PromptWorkflowOut(BaseModel):
+    spec: CampaignSpec
+    detail: WorkflowDetail | None = None
+
+
+@router.post(
+    "/workflows/from-prompt",
+    response_model=PromptWorkflowOut,
+    status_code=201,
+    summary="Create a campaign from a plain-language prompt",
+    description=(
+        "DYNAMIC-001: describe the campaign in natural language ('find 30 CTOs at "
+        "mid-size Indian SaaS companies, enrich their emails, send a warm 2-step "
+        "email sequence') and the campaign architect turns it into a validated "
+        "CampaignSpec grounded in this workspace's real connections, then compiles "
+        "it through the same from-spec pathway into a runnable, canvas-editable "
+        "workflow. Set dry_run to preview the spec without creating anything. "
+        "Requires an anthropic connection."
+    ),
+)
+async def create_from_prompt(
+    body: PromptWorkflowCreate,
+    ctx: AuthContext = Depends(get_current_workspace),
+) -> PromptWorkflowOut:
+    from app.services.campaign_architect import ArchitectError, generate_campaign_spec
+
+    # Ground the model in the connections that actually exist (RLS-scoped read),
+    # so connection_name values are real instead of hallucinated.
+    connections = await fetch_all("SELECT provider, name FROM omni_connections ORDER BY provider, name")
+    try:
+        spec = await generate_campaign_spec(
+            ctx.workspace_id, body.prompt, [dict(c) for c in connections]
+        )
+    except ArchitectError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if body.dry_run:
+        return PromptWorkflowOut(spec=spec, detail=None)
+    detail = await create_from_campaign_spec(spec, ctx)
+    return PromptWorkflowOut(spec=spec, detail=detail)
+
+
 @router.get("/workflows/{workflow_id}", response_model=WorkflowDetail, summary="Fetch a workflow with all its nodes and edges")
 async def get_workflow(workflow_id: uuid.UUID, _: AuthContext = Depends(get_current_workspace)) -> WorkflowDetail:
     wf = await fetch_one("SELECT * FROM omni_workflows WHERE id = $1", workflow_id)

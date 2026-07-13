@@ -332,7 +332,9 @@ def test_campaign_creation_has_architect_and_preserves_classic_goal_flow():
     assert "requires a connection name" in architect
     assert "No messages will be created" in architect
     assert ".filter((stage) => stage.connection_name.trim())" not in architect
-    assert "disabled={mode === 'architect' && !architectReady}" in architect
+    # DYNAMIC-001 widened the create-gate to also cover the prompt mode; the
+    # architect readiness gate must still be part of it.
+    assert "(mode === 'architect' && !architectReady)" in architect
     assert "Message sequence (optional)" in architect
     assert "Classic goal creation" in architect
     assert "canvas.createFromGoal" in architect
@@ -341,3 +343,10 @@ def test_campaign_creation_has_architect_and_preserves_classic_goal_flow():
     assert "canvas.createFromSpec" in architect
     assert "createFromSpec" in api
     assert "CampaignSpec" in api
+    # DYNAMIC-001: the natural-language authoring mode exists, wires to the
+    # from-prompt endpoint, and did not displace the other two modes.
+    assert "'prompt' | 'architect' | 'classic'" in architect
+    assert "canvas.createFromPrompt" in architect
+    assert '"/workflows/from-prompt"' in backend
+    assert "generate_campaign_spec" in backend
+    assert "createFromPrompt" in api

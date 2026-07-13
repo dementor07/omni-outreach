@@ -19,7 +19,9 @@ import Button from './Button'
 import Card from './Card'
 import { useToast } from './Toast'
 
-type AuthoringMode = 'architect' | 'classic'
+// DYNAMIC-001: 'prompt' is the natural-language mode — describe the campaign,
+// the backend architect turns it into a validated spec and compiles it.
+type AuthoringMode = 'prompt' | 'architect' | 'classic'
 
 interface DraftSource {
   provider: CampaignSourceProvider
@@ -123,7 +125,9 @@ const DEFAULT_CLASSIC: ClassicDraft = {
 
 export default function CampaignArchitect({ templates, connections = [], onCreated, onCancel }: Props) {
   const toast = useToast()
-  const [mode, setMode] = useState<AuthoringMode>('architect')
+  const [mode, setMode] = useState<AuthoringMode>('prompt')
+  const [promptText, setPromptText] = useState('')
+  const [promptBusy, setPromptBusy] = useState(false)
   const [name, setName] = useState('Connected-source contact campaign')
   const [targetContacts, setTargetContacts] = useState('25')
   const [audience, setAudience] = useState('software development companies')
@@ -260,6 +264,31 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
     }
   }
 
+  // DYNAMIC-001: plain-language prompt → backend campaign architect → compiled
+  // workflow. The AI names the campaign; the result is a normal editable graph.
+  const createPrompt = async () => {
+    const prompt = promptText.trim()
+    if (prompt.length < 8) {
+      toast.error('Describe the campaign in a sentence or two first.')
+      return
+    }
+    setPromptBusy(true)
+    try {
+      const result = await canvas.createFromPrompt(prompt)
+      if (!result.detail) {
+        toast.error('The architect returned a spec but no campaign was created.')
+        return
+      }
+      onCreated(result.detail)
+    } catch (err) {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      toast.error(detail ?? (err instanceof Error ? err.message : 'Could not create campaign'))
+    } finally {
+      setPromptBusy(false)
+    }
+  }
+
   return (
     <Card padding="none" className="overflow-hidden">
       <div className="relative overflow-hidden border-b border-slate-100 bg-gradient-to-br from-slate-950 via-slate-900 to-brand-950 px-6 py-8 text-white dark:border-slate-800">
@@ -284,7 +313,8 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
       <div className="grid min-h-[640px] lg:grid-cols-[250px_1fr]">
         <aside className="border-b border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900/50 lg:border-b-0 lg:border-r">
           <div className="space-y-2">
-            <ModeButton active={mode === 'architect'} icon={Sparkles} title="Goal builder" body="Sources, people, verification, optional messages" onClick={() => setMode('architect')} />
+            <ModeButton active={mode === 'prompt'} icon={Sparkles} title="Describe it" body="Plain language in, a runnable campaign out — AI picks sources and messages" onClick={() => setMode('prompt')} />
+            <ModeButton active={mode === 'architect'} icon={Target} title="Goal builder" body="Sources, people, verification, optional messages" onClick={() => setMode('architect')} />
             <ModeButton active={mode === 'classic'} icon={GitBranch} title="Classic" body="Keep the existing goal/template workflow" onClick={() => setMode('classic')} />
           </div>
           <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950/40">
@@ -296,17 +326,54 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
         </aside>
 
         <main className="space-y-5 p-5">
-          <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Campaign name
-            <input
-              autoFocus
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
-            />
-          </label>
+          {mode !== 'prompt' && (
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
+              Campaign name
+              <input
+                autoFocus
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+              />
+            </label>
+          )}
 
-          {mode === 'architect' ? (
+          {mode === 'prompt' ? (
+            <div className="space-y-4">
+              <ArchitectSection icon={Sparkles} title="Describe the campaign" subtitle="Audience, how many contacts you want, and what (if anything) to send. The architect only uses connections you actually have.">
+                <textarea
+                  autoFocus
+                  value={promptText}
+                  onChange={(event) => setPromptText(event.target.value)}
+                  rows={5}
+                  placeholder="e.g. Find 30 CEOs and CMOs at 10-100 person Indian software companies via Apollo, enrich their emails, then send a warm 2-step email sequence introducing our analytics product."
+                  className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                />
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {[
+                    'Find 25 founders at early-stage SaaS companies and create contacts with verified emails — no outreach yet',
+                    'Target CTOs at companies hiring backend engineers in India, connect on LinkedIn, then follow up with a short AI-personalised DM',
+                    'Build a list of 50 marketing directors at US agencies and send a 2-step email sequence about our reporting tool',
+                  ].map((example) => (
+                    <button
+                      key={example}
+                      type="button"
+                      onClick={() => setPromptText(example)}
+                      className="max-w-[320px] truncate rounded-full border border-slate-200 px-2.5 py-1 text-[11px] text-slate-500 transition-colors hover:border-brand-300 hover:text-brand-600 dark:border-slate-700 dark:text-slate-400"
+                      title={example}
+                    >
+                      {example}
+                    </button>
+                  ))}
+                </div>
+              </ArchitectSection>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs leading-relaxed text-slate-500 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-400">
+                The AI drafts a full campaign spec (sources → people → enrichment → messages), validates it against your
+                real connections, and compiles it into an ordinary canvas graph you can inspect and edit before running.
+                Requires an Anthropic connection in Settings → Integrations.
+              </div>
+            </div>
+          ) : mode === 'architect' ? (
             <>
               <ArchitectSection icon={Target} title="1. Goal" subtitle="Define exactly what counts as progress. Contacts mean verified people, not just company names.">
                 <div className="grid gap-3 md:grid-cols-[160px_1fr_180px]">
@@ -499,19 +566,27 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
 
           <div className="sticky bottom-0 -mx-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100/50 bg-white/80 px-5 py-5 backdrop-blur-xl dark:border-slate-800/50 dark:bg-slate-950/80">
             <p className="text-xs text-slate-500">
-              {mode === 'architect'
-                ? 'Create the campaign, then inspect or tune the generated canvas.'
-                : 'Classic mode preserves the existing goal/template creation flow.'}
+              {mode === 'prompt'
+                ? 'The generated campaign lands on the canvas — inspect it before running.'
+                : mode === 'architect'
+                  ? 'Create the campaign, then inspect or tune the generated canvas.'
+                  : 'Classic mode preserves the existing goal/template creation flow.'}
             </p>
             <div className="flex items-center gap-2">
               <Button variant="ghost" onClick={onCancel}>Cancel</Button>
               <Button
                 variant="primary"
-                icon={mode === 'architect' ? Sparkles : Target}
-                onClick={mode === 'architect' ? createArchitect : createClassic}
-                disabled={mode === 'architect' && !architectReady}
+                icon={mode === 'classic' ? Target : Sparkles}
+                isLoading={mode === 'prompt' && promptBusy}
+                onClick={mode === 'prompt' ? createPrompt : mode === 'architect' ? createArchitect : createClassic}
+                disabled={
+                  (mode === 'architect' && !architectReady) ||
+                  (mode === 'prompt' && (promptBusy || promptText.trim().length < 8))
+                }
               >
-                {mode === 'architect' ? 'Create campaign' : 'Create classic campaign'}
+                {mode === 'prompt'
+                  ? promptBusy ? 'Designing campaign…' : 'Generate campaign'
+                  : mode === 'architect' ? 'Create campaign' : 'Create classic campaign'}
               </Button>
             </div>
           </div>
