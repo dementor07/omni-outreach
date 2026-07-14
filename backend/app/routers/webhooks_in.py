@@ -477,3 +477,151 @@ async def receive_unipile_webhook(
 
     # Unrecognised event type — accept (so Unipile doesn't retry) but no-op.
     return {"accepted": True, "kind": "ignored", "event": event}
+
+
+# ── Mailgun webhooks (MAILGUN-001) ────────────────────────────────────────────
+
+# Mailgun event name -> our resume-signal kind (see services.event_resume).
+_MAILGUN_EVENT_SIGNAL: dict[str, str] = {
+    "delivered": "email_delivered",
+    "opened": "email_opened",
+    "clicked": "link_clicked",
+    # A hard bounce is a 'failed' event with severity=permanent (older payloads
+    # used 'bounced'/'permanent_fail'); handled explicitly below.
+}
+
+
+# Reject Mailgun signatures whose timestamp is older than this (replay window).
+_MAILGUN_MAX_SKEW_SECONDS = 15 * 60
+
+
+def _verify_mailgun(signing_key: str, timestamp: str, token: str, signature: str) -> bool:
+    """Mailgun webhook HMAC: HMAC-SHA256(signing_key, timestamp + token) hex,
+    compared constant-time to the provided signature."""
+    if not (signing_key and timestamp and token and signature):
+        return False
+    expected = hmac.new(
+        signing_key.encode(), f"{timestamp}{token}".encode(), hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature.strip())
+
+
+def _mailgun_timestamp_fresh(timestamp: str) -> bool:
+    """Reject a replayed/stale signature: the timestamp must be within the skew
+    window of now (review MEDIUM — replay surface)."""
+    try:
+        ts = float(timestamp)
+    except (TypeError, ValueError):
+        return False
+    now = datetime.now(UTC).timestamp()
+    return abs(now - ts) <= _MAILGUN_MAX_SKEW_SECONDS
+
+
+def _mailgun_signal(event: str, severity: str) -> str | None:
+    """Resolve a Mailgun event (+ failure severity) to our resume-signal kind.
+    A permanent 'failed' is a hard bounce; a temporary one is NOT (transient)."""
+    if event in ("failed", "permanent_fail", "bounced"):
+        return "email_bounced" if severity == "permanent" or event != "failed" else None
+    return _MAILGUN_EVENT_SIGNAL.get(event)
+
+
+@router.post(
+    "/mailgun",
+    status_code=202,
+    summary="Receive a Mailgun event webhook (delivered/bounced/opened/clicked) — wake parked leads",
+    description=(
+        "Unauthenticated inbound Mailgun webhook. Trust comes from Mailgun's own "
+        "HMAC-SHA256 signature (verified against the sending workspace's Mailgun "
+        "signing key). The message was tagged with v:lead_id at send time, so we "
+        "resolve the lead -> its workspace -> that workspace's Mailgun connection "
+        "signing key, verify the signature, then resume the lead parked at the "
+        "matching event node (delivered/bounced/opened/clicked). Returns 202; an "
+        "event for an unknown or already-advanced lead is a safe no-op."
+    ),
+)
+async def receive_mailgun_webhook(request: Request) -> dict:
+    try:
+        body = await request.json()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="body must be valid JSON") from e
+
+    sig = body.get("signature") or {}
+    data = body.get("event-data") or {}
+    timestamp = str(sig.get("timestamp") or "")
+    token = str(sig.get("token") or "")
+    signature = str(sig.get("signature") or "")
+
+    event = str(data.get("event") or "").lower()
+    severity = str(data.get("severity") or "").lower()
+    user_vars = data.get("user-variables") or {}
+    lead_id_raw = user_vars.get("lead_id")
+    if not lead_id_raw:
+        # No lead tag -> nothing to resume (still 202 so Mailgun stops retrying).
+        return {"accepted": True, "kind": "ignored", "reason": "no lead_id"}
+    # Validate lead_id is a real UUID BEFORE it hits a uuid-typed query (review
+    # MEDIUM: a non-UUID from the untrusted body would 500 on the cast).
+    try:
+        lead_id = str(uuid.UUID(str(lead_id_raw)))
+    except (ValueError, AttributeError, TypeError):
+        return {"accepted": True, "kind": "ignored", "reason": "bad lead_id"}
+    mg_connection_id_raw = user_vars.get("mg_connection_id")
+
+    # Reject stale/replayed signatures early (before any DB work).
+    if not _mailgun_timestamp_fresh(timestamp):
+        raise HTTPException(status_code=401, detail="mailgun signature timestamp out of range")
+
+    # Resolve the lead's workspace, then the EXACT connection that sent this
+    # message (by mg_connection_id) — not "the most recent mailgun connection",
+    # which verifies against the wrong key in a multi-connection workspace
+    # (review HIGH #1). Falls back to the sole mailgun connection only when the
+    # send didn't tag one (older sends / single-connection workspaces).
+    async with system_scope():
+        lead_row = await fetch_one(
+            "SELECT workspace_id FROM omni_leads WHERE id=$1", lead_id
+        )
+        if not lead_row:
+            return {"accepted": True, "kind": "ignored", "reason": "unknown lead"}
+        ws = str(lead_row["workspace_id"])
+        conn_row = None
+        if mg_connection_id_raw:
+            try:
+                conn_uuid = str(uuid.UUID(str(mg_connection_id_raw)))
+                conn_row = await fetch_one(
+                    "SELECT credentials_encrypted FROM omni_connections "
+                    "WHERE id=$1 AND workspace_id=$2 AND provider='mailgun'",
+                    conn_uuid, ws,
+                )
+            except (ValueError, AttributeError, TypeError):
+                conn_row = None
+        if conn_row is None:
+            conn_row = await fetch_one(
+                "SELECT credentials_encrypted FROM omni_connections "
+                "WHERE workspace_id=$1 AND provider='mailgun' ORDER BY connected_at DESC LIMIT 1",
+                ws,
+            )
+    if not conn_row:
+        raise HTTPException(status_code=401, detail="no mailgun connection to verify against")
+    try:
+        import json as _json
+
+        from app.services.encryption import decrypt
+
+        creds = _json.loads(decrypt(conn_row["credentials_encrypted"]))
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=401, detail="could not read mailgun signing key")
+    # Require the dedicated webhook SIGNING key — it is a DIFFERENT secret from the
+    # send api_key and Mailgun will not verify against api_key (review HIGH #2).
+    signing_key = creds.get("signing_key") or ""
+    if not signing_key:
+        raise HTTPException(status_code=401, detail="mailgun connection has no signing_key configured")
+    if not _verify_mailgun(signing_key, timestamp, token, signature):
+        raise HTTPException(status_code=401, detail="invalid mailgun signature")
+
+    signal = _mailgun_signal(event, severity)
+    if not signal:
+        # A real but non-actionable event (temporary fail, unsubscribed, …).
+        return {"accepted": True, "kind": "ignored", "event": event}
+
+    correlation_id = str(uuid.uuid4())
+    resumed = await event_resume.resume_on_signal(ws, str(lead_id), signal, correlation_id=correlation_id)
+    return {"accepted": True, "kind": signal, "resumed": resumed}

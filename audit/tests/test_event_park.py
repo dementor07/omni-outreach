@@ -82,6 +82,9 @@ def test_resume_bridge_maps_signals_to_node_and_handle():
         "email_opened": ("event.email_opened", "opened"),
         "link_clicked": ("event.link_clicked", "clicked"),
         "invite_accepted": ("event.invite_accepted", "accepted"),
+        # MAILGUN-001: real delivery/bounce webhooks resume the matching event node.
+        "email_delivered": ("event.email_delivered", "delivered"),
+        "email_bounced": ("event.email_bounced", "bounced"),
     }
 
 

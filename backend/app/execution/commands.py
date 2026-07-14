@@ -328,14 +328,21 @@ async def _load_connection_bundle(workspace_id: str, connection_name: str | None
         return None
     async with system_scope():
         row = await fetch_one(
-            "SELECT credentials_encrypted FROM omni_connections WHERE workspace_id=$1 AND name=$2",
+            "SELECT id, provider, credentials_encrypted FROM omni_connections WHERE workspace_id=$1 AND name=$2",
             workspace_id,
             connection_name,
         )
     if not row:
         log.warning("[dispatch] no connection %r for workspace %s", connection_name, workspace_id)
         return None
-    return json.loads(decrypt(row["credentials_encrypted"]))
+    bundle = json.loads(decrypt(row["credentials_encrypted"]))
+    # MAILGUN-001: carry the connection identity (non-secret) so downstream can
+    # tag a send with WHICH connection sent it — the Mailgun webhook resolves the
+    # signing key from this exact connection, not "the most recent mailgun one"
+    # (which breaks verification in a workspace with 2+ Mailgun connections).
+    bundle.setdefault("_connection_id", str(row["id"]))
+    bundle.setdefault("provider", row["provider"])
+    return bundle
 
 
 async def _mint_credential_ref(bundle: dict[str, Any] | None, channel: str) -> str | None:

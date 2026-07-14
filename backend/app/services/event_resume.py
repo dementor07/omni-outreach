@@ -32,6 +32,10 @@ _SIGNAL_RESUME: dict[str, tuple[str, str]] = {
     "email_opened": ("event.email_opened", "opened"),
     "link_clicked": ("event.link_clicked", "clicked"),
     "invite_accepted": ("event.invite_accepted", "accepted"),
+    # MAILGUN-001: real delivery/bounce webhooks resume leads parked at the
+    # corresponding event node.
+    "email_delivered": ("event.email_delivered", "delivered"),
+    "email_bounced": ("event.email_bounced", "bounced"),
 }
 
 

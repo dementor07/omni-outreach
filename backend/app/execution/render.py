@@ -191,15 +191,33 @@ def render_channel_payload(
                 out["attendee_identifier"] = attendee
 
     elif channel == ChannelType.EMAIL:
-        # Non-secret transport config rides the payload; only smtp_password
-        # stays behind the credential ref (email.rs redeems it by field).
-        for key in ("smtp_host", "smtp_port", "smtp_username", "smtp_use_tls"):
-            if out.get(key) is None and bundle.get(key) is not None:
-                out[key] = bundle[key]
-        if not out.get("from"):
-            out["from"] = bundle.get("from") or bundle.get("smtp_username") or ""
+        # MAILGUN-001: the email node has two send backends, chosen by the
+        # connection's provider. A Mailgun connection carries provider="mailgun"
+        # (+ a mailgun_domain); anything else is the SMTP transport. Only the
+        # non-secret transport config rides the payload — the secret (smtp_password
+        # or the Mailgun api_key) stays behind the credential ref, redeemed in
+        # email.rs by field name.
+        is_mailgun = bundle.get("provider") == "mailgun" or bool(bundle.get("mailgun_domain"))
+        if is_mailgun:
+            out["provider"] = "mailgun"
+            for key in ("mailgun_domain", "mailgun_region"):
+                if out.get(key) is None and bundle.get(key) is not None:
+                    out[key] = bundle[key]
+            if not out.get("from"):
+                out["from"] = bundle.get("from") or ""
+            # Tag the send with which connection sent it so the webhook verifies
+            # against THIS connection's signing key (MAILGUN-001 review HIGH #1).
+            if bundle.get("_connection_id"):
+                out["mailgun_connection_id"] = bundle["_connection_id"]
+        else:
+            for key in ("smtp_host", "smtp_port", "smtp_username", "smtp_use_tls"):
+                if out.get(key) is None and bundle.get(key) is not None:
+                    out[key] = bundle[key]
+            if not out.get("from"):
+                out["from"] = bundle.get("from") or bundle.get("smtp_username") or ""
         # T3: inject open pixel + click tracking into the rendered HTML body.
-        # Opt-in per send: only when the caller supplied a signed token + base.
+        # For Mailgun we ALSO get native open/click webhooks, but our own pixel is
+        # harmless and keeps the SMTP-parity signal; opt-in per send as before.
         if tracking_base and tracking_token and out.get("body"):
             out["body"] = inject_tracking(str(out["body"]), base=tracking_base, token=tracking_token)
 

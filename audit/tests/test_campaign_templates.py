@@ -75,13 +75,18 @@ def test_template_edges_reference_real_keys_and_handles(tpl_id: str) -> None:
 
 
 @pytest.mark.parametrize("tpl_id", _TEMPLATE_IDS)
-def test_template_has_single_entry_source(tpl_id: str) -> None:
+def test_template_has_single_entry_capable_node(tpl_id: str) -> None:
     """A template must have exactly one node with no incoming edge (the entry),
-    and it must be a source.* node — otherwise the run path can't seed it."""
+    and that node must be ENTRY-CAPABLE. Post OUTBOUND-FIRST-001 that means a
+    source.* (discovers its own audience) OR an outbound channel that starts the
+    journey by messaging an attached audience — the manifest's own entry_capable
+    property is the authority, not a name prefix."""
     tpl = TEMPLATES[tpl_id]
     targeted = {e.target for e in tpl.edges}
     entries = [n for n in tpl.nodes if n.key not in targeted]
     assert len(entries) == 1, f"{tpl_id}: expected 1 entry node, got {[e.key for e in entries]}"
-    assert entries[0].node_type.startswith("source."), (
-        f"{tpl_id}: entry node {entries[0].node_type} is not a source"
+    manifest, _ = get(entries[0].node_type)
+    assert manifest.entry_capable, (
+        f"{tpl_id}: entry node {entries[0].node_type} is not entry-capable "
+        "(can't seed the run path)"
     )
