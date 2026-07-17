@@ -63,6 +63,10 @@ NODE_CHANNEL: dict[str, ChannelType] = {
     "linkfinder.name_to_linkedin": ChannelType.ENRICH,
     "linkfinder.email_to_linkedin": ChannelType.ENRICH,
     "linkfinder.instagram_info": ChannelType.ENRICH,
+    # Renidly rides the same ENRICH channel; handle_enrich switches on the
+    # payload's enrich_source. Without this route the node publishes its intent
+    # into a void and the lead stalls (cf. ENRICH-INTENT-001).
+    "renidly.person_profile": ChannelType.ENRICH,
     "ai.compose": ChannelType.AI_COMPOSE,
     # Claude classifier handler — both screen variants share it. The asymmetric
     # error policy lives in the node's payload (on_error_handle), not here.

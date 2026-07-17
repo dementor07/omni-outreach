@@ -188,6 +188,14 @@ export const PROVIDERS: ProviderSpec[] = [
     fields: [API_KEY],
   },
   {
+    id: 'renidly', name: 'Renidly', category: 'data', icon: Users,
+    blurb: 'Resolve and enrich B2B identities — people and organizations — against Renidly’s identity graph.',
+    // One key, one header (X-renidly-apikey) across every Renidly endpoint —
+    // no region/DSN field to get wrong. Base URL is fixed (https://renidly.com).
+    docsUrl: 'https://renidly.com/docs',
+    fields: [API_KEY],
+  },
+  {
     id: 'apify', name: 'Apify', category: 'data', icon: Globe,
     blurb: 'Run Apify actors for LinkedIn Jobs / Indeed scraping.',
     docsUrl: 'https://console.apify.com/account/integrations',

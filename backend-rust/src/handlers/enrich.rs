@@ -13,6 +13,16 @@ use std::time::Duration;
 const LINKFINDER_URL: &str = "https://api.linkfinderai.com";
 const LINKFINDER_MAX_RETRIES: u32 = 3;
 
+const RENIDLY_BASE: &str = "https://renidly.com";
+const RENIDLY_PROFILE_PATH: &str = "/api/data/v1/people/profile";
+// Renidly's documented retry policy: cap at 5 attempts, exponential backoff
+// capped at 15s, plus jitter. Their limits are per MINUTE (7/min on the free
+// Testing tier, confirmed live), so the LinkFinder-style 1s/2s backoff burns the
+// whole budget inside a window it can never clear.
+const RENIDLY_MAX_RETRIES: u32 = 5;
+const RENIDLY_BACKOFF_CAP_MS: u64 = 15_000;
+const RENIDLY_JITTER_MAX_MS: u64 = 250;
+
 pub async fn handle_enrich(command: &ActionCommand) -> ExecutionResult {
     let provider = common::s(command, "enrich_source");
     let skip_if_complete = command
@@ -42,6 +52,7 @@ pub async fn handle_enrich(command: &ActionCommand) -> ExecutionResult {
         "hunter" => hunter(command).await,
         "proxycurl" => proxycurl(command).await,
         "linkfinder" => linkfinder(command).await,
+        "renidly" => renidly(command).await,
         "" => common::fail(command, "enrich_source missing", false),
         other => common::fail(command, format!("unknown enrich provider {other}"), false),
     };
@@ -93,6 +104,18 @@ fn enrichment_complete(command: &ActionCommand, provider: &str) -> bool {
                 _ => false,
             }
         }
+        "renidly" => match common::s(command, "renidly_mode").as_str() {
+            // people/profile fills identity + headline + company (the last from
+            // the current entry in `full_positions`), so all four must already be
+            // present before we can call the lead complete and skip the call.
+            "person_profile" | "" => {
+                has(&command.lead.first_name)
+                    && has(&command.lead.last_name)
+                    && has(&command.lead.headline)
+                    && has(&command.lead.company)
+            }
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -463,6 +486,345 @@ async fn post_linkfinder(api_key: &str, body: &Value) -> Result<Value, LinkFinde
     }
 }
 
+/// Renidly identity-graph enrichment.
+///
+/// One key, one header (`X-renidly-apikey`), one envelope for every endpoint:
+/// `{success, statusCode, message, error_code, errors, data}`. We branch on
+/// `body.success`, never the HTTP status — see `classify_renidly_envelope` for
+/// why that is a correctness requirement and not a preference.
+///
+/// `renidly_mode` selects the endpoint. `person_profile`
+/// (GET /api/data/v1/people/profile, `handle` | `id`) is the wired mode: it is
+/// the richest person payload Renidly exposes (identity, headline, geo,
+/// `full_positions[]`, skills) for 1 credit. A no-match is an outcome
+/// (`matched: false`), not a failure.
+///
+/// Contract notes confirmed against the live API — Renidly's docs are wrong or
+/// silent on all of these, so re-verify before trusting the published reference:
+///   * A no-match is HTTP **200** + `success:false` + `error_code:"1010"`.
+///     The documented 404 does not occur.
+///   * `/api/v2/*` answers HTTP **200** for validation errors too, so HTTP
+///     status carries no signal there at all.
+///   * `/api/v2/person/enrich` returns the same person in **camelCase** with a
+///     numeric id — a different shape, less data, no reason to wire it.
+///   * `/api/v2/organization/enrich` rejects `org_…` ids (it wants a LinkedIn
+///     entityId), so the usable company lookups are the /api/data/v1 pair:
+///     `companies/search?name=|website=` and `companies/company?slug=|id=`.
+///   * Rate limits are per MINUTE and tier-scoped (7/min on the free tier). The
+///     429 body carries `{current_limit, current_tier}` — and since
+///     `/api/panel/credits/*` is session-cookie auth, NOT api-key auth, that
+///     429 body is the only key-accessible way to learn your own tier.
+async fn renidly(command: &ActionCommand) -> ExecutionResult {
+    let cred_ref = match command.credential_ref.as_ref() {
+        Some(r) => r.clone(),
+        None => return common::fail(command, "renidly missing credential_ref", false),
+    };
+    let api_key = match credentials::redeem_field(&cred_ref, "api_key").await {
+        Ok(Some(k)) => k,
+        Ok(None) => {
+            credentials::release(&cred_ref).await;
+            return common::fail(command, "renidly bundle missing api_key", false);
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "renidly credential redeem failed");
+            credentials::release(&cred_ref).await;
+            return common::fail(command, "RENIDLY_CREDENTIAL_REDEEM_FAILED", true);
+        }
+    };
+
+    let mode = match common::s(command, "renidly_mode") {
+        m if m.is_empty() => "person_profile".to_string(),
+        m => m,
+    };
+    let renidly_id = common::opt_s(command, "renidly_id");
+    let handle_cfg = common::opt_s(command, "handle");
+    let request = renidly_request_for(
+        &mode,
+        renidly_id.as_deref(),
+        handle_cfg.as_deref(),
+        command.lead.linkedin_url.as_deref(),
+    );
+    let (path, params) = match request {
+        Some(v) => v,
+        None => {
+            credentials::release(&cred_ref).await;
+            return common::fail(command, "RENIDLY_INPUT_MISSING", false);
+        }
+    };
+
+    let envelope = match renidly_get(&api_key, &path, &params).await {
+        Ok(v) => v,
+        Err(err) => {
+            credentials::release(&cred_ref).await;
+            return common::fail(command, err.code, err.retriable);
+        }
+    };
+    credentials::release(&cred_ref).await;
+
+    let data = envelope.get("data").cloned().unwrap_or(Value::Null);
+    let matched = envelope.get("success").and_then(|v| v.as_bool()).unwrap_or(false) && !data.is_null();
+    let (fields, custom_fields) = if matched {
+        normalise_renidly_fields(&data, &mode)
+    } else {
+        (json!({}), json!({}))
+    };
+    let mutations = enrichment_mutations(
+        command,
+        "renidly",
+        fields,
+        json!({
+            "matched": matched,
+            "mode": mode,
+            "message": envelope.get("message").and_then(|v| v.as_str()).unwrap_or(""),
+        }),
+        custom_fields,
+    );
+    common::ok(
+        command,
+        json!({"provider": "renidly", "mode": mode, "matched": matched}),
+        Some("lead_enriched"),
+        mutations,
+    )
+}
+
+#[derive(Debug)]
+struct RenidlyError {
+    code: &'static str,
+    retriable: bool,
+}
+
+/// Classify a parsed Renidly envelope into "definitive answer" vs "failure".
+///
+/// The ENVELOPE — not the HTTP status — is the source of truth here, and that is
+/// not a style choice. Renidly's `/api/v2/*` surface answers **HTTP 200 even for
+/// validation errors** (live-verified: `person/resolve-handle` with no params
+/// returns 200 + `success:false`), and their docs pin `error_code` 1072
+/// ("temporarily unavailable") as a RETRIABLE failure that also arrives as
+/// HTTP 200. Gating on `status().is_success()` — what every other provider in
+/// this file does — would book a transient outage as a successful "no match",
+/// write an empty enrichment onto the lead, and never retry it.
+///
+/// `Ok(envelope)` means a definitive answer: a hit, OR a genuine no-record
+/// (404 / 1010|1020|1040), which is a routine enrichment outcome and not an
+/// error worth failing the node over.
+fn classify_renidly_envelope(envelope: Value, http_status: u16) -> Result<Value, RenidlyError> {
+    if envelope.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+        return Ok(envelope);
+    }
+    // The envelope's own statusCode is authoritative; the HTTP one is a fallback
+    // for a body that arrived without it.
+    let status = envelope
+        .get("statusCode")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u16)
+        .unwrap_or(http_status);
+    match envelope.get("error_code").and_then(|v| v.as_str()).unwrap_or("") {
+        // No such person / organization / institution — an outcome, not a failure.
+        "1010" | "1020" | "1040" => return Ok(envelope),
+        "1072" => return Err(RenidlyError { code: "RENIDLY_TEMPORARILY_UNAVAILABLE", retriable: true }),
+        "1074" => return Err(RenidlyError { code: "RENIDLY_RATE_LIMITED", retriable: true }),
+        _ => {}
+    }
+    if status == 404 {
+        return Ok(envelope);
+    }
+    Err(match status {
+        429 => RenidlyError { code: "RENIDLY_RATE_LIMITED", retriable: true },
+        400 | 422 => RenidlyError { code: "RENIDLY_BAD_REQUEST", retriable: false },
+        401 | 403 => RenidlyError { code: "RENIDLY_AUTH", retriable: false },
+        402 => RenidlyError { code: "RENIDLY_NO_CREDITS", retriable: false },
+        500..=599 => RenidlyError { code: "RENIDLY_SERVER_ERROR", retriable: true },
+        // `success:false` at HTTP 200 with no error_code: this is where the
+        // /api/v2 validation errors land ("username is required"). A rejected
+        // request we must NOT retry and must NOT call a no-match.
+        _ => RenidlyError { code: "RENIDLY_REQUEST_REJECTED", retriable: false },
+    })
+}
+
+/// Exponential backoff in ms, capped, plus jitter — Renidly's own documented
+/// policy (`min(1000 * 2**attempt, 15_000)` + jitter). Jitter keeps concurrent
+/// muscle workers from re-colliding in lockstep against a per-minute quota.
+fn renidly_backoff_ms(attempt: u32) -> u64 {
+    let factor = 1u64 << attempt.min(6);
+    (1_000u64 * factor).min(RENIDLY_BACKOFF_CAP_MS) + renidly_jitter_ms()
+}
+
+/// Sub-millisecond clock noise as a jitter source — avoids pulling in `rand`
+/// for 250ms of spread.
+fn renidly_jitter_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::from(d.subsec_nanos()) % (RENIDLY_JITTER_MAX_MS + 1))
+        .unwrap_or(0)
+}
+
+/// GET a Renidly endpoint with the account key, retrying only what Renidly says
+/// is retriable (rate limit, temporary unavailability, network) with capped
+/// exponential backoff.
+async fn renidly_get(api_key: &str, path: &str, params: &[(String, String)]) -> Result<Value, RenidlyError> {
+    let url = format!("{RENIDLY_BASE}{path}");
+    let mut attempt: u32 = 0;
+    loop {
+        let outcome = match OUTBOUND
+            .get(&url)
+            .header("X-renidly-apikey", api_key)
+            .query(params)
+            .send()
+            .await
+        {
+            Ok(r) => {
+                let status = r.status().as_u16();
+                match r.json::<Value>().await {
+                    Ok(envelope) => classify_renidly_envelope(envelope, status),
+                    // A non-JSON body is a proxy/gateway page, never Renidly itself.
+                    Err(_) => Err(RenidlyError {
+                        code: "RENIDLY_BAD_RESPONSE",
+                        retriable: status == 429 || status >= 500,
+                    }),
+                }
+            }
+            Err(_) => Err(RenidlyError { code: "RENIDLY_NETWORK_ERROR", retriable: true }),
+        };
+        match outcome {
+            Ok(envelope) => return Ok(envelope),
+            Err(err) if err.retriable && attempt + 1 < RENIDLY_MAX_RETRIES => {
+                let wait = renidly_backoff_ms(attempt);
+                tracing::warn!(code = err.code, attempt, "renidly retrying in {wait}ms");
+                tokio::time::sleep(Duration::from_millis(wait)).await;
+                attempt += 1;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+}
+
+/// Endpoint + query params for a mode, or None when we lack the required input.
+/// Kept free of `ActionCommand` so the routing rules are unit-testable.
+///
+/// Precedence for `person_profile`: an explicit Renidly id (exact-record lookup)
+/// beats a configured handle, which beats the handle parsed out of the lead's
+/// LinkedIn URL — the input most real leads actually carry.
+fn renidly_request_for(
+    mode: &str,
+    renidly_id: Option<&str>,
+    handle: Option<&str>,
+    linkedin_url: Option<&str>,
+) -> Option<(String, Vec<(String, String)>)> {
+    let clean = |v: Option<&str>| v.map(str::trim).filter(|s| !s.is_empty());
+    match mode {
+        "person_profile" => {
+            if let Some(id) = clean(renidly_id) {
+                return Some((RENIDLY_PROFILE_PATH.to_string(), vec![("id".to_string(), id.to_string())]));
+            }
+            let resolved = match clean(handle) {
+                Some(h) => h.to_string(),
+                None => renidly_handle_from_linkedin_url(clean(linkedin_url)?)?,
+            };
+            Some((RENIDLY_PROFILE_PATH.to_string(), vec![("handle".to_string(), resolved)]))
+        }
+        _ => None,
+    }
+}
+
+/// `https://www.linkedin.com/in/ryanroslansky/?trk=x` -> `ryanroslansky`.
+/// Renidly's `handle` IS the LinkedIn public handle (the docs' own example is
+/// `handle=ryanroslansky`), so a lead's LinkedIn URL is a valid lookup key.
+fn renidly_handle_from_linkedin_url(url: &str) -> Option<String> {
+    let cleaned = url.split(['?', '#']).next().unwrap_or(url).trim_end_matches('/');
+    let start = cleaned.rfind("/in/")? + 4;
+    let handle = cleaned[start..].split('/').next().unwrap_or("").trim();
+    if handle.is_empty() {
+        None
+    } else {
+        Some(handle.to_string())
+    }
+}
+
+/// The lead's CURRENT employer inside a people/profile payload. `people/profile`
+/// has no top-level company field — employment lives in `full_positions[]`, each
+/// entry carrying `is_current` + `organization_name` (shape confirmed against the
+/// live API). Falls back to the first position, which Renidly returns
+/// most-recent-first, so a lead whose positions all ended still resolves to their
+/// latest employer rather than nothing.
+fn renidly_current_position(data: &Value) -> Option<&Value> {
+    let positions = data.get("full_positions")?.as_array()?;
+    positions
+        .iter()
+        .find(|p| p.get("is_current").and_then(|v| v.as_bool()).unwrap_or(false))
+        .or_else(|| positions.first())
+}
+
+/// Map a Renidly `data` payload onto lead fields.
+///
+/// Field names here are the `/api/data/v1` (snake_case) shape. Note that
+/// Renidly's `/api/v2` surface returns the SAME person in camelCase
+/// (`firstName`, `isOpenToWork`) — so any future v2-backed mode needs its own
+/// arm rather than reusing this one.
+fn normalise_renidly_fields(data: &Value, mode: &str) -> (Value, Value) {
+    let mut custom = json!({});
+    match mode {
+        "person_profile" => {
+            let mut fields = pick_mutations(data, &["first_name", "last_name", "headline"]);
+            if let Some(handle) = str_from(data, &["handle"]) {
+                // The handle is the LinkedIn public handle -> a canonical profile
+                // URL for a lead that reached us without one (merge_policy
+                // fill_missing means this never clobbers a known URL).
+                fields["linkedin_url"] = json!(format!("https://www.linkedin.com/in/{handle}"));
+                custom["renidly_handle"] = json!(handle);
+            }
+            // `company` is a first-class lead column that every other provider
+            // fills (and that apollo's completeness gate reads), so leaving it
+            // unset made Renidly needlessly weaker than the payload allows.
+            if let Some(position) = renidly_current_position(data) {
+                if let Some(company) = str_from(position, &["organization_name"]) {
+                    fields["company"] = json!(company);
+                }
+                if fields.get("headline").is_none() {
+                    if let Some(title) = str_from(position, &["title"]) {
+                        fields["headline"] = json!(title);
+                    }
+                }
+                // The slug/id are the exact keys companies/company?slug= and the
+                // org endpoints take, so a later company lookup needs no re-resolve.
+                for (key, out) in [
+                    ("organization_slug", "renidly_company_slug"),
+                    ("organization_id", "renidly_company_id"),
+                    ("organization_industry", "renidly_company_industry"),
+                    ("organization_headcount_range", "renidly_company_headcount"),
+                ] {
+                    if let Some(v) = str_from(position, &[key]) {
+                        custom[out] = json!(v);
+                    }
+                }
+            }
+            for (key, out) in [
+                ("id", "renidly_id"),
+                ("geo_city", "renidly_geo_city"),
+                ("geo_country", "renidly_geo_country"),
+                ("summary", "renidly_summary"),
+            ] {
+                if let Some(v) = str_from(data, &[key]) {
+                    custom[out] = json!(v);
+                }
+            }
+            // Timing signals worth acting on — "open to work" / "hiring" is the
+            // kind of trigger this product exists to catch. These are bools and
+            // numbers, which `str_from` silently drops, hence `value_from`.
+            for (key, out) in [
+                ("is_open_to_work", "renidly_open_to_work"),
+                ("is_hiring", "renidly_hiring"),
+                ("follower_count", "renidly_follower_count"),
+            ] {
+                if let Some(v) = value_from(data, &[key]) {
+                    custom[out] = v;
+                }
+            }
+            (fields, custom)
+        }
+        _ => (json!({}), custom),
+    }
+}
+
 fn full_name(command: &ActionCommand) -> String {
     format!(
         "{} {}",
@@ -637,8 +999,281 @@ fn build_bulk_match_body(details: &[Value], flags: &[&str]) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_bulk_match_body, APOLLO_BULK_MATCH_URL};
+    use super::{
+        build_bulk_match_body, classify_renidly_envelope, normalise_renidly_fields,
+        renidly_backoff_ms, renidly_handle_from_linkedin_url, renidly_request_for,
+        APOLLO_BULK_MATCH_URL, RENIDLY_BACKOFF_CAP_MS, RENIDLY_JITTER_MAX_MS, RENIDLY_PROFILE_PATH,
+    };
     use serde_json::json;
+
+    // ── RENIDLY-001 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn renidly_handle_parses_real_linkedin_urls() {
+        for url in [
+            "https://www.linkedin.com/in/ryanroslansky",
+            "https://www.linkedin.com/in/ryanroslansky/",
+            "https://linkedin.com/in/ryanroslansky/?trk=nav",
+            "http://www.linkedin.com/in/ryanroslansky/detail/recent-activity/",
+            "linkedin.com/in/ryanroslansky#about",
+        ] {
+            assert_eq!(
+                renidly_handle_from_linkedin_url(url).as_deref(),
+                Some("ryanroslansky"),
+                "failed for {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn renidly_handle_rejects_non_profile_urls() {
+        // A company page or a bare domain carries no person handle.
+        assert!(renidly_handle_from_linkedin_url("https://www.linkedin.com/company/linkedin").is_none());
+        assert!(renidly_handle_from_linkedin_url("https://example.com").is_none());
+        assert!(renidly_handle_from_linkedin_url("https://www.linkedin.com/in/").is_none());
+    }
+
+    #[test]
+    fn renidly_request_prefers_id_then_handle_then_linkedin_url() {
+        // Explicit Renidly id -> exact-record lookup, beats everything.
+        let (path, params) = renidly_request_for(
+            "person_profile",
+            Some("prsn_06d0d44dogo2m"),
+            Some("someone"),
+            Some("https://www.linkedin.com/in/other"),
+        )
+        .unwrap();
+        assert_eq!(path, RENIDLY_PROFILE_PATH);
+        assert_eq!(params, vec![("id".to_string(), "prsn_06d0d44dogo2m".to_string())]);
+
+        // Configured handle beats the lead's LinkedIn URL.
+        let (_, params) = renidly_request_for(
+            "person_profile",
+            None,
+            Some("someone"),
+            Some("https://www.linkedin.com/in/other"),
+        )
+        .unwrap();
+        assert_eq!(params, vec![("handle".to_string(), "someone".to_string())]);
+
+        // Falls back to the handle inside the lead's LinkedIn URL.
+        let (_, params) =
+            renidly_request_for("person_profile", None, None, Some("https://www.linkedin.com/in/other/")).unwrap();
+        assert_eq!(params, vec![("handle".to_string(), "other".to_string())]);
+    }
+
+    #[test]
+    fn renidly_request_is_none_without_usable_input() {
+        // Blank/whitespace config must not become a lookup for "".
+        assert!(renidly_request_for("person_profile", Some("  "), Some(""), None).is_none());
+        assert!(renidly_request_for("person_profile", None, None, None).is_none());
+        // A company URL yields no handle -> no request.
+        assert!(renidly_request_for("person_profile", None, None, Some("https://linkedin.com/company/x")).is_none());
+    }
+
+    #[test]
+    fn renidly_unknown_mode_makes_no_request() {
+        // Guards against a node shipping a mode the muscle can't build a URL for.
+        assert!(renidly_request_for("job_changes", Some("prsn_1"), None, None).is_none());
+    }
+
+    #[test]
+    fn renidly_profile_maps_documented_fields_and_keeps_the_rest() {
+        let data = json!({
+            "id": "prsn_06d0d44dogo2m",
+            "handle": "ryanroslansky",
+            "first_name": "Ryan",
+            "last_name": "Roslansky",
+            "headline": "CEO at LinkedIn",
+            "summary": "Leading LinkedIn.",
+            "geo_city": "San Francisco Bay Area",
+            "geo_country": "United States",
+            "full_positions": []
+        });
+        let (fields, custom) = normalise_renidly_fields(&data, "person_profile");
+
+        assert_eq!(fields["first_name"], json!("Ryan"));
+        assert_eq!(fields["last_name"], json!("Roslansky"));
+        assert_eq!(fields["headline"], json!("CEO at LinkedIn"));
+        // The handle becomes a canonical profile URL for lead-level use.
+        assert_eq!(fields["linkedin_url"], json!("https://www.linkedin.com/in/ryanroslansky"));
+        // Everything else useful is preserved rather than dropped.
+        assert_eq!(custom["renidly_id"], json!("prsn_06d0d44dogo2m"));
+        assert_eq!(custom["renidly_handle"], json!("ryanroslansky"));
+        assert_eq!(custom["renidly_geo_city"], json!("San Francisco Bay Area"));
+        assert_eq!(custom["renidly_geo_country"], json!("United States"));
+        assert_eq!(custom["renidly_summary"], json!("Leading LinkedIn."));
+    }
+
+    #[test]
+    fn renidly_profile_tolerates_a_sparse_payload() {
+        // A minimal record (the quickstart's own example) must not fabricate fields.
+        let data = json!({"id": "prsn_1", "handle": "someone"});
+        let (fields, custom) = normalise_renidly_fields(&data, "person_profile");
+        assert!(fields.get("first_name").is_none());
+        assert!(fields.get("headline").is_none());
+        assert_eq!(fields["linkedin_url"], json!("https://www.linkedin.com/in/someone"));
+        assert_eq!(custom["renidly_id"], json!("prsn_1"));
+    }
+
+    #[test]
+    fn renidly_unknown_mode_maps_nothing() {
+        let (fields, custom) = normalise_renidly_fields(&json!({"first_name": "Ryan"}), "job_changes");
+        assert_eq!(fields, json!({}));
+        assert_eq!(custom, json!({}));
+    }
+
+    // ── Envelope classification ──────────────────────────────────────────────
+    //
+    // The envelopes below are REAL responses captured from the live API. Several
+    // contradict Renidly's published docs, so they are fixtures worth keeping.
+
+    #[test]
+    fn renidly_no_match_is_an_outcome_not_a_failure() {
+        // Live: people/profile?handle=<nobody>. HTTP 200 — the documented 404
+        // never actually occurs, so 1010 is the only real no-match signal.
+        let envelope = json!({
+            "success": false, "statusCode": 200, "message": "Profile not found",
+            "error_code": "1010", "errors": null, "data": null
+        });
+        let out = classify_renidly_envelope(envelope, 200).expect("1010 must be a definitive answer");
+        assert_eq!(out["success"], json!(false)); // -> caller reports matched:false
+    }
+
+    #[test]
+    fn renidly_rejection_at_http_200_is_a_failure_not_a_silent_no_match() {
+        // REGRESSION LOCK. Live: organization/enrich?id=org_… answers HTTP 200 +
+        // success:false. Branching on the HTTP status — what every other provider
+        // in this file does — booked this as a successful "no match", wrote an
+        // empty enrichment onto the lead, and never retried it.
+        let envelope = json!({
+            "success": false, "statusCode": 200,
+            "message": "the data cannot be displayed or it doesn't exist",
+            "errors": null, "data": null
+        });
+        let err = classify_renidly_envelope(envelope, 200).expect_err("must not pass as a no-match");
+        assert_eq!(err.code, "RENIDLY_REQUEST_REJECTED");
+        assert!(!err.retriable, "a rejected request must not be retried");
+    }
+
+    #[test]
+    fn renidly_temporarily_unavailable_at_http_200_is_retriable() {
+        // 1072: the docs' own example of a retriable failure delivered as HTTP 200.
+        let envelope = json!({"success": false, "statusCode": 200, "error_code": "1072", "data": null});
+        let err = classify_renidly_envelope(envelope, 200).expect_err("1072 must fail");
+        assert_eq!(err.code, "RENIDLY_TEMPORARILY_UNAVAILABLE");
+        assert!(err.retriable);
+    }
+
+    #[test]
+    fn renidly_rate_limit_is_retriable_by_status_or_code() {
+        // Live 429 body — also the only key-accessible tier signal, since
+        // /api/panel/credits/* is session-cookie auth rather than api-key auth.
+        let live = json!({
+            "success": false, "statusCode": 429,
+            "message": "Too many requests for your tier \"Testing\".",
+            "errors": {"current_limit": "7 requests/minute", "current_tier": "Testing"}, "data": null
+        });
+        let err = classify_renidly_envelope(live, 429).expect_err("429 must fail");
+        assert_eq!(err.code, "RENIDLY_RATE_LIMITED");
+        assert!(err.retriable);
+
+        let by_code = json!({"success": false, "statusCode": 200, "error_code": "1074", "data": null});
+        assert!(classify_renidly_envelope(by_code, 200).unwrap_err().retriable);
+    }
+
+    #[test]
+    fn renidly_validation_and_auth_failures_are_permanent() {
+        // Live /api/data/v1 validation shape (this surface does use HTTP 400).
+        let validation = json!({
+            "success": false, "statusCode": 400, "message": "Validation failed",
+            "error_code": "VALIDATION_ERROR", "errors": {"error": "either 'id' or 'handle' is required"}
+        });
+        assert!(!classify_renidly_envelope(validation, 400).unwrap_err().retriable);
+
+        for status in [401u16, 403] {
+            let envelope = json!({"success": false, "statusCode": status});
+            let err = classify_renidly_envelope(envelope, status).unwrap_err();
+            assert_eq!(err.code, "RENIDLY_AUTH");
+            assert!(!err.retriable, "a bad key must never be retried");
+        }
+    }
+
+    #[test]
+    fn renidly_hit_passes_through_and_server_errors_retry() {
+        assert!(classify_renidly_envelope(json!({"success": true, "data": {"handle": "x"}}), 200).is_ok());
+        assert!(classify_renidly_envelope(json!({"success": false, "statusCode": 503}), 503)
+            .unwrap_err()
+            .retriable);
+    }
+
+    #[test]
+    fn renidly_backoff_grows_and_stays_capped() {
+        // Renidly's quota is per MINUTE, so the cap matters more than the ramp:
+        // every wait must stay bounded so a muscle worker is never parked forever.
+        let ceiling = RENIDLY_BACKOFF_CAP_MS + RENIDLY_JITTER_MAX_MS;
+        for attempt in 0..8 {
+            let wait = renidly_backoff_ms(attempt);
+            assert!(wait <= ceiling, "attempt {attempt} waited {wait}ms, over the cap");
+        }
+        assert!(renidly_backoff_ms(0) < renidly_backoff_ms(3), "backoff must ramp");
+        assert!(renidly_backoff_ms(6) >= RENIDLY_BACKOFF_CAP_MS, "late attempts sit at the cap");
+    }
+
+    // ── Company + signals (fixture mirrors the live people/profile payload) ───
+
+    #[test]
+    fn renidly_company_comes_from_the_current_position() {
+        let data = json!({
+            "handle": "ryanroslansky", "first_name": "Ryan", "last_name": "Roslansky",
+            "headline": "Executive Vice President at Microsoft",
+            "is_open_to_work": false, "is_hiring": true, "follower_count": 966875,
+            "full_positions": [
+                {"is_current": false, "title": "CEO", "organization_name": "LinkedIn",
+                 "organization_slug": "linkedin"},
+                {"is_current": true, "title": "Executive Vice President",
+                 "organization_name": "Microsoft", "organization_slug": "microsoft",
+                 "organization_id": "org_jb3e59e3q21b8", "organization_industry": "Computer Software",
+                 "organization_headcount_range": "10,001+ employees"}
+            ]
+        });
+        let (fields, custom) = normalise_renidly_fields(&data, "person_profile");
+
+        // The CURRENT employer, not merely the first one listed.
+        assert_eq!(fields["company"], json!("Microsoft"));
+        // Keys a later company lookup takes verbatim, so it never re-resolves.
+        assert_eq!(custom["renidly_company_slug"], json!("microsoft"));
+        assert_eq!(custom["renidly_company_id"], json!("org_jb3e59e3q21b8"));
+        assert_eq!(custom["renidly_company_headcount"], json!("10,001+ employees"));
+        // Signals are bools/numbers -> must survive (str_from silently drops them).
+        assert_eq!(custom["renidly_hiring"], json!(true));
+        assert_eq!(custom["renidly_open_to_work"], json!(false));
+        assert_eq!(custom["renidly_follower_count"], json!(966875));
+    }
+
+    #[test]
+    fn renidly_company_falls_back_to_the_latest_position() {
+        // Positions come back most-recent-first, so a lead between jobs still
+        // resolves to their latest employer rather than to nothing.
+        let data = json!({
+            "handle": "x",
+            "full_positions": [
+                {"is_current": false, "title": "Founder", "organization_name": "Most Recent Co"},
+                {"is_current": false, "organization_name": "Older Co"}
+            ]
+        });
+        let (fields, _) = normalise_renidly_fields(&data, "person_profile");
+        assert_eq!(fields["company"], json!("Most Recent Co"));
+        // No headline in the payload -> the role title stands in for it.
+        assert_eq!(fields["headline"], json!("Founder"));
+    }
+
+    #[test]
+    fn renidly_never_invents_a_company() {
+        let data = json!({"handle": "x", "first_name": "A", "full_positions": []});
+        let (fields, _) = normalise_renidly_fields(&data, "person_profile");
+        assert!(fields.get("company").is_none());
+    }
 
     #[test]
     fn bulk_match_url_is_api_v1() {
