@@ -701,6 +701,14 @@ async fn renidly_get(api_key: &str, path: &str, params: &[(String, String)]) -> 
 /// Endpoint + query params for a mode, or None when we lack the required input.
 /// Kept free of `ActionCommand` so the routing rules are unit-testable.
 ///
+/// Trim, and treat blank as absent: a config field that exists but holds "" is
+/// not an input. A free fn rather than a closure — a closure's inferred return
+/// lifetime can't be tied back to its argument's, so the borrow doesn't outlive
+/// the call.
+fn renidly_clean(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|s| !s.is_empty())
+}
+
 /// Precedence for `person_profile`: an explicit Renidly id (exact-record lookup)
 /// beats a configured handle, which beats the handle parsed out of the lead's
 /// LinkedIn URL — the input most real leads actually carry.
@@ -710,15 +718,14 @@ fn renidly_request_for(
     handle: Option<&str>,
     linkedin_url: Option<&str>,
 ) -> Option<(String, Vec<(String, String)>)> {
-    let clean = |v: Option<&str>| v.map(str::trim).filter(|s| !s.is_empty());
     match mode {
         "person_profile" => {
-            if let Some(id) = clean(renidly_id) {
+            if let Some(id) = renidly_clean(renidly_id) {
                 return Some((RENIDLY_PROFILE_PATH.to_string(), vec![("id".to_string(), id.to_string())]));
             }
-            let resolved = match clean(handle) {
+            let resolved = match renidly_clean(handle) {
                 Some(h) => h.to_string(),
-                None => renidly_handle_from_linkedin_url(clean(linkedin_url)?)?,
+                None => renidly_handle_from_linkedin_url(renidly_clean(linkedin_url)?)?,
             };
             Some((RENIDLY_PROFILE_PATH.to_string(), vec![("handle".to_string(), resolved)]))
         }
