@@ -54,7 +54,7 @@ def test_enrichment_only_spec_compiles_unchanged():
         )
     )
     types = [n.node_type for n in g.nodes]
-    assert "ai.enrich" in types
+    assert "enrich.apollo_person" in types  # TAXONOMY-001: per-provider node
     assert not any(t.startswith("channel.") for t in types)
 
 
@@ -84,8 +84,9 @@ def test_await_acceptance_compiles_the_wait_between_invite_and_next_step():
     # invite. So we never DM before the connection is accepted.
     assert ("delay_1", "default", "message_2") in edges
     assert not any(s == "message_1" and t == "message_2" for s, _h, t in edges)
-    # a non-connection / no-thread degrade from the invite send ends honestly.
-    assert ("message_1", "not_connected", "end_sequence_complete") in edges
+    # TAXONOMY-001: an invite cannot emit not_connected (that is the DM's
+    # relationship gate) — the composer no longer wires that meaningless edge.
+    assert not any(s2 == "message_1" and h == "not_connected" for s2, h, _t in edges)
     # SMART-INVITE-001: an already-connected recipient skips the invite AND the
     # wait, going straight to the same delay->next-step the accepted path uses —
     # so invite->await->DM auto-navigates for connected people, no manual branch.

@@ -106,7 +106,9 @@ def _suppression_identity(contact: dict | None, lead: dict | None) -> dict | Non
 # applies to these. Internal "channels" (tags, alerts, enrich) are not sends.
 _OUTBOUND_SEND_CHANNELS = frozenset(
     {
-        "channel.email", "channel.sms", "channel.voice", "channel.linkedin",
+        "channel.email", "channel.sms", "channel.voice",
+        "channel.linkedin_invite", "channel.linkedin_dm",
+        "channel.linkedin_inmail", "channel.linkedin_profile_view",
         "channel.whatsapp", "channel.instagram", "channel.telegram",
         "channel.slack", "channel.webhook_out",
         # UNIPILE-FULL: per-lead social ACTIONS are real outbound side effects, so
@@ -126,7 +128,9 @@ _OUTBOUND_SEND_CHANNELS = frozenset(
 # is what the guard matches a prior send on.
 _PERSON_MESSAGE_CHANNELS = frozenset(
     {
-        "channel.email", "channel.sms", "channel.voice", "channel.linkedin",
+        "channel.email", "channel.sms", "channel.voice",
+        "channel.linkedin_invite", "channel.linkedin_dm",
+        "channel.linkedin_inmail", "channel.linkedin_profile_view",
         "channel.whatsapp", "channel.instagram", "channel.telegram",
     }
 )
@@ -974,22 +978,28 @@ async def _dedupe_send(
         # nothing to compare a prior send to. Proceed with the send.
         return False
 
-    channel = node_type.split(".", 1)[-1]  # "channel.linkedin" -> "linkedin"
+    channel = node_type.split(".", 1)[-1]  # "channel.linkedin_dm" -> "linkedin_dm"
+    # Outcomes recorded before migration 053 used the combined token "linkedin"
+    # for every LinkedIn action. Those rows can't say WHICH action they were, so
+    # a linkedin_* dedupe check conservatively matches them too: historically
+    # touched contacts stay suppressed, while new outcomes dedupe per-action
+    # (an invite no longer blocks a DM).
+    channels = [channel, "linkedin"] if channel.startswith("linkedin_") else [channel]
     scope = str(cfg.get("dedupe_scope") or "channel").lower()
     async with system_scope():
         if scope == "campaign" and workflow_id:
             row = await fetch_one(
                 "SELECT 1 FROM omni_send_outcomes "
-                "WHERE workspace_id=$1 AND contact_id=$2 AND channel=$3 "
+                "WHERE workspace_id=$1 AND contact_id=$2 AND channel = ANY($3::text[]) "
                 "AND workflow_id=$4 AND status='sent' LIMIT 1",
-                workspace_id, str(contact_id), channel, workflow_id,
+                workspace_id, str(contact_id), channels, workflow_id,
             )
         else:
             row = await fetch_one(
                 "SELECT 1 FROM omni_send_outcomes "
-                "WHERE workspace_id=$1 AND contact_id=$2 AND channel=$3 "
+                "WHERE workspace_id=$1 AND contact_id=$2 AND channel = ANY($3::text[]) "
                 "AND status='sent' LIMIT 1",
-                workspace_id, str(contact_id), channel,
+                workspace_id, str(contact_id), channels,
             )
     if not row:
         return False  # never messaged on this channel — proceed.

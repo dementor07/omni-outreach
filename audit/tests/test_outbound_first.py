@@ -62,7 +62,8 @@ def test_sources_and_person_channels_are_entry_capable():
     for t in ("source.searxng", "source.serper_people"):
         assert get(t)[0].entry_capable, f"{t} (a source) must be entry-capable"
     for t in (
-        "channel.linkedin", "channel.email", "channel.sms",
+        "channel.linkedin_invite", "channel.linkedin_dm", "channel.linkedin_inmail",
+        "channel.linkedin_profile_view", "channel.email", "channel.sms",
         "channel.whatsapp", "channel.instagram", "channel.telegram", "channel.voice",
     ):
         assert get(t)[0].entry_capable, f"{t} must be entry-capable (can start an outbound campaign)"
@@ -83,7 +84,7 @@ def test_non_addressable_nodes_are_not_entry_capable():
 
 
 def test_outbound_root_without_audience_is_blocked():
-    inv = _n("channel.linkedin", {"mode": "invite", "message_template": "hi"})
+    inv = _n("channel.linkedin_invite", {"message_template": "hi"})
     end = _n("flow.end")
     result = validate_graph([inv, end], [_e(inv, end, "sent")], has_audience=False)
     codes = {i["code"] for i in result["issues"]}
@@ -95,7 +96,7 @@ def test_outbound_root_without_audience_is_blocked():
 
 
 def test_outbound_root_with_audience_is_runnable():
-    inv = _n("channel.linkedin", {"mode": "invite", "message_template": "hi"})
+    inv = _n("channel.linkedin_invite", {"message_template": "hi"})
     end = _n("flow.end")
     result = validate_graph([inv, end], [_e(inv, end, "sent")], has_audience=True)
     assert result["valid_for_run"] is True, [i["code"] for i in result["issues"]]
@@ -127,7 +128,7 @@ def test_non_entry_root_is_a_wiring_error():
 def test_mixed_start_source_plus_outbound_with_audience():
     # a campaign may run a source AND an outbound root together (any mix).
     src = _n("source.searxng", {"query": "x"})
-    inv = _n("channel.linkedin", {"mode": "invite", "message_template": "hi"})
+    inv = _n("channel.linkedin_invite", {"message_template": "hi"})
     end = _n("flow.end")
     end2 = _n("flow.end")
     edges = [_e(src, end, "default"), _e(inv, end2, "sent")]

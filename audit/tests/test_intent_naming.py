@@ -70,12 +70,13 @@ def test_every_requested_or_queued_intent_routes():
 
 
 def test_enrich_emits_a_routable_intent():
-    """Pin the specific ENRICH-INTENT-001 fix: ai.enrich's intent routes."""
-    enrich = (NODES_DIR / "ai/enrich.py").read_text(encoding="utf-8")
+    """Pin the specific ENRICH-INTENT-001 fix: the enrichment intent routes.
+    TAXONOMY-001 moved the emit into the shared provider factory."""
+    enrich = (NODES_DIR / "enrich/_provider_common.py").read_text(encoding="utf-8")
     m = re.search(r'"event_type":\s*"([a-z_.]+)"', enrich)
-    assert m, "ai.enrich emits no event_type literal"
+    assert m, "the enrich provider factory emits no event_type literal"
     et = m.group(1)
-    assert _is_intent(et), f"ai.enrich intent {et!r} does not route (the original bug)"
+    assert _is_intent(et), f"enrich intent {et!r} does not route (the original bug)"
     assert et == "ai.enrich.requested"
     # and it must carry node_id/lead_id so the dispatcher can resolve the node
     assert "node_id" in enrich and "lead_id" in enrich

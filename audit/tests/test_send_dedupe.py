@@ -33,7 +33,11 @@ from app.nodes import discover, get
 REPO = Path(__file__).resolve().parents[2]
 RUN_SRC = (REPO / "backend/app/execution/run.py").read_text(encoding="utf-8")
 
-_PERSON_CHANNELS = ["linkedin", "email", "sms", "whatsapp", "instagram", "telegram", "voice"]
+# TAXONOMY-001: the four LinkedIn actions are first-class person channels.
+_PERSON_CHANNELS = [
+    "linkedin_invite", "linkedin_dm", "linkedin_inmail", "linkedin_profile_view",
+    "email", "sms", "whatsapp", "instagram", "telegram", "voice",
+]
 _NON_PERSON = ["slack", "webhook_out"]
 
 discover()
@@ -92,7 +96,7 @@ async def test_dedupe_guard_off_proceeds_without_a_ledger_read():
     handled = await tw._dedupe_send(
         "ws", {"id": "l1", "contact_id": "c1"}, {"id": "c1"},
         {"id": "n1", "config": {"dedupe_action": "off"}},
-        "channel.linkedin", "wf1", "corr",
+        "channel.linkedin_dm", "wf1", "corr",
     )
     assert handled is False
 
@@ -117,7 +121,7 @@ async def test_dedupe_guard_end_lead_terminalizes_on_prior_send(monkeypatch):
     handled = await tw._dedupe_send(
         "ws", {"id": "l1", "contact_id": "c1"}, {"id": "c1"},
         {"id": "n1", "config": {"dedupe_action": "end_lead", "dedupe_scope": "channel"}},
-        "channel.linkedin", "wf1", "corr",
+        "channel.linkedin_dm", "wf1", "corr",
     )
     assert handled is True
     assert terminalized["status"] == "ended"
@@ -134,9 +138,39 @@ async def test_dedupe_guard_no_prior_send_proceeds(monkeypatch):
     handled = await tw._dedupe_send(
         "ws", {"id": "l1", "contact_id": "c1"}, {"id": "c1"},
         {"id": "n1", "config": {"dedupe_action": "skip_step"}},
-        "channel.linkedin", "wf1", "corr",
+        "channel.linkedin_dm", "wf1", "corr",
     )
     assert handled is False
+
+
+@pytest.mark.asyncio
+async def test_linkedin_dedupe_matches_legacy_combined_token(monkeypatch):
+    """TAXONOMY-001: outcomes recorded before migration 053 used the combined
+    token 'linkedin' for every LinkedIn action. A linkedin_* dedupe check must
+    match those rows too (conservative suppression), while a non-LinkedIn
+    channel queries only its own token."""
+    from app.execution import transition_worker as tw
+
+    captured: dict = {}
+
+    async def fake_fetch_one(_sql, *args):
+        captured["channels"] = args[2]
+        return None
+
+    monkeypatch.setattr(tw, "fetch_one", fake_fetch_one)
+    await tw._dedupe_send(
+        "ws", {"id": "l1", "contact_id": "c1"}, {"id": "c1"},
+        {"id": "n1", "config": {"dedupe_action": "skip_step"}},
+        "channel.linkedin_dm", "wf1", "corr",
+    )
+    assert captured["channels"] == ["linkedin_dm", "linkedin"]
+
+    await tw._dedupe_send(
+        "ws", {"id": "l1", "contact_id": "c1"}, {"id": "c1"},
+        {"id": "n1", "config": {"dedupe_action": "skip_step"}},
+        "channel.email", "wf1", "corr",
+    )
+    assert captured["channels"] == ["email"], "non-LinkedIn channels have no legacy alias"
 
 
 @pytest.mark.asyncio
@@ -148,7 +182,7 @@ async def test_contactless_lead_cannot_be_deduped(monkeypatch):
     handled = await tw._dedupe_send(
         "ws", {"id": "l1", "contact_id": None}, None,
         {"id": "n1", "config": {"dedupe_action": "end_lead"}},
-        "channel.linkedin", "wf1", "corr",
+        "channel.linkedin_dm", "wf1", "corr",
     )
     assert handled is False
 

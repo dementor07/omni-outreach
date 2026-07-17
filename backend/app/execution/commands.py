@@ -37,7 +37,13 @@ NODE_CHANNEL: dict[str, ChannelType] = {
     "channel.email": ChannelType.EMAIL,
     "channel.sms": ChannelType.SMS,
     "channel.voice": ChannelType.VOICE,
-    "channel.linkedin": ChannelType.LINKEDIN_DM,
+    # One action = one node = one static channel — the four LinkedIn actions are
+    # first-class nodes (the old channel.linkedin mode toggle needed a dispatcher
+    # special-case that once mis-dispatched invites as DMs; see bug C1).
+    "channel.linkedin_invite": ChannelType.LINKEDIN_INVITE,
+    "channel.linkedin_dm": ChannelType.LINKEDIN_DM,
+    "channel.linkedin_inmail": ChannelType.LINKEDIN_INMAIL,
+    "channel.linkedin_profile_view": ChannelType.LINKEDIN_PROFILE_VIEW,
     "channel.whatsapp": ChannelType.WHATSAPP,
     "channel.instagram": ChannelType.INSTAGRAM,
     "channel.telegram": ChannelType.TELEGRAM,
@@ -49,7 +55,12 @@ NODE_CHANNEL: dict[str, ChannelType] = {
     "crm.add_tag": ChannelType.ADD_TAG,
     "crm.remove_tag": ChannelType.REMOVE_TAG,
     "crm.hot_lead_alert": ChannelType.HOT_LEAD_ALERT,
-    "ai.enrich": ChannelType.ENRICH,
+    # Person-enrichment providers — first-class nodes (the old ai.enrich
+    # enrich_source toggle is gone; migration 053 rewrote stored rows). All ride
+    # the same ENRICH muscle channel; handle_enrich switches on enrich_source.
+    "enrich.apollo_person": ChannelType.ENRICH,
+    "enrich.hunter_email": ChannelType.ENRICH,
+    "enrich.proxycurl_profile": ChannelType.ENRICH,
     "linkfinder.company_website": ChannelType.ENRICH,
     "linkfinder.company_phone": ChannelType.ENRICH,
     "linkfinder.company_email": ChannelType.ENRICH,

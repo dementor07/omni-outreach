@@ -99,11 +99,15 @@ def test_invite_skips_when_already_connected():
     assert "linkedin_distance" in body and "provider_id" in body
 
 
-def test_linkedin_manifest_declares_smart_handles():
-    # the validator/composer need these handles declared on the node.
-    src = (REPO / "backend/app/nodes/channels/linkedin.py").read_text(encoding="utf-8")
-    for h in ("already_connected", "not_connected", "no_thread"):
-        assert f'NodeHandle("{h}"' in src, f"channel.linkedin must declare the {h} handle"
+def test_linkedin_manifests_declare_smart_handles():
+    # TAXONOMY-001: the smart handles live on the ACTION that can emit them —
+    # already_connected is the invite's skip; not_connected/no_thread are the
+    # DM's relationship gate + degraded thread. InMail/profile-view emit neither.
+    invite = (REPO / "backend/app/nodes/channels/linkedin_invite.py").read_text(encoding="utf-8")
+    assert 'NodeHandle("already_connected"' in invite
+    dm = (REPO / "backend/app/nodes/channels/linkedin_dm.py").read_text(encoding="utf-8")
+    for h in ("not_connected", "no_thread"):
+        assert f'NodeHandle("{h}"' in dm, f"channel.linkedin_dm must declare the {h} handle"
 
 
 def test_unwired_not_connected_handle_ends_honestly_not_completed():

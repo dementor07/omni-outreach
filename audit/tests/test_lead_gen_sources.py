@@ -519,9 +519,8 @@ def test_company_sources_can_stack_into_people_discovery_enrichment_and_contact_
         },
         {
             "id": "enrich-proxycurl",
-            "node_type": "ai.enrich",
+            "node_type": "enrich.proxycurl_profile",
             "config": {
-                "enrich_source": "proxycurl",
                 "connection_name": "proxycurl-test",
                 "merge_policy": "fill_missing",
                 "skip_if_complete": True,
@@ -529,9 +528,8 @@ def test_company_sources_can_stack_into_people_discovery_enrichment_and_contact_
         },
         {
             "id": "enrich-hunter",
-            "node_type": "ai.enrich",
+            "node_type": "enrich.hunter_email",
             "config": {
-                "enrich_source": "hunter",
                 "connection_name": "hunter-test",
                 "merge_policy": "fill_missing",
                 "skip_if_complete": True,

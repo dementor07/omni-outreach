@@ -419,8 +419,14 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
         for index, stage in enumerate(spec.enrichment):
             key = "post_verify_0" if index == 0 else f"enrich_{index + 1}"
             next_key = f"enrich_{index + 2}" if index < len(spec.enrichment) - 1 else "create_contact"
+            # TAXONOMY-001: one provider = one node; no enrich_source in config —
+            # the node TYPE carries the provider.
+            enrich_node_type = {
+                "apollo": "enrich.apollo_person",
+                "hunter": "enrich.hunter_email",
+                "proxycurl": "enrich.proxycurl_profile",
+            }[stage.provider]
             enrich_cfg = {
-                "enrich_source": stage.provider,
                 "connection_name": stage.connection_name,
                 "merge_policy": stage.merge_policy,
                 "skip_if_complete": stage.skip_if_complete,
@@ -440,7 +446,7 @@ def compile_campaign_spec(spec: CampaignSpec) -> CompiledCampaignGraph:
                     enrich_cfg["run_waterfall_email"] = True
                 if stage.run_waterfall_phone:
                     enrich_cfg["run_waterfall_phone"] = True
-            add_node(key, "ai.enrich", people_x + 960 + index * 280, 250, enrich_cfg)
+            add_node(key, enrich_node_type, people_x + 960 + index * 280, 250, enrich_cfg)
             add_edge(key, next_key, "default")
             add_edge(key, next_key, "on_error")
         previous = "create_contact"
@@ -632,7 +638,7 @@ def _append_message_sequence(
             })
             add_edge(compose_key, message_key, "default")
             add_edge(compose_key, completed_key, "on_error")
-        add_node(message_key, _message_node_type(message.channel), x, 250, _message_config(message))
+        add_node(message_key, _message_node_type(message), x, 250, _message_config(message))
         add_edge(message_key, completed_key, "on_error")
 
         # A linkedin invite with await_acceptance compiles the hardened
@@ -648,8 +654,6 @@ def _append_message_sequence(
                 "timeout_hours": message.accept_timeout_hours,
             })
             add_edge(message_key, wait_key, "sent")
-            # A non-connection / no-thread degrade from the send ends honestly.
-            add_edge(message_key, completed_key, "not_connected")
             add_edge(wait_key, completed_key, "timeout")
             if is_last:
                 add_edge(wait_key, completed_key, "accepted")
@@ -683,9 +687,15 @@ def _append_message_sequence(
         add_edge(delay_key, next_message_key)
 
 
-def _message_node_type(channel: MessageChannel) -> str:
-    # MULTI-CHANNEL-AUTHOR-001: every person channel maps 1:1 to its channel node.
-    return f"channel.{channel}"
+def _message_node_type(message: MessageStepSpec) -> str:
+    # MULTI-CHANNEL-AUTHOR-001: every person channel maps 1:1 to its channel
+    # node. TAXONOMY-001: the authoring spec keeps `mode` as a friendly
+    # shorthand, but the materialized node is the specific first-class action
+    # (channel.linkedin_invite / _dm / _inmail / _profile_view) — the combined
+    # mode-toggle node is gone.
+    if message.channel == "linkedin":
+        return f"channel.linkedin_{message.mode}"
+    return f"channel.{message.channel}"
 
 
 def _success_handle(channel: MessageChannel) -> str:
@@ -715,12 +725,14 @@ def _message_config(message: MessageStepSpec) -> dict[str, Any]:
             "verification_policy": "block_invalid",
         }
     if message.channel == "linkedin":
-        return {
-            "connection_name": message.connection_name,
-            "mode": message.mode,
-            "message_template": message.message_template or body,
-            "subject_template": message.subject_template,
-        }
+        # TAXONOMY-001: no `mode` in node config — the node TYPE is the action.
+        # Only InMail takes a subject; profile_view takes no template at all.
+        cfg: dict[str, Any] = {"connection_name": message.connection_name}
+        if message.mode != "profile_view":
+            cfg["message_template"] = message.message_template or body
+        if message.mode == "inmail":
+            cfg["subject_template"] = message.subject_template
+        return cfg
     if message.channel == "voice":
         return {
             "connection_name": message.connection_name,

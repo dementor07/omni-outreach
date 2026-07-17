@@ -24,6 +24,11 @@ _UNIPILE_NODES = {
     "source.linkedin_search",
     "enrich.linkedin_company",
     "enrich.linkedin_member",
+    # TAXONOMY-001: the four first-class LinkedIn actions (ex channel.linkedin).
+    "channel.linkedin_invite",
+    "channel.linkedin_dm",
+    "channel.linkedin_inmail",
+    "channel.linkedin_profile_view",
     "channel.linkedin_react_post",
     "channel.linkedin_comment_post",
     "channel.linkedin_endorse",
@@ -182,20 +187,8 @@ def validate_graph(
                         )
                     )
 
-            # 3. Communication channels
-            if node_type == "channel.linkedin":
-                connection_name = str(config.get("connection_name") or "")
-                if connection_name and ("unipile", connection_name) not in connections:
-                    issues.append(
-                        _issue(
-                            "ACTION_CONNECTION_MISMATCH",
-                            f"{connection_name!r} is not a connected unipile account.",
-                            node_id=node_id,
-                        )
-                    )
-
-            # 3b. UNIPILE-FULL nodes (native search, enrichment reads, social
-            # actions) all use a Unipile connection.
+            # 3. UNIPILE-FULL nodes (channels, native search, enrichment reads,
+            # social actions) all use a Unipile connection.
             if node_type in _UNIPILE_NODES:
                 connection_name = str(config.get("connection_name") or "")
                 if connection_name and ("unipile", connection_name) not in connections:

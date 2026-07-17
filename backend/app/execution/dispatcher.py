@@ -112,29 +112,13 @@ async def _resolve_lead_and_contact(workspace_id: str, lead_id: str) -> tuple[di
     return lead, contact
 
 
-# channel.linkedin is one node with a `mode` (invite/dm/inmail/profile_view);
-# each mode is a DISTINCT muscle channel with its own Rust handler. NODE_CHANNEL
-# can only hold one static value, so the mode→channel mapping lives here (the
-# dispatcher is the only place that sees the rendered payload). Without this, a
-# LinkedIn invite/inmail/profile_view node silently dispatched as a DM (C1).
-_LINKEDIN_MODE_CHANNEL: dict[str, ChannelType] = {
-    "invite": ChannelType.LINKEDIN_INVITE,
-    "dm": ChannelType.LINKEDIN_DM,
-    "inmail": ChannelType.LINKEDIN_INMAIL,
-    "profile_view": ChannelType.LINKEDIN_PROFILE_VIEW,
-}
-
-
 def _channel_for(node_type: str, payload: dict) -> ChannelType | None:
-    # Declarative HTTP nodes announce themselves explicitly.
+    # Declarative HTTP nodes announce themselves explicitly. Every other node
+    # type maps 1:1 to a static muscle channel — the LinkedIn mode→channel
+    # special-case died with the combined channel.linkedin node (each action is
+    # a first-class node since migration 053; bug C1 can no longer exist).
     if payload.get("channel") == "http_call":
         return ChannelType.HTTP_CALL
-    # channel.linkedin: route by the node's chosen mode, not the static default.
-    if node_type == "channel.linkedin":
-        mode = payload.get("mode")
-        # Fall back to the NODE_CHANNEL default (LINKEDIN_DM) only when mode is
-        # absent/unknown, preserving the prior behaviour for malformed configs.
-        return _LINKEDIN_MODE_CHANNEL.get(mode) or commands.NODE_CHANNEL.get(node_type)
     return commands.NODE_CHANNEL.get(node_type)
 
 

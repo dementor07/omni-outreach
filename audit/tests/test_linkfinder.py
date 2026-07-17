@@ -133,7 +133,8 @@ async def test_linkfinder_source_nodes_emit_hardcoded_intent(node_type: str):
 def test_linkfinder_phantom_types_are_not_in_runtime_code():
     runtime_files = [
         REPO / "backend-rust/src/handlers/enrich.rs",
-        REPO / "backend/app/nodes/ai/enrich.py",
+        # TAXONOMY-001: ai/enrich.py was split into per-provider nodes.
+        REPO / "backend/app/nodes/enrich/_provider_common.py",
         *list((REPO / "backend/app/nodes/enrich/linkfinder").glob("*.py")),
     ]
     text = "\n".join(path.read_text(encoding="utf-8") for path in runtime_files)

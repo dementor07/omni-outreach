@@ -86,11 +86,14 @@ def test_campaign_spec_compiles_multi_source_enrichment_and_followups():
     assert by_key["source_1"].config["companies_key"] == "companies_1"
     assert by_key["source_2"].config["companies_key"] == "companies_2"
     assert by_key["people_discovery"].node_type == "source.serper_people"
-    assert by_key["post_verify_0"].config["enrich_source"] == "proxycurl"
-    assert by_key["enrich_2"].config["enrich_source"] == "hunter"
+    # TAXONOMY-001: the provider is the node TYPE, not a config key.
+    assert by_key["post_verify_0"].node_type == "enrich.proxycurl_profile"
+    assert "enrich_source" not in by_key["post_verify_0"].config
+    assert by_key["enrich_2"].node_type == "enrich.hunter_email"
     assert by_key["message_1"].node_type == "channel.email"
     assert by_key["message_1"].config["body_template"] == "<p>Hi {{contact.first_name}}</p>"
-    assert by_key["message_2"].node_type == "channel.linkedin"
+    assert by_key["message_2"].node_type == "channel.linkedin_dm"
+    assert "mode" not in by_key["message_2"].config
 
     edges = {(edge.source, edge.source_handle, edge.target) for edge in graph.edges}
     assert ("company_loop_1", "each", "resolve_company") in edges

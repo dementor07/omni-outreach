@@ -18,42 +18,45 @@ os.environ.setdefault("DB_PASSWORD", "testpass")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production")
 os.environ.setdefault("REDIS_PASSWORD", "")
 
+import app.nodes as noderegistry  # noqa: E402
 from app.core.events import ChannelType  # noqa: E402
 from app.execution import dispatcher  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 
 
-# ── C1: channel.linkedin mode must route to the matching muscle channel ────────
-def test_linkedin_mode_routes_to_distinct_channels():
-    """REGRESSION C1: the dispatcher must map channel.linkedin + payload.mode to
-    the mode-specific ChannelType. The bug was a static NODE_CHANNEL value that
-    sent every mode as a DM."""
+# ── C1/TAXONOMY-001: each LinkedIn action node routes statically to its channel ─
+def test_linkedin_action_nodes_route_statically_to_distinct_channels():
+    """REGRESSION C1, made structural: the old combined channel.linkedin needed a
+    dispatcher mode→channel special-case, and a missing/typo'd mode silently sent
+    an invite as a DM. Each action is now its own node with a STATIC NODE_CHANNEL
+    entry — the payload can no longer influence which handler runs."""
     expected = {
-        "invite": ChannelType.LINKEDIN_INVITE,
-        "dm": ChannelType.LINKEDIN_DM,
-        "inmail": ChannelType.LINKEDIN_INMAIL,
-        "profile_view": ChannelType.LINKEDIN_PROFILE_VIEW,
+        "channel.linkedin_invite": ChannelType.LINKEDIN_INVITE,
+        "channel.linkedin_dm": ChannelType.LINKEDIN_DM,
+        "channel.linkedin_inmail": ChannelType.LINKEDIN_INMAIL,
+        "channel.linkedin_profile_view": ChannelType.LINKEDIN_PROFILE_VIEW,
     }
-    for mode, chan in expected.items():
-        got = dispatcher._channel_for("channel.linkedin", {"mode": mode})
-        assert got == chan, f"channel.linkedin mode={mode!r} routed to {got}, expected {chan}"
-    # Absent/unknown mode falls back to the safe default (DM), not None.
-    assert dispatcher._channel_for("channel.linkedin", {}) == ChannelType.LINKEDIN_DM
-    assert dispatcher._channel_for("channel.linkedin", {"mode": "bogus"}) == ChannelType.LINKEDIN_DM
+    for node_type, chan in expected.items():
+        # A poisoned payload mode must be ignored — routing is by node type only.
+        got = dispatcher._channel_for(node_type, {"mode": "bogus"})
+        assert got == chan, f"{node_type} routed to {got}, expected {chan}"
 
 
-def test_linkedin_node_config_modes_match_router_map():
-    """Every mode the channel.linkedin node config offers must be routable by the
-    dispatcher — config and router can't drift apart."""
-    src = (REPO / "backend/app/nodes/channels/linkedin.py").read_text(encoding="utf-8")
-    m = re.search(r'mode:\s*Literal\[([^\]]+)\]', src)
-    assert m, "could not find the LinkedIn mode Literal in the node config"
-    config_modes = set(re.findall(r'"(\w+)"', m.group(1)))
-    routed = set(dispatcher._LINKEDIN_MODE_CHANNEL)
-    assert config_modes == routed, (
-        f"LinkedIn node modes {config_modes} != dispatcher-routed modes {routed}"
+def test_combined_mode_toggle_nodes_are_gone():
+    """TAXONOMY-001: the combined nodes must never come back. A re-registered
+    channel.linkedin or ai.enrich would bypass migration 053's rewrite and
+    resurrect the mode special-case class of bug."""
+    noderegistry.discover()
+    types = {m.type for m in noderegistry.manifests()}
+    assert "channel.linkedin" not in types
+    assert "ai.enrich" not in types
+    assert not hasattr(dispatcher, "_LINKEDIN_MODE_CHANNEL"), (
+        "the dispatcher mode→channel special-case must stay deleted"
     )
+    # The dispatcher no longer routes the dead types at all.
+    assert dispatcher._channel_for("channel.linkedin", {"mode": "dm"}) is None
+    assert dispatcher._channel_for("ai.enrich", {}) is None
 
 
 # ── H2: omni_ai_jobs.kind values must agree across DB CHECK, projector, Pydantic ─

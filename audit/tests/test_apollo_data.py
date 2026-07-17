@@ -203,29 +203,31 @@ def test_apollo_company_reads_domain_from_lead_custom_fields():
     assert payload["domain"] == "acme.com"
 
 
-# ── Part 2: waterfall flags forward only for the apollo enrich source ──────────
-def test_ai_enrich_waterfall_flags_apollo_only():
+# ── Part 2: waterfall flags exist only on the Apollo node ─────────────────────
+def test_apollo_waterfall_flags_are_apollo_only():
+    """TAXONOMY-001 made this structural: the flags are fields of
+    enrich.apollo_person alone — the other provider nodes can't even accept
+    them, so cross-provider leakage is impossible by construction."""
     discover()
-    _, execute = get("ai.enrich")
+    _, execute = get("enrich.apollo_person")
 
-    def _flags(source):
-        ctx = NodeContext(
-            workspace_id="ws", workflow_id="wf", node_id="n1",
-            config={
-                "enrich_source": source, "connection_name": "c",
-                "run_waterfall_email": True, "run_waterfall_phone": True,
-                "reveal_personal_emails": True,
-            },
-            lead={"id": "l1", "custom_fields": {}}, correlation_id="c",
-        )
-        return execute(ctx)
-
-    apollo_payload = _run(_flags("apollo")).events[0]["payload"]
+    ctx = NodeContext(
+        workspace_id="ws", workflow_id="wf", node_id="n1",
+        config={
+            "connection_name": "c",
+            "run_waterfall_email": True, "run_waterfall_phone": True,
+            "reveal_personal_emails": True,
+        },
+        lead={"id": "l1", "custom_fields": {}}, correlation_id="c",
+    )
+    apollo_payload = _run(execute(ctx)).events[0]["payload"]
+    assert apollo_payload["enrich_source"] == "apollo"
     assert apollo_payload["run_waterfall_email"] is True
     assert apollo_payload["run_waterfall_phone"] is True
     assert apollo_payload["reveal_personal_emails"] is True
 
-    # A different provider must NOT receive the Apollo-only flags.
-    hunter_payload = _run(_flags("hunter")).events[0]["payload"]
-    assert "run_waterfall_email" not in hunter_payload
-    assert "reveal_personal_emails" not in hunter_payload
+    # The other provider nodes don't declare the Apollo-only flags at all.
+    hunter_manifest, _ = get("enrich.hunter_email")
+    hunter_props = hunter_manifest.config_schema.model_json_schema()["properties"]
+    assert "run_waterfall_email" not in hunter_props
+    assert "reveal_personal_emails" not in hunter_props

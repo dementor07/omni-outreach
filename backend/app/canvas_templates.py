@@ -154,17 +154,13 @@ _OMNICHANNEL = CampaignTemplate(
         TemplateNode("ev_open", "event.email_opened", 340, 320, {"timeout_hours": 48}),
         TemplateNode("ev_reply1", "condition.replied", 340, 520, {"window_days": 14}),
         # Clicked = hottest -> LinkedIn connect immediately.
-        TemplateNode("li_connect_hot", "channel.linkedin", 680, 120, {
-            "connection_name": "", "mode": "invite",
-            "message_template": _LI_INVITE, "await_acceptance": True,
-            "accept_timeout_hours": 168,
+        TemplateNode("li_connect_hot", "channel.linkedin_invite", 680, 120, {
+            "connection_name": "", "message_template": _LI_INVITE,
         }),
         # Opened = warm -> short wait then LinkedIn connect.
         TemplateNode("wait_open", "flow.delay", 680, 320, {"amount": 1, "unit": "days"}),
-        TemplateNode("li_connect_warm", "channel.linkedin", 1020, 320, {
-            "connection_name": "", "mode": "invite",
-            "message_template": _LI_INVITE, "await_acceptance": True,
-            "accept_timeout_hours": 168,
+        TemplateNode("li_connect_warm", "channel.linkedin_invite", 1020, 320, {
+            "connection_name": "", "message_template": _LI_INVITE,
         }),
         # No engagement -> wait then Email #2 (nurture).
         TemplateNode("wait_nurture", "flow.delay", 680, 520, {"amount": 2, "unit": "days"}),
@@ -175,8 +171,8 @@ _OMNICHANNEL = CampaignTemplate(
         }),
         # After a connection is accepted (either invite path), DM referencing it.
         TemplateNode("wait_dm", "flow.delay", 1360, 200, {"amount": 12, "unit": "hours"}),
-        TemplateNode("li_dm", "channel.linkedin", 1700, 200, {
-            "connection_name": "", "mode": "dm", "message_template": _LI_DM,
+        TemplateNode("li_dm", "channel.linkedin_dm", 1700, 200, {
+            "connection_name": "", "message_template": _LI_DM,
         }),
         # Bounce branch (MAILGUN-001): a hard bounce = the email address is dead,
         # so switch channels — find the person on LinkedIn and connect there.
@@ -188,10 +184,8 @@ _OMNICHANNEL = CampaignTemplate(
         # is valid — the operator points it at their real LinkFinder connection
         # (or renames one to "linkfinder") before running the bounce branch.
         TemplateNode("find_li", "linkfinder.name_to_linkedin", 680, -80, {"connection_name": "linkfinder"}),
-        TemplateNode("li_connect_bounce", "channel.linkedin", 1020, -80, {
-            "connection_name": "", "mode": "invite",
-            "message_template": _LI_INVITE, "await_acceptance": True,
-            "accept_timeout_hours": 168,
+        TemplateNode("li_connect_bounce", "channel.linkedin_invite", 1020, -80, {
+            "connection_name": "", "message_template": _LI_INVITE,
         }),
         # Terminal: a reply anywhere -> hot-lead alert (assign to sales) + end.
         TemplateNode("hot_alert", "crm.hot_lead_alert", 1360, 520, {

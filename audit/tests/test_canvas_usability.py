@@ -12,7 +12,9 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production")
 os.environ.setdefault("REDIS_PASSWORD", "")
 
 from app.nodes import NodeContext, discover, manifests  # noqa: E402
-from app.nodes.ai.enrich import execute as execute_enrichment  # noqa: E402
+# TAXONOMY-001: the combined ai.enrich node was split per-provider; the Apollo
+# node carries the same payload contract the muscle expects.
+from app.nodes.enrich.apollo_person import execute as execute_enrichment  # noqa: E402
 from app.nodes.conditions.rules import _resolve, evaluate_rule, execute  # noqa: E402
 from app.execution import run as workflow_runner  # noqa: E402
 from app.execution.transition_worker import _clean_enrichment_fields  # noqa: E402
@@ -94,7 +96,6 @@ async def test_enrichment_stage_emits_the_provider_contract_the_muscle_expects()
             node_id="node",
             lead={"id": "lead"},
             config={
-                "enrich_source": "apollo",
                 "connection_name": "Apollo production",
                 "merge_policy": "fill_missing",
             },
@@ -121,7 +122,6 @@ def test_enrichment_mutations_accept_only_whitelisted_nonempty_identity_fields()
 def test_low_level_building_block_nodes_are_hidden_from_the_palette():
     discover()
     by_type = {manifest.type: manifest for manifest in manifests()}
-    assert by_type["ai.enrich"].visible_in_palette is False
     assert by_type["flow.continue"].visible_in_palette is False
 
 
