@@ -61,13 +61,20 @@ const NODE_LABELS: Record<string, string> = {
   'ai.compose': 'AI compose message',
   'ai.screen_company': 'AI screen company',
   'ai.screen_person': 'AI screen person',
-  'ai.enrich': 'Enrichment provider',
+  // TAXONOMY-001: one provider = one node (ex ai.enrich mode toggle).
+  'enrich.apollo_person': 'Person match (Apollo)',
+  'enrich.hunter_email': 'Email finder (Hunter)',
+  'enrich.proxycurl_profile': 'Profile enrichment (Proxycurl)',
 
   // Channels
   'channel.email': 'Send email',
   'channel.sms': 'Send SMS',
   'channel.voice': 'AI voice call',
-  'channel.linkedin': 'LinkedIn message',
+  // TAXONOMY-001: one action = one node (ex channel.linkedin mode toggle).
+  'channel.linkedin_invite': 'LinkedIn invite',
+  'channel.linkedin_dm': 'LinkedIn DM',
+  'channel.linkedin_inmail': 'LinkedIn InMail',
+  'channel.linkedin_profile_view': 'View LinkedIn profile',
   'channel.whatsapp': 'WhatsApp message',
   'channel.instagram': 'Instagram DM',
   'channel.telegram': 'Telegram message',
