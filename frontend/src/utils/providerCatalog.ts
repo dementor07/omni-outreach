@@ -85,6 +85,20 @@ export const PROVIDERS: ProviderSpec[] = [
     ],
   },
   {
+    id: 'mailgun', name: 'Mailgun (email + tracking)', category: 'email', icon: Mail,
+    blurb: 'Send campaign email via Mailgun and get real delivered / bounced / opened / clicked webhooks that drive event-based journey branching.',
+    docsUrl: 'https://app.mailgun.com/settings/api_security',
+    fields: [
+      { key: 'api_key', label: 'API key (sending)', type: 'secret', placeholder: 'key-… (Messages API key)' },
+      // MAILGUN-001: the webhook SIGNING key is a DIFFERENT secret from the send
+      // API key — without it, /webhooks/mailgun rejects every event with 401.
+      { key: 'signing_key', label: 'Webhook signing key', type: 'secret', placeholder: 'HTTP webhook signing key (Settings → API keys)' },
+      { key: 'mailgun_domain', label: 'Sending domain', type: 'text', placeholder: 'mg.yourdomain.com', metadata: true },
+      { key: 'from', label: 'From address', type: 'text', placeholder: 'outreach@mg.yourdomain.com', metadata: true },
+      { key: 'mailgun_region', label: 'Region (blank = US, "eu" = EU)', type: 'text', placeholder: '', optional: true, metadata: true },
+    ],
+  },
+  {
     id: 'zerobounce', name: 'ZeroBounce', category: 'email', icon: Mail,
     blurb: 'Mailbox verification stage with catch-all, abuse, spamtrap, and do-not-mail signals.',
     docsUrl: 'https://www.zerobounce.net/docs/email-validation-api-quickstart',
