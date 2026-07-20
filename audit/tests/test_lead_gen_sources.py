@@ -22,6 +22,7 @@ from app.nodes import NodeContext, discover, get, manifests  # noqa: E402
 from app.nodes import NodeCategory  # noqa: E402
 from app.nodes.sources import csv as csv_source  # noqa: E402
 from app.nodes.sources import producthunt as producthunt_source  # noqa: E402
+from app.nodes.sources import renidly_job_changes as renidly_jc_source  # noqa: E402
 from app.nodes.sources import sheets as sheets_source  # noqa: E402
 from app.services.graph_validation import validate_graph  # noqa: E402
 
@@ -41,7 +42,7 @@ ATS_PLATFORMS = [
     "breezy",
 ]
 
-DIRECT_CONTACT_SOURCES = ["source.csv", "source.sheets", "source.producthunt"]
+DIRECT_CONTACT_SOURCES = ["source.csv", "source.sheets", "source.producthunt", "source.renidly_job_changes"]
 PASSIVE_SOURCES = ["source.webhook_in"]
 PEOPLE_SOURCES = [
     "source.serper_people",
@@ -87,6 +88,25 @@ class _FakeAsyncClient:
             ["sam@example.com", "Sam", "Rivera", "Globex", "Founder", "+15550202"],
         ]
     }
+    renidly_job_changes_body = {
+        "success": True,
+        "statusCode": 200,
+        "data": [
+            {
+                "event_type": "joined",
+                "title": "Head of Growth",
+                "previous_title": "Growth Lead",
+                "effective_date": "2026-05-01T00:00:00Z",
+                "profile_id": "prsn_abc123",
+                "organization_id": "org_xyz789",
+                "profile_handle": "sam-rivera-99",
+                "profile_first_name": "Sam",
+                "profile_last_name": "Rivera",
+                "profile_headline": "Head of Growth @ Globex",
+                "profile_url": "https://linkedin.com/in/sam-rivera-99",
+            }
+        ],
+    }
     producthunt_body = {
         "data": {
             "posts": {
@@ -127,6 +147,8 @@ class _FakeAsyncClient:
     async def get(self, url: str, **kwargs: Any) -> _FakeResponse:
         if "sheets.googleapis.com" in url:
             return _FakeResponse(body=self.sheets_body)
+        if "renidly.com" in url:
+            return _FakeResponse(body=self.renidly_job_changes_body)
         return _FakeResponse(text=self.csv_text)
 
     async def post(self, url: str, **kwargs: Any) -> _FakeResponse:
@@ -160,6 +182,8 @@ def _config_for(node_type: str, companies_key: str = "companies") -> dict[str, A
         return {"spreadsheet_id": "sheet123", "range": "Sheet1!A:Z"}
     if node_type == "source.producthunt":
         return {"max_posts": 1}
+    if node_type == "source.renidly_job_changes":
+        return {"connection_name": "renidly", "limit": 5}
     if node_type == "source.webhook_in":
         return {
             "require_hmac": True,
@@ -418,7 +442,7 @@ def test_every_expected_lead_gen_source_is_registered_once():
     source_types = sorted(manifest.type for manifest in manifests() if manifest.category == NodeCategory.SOURCE)
 
     assert source_types == EXPECTED_SOURCE_TYPES
-    assert len(source_types) == 31
+    assert len(source_types) == len(EXPECTED_SOURCE_TYPES)
 
 
 @pytest.mark.asyncio
@@ -427,8 +451,10 @@ async def test_each_lead_gen_source_executes_its_safe_contract(monkeypatch: pyte
     monkeypatch.setattr(csv_source.httpx, "AsyncClient", _FakeAsyncClient)
     monkeypatch.setattr(sheets_source.httpx, "AsyncClient", _FakeAsyncClient)
     monkeypatch.setattr(producthunt_source.httpx, "AsyncClient", _FakeAsyncClient)
+    monkeypatch.setattr(renidly_jc_source.httpx, "AsyncClient", _FakeAsyncClient)
     monkeypatch.setattr(sheets_source, "_resolve_access_token", lambda workspace_id: _async_value("google-token"))
     monkeypatch.setattr(producthunt_source, "resolve_user_access_token", lambda: _async_value("ph-token"))
+    monkeypatch.setattr(renidly_jc_source, "_resolve_api_key", lambda workspace_id, connection_name: _async_value("rnd-token"))
     discover()
     _, execute = get(node_type)
 
