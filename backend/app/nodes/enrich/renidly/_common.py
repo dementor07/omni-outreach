@@ -40,9 +40,27 @@ class PersonProfileConfig(RenidlyBaseConfig):
     )
 
 
-# Config keys forwarded to the muscle as lookup inputs. Keep in step with
-# `renidly_request_for` in handlers/enrich.rs.
-_INPUT_FIELDS = ("handle", "renidly_id")
+class CompanyProfileConfig(RenidlyBaseConfig):
+    renidly_org_id: str | None = Field(
+        None,
+        max_length=64,
+        description="Optional Renidly org id (org_…) — an exact-record lookup that beats everything",
+    )
+    company_slug: str | None = Field(
+        None,
+        max_length=200,
+        description="Optional company slug override; defaults to the renidly_company_slug a person enrich stamped",
+    )
+    company_name: str | None = Field(
+        None,
+        max_length=255,
+        description="Optional company-name override for the search fallback; defaults to the lead's company",
+    )
+
+
+# Config keys forwarded to the muscle as lookup inputs, per node. Keep in step
+# with `renidly_request_for` in handlers/enrich.rs.
+_INPUT_FIELDS = ("handle", "renidly_id", "renidly_org_id", "company_slug", "company_name")
 
 
 def make_manifest(

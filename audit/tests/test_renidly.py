@@ -87,3 +87,35 @@ def test_connection_name_is_required():
 
     with pytest.raises(ValidationError):
         PersonProfileConfig(connection_name="")
+
+
+# ── renidly.company_profile ──────────────────────────────────────────────────
+
+
+def test_company_node_registered_and_emits_the_company_mode():
+    manifest, execute = get("renidly.company_profile")
+    assert {h.name for h in manifest.output_handles} == {"default", "on_error"}
+    assert "connection:renidly" in manifest.capabilities
+
+
+@pytest.mark.asyncio
+async def test_company_execute_forwards_lookup_overrides_only_when_set():
+    _, execute = get("renidly.company_profile")
+
+    bare = await execute(_ctx({"connection_name": "renidly"}))
+    payload = bare.events[0]["payload"]
+    assert bare.events[0]["event_type"] == "ai.enrich.requested"
+    assert payload["enrich_source"] == "renidly"
+    assert payload["renidly_mode"] == "company_profile"
+    # Unset lookup inputs must be ABSENT (the muscle falls back to the
+    # custom_fields keys a person enrich stamped, then the lead's company).
+    for key in ("renidly_org_id", "company_slug", "company_name"):
+        assert key not in payload
+
+    pinned = await execute(
+        _ctx({"connection_name": "renidly", "renidly_org_id": "org_1", "company_slug": "acme", "company_name": "Acme"})
+    )
+    payload = pinned.events[0]["payload"]
+    assert payload["renidly_org_id"] == "org_1"
+    assert payload["company_slug"] == "acme"
+    assert payload["company_name"] == "Acme"

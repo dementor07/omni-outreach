@@ -15,6 +15,10 @@ const LINKFINDER_MAX_RETRIES: u32 = 3;
 
 const RENIDLY_BASE: &str = "https://renidly.com";
 const RENIDLY_PROFILE_PATH: &str = "/api/data/v1/people/profile";
+// Company lookups (live-verified): an exact record by `id`/`slug`, or a
+// name-driven search (`name=`) whose data is an ARRAY of companies.
+const RENIDLY_COMPANY_PATH: &str = "/api/data/v1/companies/company";
+const RENIDLY_COMPANY_SEARCH_PATH: &str = "/api/data/v1/companies/search";
 // Renidly's documented retry policy: cap at 5 attempts, exponential backoff
 // capped at 15s, plus jitter. Their limits are per MINUTE (7/min on the free
 // Testing tier, confirmed live), so the LinkFinder-style 1s/2s backoff burns the
@@ -113,6 +117,21 @@ fn enrichment_complete(command: &ActionCommand, provider: &str) -> bool {
                     && has(&command.lead.last_name)
                     && has(&command.lead.headline)
                     && has(&command.lead.company)
+            }
+            // The company mode's value is the DEEP company data (website,
+            // industry, headcount) landing in custom_fields — `company` alone
+            // being set (e.g. by a prior person enrich) is not completeness.
+            // The two hallmark custom fields a prior company enrich stamps:
+            "company_profile" => {
+                let cf_has = |key: &str| {
+                    command
+                        .lead
+                        .extra_data
+                        .get(key)
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|s| !s.trim().is_empty())
+                };
+                cf_has("renidly_company_website") && cf_has("renidly_company_industry")
             }
             _ => false,
         },
@@ -538,13 +557,33 @@ async fn renidly(command: &ActionCommand) -> ExecutionResult {
     };
     let renidly_id = common::opt_s(command, "renidly_id");
     let handle_cfg = common::opt_s(command, "handle");
-    let request = renidly_request_for(
-        &mode,
-        renidly_id.as_deref(),
-        handle_cfg.as_deref(),
-        command.lead.linkedin_url.as_deref(),
-    );
-    let (path, params) = match request {
+    // Company inputs: explicit config overrides beat the keys a prior
+    // person-enrich stamped into custom_fields, which beat the lead's company
+    // name (a search rather than an exact record).
+    let company_slug_cfg = common::opt_s(command, "company_slug");
+    let company_id_cfg = common::opt_s(command, "renidly_org_id");
+    let company_name_cfg = common::opt_s(command, "company_name");
+    let cf_str = |key: &str| {
+        command
+            .lead
+            .extra_data
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .filter(|s| !s.trim().is_empty())
+    };
+    let company_slug = company_slug_cfg.or_else(|| cf_str("renidly_company_slug"));
+    let company_id = company_id_cfg.or_else(|| cf_str("renidly_company_id"));
+    let company_name = company_name_cfg.or_else(|| command.lead.company.clone());
+    let inputs = RenidlyInputs {
+        renidly_id: renidly_id.as_deref(),
+        handle: handle_cfg.as_deref(),
+        linkedin_url: command.lead.linkedin_url.as_deref(),
+        company_id: company_id.as_deref(),
+        company_slug: company_slug.as_deref(),
+        company_name: company_name.as_deref(),
+    };
+    let (path, params) = match renidly_request_for(&mode, &inputs) {
         Some(v) => v,
         None => {
             credentials::release(&cred_ref).await;
@@ -562,7 +601,8 @@ async fn renidly(command: &ActionCommand) -> ExecutionResult {
     credentials::release(&cred_ref).await;
 
     let data = envelope.get("data").cloned().unwrap_or(Value::Null);
-    let matched = envelope.get("success").and_then(|v| v.as_bool()).unwrap_or(false) && !data.is_null();
+    let matched =
+        envelope.get("success").and_then(|v| v.as_bool()).unwrap_or(false) && renidly_data_has_record(&data);
     let (fields, custom_fields) = if matched {
         normalise_renidly_fields(&data, &mode)
     } else {
@@ -709,25 +749,54 @@ fn renidly_clean(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|s| !s.is_empty())
 }
 
-/// Precedence for `person_profile`: an explicit Renidly id (exact-record lookup)
+/// A definitive record exists in `data`. The person surface returns an object
+/// (null on 1010-no-match); `companies/search` returns an ARRAY, and an empty
+/// array is a routine no-match — booking it as a hit would write an empty
+/// enrichment onto the lead.
+fn renidly_data_has_record(data: &Value) -> bool {
+    !data.is_null() && data.as_array().map(|a| !a.is_empty()).unwrap_or(true)
+}
+
+/// The lookup inputs a Renidly mode may draw from — config overrides already
+/// merged over lead-derived fallbacks by the caller.
+struct RenidlyInputs<'a> {
+    renidly_id: Option<&'a str>,
+    handle: Option<&'a str>,
+    linkedin_url: Option<&'a str>,
+    company_id: Option<&'a str>,
+    company_slug: Option<&'a str>,
+    company_name: Option<&'a str>,
+}
+
+/// Endpoint + query params for a mode, or None when we lack the required input.
+///
+/// `person_profile` precedence: an explicit Renidly id (exact-record lookup)
 /// beats a configured handle, which beats the handle parsed out of the lead's
 /// LinkedIn URL — the input most real leads actually carry.
-fn renidly_request_for(
-    mode: &str,
-    renidly_id: Option<&str>,
-    handle: Option<&str>,
-    linkedin_url: Option<&str>,
-) -> Option<(String, Vec<(String, String)>)> {
+///
+/// `company_profile` precedence mirrors it: org id beats slug (both exact
+/// records via companies/company) beats a name-driven companies/search.
+fn renidly_request_for(mode: &str, inputs: &RenidlyInputs<'_>) -> Option<(String, Vec<(String, String)>)> {
     match mode {
         "person_profile" => {
-            if let Some(id) = renidly_clean(renidly_id) {
+            if let Some(id) = renidly_clean(inputs.renidly_id) {
                 return Some((RENIDLY_PROFILE_PATH.to_string(), vec![("id".to_string(), id.to_string())]));
             }
-            let resolved = match renidly_clean(handle) {
+            let resolved = match renidly_clean(inputs.handle) {
                 Some(h) => h.to_string(),
-                None => renidly_handle_from_linkedin_url(renidly_clean(linkedin_url)?)?,
+                None => renidly_handle_from_linkedin_url(renidly_clean(inputs.linkedin_url)?)?,
             };
             Some((RENIDLY_PROFILE_PATH.to_string(), vec![("handle".to_string(), resolved)]))
+        }
+        "company_profile" => {
+            if let Some(id) = renidly_clean(inputs.company_id) {
+                return Some((RENIDLY_COMPANY_PATH.to_string(), vec![("id".to_string(), id.to_string())]));
+            }
+            if let Some(slug) = renidly_clean(inputs.company_slug) {
+                return Some((RENIDLY_COMPANY_PATH.to_string(), vec![("slug".to_string(), slug.to_string())]));
+            }
+            let name = renidly_clean(inputs.company_name)?;
+            Some((RENIDLY_COMPANY_SEARCH_PATH.to_string(), vec![("name".to_string(), name.to_string())]))
         }
         _ => None,
     }
@@ -825,6 +894,45 @@ fn normalise_renidly_fields(data: &Value, mode: &str) -> (Value, Value) {
                 if let Some(v) = value_from(data, &[key]) {
                     custom[out] = v;
                 }
+            }
+            (fields, custom)
+        }
+        "company_profile" => {
+            // companies/search returns an ARRAY — take the top match;
+            // companies/company returns the object directly. Field names from
+            // the live payload (companies/company?slug=microsoft).
+            let record = data.as_array().and_then(|a| a.first()).unwrap_or(data);
+            let mut fields = json!({});
+            if let Some(name) = str_from(record, &["name"]) {
+                // fill_missing merge means this never clobbers a known company.
+                fields["company"] = json!(name);
+            }
+            for (key, out) in [
+                ("id", "renidly_company_id"),
+                ("slug", "renidly_company_slug"),
+                ("website", "renidly_company_website"),
+                ("url", "renidly_company_linkedin_url"),
+                ("headcount_range", "renidly_company_headcount"),
+                ("hq_city", "renidly_company_city"),
+                ("hq_country", "renidly_company_country"),
+            ] {
+                if let Some(v) = str_from(record, &[key]) {
+                    custom[out] = json!(v);
+                }
+            }
+            // industries_v2 is the maintained taxonomy; `type` the legacy one.
+            let industry = record
+                .get("industries_v2")
+                .and_then(|v| v.as_array())
+                .and_then(|a| a.iter().find_map(|v| v.as_str().filter(|s| !s.trim().is_empty())))
+                .map(|s| s.to_string())
+                .or_else(|| str_from(record, &["type"]));
+            if let Some(v) = industry {
+                custom["renidly_company_industry"] = json!(v);
+            }
+            // Raw employee count arrives as a STRING ("233210") — keep verbatim.
+            if let Some(v) = value_from(record, &["headcount"]) {
+                custom["renidly_company_headcount_exact"] = v;
             }
             (fields, custom)
         }
@@ -1008,10 +1116,44 @@ fn build_bulk_match_body(details: &[Value], flags: &[&str]) -> Value {
 mod tests {
     use super::{
         build_bulk_match_body, classify_renidly_envelope, normalise_renidly_fields,
-        renidly_backoff_ms, renidly_handle_from_linkedin_url, renidly_request_for,
-        APOLLO_BULK_MATCH_URL, RENIDLY_BACKOFF_CAP_MS, RENIDLY_JITTER_MAX_MS, RENIDLY_PROFILE_PATH,
+        renidly_backoff_ms, renidly_data_has_record, renidly_handle_from_linkedin_url,
+        renidly_request_for, RenidlyInputs, APOLLO_BULK_MATCH_URL, RENIDLY_BACKOFF_CAP_MS,
+        RENIDLY_COMPANY_PATH, RENIDLY_COMPANY_SEARCH_PATH, RENIDLY_JITTER_MAX_MS,
+        RENIDLY_PROFILE_PATH,
     };
     use serde_json::json;
+
+    /// Person-mode inputs (company fields absent).
+    fn person_inputs<'a>(
+        renidly_id: Option<&'a str>,
+        handle: Option<&'a str>,
+        linkedin_url: Option<&'a str>,
+    ) -> RenidlyInputs<'a> {
+        RenidlyInputs {
+            renidly_id,
+            handle,
+            linkedin_url,
+            company_id: None,
+            company_slug: None,
+            company_name: None,
+        }
+    }
+
+    /// Company-mode inputs (person fields absent).
+    fn company_inputs<'a>(
+        company_id: Option<&'a str>,
+        company_slug: Option<&'a str>,
+        company_name: Option<&'a str>,
+    ) -> RenidlyInputs<'a> {
+        RenidlyInputs {
+            renidly_id: None,
+            handle: None,
+            linkedin_url: None,
+            company_id,
+            company_slug,
+            company_name,
+        }
+    }
 
     // ── RENIDLY-001 ──────────────────────────────────────────────────────────
 
@@ -1045,9 +1187,7 @@ mod tests {
         // Explicit Renidly id -> exact-record lookup, beats everything.
         let (path, params) = renidly_request_for(
             "person_profile",
-            Some("prsn_06d0d44dogo2m"),
-            Some("someone"),
-            Some("https://www.linkedin.com/in/other"),
+            &person_inputs(Some("prsn_06d0d44dogo2m"), Some("someone"), Some("https://www.linkedin.com/in/other")),
         )
         .unwrap();
         assert_eq!(path, RENIDLY_PROFILE_PATH);
@@ -1056,32 +1196,109 @@ mod tests {
         // Configured handle beats the lead's LinkedIn URL.
         let (_, params) = renidly_request_for(
             "person_profile",
-            None,
-            Some("someone"),
-            Some("https://www.linkedin.com/in/other"),
+            &person_inputs(None, Some("someone"), Some("https://www.linkedin.com/in/other")),
         )
         .unwrap();
         assert_eq!(params, vec![("handle".to_string(), "someone".to_string())]);
 
         // Falls back to the handle inside the lead's LinkedIn URL.
-        let (_, params) =
-            renidly_request_for("person_profile", None, None, Some("https://www.linkedin.com/in/other/")).unwrap();
+        let (_, params) = renidly_request_for(
+            "person_profile",
+            &person_inputs(None, None, Some("https://www.linkedin.com/in/other/")),
+        )
+        .unwrap();
         assert_eq!(params, vec![("handle".to_string(), "other".to_string())]);
     }
 
     #[test]
     fn renidly_request_is_none_without_usable_input() {
         // Blank/whitespace config must not become a lookup for "".
-        assert!(renidly_request_for("person_profile", Some("  "), Some(""), None).is_none());
-        assert!(renidly_request_for("person_profile", None, None, None).is_none());
+        assert!(renidly_request_for("person_profile", &person_inputs(Some("  "), Some(""), None)).is_none());
+        assert!(renidly_request_for("person_profile", &person_inputs(None, None, None)).is_none());
         // A company URL yields no handle -> no request.
-        assert!(renidly_request_for("person_profile", None, None, Some("https://linkedin.com/company/x")).is_none());
+        assert!(renidly_request_for(
+            "person_profile",
+            &person_inputs(None, None, Some("https://linkedin.com/company/x"))
+        )
+        .is_none());
     }
 
     #[test]
     fn renidly_unknown_mode_makes_no_request() {
         // Guards against a node shipping a mode the muscle can't build a URL for.
-        assert!(renidly_request_for("job_changes", Some("prsn_1"), None, None).is_none());
+        assert!(renidly_request_for("job_changes", &person_inputs(Some("prsn_1"), None, None)).is_none());
+    }
+
+    #[test]
+    fn renidly_company_request_prefers_id_then_slug_then_name_search() {
+        // Org id -> exact record.
+        let (path, params) =
+            renidly_request_for("company_profile", &company_inputs(Some("org_jb3e59e3q21b8"), Some("microsoft"), Some("Microsoft"))).unwrap();
+        assert_eq!(path, RENIDLY_COMPANY_PATH);
+        assert_eq!(params, vec![("id".to_string(), "org_jb3e59e3q21b8".to_string())]);
+
+        // Slug -> exact record.
+        let (path, params) =
+            renidly_request_for("company_profile", &company_inputs(None, Some("microsoft"), Some("Microsoft"))).unwrap();
+        assert_eq!(path, RENIDLY_COMPANY_PATH);
+        assert_eq!(params, vec![("slug".to_string(), "microsoft".to_string())]);
+
+        // Name only -> the search endpoint.
+        let (path, params) =
+            renidly_request_for("company_profile", &company_inputs(None, None, Some("Microsoft"))).unwrap();
+        assert_eq!(path, RENIDLY_COMPANY_SEARCH_PATH);
+        assert_eq!(params, vec![("name".to_string(), "Microsoft".to_string())]);
+
+        // Nothing usable -> no request.
+        assert!(renidly_request_for("company_profile", &company_inputs(None, Some("  "), None)).is_none());
+    }
+
+    #[test]
+    fn renidly_empty_search_array_is_not_a_record() {
+        // companies/search returns [] for a no-match at success:true — booking
+        // that as a hit would write an empty enrichment onto the lead.
+        assert!(!renidly_data_has_record(&json!([])));
+        assert!(!renidly_data_has_record(&json!(null)));
+        assert!(renidly_data_has_record(&json!([{"name": "Microsoft"}])));
+        assert!(renidly_data_has_record(&json!({"handle": "x"})));
+    }
+
+    #[test]
+    fn renidly_company_fields_map_from_the_live_payload() {
+        // Fixture mirrors the live companies/company?slug=microsoft response.
+        let data = json!({
+            "id": "org_jb3e59e3q21b8", "name": "Microsoft", "slug": "microsoft",
+            "url": "https://www.linkedin.com/company/microsoft/",
+            "type": "Computer Software",
+            "headcount": "233210", "headcount_range": "10,001+ employees",
+            "industries_v2": ["Software Development"],
+            "website": "https://news.microsoft.com/",
+            "hq_city": "Redmond", "hq_country": "US"
+        });
+        let (fields, custom) = normalise_renidly_fields(&data, "company_profile");
+        assert_eq!(fields["company"], json!("Microsoft"));
+        assert_eq!(custom["renidly_company_id"], json!("org_jb3e59e3q21b8"));
+        assert_eq!(custom["renidly_company_slug"], json!("microsoft"));
+        assert_eq!(custom["renidly_company_website"], json!("https://news.microsoft.com/"));
+        assert_eq!(custom["renidly_company_linkedin_url"], json!("https://www.linkedin.com/company/microsoft/"));
+        // industries_v2 (maintained taxonomy) beats the legacy `type`.
+        assert_eq!(custom["renidly_company_industry"], json!("Software Development"));
+        assert_eq!(custom["renidly_company_headcount"], json!("10,001+ employees"));
+        assert_eq!(custom["renidly_company_headcount_exact"], json!("233210"));
+        assert_eq!(custom["renidly_company_city"], json!("Redmond"));
+    }
+
+    #[test]
+    fn renidly_company_search_array_takes_the_top_match() {
+        let data = json!([
+            {"id": "org_1", "name": "Acme Corp", "slug": "acme", "type": "Software"},
+            {"id": "org_2", "name": "Acme Ltd"}
+        ]);
+        let (fields, custom) = normalise_renidly_fields(&data, "company_profile");
+        assert_eq!(fields["company"], json!("Acme Corp"));
+        assert_eq!(custom["renidly_company_id"], json!("org_1"));
+        // Legacy `type` stands in when industries_v2 is absent.
+        assert_eq!(custom["renidly_company_industry"], json!("Software"));
     }
 
     #[test]

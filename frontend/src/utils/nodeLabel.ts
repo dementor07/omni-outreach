@@ -38,6 +38,7 @@ const NODE_LABELS: Record<string, string> = {
   'source.serper_people': 'Find people (Serper)',
   'source.searxng_people': 'Find people (free)',
   'source.linkedin_search': 'LinkedIn search (Unipile)',
+  'source.renidly_job_changes': 'Job changes (Renidly)',
   'source.linkfinder_leads': 'Leads finder AI (LinkFinder)',
   'source.linkfinder_employees': 'Company employees (LinkFinder)',
   'source.linkfinder_post_reactions': 'Post reactions (LinkFinder)',
@@ -90,6 +91,8 @@ const NODE_LABELS: Record<string, string> = {
   'enrich.linkedin_company': 'LinkedIn company profile (Unipile)',
   'enrich.linkedin_member': 'LinkedIn profile (Unipile)',
   'enrich.apollo_company': 'Apollo company enrich',
+  'renidly.person_profile': 'Person profile (Renidly)',
+  'renidly.company_profile': 'Company profile (Renidly)',
 
   // Conditions
   'condition.company_filter': 'Filter companies',

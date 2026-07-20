@@ -78,6 +78,7 @@ NODE_CHANNEL: dict[str, ChannelType] = {
     # payload's enrich_source. Without this route the node publishes its intent
     # into a void and the lead stalls (cf. ENRICH-INTENT-001).
     "renidly.person_profile": ChannelType.ENRICH,
+    "renidly.company_profile": ChannelType.ENRICH,
     "ai.compose": ChannelType.AI_COMPOSE,
     # Claude classifier handler — both screen variants share it. The asymmetric
     # error policy lives in the node's payload (on_error_handle), not here.
