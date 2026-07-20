@@ -53,7 +53,6 @@ LOCALLY_RESOLVED = {
     "source.csv",         # self-contained: does its own fetch, emits projection events
     "source.sheets",      # SHEETS-001: same pattern — fetches a Google Sheet, emits contact.created
     "source.producthunt", # PH-001: same pattern — pulls PH makers via GraphQL, emits contact.created
-    "source.renidly_job_changes",  # RENIDLY-002: same pattern — pulls job-change events, emits contact.created
     "source.webhook_in",  # passive declaration (listener lives in an HTTP route)
 }
 

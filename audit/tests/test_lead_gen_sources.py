@@ -22,7 +22,6 @@ from app.nodes import NodeContext, discover, get, manifests  # noqa: E402
 from app.nodes import NodeCategory  # noqa: E402
 from app.nodes.sources import csv as csv_source  # noqa: E402
 from app.nodes.sources import producthunt as producthunt_source  # noqa: E402
-from app.nodes.sources import renidly_job_changes as renidly_jc_source  # noqa: E402
 from app.nodes.sources import sheets as sheets_source  # noqa: E402
 from app.services.graph_validation import validate_graph  # noqa: E402
 
@@ -42,7 +41,7 @@ ATS_PLATFORMS = [
     "breezy",
 ]
 
-DIRECT_CONTACT_SOURCES = ["source.csv", "source.sheets", "source.producthunt", "source.renidly_job_changes"]
+DIRECT_CONTACT_SOURCES = ["source.csv", "source.sheets", "source.producthunt"]
 PASSIVE_SOURCES = ["source.webhook_in"]
 PEOPLE_SOURCES = [
     "source.serper_people",
@@ -52,6 +51,7 @@ PEOPLE_SOURCES = [
     "source.linkfinder_post_reactions",
     "source.linkedin_search",
     "source.apollo_people",
+    "source.renidly_job_changes",
 ]
 COMPANY_SOURCES = [
     "source.searxng",
@@ -433,6 +433,17 @@ def _payload_keys_for(node_type: str) -> set[str]:
             "jobs_key",
             "correlation_id",
         }
+    if node_type == "source.renidly_job_changes":
+        return {
+            "provider",
+            "connection_name",
+            "limit",
+            "page",
+            "randomize_page",
+            "max_page",
+            "people_key",
+            "correlation_id",
+        }
     raise AssertionError(f"missing payload contract for {node_type}")
 
 
@@ -451,10 +462,8 @@ async def test_each_lead_gen_source_executes_its_safe_contract(monkeypatch: pyte
     monkeypatch.setattr(csv_source.httpx, "AsyncClient", _FakeAsyncClient)
     monkeypatch.setattr(sheets_source.httpx, "AsyncClient", _FakeAsyncClient)
     monkeypatch.setattr(producthunt_source.httpx, "AsyncClient", _FakeAsyncClient)
-    monkeypatch.setattr(renidly_jc_source.httpx, "AsyncClient", _FakeAsyncClient)
     monkeypatch.setattr(sheets_source, "_resolve_access_token", lambda workspace_id: _async_value("google-token"))
     monkeypatch.setattr(producthunt_source, "resolve_user_access_token", lambda: _async_value("ph-token"))
-    monkeypatch.setattr(renidly_jc_source, "_resolve_api_key", lambda workspace_id, connection_name: _async_value("rnd-token"))
     discover()
     _, execute = get(node_type)
 

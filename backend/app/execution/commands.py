@@ -106,6 +106,7 @@ NODE_CHANNEL: dict[str, ChannelType] = {
     # APOLLO-DATA: native Apollo data layer. Each its own ChannelType (wire
     # contract verified in test_apollo_data + test_congruity).
     "source.apollo_people": ChannelType.APOLLO_PEOPLE,
+    "source.renidly_job_changes": ChannelType.RENIDLY_JOB_CHANGES,
     "enrich.apollo_company": ChannelType.APOLLO_COMPANY_ENRICH,
     "source.apollo_jobs": ChannelType.APOLLO_JOBS,
     # UNIPILE-FULL: native LinkedIn search (fan-out lead-gen) + enrichment reads

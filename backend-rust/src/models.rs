@@ -127,6 +127,11 @@ pub enum ChannelType {
     /// source.apollo_people.
     #[serde(rename = "apollo_people")]
     ApolloPeople,
+    /// Renidly job-changes fan-out lead source. GETs
+    /// /api/data/v1/job-changes/search, writes custom_fields[people_key].
+    /// source.renidly_job_changes (RENIDLY-002).
+    #[serde(rename = "renidly_job_changes")]
+    RenidlyJobChanges,
     /// Apollo organization enrichment by domain. GETs
     /// /api/v1/organizations/enrich?domain=, writes company fields onto the lead.
     /// enrich.apollo_company.
@@ -208,6 +213,7 @@ impl ChannelType {
             ChannelType::SearxngPeople => "searxng_people",
             ChannelType::Ats => "ats",
             ChannelType::ApolloPeople => "apollo_people",
+            ChannelType::RenidlyJobChanges => "renidly_job_changes",
             ChannelType::ApolloCompanyEnrich => "apollo_company_enrich",
             ChannelType::ApolloJobs => "apollo_jobs",
             ChannelType::LinkedinSearch => "linkedin_search",

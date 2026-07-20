@@ -20,6 +20,7 @@ pub mod leads_finder;
 pub mod linkedin; // re-export shim, see file
 pub mod linkedin_search;
 pub mod naukri;
+pub mod renidly;
 pub mod serper_people;
 pub mod sms;
 pub mod tag;
@@ -70,6 +71,7 @@ pub async fn dispatch(command: &ActionCommand) -> ExecutionResult {
         // APOLLO-DATA: native Apollo data layer — people search (fan-out lead-gen),
         // org enrichment by domain, and org job postings (hiring signal).
         ChannelType::ApolloPeople => apollo_data::handle_apollo_people(command).await,
+        ChannelType::RenidlyJobChanges => renidly::handle_renidly_job_changes(command).await,
         ChannelType::ApolloCompanyEnrich => apollo_data::handle_apollo_company(command).await,
         ChannelType::ApolloJobs => apollo_data::handle_apollo_jobs(command).await,
         // UNIPILE-FULL: native LinkedIn search (fan-out lead-gen) + enrichment

@@ -1,12 +1,13 @@
-"""RENIDLY-002 — the Renidly job-changes in-process source.
+"""RENIDLY-002 — the Renidly job-changes FAN-OUT lead source.
 
-Locks the three things that make this source correct rather than merely
-present: (1) it branches on the ENVELOPE's success, never HTTP status
-(Renidly answers 200 for failures — the RENIDLY-001 lesson); (2) contact ids
-reuse crm.create_contact's namespace + LinkedIn key, so a person discovered
-here upserts the same row as the same person discovered anywhere else
-(DEDUP-001); (3) the fan-out emits complete ready-made contacts with the
-job-change trigger fields preserved.
+The source is a thin intent-emitter (the muscle's RenidlyJobChanges handler does
+the HTTP call + normalises each person into custom_fields[people_key]). This
+locks the Python contract the muscle depends on: the node emits
+``source.renidly_job_changes.requested`` with the people_key + paging inputs, is
+routed through NODE_CHANNEL (not dead-on-arrival), and carries the
+``connection:renidly`` capability so a credential_ref is minted. The person-row
+normalisation + envelope handling are pure Rust, unit-tested beside the handler
+in ``backend-rust/src/handlers/renidly.rs``.
 """
 
 from __future__ import annotations
@@ -24,140 +25,62 @@ _BACKEND = os.path.join(os.path.dirname(__file__), "..", "..", "backend")
 if _BACKEND not in sys.path:
     sys.path.insert(0, _BACKEND)
 
+from app.core.events import ChannelType  # noqa: E402
+from app.execution.commands import NODE_CHANNEL  # noqa: E402
 from app.nodes import NodeContext, discover, get  # noqa: E402
-from app.nodes.crm.create_contact import _contact_id  # noqa: E402
-from app.nodes.sources import renidly_job_changes as src  # noqa: E402
 
 discover()
 
 _NODE = "source.renidly_job_changes"
 
-# The live item shape (captured 2026-07-17).
-_ITEM = {
-    "event_type": "joined",
-    "title": "Allround marketeer",
-    "previous_title": "",
-    "detected_at": "2026-05-01T07:38:34.178031Z",
-    "effective_date": "2026-05-01T00:00:00Z",
-    "profile_id": "prsn_ud3n8nicnrd9c",
-    "organization_id": "org_7ounqj35nfmrq",
-    "profile_handle": "scott-aben-25488517b",
-    "profile_first_name": "Scott",
-    "profile_last_name": "Aben",
-    "profile_headline": "Marketeer",
-    "profile_url": "https://linkedin.com/in/scott-aben-25488517b",
-}
+
+def _ctx(config: dict) -> NodeContext:
+    return NodeContext(workspace_id="ws", workflow_id="wf", node_id="n1", lead={"id": "l1"}, config=config)
 
 
-class _FakeResponse:
-    def __init__(self, body: dict, status_code: int = 200):
-        self._body = body
-        self.status_code = status_code
-
-    def json(self):
-        return self._body
-
-
-def _patch_http(monkeypatch, body: dict, status_code: int = 200):
-    class _FakeClient:
-        def __init__(self, *a, **k): ...
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
-        async def get(self, *a, **k):
-            return _FakeResponse(body, status_code)
-
-    monkeypatch.setattr(src.httpx, "AsyncClient", _FakeClient)
-
-    async def fake_key(_ws, _name):
-        return "rnd-test"
-
-    monkeypatch.setattr(src, "_resolve_api_key", fake_key)
-
-
-def _ctx() -> NodeContext:
-    return NodeContext(workspace_id="ws-1", workflow_id="wf", node_id="n1", lead={"id": "l1"}, config={"connection_name": "renidly"})
-
-
-def test_node_registered_as_a_locally_resolved_source():
+def test_registered_as_a_fanout_source_routed_through_the_muscle():
     manifest, _ = get(_NODE)
+    assert manifest.category.value == "source"
+    assert manifest.entry_capable, "a source must be able to root a campaign"
     assert {h.name for h in manifest.output_handles} == {"default", "empty", "on_error"}
     assert "connection:renidly" in manifest.capabilities
-    assert manifest.entry_capable, "a source must be able to root a campaign"
+    # RENIDLY-002: routed through the muscle (NOT a locally-resolved in-process
+    # source) — the handler writes custom_fields[people_key] for flow.for_each.
+    assert NODE_CHANNEL[_NODE] == ChannelType.RENIDLY_JOB_CHANGES
 
 
 @pytest.mark.asyncio
-async def test_fanout_emits_ready_made_contacts_with_the_trigger_fields(monkeypatch):
-    _patch_http(monkeypatch, {"success": True, "statusCode": 200, "data": [_ITEM]})
+async def test_emits_the_fanout_intent_with_paging_and_people_key():
     _, execute = get(_NODE)
-    result = await execute(_ctx())
-
+    result = await execute(
+        _ctx({"connection_name": "renidly", "limit": 3, "randomize_page": True, "max_page": 30})
+    )
     assert result.handle == "default"
-    [event] = result.events
-    assert event["event_type"] == "contact.created"
-    payload = event["payload"]
-    assert payload["first_name"] == "Scott"
-    assert payload["linkedin_url"] == "https://linkedin.com/in/scott-aben-25488517b"
-    cf = payload["custom_fields"]
-    assert cf["job_change_event"] == "joined"
-    assert cf["job_change_title"] == "Allround marketeer"
-    assert cf["renidly_id"] == "prsn_ud3n8nicnrd9c"
-    # The org id chains straight into renidly.company_profile — no re-resolve.
-    assert cf["renidly_company_id"] == "org_7ounqj35nfmrq"
+    event = result.events[0]
+    assert event["event_type"] == "source.renidly_job_changes.requested"
+    p = event["payload"]
+    assert p["connection_name"] == "renidly"
+    assert p["limit"] == 3
+    assert p["randomize_page"] is True
+    assert p["max_page"] == 30
+    # people_key tells the muscle where to write the list flow.for_each reads.
+    assert p["people_key"] == "people"
 
 
 @pytest.mark.asyncio
-async def test_contact_id_reuses_the_crm_namespace(monkeypatch):
-    """DEDUP-001: the SAME person discovered by any source must mint the SAME
-    contact id — here, the crm.create_contact LinkedIn natural key."""
-    _patch_http(monkeypatch, {"success": True, "data": [_ITEM]})
+async def test_defaults_are_demo_friendly():
     _, execute = get(_NODE)
-    result = await execute(_ctx())
-    expected = _contact_id("ws-1", "https://linkedin.com/in/scott-aben-25488517b", None)
-    assert result.events[0]["entity_id"] == expected
+    p = (await execute(_ctx({"connection_name": "renidly"}))).events[0]["payload"]
+    assert p["limit"] == 3  # "three contacts at a time"
+    assert p["page"] == 1
+    assert p["randomize_page"] is False
+    assert p["people_key"] == "people"
 
 
-@pytest.mark.asyncio
-async def test_success_false_at_http_200_is_an_error_not_an_empty_pull(monkeypatch):
-    """The RENIDLY-001 lesson, applied here: Renidly delivers failures at HTTP
-    200; treating one as 'no events today' would silently kill the trigger."""
-    _patch_http(monkeypatch, {"success": False, "statusCode": 200, "error_code": "1074", "data": None})
-    _, execute = get(_NODE)
-    result = await execute(_ctx())
-    assert result.handle == "on_error"
-    assert "1074" in (result.error or "")
+def test_connection_name_is_required():
+    from pydantic import ValidationError
 
+    from app.nodes.sources.renidly_job_changes import RenidlyJobChangesConfig
 
-@pytest.mark.asyncio
-async def test_empty_data_routes_the_empty_handle(monkeypatch):
-    _patch_http(monkeypatch, {"success": True, "data": []})
-    _, execute = get(_NODE)
-    result = await execute(_ctx())
-    assert result.handle == "empty"
-    assert result.events == []
-
-
-@pytest.mark.asyncio
-async def test_items_without_a_handle_or_name_are_skipped(monkeypatch):
-    anonymous = {**_ITEM, "profile_handle": "", "profile_url": ""}
-    nameless = {**_ITEM, "profile_first_name": "", "profile_last_name": "", "profile_handle": "someone-else"}
-    _patch_http(monkeypatch, {"success": True, "data": [anonymous, nameless, _ITEM]})
-    _, execute = get(_NODE)
-    result = await execute(_ctx())
-    # Only the complete item survives; the same person twice dedupes to one.
-    assert len(result.events) == 1
-
-
-@pytest.mark.asyncio
-async def test_missing_connection_is_a_loud_error(monkeypatch):
-    async def no_key(_ws, _name):
-        return None
-
-    monkeypatch.setattr(src, "_resolve_api_key", no_key)
-    _, execute = get(_NODE)
-    result = await execute(_ctx())
-    assert result.handle == "on_error"
-    assert "RENIDLY_NOT_CONNECTED" in (result.error or "")
+    with pytest.raises(ValidationError):
+        RenidlyJobChangesConfig(connection_name="")

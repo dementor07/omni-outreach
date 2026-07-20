@@ -628,9 +628,9 @@ async fn renidly(command: &ActionCommand) -> ExecutionResult {
 }
 
 #[derive(Debug)]
-struct RenidlyError {
-    code: &'static str,
-    retriable: bool,
+pub(crate) struct RenidlyError {
+    pub(crate) code: &'static str,
+    pub(crate) retriable: bool,
 }
 
 /// Classify a parsed Renidly envelope into "definitive answer" vs "failure".
@@ -700,8 +700,9 @@ fn renidly_jitter_ms() -> u64 {
 
 /// GET a Renidly endpoint with the account key, retrying only what Renidly says
 /// is retriable (rate limit, temporary unavailability, network) with capped
-/// exponential backoff.
-async fn renidly_get(api_key: &str, path: &str, params: &[(String, String)]) -> Result<Value, RenidlyError> {
+/// exponential backoff. pub(crate) so the fan-out source handler
+/// (handlers/renidly.rs) reuses the exact RENIDLY-001 classifier.
+pub(crate) async fn renidly_get(api_key: &str, path: &str, params: &[(String, String)]) -> Result<Value, RenidlyError> {
     let url = format!("{RENIDLY_BASE}{path}");
     let mut attempt: u32 = 0;
     loop {

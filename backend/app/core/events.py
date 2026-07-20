@@ -64,6 +64,7 @@ class ChannelType(StrEnum):
     # APOLLO-DATA — native Apollo data layer. Each value MUST equal the Rust
     # #[serde(rename = "...")] on models.rs::ChannelType or the muscle sees Unknown.
     APOLLO_PEOPLE = "apollo_people"  # native people search (fan-out lead-gen)
+    RENIDLY_JOB_CHANGES = "renidly_job_changes"  # job-change fan-out lead source (RENIDLY-002)
     APOLLO_COMPANY_ENRICH = "apollo_company_enrich"  # org enrichment by domain
     APOLLO_JOBS = "apollo_jobs"  # org job postings (hiring signal)
     # UNIPILE-FULL — native LinkedIn surface. Each value MUST equal the Rust
