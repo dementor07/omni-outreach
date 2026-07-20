@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 
 import httpx
 from pydantic import BaseModel, Field
@@ -52,6 +53,19 @@ class RenidlyJobChangesConfig(BaseModel):
     limit: int = Field(
         25, ge=1, le=100, description="How many recent job-change events to pull per run"
     )
+    page: int = Field(
+        1, ge=1, le=1000, description="Which page of the job-change feed to pull (each page is a distinct set of people)"
+    )
+    randomize_page: bool = Field(
+        False,
+        description=(
+            "Sample a RANDOM page in [1, max_page] on every run instead of a fixed page, so "
+            "repeated runs surface fresh people (continuous sampling / demos). Overrides `page`."
+        ),
+    )
+    max_page: int = Field(
+        20, ge=1, le=1000, description="Upper bound for randomize_page sampling (the feed is large; keep this within its real depth)"
+    )
     timeout_seconds: int = Field(30, ge=1, le=120, description="HTTP timeout for the Renidly call")
 
 
@@ -70,7 +84,7 @@ MANIFEST = NodeManifest(
     side_effect=SideEffect.NETWORK,
     icon="briefcase",
     primary_fields=("connection_name",),
-    advanced_fields=("limit", "timeout_seconds"),
+    advanced_fields=("limit", "page", "randomize_page", "max_page", "timeout_seconds"),
 )
 
 
@@ -105,12 +119,18 @@ async def execute(ctx: NodeContext) -> NodeResult:
             error="RENIDLY_NOT_CONNECTED — connect Renidly in Settings → Integrations",
         )
 
+    # Each `page` of the feed is a DISTINCT set of people (verified live). A fixed
+    # page returns the same people every run — fine for a steady trigger, but
+    # randomize_page samples a fresh page each run so repeated runs keep pulling
+    # NEW contacts (continuous sampling / live demos).
+    page = random.randint(1, cfg.max_page) if cfg.randomize_page else cfg.page
+
     try:
         async with httpx.AsyncClient(timeout=cfg.timeout_seconds) as client:
             resp = await client.get(
                 _JOB_CHANGES_URL,
                 headers={"X-renidly-apikey": api_key},
-                params={"limit": cfg.limit},
+                params={"limit": cfg.limit, "page": page},
             )
     except Exception as e:  # noqa: BLE001
         log.warning("[renidly_job_changes] fetch failed: %s", e)
