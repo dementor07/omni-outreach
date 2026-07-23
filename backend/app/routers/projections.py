@@ -301,17 +301,23 @@ async def screen_contacts_icp(
 
     batches = [contacts[i : i + body.batch_size] for i in range(0, len(contacts), body.batch_size)]
     results = await asyncio.gather(*[_run(b) for b in batches])
-    qualified = [cid for group in results for cid in group]
-    for cid in qualified:
+    matches = {str(cid) for group in results for cid in group}
+
+    # Idempotent: reflect ONLY this screen. Mark matches true; unmark any contact
+    # that was previously true but no longer matches (both via projector-merged
+    # events, so only changed rows are touched).
+    previously = await fetch_all("SELECT id FROM omni_contacts WHERE custom_fields->>'icp_qualified' = 'true'")
+    stale = {str(r["id"]) for r in previously} - matches
+    for cid, value in [(c, True) for c in matches] + [(c, False) for c in stale]:
         await publish_event(
             workspace_id=ctx.workspace_id,
             event_type="contact.created",
             entity_type="contact",
-            entity_id=str(cid),
-            payload={"custom_fields": {"icp_qualified": True}},
+            entity_id=cid,
+            payload={"custom_fields": {"icp_qualified": value}},
             actor_user_id=ctx.user_id,
         )
-    return ScreenIcpResult(screened=len(contacts), qualified=len(qualified))
+    return ScreenIcpResult(screened=len(contacts), qualified=len(matches))
 
 
 class ContactCreate(BaseModel):
