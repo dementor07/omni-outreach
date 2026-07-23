@@ -48,7 +48,12 @@ def require_muscle(authorization: str = Header(..., alias="Authorization")) -> N
         raise HTTPException(status_code=401, detail="invalid muscle secret")
 
 
-CREDENTIAL_TTL_SECONDS = 600
+# 2 hours. Long enough that a bulk AUDIENCE campaign — which seeds one lead
+# (and mints one credential ref) per attached contact all at once — can still
+# redeem every ref by the time the muscle works through the queue. At the old
+# 600s a 1000+-contact screen pass expired most refs before their turn, so the
+# muscle SKIPPED them (410 credential ref expired) instead of screening.
+CREDENTIAL_TTL_SECONDS = 7200
 
 
 async def mint_credential_ref(channel: str, bundle: dict) -> str:
