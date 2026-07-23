@@ -15,7 +15,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.auth import AuthContext, get_current_workspace
 from app.db import fetch_all, fetch_one, system_scope
@@ -233,6 +233,85 @@ async def get_contact(
     if not row:
         raise HTTPException(status_code=404, detail="contact not found")
     return ContactOut.model_validate(row)
+
+
+class ScreenIcpRequest(BaseModel):
+    prompt: str = Field(min_length=10, description="ICP rubric; a contact is marked icp_qualified when it matches this")
+    batch_size: int = Field(60, ge=10, le=120, description="Contacts per LLM call")
+    concurrency: int = Field(6, ge=1, le=12, description="Parallel LLM calls")
+
+
+class ScreenIcpResult(BaseModel):
+    screened: int
+    qualified: int
+
+
+@router.post(
+    "/contacts/screen-icp",
+    response_model=ScreenIcpResult,
+    summary="Batch-screen every contact against an ICP prompt; mark matches (custom_fields.icp_qualified)",
+    description=(
+        "Efficient bulk filter: sends contacts to Claude in BATCHES (one call per ~60), "
+        "not one call per contact, so a 1000-contact list screens in seconds. Each match "
+        "is marked custom_fields.icp_qualified=true via a contact.created event the "
+        "projector merges, so the list can be filtered on it. Re-running re-marks the "
+        "current matches. Needs an anthropic connection."
+    ),
+)
+async def screen_contacts_icp(
+    body: ScreenIcpRequest, ctx: AuthContext = Depends(get_current_workspace)
+) -> ScreenIcpResult:
+    import asyncio
+
+    from app.services.ai_jobs import _anthropic_text, _extract_json, anthropic_key
+
+    key = await anthropic_key(ctx.workspace_id)
+    if not key:
+        raise HTTPException(status_code=400, detail="no anthropic connection in this workspace")
+    contacts = await fetch_all(
+        "SELECT id, first_name, last_name, company, headline FROM omni_contacts ORDER BY created_at"
+    )
+    system = (
+        "You screen B2B contacts against an Ideal Customer Profile (ICP). You receive a NUMBERED "
+        "list of contacts (Name | Headline | Company). Respond with ONLY a JSON object "
+        '{"qualified": [<the numbers that MATCH the ICP>]} and nothing else.\n\nICP:\n' + body.prompt
+    )
+    sem = asyncio.Semaphore(body.concurrency)
+
+    async def _run(batch: list[dict[str, Any]]) -> list[Any]:
+        lines = []
+        for i, r in enumerate(batch, 1):
+            name = ((r["first_name"] or "") + " " + (r["last_name"] or "")).strip() or "(no name)"
+            lines.append(f"{i}. {name} | {(r['headline'] or '')[:90]} | {r['company'] or ''}")
+        async with sem:
+            try:
+                text = await _anthropic_text(key, system, "Contacts:\n" + "\n".join(lines), 1200)
+            except Exception:  # noqa: BLE001 — one bad batch must not fail the whole pass
+                return []
+        obj = _extract_json(text) or {}
+        out = []
+        for n in obj.get("qualified") or []:
+            try:
+                idx = int(n)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= idx <= len(batch):
+                out.append(batch[idx - 1]["id"])
+        return out
+
+    batches = [contacts[i : i + body.batch_size] for i in range(0, len(contacts), body.batch_size)]
+    results = await asyncio.gather(*[_run(b) for b in batches])
+    qualified = [cid for group in results for cid in group]
+    for cid in qualified:
+        await publish_event(
+            workspace_id=ctx.workspace_id,
+            event_type="contact.created",
+            entity_type="contact",
+            entity_id=str(cid),
+            payload={"custom_fields": {"icp_qualified": True}},
+            actor_user_id=ctx.user_id,
+        )
+    return ScreenIcpResult(screened=len(contacts), qualified=len(qualified))
 
 
 class ContactCreate(BaseModel):
