@@ -207,6 +207,7 @@ impl ChannelType {
             ChannelType::AiCompose => "ai_compose",
             ChannelType::HttpCall => "http_call",
             ChannelType::Apify => "apify",
+            ChannelType::LinkedinJobsGuest => "linkedin_jobs_guest",
             ChannelType::AiScreen => "ai_screen",
             ChannelType::AiClassify => "ai_classify",
             ChannelType::SerperPeople => "serper_people",
