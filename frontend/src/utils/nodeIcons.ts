@@ -63,6 +63,7 @@ const ICON_BY_TYPE: Record<string, LucideIcon> = {
   'source.naukri': Briefcase,
   'source.indeed': Briefcase,
   'source.linkedin_jobs': Linkedin,
+  'source.linkedin_jobs_guest': Linkedin,
   'source.serper_people': Users,
   'source.searxng_people': Users,
   'source.linkfinder_leads': Users,

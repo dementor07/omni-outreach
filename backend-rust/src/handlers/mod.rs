@@ -18,6 +18,7 @@ pub mod http_call;
 pub mod indeed;
 pub mod leads_finder;
 pub mod linkedin; // re-export shim, see file
+pub mod linkedin_jobs_guest;
 pub mod linkedin_search;
 pub mod naukri;
 pub mod renidly;
@@ -52,6 +53,9 @@ pub async fn dispatch(command: &ActionCommand) -> ExecutionResult {
         ChannelType::AiCompose => transform::handle_ai_compose(command).await,
         ChannelType::HttpCall => http_call::handle_http_call(command).await,
         ChannelType::Apify => apify::handle_apify(command).await,
+        ChannelType::LinkedinJobsGuest => {
+            linkedin_jobs_guest::handle_linkedin_jobs_guest(command).await
+        }
         ChannelType::AiScreen => ai_screen::handle_ai_screen(command).await,
         ChannelType::AiClassify => transform::handle_ai_classify(command).await,
         // People discovery: two distinct nodes (serper paid / searxng free), one

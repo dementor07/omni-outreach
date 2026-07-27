@@ -86,6 +86,8 @@ NODE_CHANNEL: dict[str, ChannelType] = {
     "ai.screen_person": ChannelType.AI_SCREEN,
     # Apify-driven LinkedIn jobs source (multi-step actor protocol).
     "source.linkedin_jobs": ChannelType.APIFY,
+    # Free guest-API LinkedIn jobs — drop-in for source.linkedin_jobs, no credit/key.
+    "source.linkedin_jobs_guest": ChannelType.LINKEDIN_JOBS_GUEST,
     # Camoufox-driven Naukri.com jobs source (anti-detect headless scrape).
     "source.naukri": ChannelType.NAUKRI,
     # Apify-driven Indeed.com jobs source (curious_coder/indeed-scraper actor).

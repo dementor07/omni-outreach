@@ -59,6 +59,13 @@ pub enum ChannelType {
     /// by `source.linkedin_jobs` and any other Apify-driven source.
     #[serde(rename = "apify")]
     Apify,
+    /// Free LinkedIn jobs source — the guest-API drop-in for `apify`. Scrapes
+    /// the public jobs-guest endpoint + each company's public page for
+    /// `numberOfEmployees`, emitting the identical `custom_fields[companies_key]`
+    /// shape (incl. `employee_count`) so the downstream graph is unchanged. No
+    /// credential. Used by `source.linkedin_jobs_guest`.
+    #[serde(rename = "linkedin_jobs_guest")]
+    LinkedinJobsGuest,
     /// Anthropic Claude structured-classification call returning ACCEPT/REJECT.
     /// Used by `ai.screen_company` and `ai.screen_person`. The node's payload
     /// carries `on_error_handle` so the asymmetric fail-open / fail-closed

@@ -49,6 +49,7 @@ class ChannelType(StrEnum):
     AI_COMPOSE = "ai_compose"
     HTTP_CALL = "http_call"  # config-driven REST integration (generic handler)
     APIFY = "apify"  # Apify actor run + poll + dataset fetch (source.linkedin_jobs)
+    LINKEDIN_JOBS_GUEST = "linkedin_jobs_guest"  # free guest-API LinkedIn jobs (source.linkedin_jobs_guest)
     AI_SCREEN = "ai_screen"  # Claude ACCEPT/REJECT classifier (ai.screen_company / ai.screen_person)
     SERPER_PEOPLE = "serper_people"  # Multi-pattern per-company Serper LinkedIn search
     LEADS_FINDER = "leads.finder"  # LinkFinder AI fan-out people discovery

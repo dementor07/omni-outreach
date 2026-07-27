@@ -62,6 +62,7 @@ COMPANY_SOURCES = [
     "source.apollo_jobs",
     "source.indeed",
     "source.linkedin_jobs",
+    "source.linkedin_jobs_guest",
     *[f"source.{platform}" for platform in ATS_PLATFORMS],
 ]
 EXPECTED_SOURCE_TYPES = sorted(DIRECT_CONTACT_SOURCES + PASSIVE_SOURCES + PEOPLE_SOURCES + COMPANY_SOURCES)
@@ -247,6 +248,14 @@ def _config_for(node_type: str, companies_key: str = "companies") -> dict[str, A
             "min_results": 0,
             "companies_key": companies_key,
         }
+    if node_type == "source.linkedin_jobs_guest":
+        return {
+            "keywords": ["sales development representative"],
+            "location": "India",
+            "max_results": 3,
+            "min_results": 0,
+            "companies_key": companies_key,
+        }
     if node_type in {f"source.{platform}" for platform in ATS_PLATFORMS}:
         return {"max_companies": 3, "companies_key": companies_key}
     if node_type == "source.serper_people":
@@ -359,6 +368,16 @@ def _payload_keys_for(node_type: str) -> set[str]:
         return {
             "connection_name",
             "actor_id",
+            "keywords",
+            "location",
+            "date_posted",
+            "max_results",
+            "min_results",
+            "companies_key",
+            "correlation_id",
+        }
+    if node_type == "source.linkedin_jobs_guest":
+        return {
             "keywords",
             "location",
             "date_posted",
