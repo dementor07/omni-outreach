@@ -79,7 +79,7 @@ pub async fn handle_data_transform(command: &ActionCommand) -> ExecutionResult {
             command,
             json!({"provider": "anthropic", "chars": value.len()}),
             Some("data_transformed"),
-            json!({"extra_data_set": {var_name: value}}),
+            json!({"custom_fields": {var_name: value}}),
         ),
         Err(e) => common::fail(command, e, true),
     }
@@ -171,7 +171,9 @@ pub async fn handle_ai_compose(command: &ActionCommand) -> ExecutionResult {
                 command,
                 json!({"provider": "anthropic", "channel": channel, "model": model, "chars": text.len()}),
                 Some("ai_drafted"),
-                json!({"extra_data_set": {target_variable: text}}),
+                // custom_fields is the mutation key _apply_lead_mutations persists;
+                // extra_data_set is silently dropped (ai.compose reads extra_data == custom_fields).
+                json!({"custom_fields": {target_variable: text}}),
             )
         }
         Err(e) => common::fail(command, e, true),
