@@ -44,6 +44,13 @@ class AiComposeConfig(BaseModel):
     provider: Literal["anthropic", "openai", "gemini", "mindstudio"] = Field(
         "anthropic", description="Which connected AI provider to use"
     )
+    model: str | None = Field(
+        None,
+        description=(
+            "Anthropic model id override for this step. Empty = Haiku (cheap). Set a stronger "
+            "model like 'claude-sonnet-4-6' for higher-quality customer-facing copy."
+        ),
+    )
 
 
 MANIFEST = NodeManifest(

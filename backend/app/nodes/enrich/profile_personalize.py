@@ -24,6 +24,7 @@ the async projector) so the very next node — `ai.compose`, which forwards
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -34,7 +35,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from app.db import execute as db_execute
-from app.db import system_scope
+from app.db import fetch_all, system_scope
 from app.nodes import (
     NodeCategory,
     NodeContext,
@@ -54,7 +55,15 @@ _POST_DT_KEYS = ("parsed_datetime", "published_at", "posted_at", "created_at", "
 
 class ProfilePersonalizeConfig(BaseModel):
     connection_name: str = Field(min_length=1, description="Unipile connection (Settings → Integrations)")
-    unipile_account_id: str = Field(min_length=1, description="Unipile seat (account id) to read through")
+    unipile_account_id: str | None = Field(
+        None,
+        description=(
+            "Pin reads to one Unipile seat. Leave empty to ROTATE across the CAMPAIGN'S "
+            "pooled seats (the same accounts that send this campaign's invites/DMs), "
+            "deterministically per lead — so profile-view load spreads across the seats "
+            "actually working the campaign instead of hammering one account."
+        ),
+    )
     post_max_age_days: int = Field(30, ge=1, le=365, description="Only reference a post newer than this")
     website_chars: int = Field(2000, ge=200, le=8000, description="Max homepage characters to summarise")
     fetch_website: bool = Field(True, description="Also fetch + summarise the company website")
@@ -176,6 +185,37 @@ async def _resolve_website(client: UnipileClient, account_id: str, company: str)
         return ""
 
 
+async def _pick_seat(workspace_id: str, workflow_id: str | None, connection_name: str, lead_id: str) -> str:
+    """The Unipile seat to read this lead through — rotated across the CAMPAIGN'S
+    pooled seats (the same accounts that send its invites/DMs), else all seats
+    under the connection. Deterministic per lead (hash of lead_id) so the same
+    lead is always read by the same seat, and the cohort spreads across seats
+    rather than concentrating profile views on one account."""
+    async with system_scope():
+        rows = []
+        if workflow_id:
+            rows = await fetch_all(
+                "SELECT a.external_identity FROM omni_sending_accounts a "
+                "JOIN omni_campaign_sending_accounts p ON p.sending_account_id = a.id "
+                "WHERE a.workspace_id=$1 AND p.workflow_id=$2 AND a.channel_kind='linkedin' "
+                "AND a.status IN ('active','warming')",
+                workspace_id, workflow_id,
+            )
+        if not rows:  # no explicit pool → all seats under the connection (the campaign default)
+            rows = await fetch_all(
+                "SELECT a.external_identity FROM omni_sending_accounts a "
+                "JOIN omni_connections c ON c.id = a.connection_id "
+                "WHERE a.workspace_id=$1 AND c.name=$2 AND a.channel_kind='linkedin' "
+                "AND a.status IN ('active','warming')",
+                workspace_id, connection_name,
+            )
+    seats = sorted({(r["external_identity"] or "").strip() for r in rows} - {""})
+    if not seats:
+        return ""
+    idx = int(hashlib.sha256(lead_id.encode("utf-8")).hexdigest(), 16) % len(seats)
+    return seats[idx]
+
+
 async def execute(ctx: NodeContext) -> NodeResult:
     cfg = ProfilePersonalizeConfig(**ctx.config)
     lead = ctx.lead or {}
@@ -190,6 +230,13 @@ async def execute(ctx: NodeContext) -> NodeResult:
     correlation_id = ctx.correlation_id or str(uuid.uuid4())
 
     enriched: dict[str, str] = {}
+    # Seat to read through: a pinned one, else rotate across the campaign's pooled seats.
+    seat = cfg.unipile_account_id or await _pick_seat(
+        ctx.workspace_id, ctx.workflow_id, cfg.connection_name, str(lead.get("id") or "")
+    )
+    if not seat:
+        log.warning("[profile_personalize] no active Unipile seat to read through")
+        return NodeResult(handle="on_error", error="NO_UNIPILE_SEAT")
     try:
         client = await UnipileClient.for_workspace(ctx.workspace_id, connection_name=cfg.connection_name)
     except UnipileError as e:
@@ -201,7 +248,7 @@ async def execute(ctx: NodeContext) -> NodeResult:
     public_id = _public_id(linkedin_url)
     if public_id:
         try:
-            prof = await client.member_profile(cfg.unipile_account_id, public_id)
+            prof = await client.member_profile(seat, public_id)
             headline = (prof.get("headline") or prof.get("occupation") or "").strip()
             about = (prof.get("summary") or prof.get("about") or "").strip()
             loc = prof.get("location")
@@ -219,7 +266,7 @@ async def execute(ctx: NodeContext) -> NodeResult:
     # 2) Recent post (recency-gated) → anti-hallucination context.
     if provider_id:
         try:
-            posts = await client.member_posts(cfg.unipile_account_id, provider_id)
+            posts = await client.member_posts(seat, provider_id)
             items = posts.get("items") if isinstance(posts, dict) else posts
             post, posted_at = _recent_post(items or [], cfg.post_max_age_days)
             if post:
@@ -233,7 +280,7 @@ async def execute(ctx: NodeContext) -> NodeResult:
     if cfg.fetch_website:
         website_url = (cf.get("website") or cf.get("company_website") or cf.get("product_url") or cf.get("domain") or "").strip()
         if not website_url and company:
-            website_url = await _resolve_website(client, cfg.unipile_account_id, company)
+            website_url = await _resolve_website(client, seat, company)
         summary = await _website_summary(website_url, cfg.website_chars)
         if summary:
             enriched["website_summary"] = summary

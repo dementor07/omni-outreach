@@ -11,9 +11,9 @@ use serde_json::{json, Value};
 const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
 const DEFAULT_MODEL: &str = "claude-haiku-4-5-20251001";
 
-pub(crate) async fn anthropic_text(api_key: &str, system: &str, user: &str, max_tokens: u32) -> Result<String, String> {
+pub(crate) async fn anthropic_text(api_key: &str, model: &str, system: &str, user: &str, max_tokens: u32) -> Result<String, String> {
     let body = json!({
-        "model": DEFAULT_MODEL,
+        "model": model,
         "max_tokens": max_tokens,
         "system": system,
         "messages": [{"role": "user", "content": user}]
@@ -66,6 +66,7 @@ pub async fn handle_data_transform(command: &ActionCommand) -> ExecutionResult {
     };
     let result = anthropic_text(
         &api_key,
+        DEFAULT_MODEL,
         "Respond concisely. Output the answer only — no preamble, no quotes, no explanation.",
         &format!("Extract: {prompt}"),
         200,
@@ -112,6 +113,12 @@ pub async fn handle_ai_compose(command: &ActionCommand) -> ExecutionResult {
     if instruction.is_empty() {
         return common::fail(command, "instruction required", false);
     }
+    // Per-node model override — default Haiku; a campaign can set a stronger
+    // model (e.g. claude-sonnet-4-6) for higher-quality customer-facing copy.
+    let model = {
+        let m = common::s(command, "model");
+        if m.is_empty() { DEFAULT_MODEL.to_string() } else { m }
+    };
 
     let api_key = match anthropic_key(command).await {
         Ok(k) => k,
@@ -151,18 +158,60 @@ pub async fn handle_ai_compose(command: &ActionCommand) -> ExecutionResult {
         serde_json::to_string(&facts).unwrap_or_default()
     );
 
-    let result = anthropic_text(&api_key, &system, &user, (max_words as u32) * 8).await;
+    let result = anthropic_text(&api_key, &model, &system, &user, (max_words as u32) * 8).await;
     credentials::release(command.credential_ref.as_deref().unwrap_or("")).await;
 
     match result {
-        Ok(text) => common::ok(
-            command,
-            json!({"provider": "anthropic", "channel": channel, "chars": text.len()}),
-            Some("ai_drafted"),
-            json!({"extra_data_set": {target_variable: text}}),
-        ),
+        Ok(text) => {
+            // Strip any trailing sign-off / leftover "[Your name]" placeholder the
+            // model appended — a LinkedIn DM needs no signature and must never ship
+            // a literal placeholder. Paragraph breaks are preserved.
+            let text = strip_signature(&text);
+            common::ok(
+                command,
+                json!({"provider": "anthropic", "channel": channel, "model": model, "chars": text.len()}),
+                Some("ai_drafted"),
+                json!({"extra_data_set": {target_variable: text}}),
+            )
+        }
         Err(e) => common::fail(command, e, true),
     }
+}
+
+/// Remove a trailing signature block and leftover bracketed placeholders from an
+/// AI-composed message (e.g. `"...\n\nBest,\n[Your name]"`). Trims junk lines
+/// from the end while they are blank, a bare `[...]` placeholder, a `{{...}}`
+/// marker, or a lone sign-off word; then deletes inline name placeholders.
+/// Interior paragraph breaks (the professional-email structure) are kept.
+fn strip_signature(text: &str) -> String {
+    const SIGNOFFS: &[&str] = &[
+        "best", "best regards", "regards", "cheers", "sincerely", "thanks",
+        "thank you", "warm regards", "warmly", "best wishes", "kind regards",
+        "kindest regards", "talk soon", "speak soon", "cordially", "yours",
+    ];
+    let is_junk = |line: &str| -> bool {
+        let t = line.trim();
+        if t.is_empty() {
+            return true;
+        }
+        if t.starts_with('[') && t.ends_with(']') {
+            return true; // bare placeholder line: [Your name], [Name], [Company]
+        }
+        if t.contains("{{") {
+            return true;
+        }
+        let low = t.trim_end_matches([',', '.', ':', '!', ' ']).to_ascii_lowercase();
+        SIGNOFFS.contains(&low.as_str())
+    };
+    let mut lines: Vec<&str> = text.trim_end().lines().collect();
+    while lines.last().map(|l| is_junk(l)).unwrap_or(false) {
+        lines.pop();
+    }
+    let mut out = lines.join("\n");
+    for ph in ["[Your Name]", "[Your name]", "[your name]", "[Name]", "[name]", "[YOUR NAME]"] {
+        out = out.replace(ph, "");
+    }
+    out.trim().to_string()
 }
 
 // ── reply intent classification (B2, ported from Python reply_classifier) ────
@@ -247,7 +296,7 @@ pub async fn handle_ai_classify(command: &ActionCommand) -> ExecutionResult {
     };
 
     let truncated: String = body.chars().take(4000).collect();
-    let result = anthropic_text(&api_key, CLASSIFY_SYSTEM, &truncated, 200).await;
+    let result = anthropic_text(&api_key, DEFAULT_MODEL, CLASSIFY_SYSTEM, &truncated, 200).await;
     credentials::release(command.credential_ref.as_deref().unwrap_or("")).await;
 
     match result {
@@ -279,5 +328,31 @@ pub async fn handle_ai_classify(command: &ActionCommand) -> ExecutionResult {
             let (intent, conf) = keyword_classify(&body);
             classify_result(command, intent, conf, &format!("llm fallback: {e}"), "keyword")
         }
+    }
+}
+
+#[cfg(test)]
+mod strip_tests {
+    use super::strip_signature;
+
+    #[test]
+    fn drops_signoff_and_placeholder_keeps_paragraphs() {
+        let raw = "Hi Pawan,\n\nThanks for connecting.\n\nWhat's your outbound like?\n\nBest,\n[Your name]";
+        let out = strip_signature(raw);
+        assert!(out.starts_with("Hi Pawan,"));
+        assert!(out.contains("\n\nThanks for connecting."), "paragraph breaks kept");
+        assert!(out.ends_with("outbound like?"), "trailing sign-off + placeholder removed: {out:?}");
+        assert!(!out.contains('['));
+    }
+
+    #[test]
+    fn strips_inline_name_placeholder() {
+        assert_eq!(strip_signature("Reach me — [Your name]"), "Reach me —");
+    }
+
+    #[test]
+    fn leaves_clean_message_untouched() {
+        let clean = "Hi Angee,\n\nLoved your work at SkillsCapital.\n\nWorth a chat?";
+        assert_eq!(strip_signature(clean), clean);
     }
 }

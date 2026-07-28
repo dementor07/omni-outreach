@@ -28,7 +28,7 @@ use serde_json::{json, Value};
 
 const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
-const MAX_TOKENS: u32 = 80;
+const MAX_TOKENS: u32 = 200;
 
 pub async fn handle_ai_screen(command: &ActionCommand) -> ExecutionResult {
     let model = {
@@ -57,11 +57,25 @@ pub async fn handle_ai_screen(command: &ActionCommand) -> ExecutionResult {
         _ => return error_path(command, "AI_SCREEN_CREDENTIAL_MISSING", &on_error_handle, false),
     };
 
+    // Structured outputs: force a valid {decision, reason} JSON object so the
+    // verdict can't be mis-parsed out of prose (a parse miss on a person screen
+    // would fail-closed and silently reject a good lead). Haiku 4.5 supports it;
+    // parse_structured() still falls back to the prose parser if the body isn't
+    // JSON, so a schema hiccup can never reject-all.
     let body = json!({
         "model": model,
         "max_tokens": MAX_TOKENS,
         "system": screening_prompt,
         "messages": [{"role": "user", "content": user_message}],
+        "output_config": {"format": {"type": "json_schema", "schema": {
+            "type": "object",
+            "properties": {
+                "decision": {"type": "string", "enum": ["accept", "reject"]},
+                "reason": {"type": "string"}
+            },
+            "required": ["decision", "reason"],
+            "additionalProperties": false
+        }}},
     });
 
     let resp = OUTBOUND
@@ -80,7 +94,7 @@ pub async fn handle_ai_screen(command: &ActionCommand) -> ExecutionResult {
         Ok(r) if r.status().is_success() => {
             let v: Value = r.json().await.unwrap_or(Value::Null);
             let raw = extract_text(&v);
-            let (verdict, reason) = parse_verdict(&raw);
+            let (verdict, reason) = parse_structured(&raw);
             // Verdict ACCEPT/REJECT -> "accept"/"reject" handle.
             let handle = if verdict == "ACCEPT" { "accept" } else { "reject" };
             // E2E-001c: persist the verdict onto the lead's custom_fields.screen
@@ -147,7 +161,7 @@ fn build_user_message(command: &ActionCommand) -> String {
              Company: {company}\n\
              Industry: {industry}\n\
              LinkedIn: {url}\n\
-             Respond with exactly: ACCEPT or REJECT, followed by a one-sentence reason."
+             Decide accept or reject, with a one-sentence reason."
         )
     } else {
         // Company screen.
@@ -159,7 +173,7 @@ fn build_user_message(command: &ActionCommand) -> String {
              Name: {name}\n\
              Sector: {sector}\n\
              Description: {description}\n\
-             Respond with exactly: ACCEPT or REJECT, followed by a one-sentence reason."
+             Decide accept or reject, with a one-sentence reason."
         )
     }
 }
@@ -172,6 +186,20 @@ fn extract_text(v: &Value) -> String {
         .and_then(|b| b["text"].as_str())
         .unwrap_or("")
         .to_string()
+}
+
+/// Prefer the structured `{decision, reason}` JSON (guaranteed by
+/// output_config); fall back to the prose parser if the body isn't JSON (older
+/// model / structured-output unsupported) so screening degrades, never breaks.
+fn parse_structured(raw: &str) -> (&'static str, String) {
+    if let Ok(j) = serde_json::from_str::<Value>(raw.trim()) {
+        if let Some(d) = j.get("decision").and_then(|v| v.as_str()) {
+            let verdict = if d.eq_ignore_ascii_case("accept") { "ACCEPT" } else { "REJECT" };
+            let reason = j.get("reason").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            return (verdict, reason);
+        }
+    }
+    parse_verdict(raw)
 }
 
 /// Parse "ACCEPT — reason here." / "REJECT: reason." / etc. into a verdict
