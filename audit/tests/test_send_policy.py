@@ -201,3 +201,19 @@ def test_cap_hold_marker_distinct_per_reset_bucket():
 def test_increment_claim_id_is_per_command():
     assert increment_claim_id("cmd-1") == "send-count:cmd-1"
     assert increment_claim_id("cmd-1") != increment_claim_id("cmd-2")
+
+
+def test_jittered_seconds_is_deterministic_and_bounded():
+    from app.services.send_policy import jittered_seconds
+    base = 3 * 86400.0  # 3 days
+    key = "lead-abc:node-xyz"
+    a = jittered_seconds(base, 20, key)
+    b = jittered_seconds(base, 20, key)
+    assert a == b, "same lead+node must jitter identically (redelivery-safe)"
+    assert 0.8 * base <= a <= 1.2 * base, "must stay within ±20%"
+    # different leads get independent offsets
+    others = {jittered_seconds(base, 20, f"lead-{i}:node-xyz") for i in range(20)}
+    assert len(others) > 1, "different leads must not all get the same jitter"
+    # disabled / zero-base pass through unchanged
+    assert jittered_seconds(base, 0, key) == base
+    assert jittered_seconds(0.0, 50, key) == 0.0

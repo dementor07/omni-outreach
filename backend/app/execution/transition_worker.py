@@ -1181,10 +1181,11 @@ async def _increment_send_counters(
             )
 
 
-async def _compute_flow_delay_seconds(workspace_id: str, node: dict) -> float:
+async def _compute_flow_delay_seconds(workspace_id: str, node: dict, lead: dict | None = None) -> float:
     """Seconds a flow.delay / flow.wait_until node should hold the lead.
 
-    flow.delay: amount × unit (fixed duration).
+    flow.delay: amount × unit, optionally ±jitter_pct% (deterministic per
+    lead+node — anti-detection, see send_policy.jittered_seconds).
     flow.wait_until: seconds until the next moment inside the configured
     business-hours window (earliest_hour ≤ local hour < latest_hour, on an
     allowed weekday), evaluated in the workflow's timezone. 0 if the window is
@@ -1197,7 +1198,12 @@ async def _compute_flow_delay_seconds(workspace_id: str, node: dict) -> float:
     if node_type == "flow.delay":
         amount = int(cfg.get("amount") or 0)
         unit = cfg.get("unit") or "hours"
-        return float(max(0, amount) * _DELAY_UNIT_SECONDS.get(unit, 3600))
+        base = float(max(0, amount) * _DELAY_UNIT_SECONDS.get(unit, 3600))
+        jitter_pct = int(cfg.get("jitter_pct") or 0)
+        if jitter_pct > 0 and lead is not None:
+            seed_key = f"{lead.get('id')}:{node.get('id')}"
+            return send_policy.jittered_seconds(base, jitter_pct, seed_key)
+        return base
 
     # flow.wait_until
     earliest = int(cfg.get("earliest_hour", 9))
@@ -1645,7 +1651,7 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
     # delay only as telemetry and advanced immediately — a "wait 3 days" fired
     # instantly. The lead parks 'waiting' until the timer releases it.
     if node_type in ("flow.delay", "flow.wait_until"):
-        delay_seconds = await _compute_flow_delay_seconds(workspace_id, node)
+        delay_seconds = await _compute_flow_delay_seconds(workspace_id, node, lead)
         if delay_seconds > 0:
             await _advance_lead(workspace_id, str(lead["id"]), str(node["id"]), status="waiting")
         await _emit_synthetic_result(

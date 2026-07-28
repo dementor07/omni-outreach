@@ -28,6 +28,16 @@ _UNIT_SECONDS = {"minutes": 60, "hours": 3600, "days": 86400}
 class DelayConfig(BaseModel):
     amount: int = Field(ge=1, description="How many units to wait")
     unit: Literal["minutes", "hours", "days"] = "hours"
+    jitter_pct: int = Field(
+        0,
+        ge=0,
+        le=100,
+        description=(
+            "Randomize the wait by ±this percent per lead (anti-detection). 0 = exact. "
+            "e.g. 20 on a 3-day wait = each lead waits ~2.4–3.6 days, deterministic per lead "
+            "so redelivery doesn't drift the timer."
+        ),
+    )
 
 
 MANIFEST = NodeManifest(
@@ -44,9 +54,12 @@ MANIFEST = NodeManifest(
 async def execute(ctx: NodeContext) -> NodeResult:
     cfg = DelayConfig(**ctx.config)
     seconds = cfg.amount * _UNIT_SECONDS[cfg.unit]
+    # The actual (possibly jittered) hold is computed by the transition worker,
+    # which has the lead id for a deterministic per-lead offset. execute() only
+    # reports the configured base for telemetry/validation.
     return NodeResult(
         handle="default",
-        telemetry={"delay_seconds": seconds, "amount": cfg.amount, "unit": cfg.unit},
+        telemetry={"delay_seconds": seconds, "amount": cfg.amount, "unit": cfg.unit, "jitter_pct": cfg.jitter_pct},
     )
 
 

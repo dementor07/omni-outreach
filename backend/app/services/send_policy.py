@@ -21,6 +21,9 @@ Conventions (shared with the rest of the codebase):
 
 from __future__ import annotations
 
+import hashlib
+import random
+
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timedelta
 from typing import Any, Literal
@@ -197,3 +200,31 @@ def increment_claim_id(command_id: str) -> str:
     confirmed send. One claim per command → at-least-once Kafka redelivery of the
     same 'sent' transition increments the counter exactly once."""
     return f"send-count:{command_id}"
+
+
+# ── delay jitter (anti-pattern-detection) ────────────────────────────────────
+
+
+def jittered_seconds(base_seconds: float, jitter_pct: int, seed_key: str) -> float:
+    """A flow.delay held for a DETERMINISTICALLY-jittered duration.
+
+    Fixed inter-message intervals (exactly 3.00 days every time) are a robotic
+    signature LinkedIn's automation detection flags. Spreading each lead's wait
+    by ±``jitter_pct`` percent breaks that regularity while keeping the average
+    cadence the operator configured.
+
+    Deterministic on ``seed_key`` (``"<lead_id>:<node_id>"``): the SAME lead at
+    the SAME delay node always computes the SAME jitter, so a Kafka/Flink
+    at-least-once redelivery re-holds for the identical duration instead of
+    drifting the timer. Different leads get independent offsets, so a cohort
+    seeded together does not release in lockstep.
+
+    jitter_pct<=0 or a zero base returns the base unchanged (backward-compatible).
+    """
+    if jitter_pct <= 0 or base_seconds <= 0:
+        return float(base_seconds)
+    pct = min(100, int(jitter_pct))
+    digest = hashlib.sha256(seed_key.encode("utf-8")).hexdigest()
+    rng = random.Random(int(digest, 16))
+    factor = 1.0 + rng.uniform(-pct / 100.0, pct / 100.0)
+    return float(base_seconds) * factor
