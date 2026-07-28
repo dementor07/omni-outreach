@@ -53,6 +53,7 @@ LOCALLY_RESOLVED = {
     "source.csv",         # self-contained: does its own fetch, emits projection events
     "source.sheets",      # SHEETS-001: same pattern — fetches a Google Sheet, emits contact.created
     "source.producthunt", # PH-001: same pattern — pulls PH makers via GraphQL, emits contact.created
+    "enrich.profile_personalize",  # self-contained: Unipile profile/posts + website in-process, emits lead.custom_fields_updated
     "source.webhook_in",  # passive declaration (listener lives in an HTTP route)
 }
 

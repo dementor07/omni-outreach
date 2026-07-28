@@ -161,6 +161,14 @@ class UnipileClient:
             params["cursor"] = cursor
         return await self._post("linkedin/search", params=params, json_body=body)
 
+    async def member_profile(self, account_id: str, public_id: str) -> Any:
+        """A LinkedIn member's profile (headline, summary/about, location, provider_id)."""
+        return await self._get(f"users/{public_id}", params={"account_id": account_id})
+
+    async def member_posts(self, account_id: str, provider_id: str, *, limit: int = 10) -> Any:
+        """A member's recent posts (newest first) — used for recency-gated personalization."""
+        return await self._get(f"users/{provider_id}/posts", params={"account_id": account_id, "limit": limit})
+
     async def company_profile(self, account_id: str, company_id: str) -> Any:
         return await self._get(f"linkedin/company/{company_id}", params={"account_id": account_id})
 
