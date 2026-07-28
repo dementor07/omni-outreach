@@ -67,14 +67,14 @@ class UnipileClient:
                 row = await fetch_one(
                     "SELECT credentials_encrypted FROM omni_connections "
                     "WHERE workspace_id=$1 AND provider='unipile' AND name=$2 "
-                    "ORDER BY created_at DESC LIMIT 1",
+                    "ORDER BY connected_at DESC NULLS LAST LIMIT 1",
                     workspace_id, connection_name,
                 )
             else:
                 row = await fetch_one(
                     "SELECT credentials_encrypted FROM omni_connections "
                     "WHERE workspace_id=$1 AND provider='unipile' "
-                    "ORDER BY created_at DESC LIMIT 1",
+                    "ORDER BY connected_at DESC NULLS LAST LIMIT 1",
                     workspace_id,
                 )
         if not row:
