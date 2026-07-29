@@ -30,7 +30,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 
 from app.config import settings
 from app.db import execute, fetch_all, fetch_one, system_scope
-from app.services import bus, event_resume, reply_classifier
+from app.services import bus, event_resume, inbound_reply, reply_classifier
 
 router = APIRouter()
 
@@ -430,50 +430,23 @@ async def receive_unipile_webhook(
         text = msg.get("text") or msg.get("body") or body.get("text") or ""
         if not linkedin_url:
             return {"accepted": True, "kind": "message", "matched": False}
-        # Resolve the contact + wake parked leads on 'replied' (mirrors receive_reply
-        # without re-importing it — same SM-8 contract).
-        async with system_scope():
-            contact = await fetch_one(
-                "SELECT id FROM omni_contacts WHERE workspace_id=$1 AND linkedin_url=$2 LIMIT 1",
-                ws, linkedin_url,
-            )
-        if not contact:
+        # Resolve the contact + run the shared SM-8 reply path (classify,
+        # message.received, opt-out suppression, wake parked leads on 'replied').
+        # Same implementation the reply POLLER uses — the poller is the reliable
+        # detector; this push is best-effort (Unipile's LinkedIn message payload
+        # has not reliably carried a resolvable sender for us).
+        contact_id = await inbound_reply.resolve_contact_by_linkedin(ws, linkedin_url)
+        if not contact_id:
             return {"accepted": True, "kind": "message", "matched": False}
-        contact_id = str(contact["id"])
-        correlation_id = str(uuid.uuid4())
-        intent, confidence, reason, source = reply_classifier.classify_reply(text)
-        await bus.publish_event(
-            workspace_id=ws,
-            event_type="message.received",
-            entity_type="message",
-            entity_id=str(uuid.uuid4()),
-            payload={
-                "contact_id": contact_id,
-                "channel": "linkedin",
-                "body": text,
-                "classification": intent,
-                "confidence": confidence,
-                "metadata": {"reason": reason, "classifier_source": source},
-            },
-            correlation_id=correlation_id,
+        msg_id = msg.get("id") or msg.get("message_id")
+        res = await inbound_reply.process_reply(
+            ws, contact_id, text, channel="linkedin",
+            source_message_id=str(msg_id) if msg_id else None,
         )
-        async with system_scope():
-            waiting = await fetch_all(
-                "SELECT id, current_node_id FROM omni_leads "
-                "WHERE workspace_id=$1 AND contact_id=$2 AND status='waiting' AND current_node_id IS NOT NULL",
-                ws, contact_id,
-            )
-        for lead in waiting:
-            transition = {
-                "lead_id": str(lead["id"]),
-                "source_node_id": str(lead["current_node_id"]),
-                "handle": "replied",
-                "event_type": "transition",
-                "metadata": {"workspace_id": ws, "correlation_id": correlation_id, "reply_intent": intent},
-                "occurred_at": datetime.now(UTC).isoformat(),
-            }
-            await bus._producer.send_and_wait(bus.TRANSITIONS_TOPIC, value=transition, key=str(lead["id"]))  # type: ignore[union-attr]
-        return {"accepted": True, "kind": "message", "matched": True, "intent": intent, "woke_leads": len(waiting)}
+        return {
+            "accepted": True, "kind": "message", "matched": True,
+            "intent": res["intent"], "woke_leads": res["woke_leads"],
+        }
 
     # Unrecognised event type — accept (so Unipile doesn't retry) but no-op.
     return {"accepted": True, "kind": "ignored", "event": event}

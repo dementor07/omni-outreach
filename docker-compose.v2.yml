@@ -219,6 +219,30 @@ services:
       disable: true
     restart: unless-stopped
 
+  # Unipile inbound-sync worker (reply detection). Unipile push webhooks proved
+  # unreliable for LinkedIn (a real reply fired the webhook but carried no
+  # resolvable sender, so no lead woke). This polls every in-flight thread
+  # (leads waiting with a custom_fields.chat_id) and halts the sequence when the
+  # newest message is inbound (is_sender==0) — the reliable reply-stop path.
+  # Time-driven, no Kafka consumer; publishes message.received + the 'replied'
+  # transition via the shared inbound_reply path.
+  unipile-sync-v2:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+      args: *build-args
+    container_name: omni-v2-unipile-sync
+    command: python -m app.execution.unipile_sync_worker
+    env_file:
+      - .env
+    environment:
+      <<: *secret-env
+    networks:
+      - omni-outreach_default
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
   # Outbound webhook fan-out worker (N8N-001). Consumes omni.events, filters to
   # the customer-facing allow-list (webhook_events.ALLOWED_EVENTS), and delivers
   # HMAC-signed, SSRF-guarded envelopes to each workspace's webhook subscriptions
