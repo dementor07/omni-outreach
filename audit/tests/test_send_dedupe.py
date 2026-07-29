@@ -174,6 +174,40 @@ async def test_linkedin_dedupe_matches_legacy_combined_token(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_dedupe_excludes_own_lead_so_sequence_followups_send(monkeypatch):
+    """SEQ-DEDUP-001: a sequence's own follow-ups must NOT be dedupe-skipped by
+    the sequence's earlier sends. The guard must exclude the current lead_id from
+    the ledger query (both scopes), so it only suppresses OTHER leads/campaigns."""
+    from app.execution import transition_worker as tw
+
+    seen: dict = {}
+
+    async def fake_fetch_one(sql, *args):
+        seen["sql"] = sql
+        seen["args"] = args
+        return None
+
+    monkeypatch.setattr(tw, "fetch_one", fake_fetch_one)
+
+    # channel scope: last positional arg is the current lead id to exclude.
+    await tw._dedupe_send(
+        "ws", {"id": "leadX", "contact_id": "c1"}, {"id": "c1"},
+        {"id": "n1", "config": {"dedupe_action": "skip_step", "dedupe_scope": "channel"}},
+        "channel.linkedin_dm", "wf1", "corr",
+    )
+    assert "lead_id <> $" in seen["sql"], "dedupe query must exclude the current lead"
+    assert "leadX" in seen["args"], "current lead id must be passed to exclude own sends"
+
+    # campaign scope also excludes the current lead.
+    await tw._dedupe_send(
+        "ws", {"id": "leadY", "contact_id": "c1"}, {"id": "c1"},
+        {"id": "n1", "config": {"dedupe_action": "skip_step", "dedupe_scope": "campaign"}},
+        "channel.linkedin_dm", "wf1", "corr",
+    )
+    assert "lead_id <> $" in seen["sql"] and "leadY" in seen["args"]
+
+
+@pytest.mark.asyncio
 async def test_contactless_lead_cannot_be_deduped(monkeypatch):
     # a discovered person before a contact row exists has no contact_id — there's
     # nothing to compare a prior send to, so the send proceeds (never blocks blind).

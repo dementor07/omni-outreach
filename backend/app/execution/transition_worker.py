@@ -986,23 +986,28 @@ async def _dedupe_send(
     # (an invite no longer blocks a DM).
     channels = [channel, "linkedin"] if channel.startswith("linkedin_") else [channel]
     scope = str(cfg.get("dedupe_scope") or "channel").lower()
+    # SEQ-DEDUP-001: dedupe suppresses re-contacting someone ANOTHER lead/campaign
+    # already messaged — NOT a sequence's own follow-ups. Without excluding this
+    # lead's own prior sends, M1's send blocks M2 (same contact, same channel) and
+    # every follow-up in a sequence is silently skipped. Exclude the current lead.
+    this_lead_id = str(lead["id"])
     async with system_scope():
         if scope == "campaign" and workflow_id:
             row = await fetch_one(
                 "SELECT 1 FROM omni_send_outcomes "
                 "WHERE workspace_id=$1 AND contact_id=$2 AND channel = ANY($3::text[]) "
-                "AND workflow_id=$4 AND status='sent' LIMIT 1",
-                workspace_id, str(contact_id), channels, workflow_id,
+                "AND workflow_id=$4 AND status='sent' AND lead_id <> $5 LIMIT 1",
+                workspace_id, str(contact_id), channels, workflow_id, this_lead_id,
             )
         else:
             row = await fetch_one(
                 "SELECT 1 FROM omni_send_outcomes "
                 "WHERE workspace_id=$1 AND contact_id=$2 AND channel = ANY($3::text[]) "
-                "AND status='sent' LIMIT 1",
-                workspace_id, str(contact_id), channels,
+                "AND status='sent' AND lead_id <> $4 LIMIT 1",
+                workspace_id, str(contact_id), channels, this_lead_id,
             )
     if not row:
-        return False  # never messaged on this channel — proceed.
+        return False  # never messaged by ANOTHER lead on this channel — proceed.
 
     log.info(
         "lead %s: DEDUP-SEND-001 skip — contact %s already messaged on %s (scope=%s, action=%s)",
