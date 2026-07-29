@@ -265,15 +265,21 @@ services:
     restart: unless-stopped
 
   # Submits the pyflink orchestrator job (outreach.results -> outreach.transitions)
-  # to the shared Flink jobmanager from the master stack. Idempotent enough:
-  # if the job is already registered a duplicate submit fails and we tail; the
-  # registered job survives. Restart re-submits if the cluster was wiped.
+  # to the shared Flink jobmanager from the master stack. IDEMPOTENT SUBMIT:
+  # Flink does NOT reject a same-named duplicate `flink run`, so every restart of
+  # this container used to add ANOTHER copy of the job — 4 accumulated once and
+  # oversubscribed the task slots, making result->transition routing and
+  # flow.delay timers run minutes late. Guard it: if a job is already RUNNING on
+  # the cluster (this cluster only ever runs the orchestrator), skip the submit
+  # and just tail. Only a genuinely empty/wiped cluster re-submits. `grep`
+  # matches "status":"RUNNING" via `.` for the quote chars so the command needs
+  # no nested double-quotes (compose scalar friendly).
   orchestrator-v2:
     build:
       context: ./backend-flink
       args: *build-args
     container_name: omni-v2-orchestrator
-    command: sh -lc "until curl -fsS http://flink-jobmanager:8081/overview >/dev/null 2>&1; do echo waiting for jobmanager; sleep 3; done && (flink run -d -m flink-jobmanager:8081 -py /opt/flink/usrlib/orchestrator.py || echo 'submit failed (job may already be running)') && tail -f /dev/null"
+    command: sh -lc "until curl -fsS http://flink-jobmanager:8081/overview >/dev/null 2>&1; do echo waiting for jobmanager; sleep 3; done && if curl -fsS http://flink-jobmanager:8081/jobs 2>/dev/null | grep -qE 'status.:.RUNNING'; then echo orchestrator already RUNNING - skipping submit; else echo submitting orchestrator; flink run -d -m flink-jobmanager:8081 -py /opt/flink/usrlib/orchestrator.py || echo submit failed; fi && tail -f /dev/null"
     environment:
       - KAFKA_BROKERS=redpanda:9092
     networks:
