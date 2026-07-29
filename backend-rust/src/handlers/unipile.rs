@@ -186,11 +186,16 @@ pub async fn handle_linkedin_invite(command: &ActionCommand) -> ExecutionResult 
             // merges the `custom_fields` envelope). The invite-accepted webhook
             // matches a parked lead by custom_fields.provider_id — without this
             // the precise match has nothing to key on.
+            // invite_account_id: the SEAT that sent this invite. LinkedIn network
+            // distance is relative to the querying account, so the acceptance
+            // POLLER (unipile_sync_worker) must re-check the profile through THIS
+            // seat to see the connection flip to FIRST_DEGREE — push webhooks for
+            // new_relation proved unreliable, so polling is the reliable advance.
             common::ok(
                 command,
                 json!({"provider": "unipile", "channel": "linkedin_invite", "provider_id": provider_id}),
                 Some("invite_sent"),
-                json!({"custom_fields": {"invited_at": "now", "provider_id": provider_id}}),
+                json!({"custom_fields": {"invited_at": "now", "provider_id": provider_id, "invite_account_id": unipile_account_id}}),
             )
         }
         Ok(r) => {

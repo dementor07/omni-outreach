@@ -123,3 +123,70 @@ def test_contact_already_woken_this_cycle_is_skipped_but_stamped():
     woke, calls, stamped = _run(_LEAD, items, seen_contacts={"c1"})
     assert woke == 0 and calls == []
     assert "mX" in stamped
+
+
+# ── acceptance sweep — advance parked invites when the connection lands ────────
+
+
+class _ProfClient:
+    def __init__(self, prof):
+        self._prof = prof
+
+    async def member_profile(self, account_id, public_id):
+        return self._prof
+
+
+def _run_accept(lead, prof):
+    """Drive _check_acceptance with resume_on_signal stubbed; return
+    (resumed_count, list-of-resume-calls)."""
+    calls: list = []
+
+    async def fake_resume(ws, lead_id, signal, **kw):
+        calls.append({"ws": ws, "lead_id": lead_id, "signal": signal})
+        return True
+
+    async def go():
+        orig = usw.event_resume.resume_on_signal
+        usw.event_resume.resume_on_signal = fake_resume
+        try:
+            import asyncio as _a
+            return await usw._check_acceptance(
+                _ProfClient(prof), "ws1", lead, sem=_a.Semaphore(2)
+            )
+        finally:
+            usw.event_resume.resume_on_signal = orig
+
+    return asyncio.run(go()), calls
+
+
+_INVITE_LEAD = {
+    "id": "il1", "workspace_id": "ws1", "account_id": "seatA",
+    "linkedin_url": "https://www.linkedin.com/in/navin-john-antony-a58a00335/",
+}
+
+
+def test_public_id_strips_trailing_slash_and_lowercases():
+    assert usw._public_id("https://www.linkedin.com/in/Navin-John/") == "navin-john"
+    assert usw._public_id(None) is None
+
+
+def test_first_degree_resumes_the_parked_invite():
+    resumed, calls = _run_accept(_INVITE_LEAD, {"network_distance": "FIRST_DEGREE"})
+    assert resumed == 1
+    assert calls and calls[0]["signal"] == "invite_accepted" and calls[0]["lead_id"] == "il1"
+
+
+def test_is_relationship_true_also_resumes():
+    resumed, calls = _run_accept(_INVITE_LEAD, {"is_relationship": True})
+    assert resumed == 1 and calls
+
+
+def test_not_connected_does_not_resume():
+    # 2nd-degree / pending invite → no advance, no guess.
+    resumed, calls = _run_accept(_INVITE_LEAD, {"network_distance": "SECOND_DEGREE", "is_relationship": False})
+    assert resumed == 0 and calls == []
+
+
+def test_missing_distance_is_not_treated_as_accepted():
+    resumed, calls = _run_accept(_INVITE_LEAD, {"first_name": "Navin"})
+    assert resumed == 0 and calls == []

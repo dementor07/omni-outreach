@@ -42,17 +42,22 @@ from app.db import (
     init_pool,
     system_scope,
 )
-from app.services import bus, inbound_reply
+from app.services import bus, event_resume, inbound_reply
 from app.services.unipile_client import UnipileClient, UnipileError, UnipileNotConfigured
 
 log = logging.getLogger("unipile_sync")
 
 # How often to sweep in-flight threads for new inbound messages.
 POLL_INTERVAL_S = int(os.getenv("REPLY_POLL_INTERVAL_S", "60"))
+# How often to re-check parked invites for acceptance. Slower than replies: a
+# lead can sit at invite_accepted for days, so a tight cadence would fire an
+# enormous number of profile reads per lead. 5 min is ample for a connection.
+ACCEPT_INTERVAL_S = int(os.getenv("ACCEPT_POLL_INTERVAL_S", "300"))
 # Cap concurrent Unipile reads per workspace (the client already backs off 429s).
 _MAX_CONCURRENCY = int(os.getenv("REPLY_POLL_CONCURRENCY", "5"))
 # Only the last few messages matter — we only ever inspect the newest.
 _MESSAGES_LIMIT = 3
+_INVITE_NODE = "event.invite_accepted"
 
 
 async def _waiting_leads_with_chats() -> list[dict]:
@@ -179,13 +184,120 @@ async def run_once() -> None:
         log.info("[unipile_sync] swept %d thread(s); woke %d lead(s)", len(leads), total_woken)
 
 
+# ── Acceptance sweep — advance leads parked at event.invite_accepted ──────────
+
+
+def _public_id(url: str | None) -> str | None:
+    """The slug after /in/ (mirrors _public_id_from_linkedin_url in webhooks_in
+    and public_id_from_linkedin_url in unipile.rs)."""
+    if not url:
+        return None
+    slug = url.strip().rstrip("/").split("/in/")[-1].strip().lower()
+    return slug or None
+
+
+async def _invite_leads() -> list[dict]:
+    """Every lead parked 'waiting' at event.invite_accepted that we can re-check
+    — it must carry the inviting seat (custom_fields.invite_account_id) and a
+    linkedin_url to resolve the member. Legacy invites (pre invite_account_id)
+    are skipped here; they still rely on the push webhook."""
+    async with system_scope():
+        return list(
+            await fetch_all(
+                """
+                SELECT l.id,
+                       l.workspace_id,
+                       l.custom_fields->>'invite_account_id' AS account_id,
+                       c.linkedin_url
+                FROM omni_leads l
+                JOIN omni_workflow_nodes n ON n.id = l.current_node_id
+                JOIN omni_contacts c ON c.id = l.contact_id
+                WHERE l.status = 'waiting'
+                  AND n.node_type = $1
+                  AND COALESCE(l.custom_fields->>'invite_account_id', '') <> ''
+                  AND COALESCE(c.linkedin_url, '') <> ''
+                """,
+                _INVITE_NODE,
+            )
+        )
+
+
+async def _check_acceptance(
+    client: UnipileClient, ws: str, lead: dict, *, sem: asyncio.Semaphore
+) -> int:
+    """Re-check one parked invite through the inviting seat; resume the lead when
+    the recipient is now a first-degree connection. Returns 1 if resumed."""
+    public_id = _public_id(lead["linkedin_url"])
+    if not public_id:
+        return 0
+    async with sem:
+        try:
+            prof = await client.member_profile(lead["account_id"], public_id)
+        except UnipileError as e:
+            log.warning("[unipile_sync] profile read failed for %s: %s", public_id, e)
+            return 0
+    if not isinstance(prof, dict):
+        return 0
+    # Accept either signal Unipile exposes; require an explicit positive (never
+    # guess a missing field into an acceptance).
+    accepted = prof.get("network_distance") == "FIRST_DEGREE" or prof.get("is_relationship") is True
+    if not accepted:
+        return 0
+    resumed = await event_resume.resume_on_signal(ws, str(lead["id"]), "invite_accepted")
+    if resumed:
+        log.info("[unipile_sync] invite accepted (polled) lead=%s public_id=%s", lead["id"], public_id)
+    return 1 if resumed else 0
+
+
+async def run_acceptance_once() -> None:
+    """One acceptance sweep: re-check every parked invite and advance the ones
+    that have connected."""
+    leads = await _invite_leads()
+    if not leads:
+        return
+    by_ws: dict[str, list[dict]] = {}
+    for lead in leads:
+        by_ws.setdefault(str(lead["workspace_id"]), []).append(lead)
+    total = 0
+    for ws, ws_leads in by_ws.items():
+        try:
+            client = await UnipileClient.for_workspace(ws)
+        except UnipileNotConfigured:
+            continue
+        except UnipileError as e:
+            log.warning("[unipile_sync] client init failed for ws %s: %s", ws, e)
+            continue
+        sem = asyncio.Semaphore(_MAX_CONCURRENCY)
+        results = await asyncio.gather(
+            *(_check_acceptance(client, ws, lead, sem=sem) for lead in ws_leads),
+            return_exceptions=True,
+        )
+        for r in results:
+            if isinstance(r, Exception):
+                log.exception("[unipile_sync] acceptance check errored", exc_info=r)
+            else:
+                total += r
+    if total:
+        log.info("[unipile_sync] acceptance sweep: advanced %d lead(s)", total)
+
+
 async def _poll_loop(stop: asyncio.Event) -> None:
+    """Drive two cadences off one loop: replies every POLL_INTERVAL_S, acceptance
+    every ACCEPT_INTERVAL_S (throttled — parked invites live for days)."""
+    last_accept = 0.0
     while not stop.is_set():
         try:
             await run_once()
         except Exception:  # noqa: BLE001
             # One bad sweep must never kill the loop.
-            log.exception("[unipile_sync] sweep errored; continuing")
+            log.exception("[unipile_sync] reply sweep errored; continuing")
+        now = asyncio.get_running_loop().time()
+        if now - last_accept >= ACCEPT_INTERVAL_S:
+            last_accept = now
+            try:
+                await run_acceptance_once()
+            except Exception:  # noqa: BLE001
+                log.exception("[unipile_sync] acceptance sweep errored; continuing")
         try:
             await asyncio.wait_for(stop.wait(), timeout=POLL_INTERVAL_S)
         except TimeoutError:
@@ -205,7 +317,10 @@ async def run() -> None:
         except NotImplementedError:
             pass
 
-    log.info("[unipile_sync] polling in-flight threads every %ds", POLL_INTERVAL_S)
+    log.info(
+        "[unipile_sync] replies every %ds, acceptance every %ds",
+        POLL_INTERVAL_S, ACCEPT_INTERVAL_S,
+    )
     try:
         await _poll_loop(stop)
     finally:
