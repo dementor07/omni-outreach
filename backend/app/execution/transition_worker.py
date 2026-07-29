@@ -35,7 +35,8 @@ import app.nodes as noderegistry
 from app.config import settings
 from app.db import acquire, assert_rls_enforcing_role, close_pool, execute, fetch_all, fetch_one, init_pool, system_scope
 from app.execution import commands
-from app.services import bus, company_kg, email_verification, send_policy, suppression
+from app.services import bus, company_kg, email_verification, inbound_reply, send_policy, suppression
+from app.services.unipile_client import UnipileClient, UnipileError, UnipileNotConfigured
 
 log = logging.getLogger("transitions")
 
@@ -1030,6 +1031,74 @@ async def _dedupe_send(
     return True
 
 
+async def _reply_gate_send(
+    workspace_id: str,
+    lead: dict,
+    node: dict,
+    node_type: str,
+    correlation_id: str | None,
+) -> bool:
+    """REPLY-GATE-001: the HARD reply-stop, checked LIVE at the moment of sending.
+
+    The reply poller (unipile_sync_worker) halts a waiting lead within its poll
+    interval, but that leaves a race: a reply can land in the gap before the next
+    sweep, and if the operator approves the follow-up in that same gap the
+    follow-up ships AFTER the human already answered — exactly what gets a seat
+    flagged. This gate removes the race by re-checking Unipile's AUTHORITATIVE
+    thread state at the instant of the send: if the newest message in the thread
+    is inbound (is_sender==0), the contact has replied since our last message, so
+    we DO NOT send — we record the reply and halt the sequence. Poll cadence
+    becomes irrelevant to the send decision; the poller is just the "end the wait
+    early" optimization, this is the hard stop.
+
+    Applies only to a LinkedIn DM with an already-open thread
+    (custom_fields.chat_id, set by the first DM) — a first DM has no thread, so
+    there is nothing to have replied to. Fail-OPEN on a Unipile read error: the
+    poller + human approval gate are backstops, and a Unipile outage would fail
+    the send itself anyway. Returns True when it SUPPRESSED the send (caller must
+    not send)."""
+    if node_type != "channel.linkedin_dm":
+        return False
+    chat_id = (lead.get("custom_fields") or {}).get("chat_id")
+    if not chat_id:
+        return False  # first DM opening the thread — nothing prior to reply to
+    try:
+        client = await UnipileClient.for_workspace(workspace_id)
+        resp = await client.list_chat_messages(str(chat_id), limit=1)
+    except (UnipileError, UnipileNotConfigured) as e:
+        log.warning(
+            "[reply-gate] lead %s: could not verify thread %s (%s) — proceeding; poller is the backstop",
+            lead["id"], chat_id, e,
+        )
+        return False
+    items = resp.get("items") if isinstance(resp, dict) else None
+    if not items:
+        return False
+    newest = items[0]
+    # is_sender: 1 = our seat sent it, 0 = inbound. Require an EXPLICIT inbound
+    # flag — never guess a missing field into a reply, never read our own send as one.
+    if newest.get("is_sender") != 0:
+        return False  # newest is our own outbound — no pending reply, proceed
+    # The contact has replied since our last message → suppress this send + stop.
+    contact_id = lead.get("contact_id")
+    msg_id = newest.get("id")
+    if contact_id:
+        # Record the reply + wake any OTHER waiting leads for this contact (a
+        # sibling sequence). Idempotent on the provider message id, so the poller
+        # catching the same reply later collapses to one message.received.
+        await inbound_reply.process_reply(
+            workspace_id, str(contact_id), newest.get("text") or "",
+            channel="linkedin", source_message_id=str(msg_id) if msg_id else None,
+            correlation_id=correlation_id,
+        )
+    await _terminalize_lead(workspace_id, str(lead["id"]), "completed", correlation_id)
+    log.info(
+        "[reply-gate] lead %s: send SUPPRESSED — contact replied (newest thread msg inbound); sequence halted",
+        lead["id"],
+    )
+    return True
+
+
 async def _gate_send(
     workspace_id: str,
     lead: dict,
@@ -1438,6 +1507,17 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
         # or terminalizes the lead (end_lead); returns True when it handled it.
         if await _dedupe_send(
             workspace_id, lead, contact, node, node_type, workflow_id, correlation_id
+        ):
+            return
+
+        # REPLY-GATE-001: the HARD reply-stop. Before a LinkedIn follow-up DM
+        # ships, re-check the thread's authoritative state — if the contact has
+        # replied since our last message, suppress the send and halt. This closes
+        # the poller's ≤interval race (a reply landing right as the send fires):
+        # the send decision itself refuses, regardless of poll latency or an
+        # operator approving in the gap.
+        if await _reply_gate_send(
+            workspace_id, lead, node, node_type, correlation_id
         ):
             return
 
