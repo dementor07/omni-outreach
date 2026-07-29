@@ -16,6 +16,7 @@ Resolving does two things:
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
 from typing import Literal
@@ -24,7 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.auth import AuthContext, get_current_workspace
-from app.db import fetch_all, fetch_one
+from app.db import execute, fetch_all, fetch_one, system_scope
 from app.services import bus
 from app.services.bus import publish_event
 
@@ -99,7 +100,7 @@ async def resolve_approval(
     ctx: AuthContext = Depends(get_current_workspace),
 ) -> dict:
     row = await fetch_one(
-        "SELECT id, lead_id, node_id, status, correlation_id FROM omni_approvals WHERE id = $1",
+        "SELECT id, lead_id, node_id, status, correlation_id, draft FROM omni_approvals WHERE id = $1",
         approval_id,
     )
     if not row:
@@ -108,6 +109,26 @@ async def resolve_approval(
         raise HTTPException(status_code=409, detail=f"approval already {row['status']}")
 
     correlation_id = str(row["correlation_id"]) if row.get("correlation_id") else None
+
+    # APPROVAL-EDIT-001: carry the REVIEWED/EDITED draft onto the lead so the
+    # downstream send renders the operator-approved text, not the original compose
+    # output. flow.human_approval stores the draft under its draft_variable
+    # (default 'ai_draft'); the channel template ({{ai_draft}}) reads that from
+    # custom_fields. Without this, editing a draft in the queue was a no-op — the
+    # unedited message shipped. Written SYNCHRONOUSLY before the resume transition
+    # so the DM command (built after the resume) sees the approved text.
+    if body.handle == "approved" and row.get("draft") and row.get("node_id"):
+        node = await fetch_one(
+            "SELECT config FROM omni_workflow_nodes WHERE id=$1 AND workspace_id=$2",
+            row["node_id"], ctx.workspace_id,
+        )
+        draft_var = ((node or {}).get("config") or {}).get("draft_variable") or "ai_draft"
+        async with system_scope():
+            await execute(
+                "UPDATE omni_leads SET custom_fields = COALESCE(custom_fields,'{}'::jsonb) || $1::jsonb, "
+                "updated_at = NOW() WHERE id=$2 AND workspace_id=$3",
+                json.dumps({draft_var: row["draft"]}), str(row["lead_id"]), ctx.workspace_id,
+            )
 
     # 1. Projection event: flips the omni_approvals row to the outcome.
     await publish_event(
