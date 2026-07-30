@@ -226,6 +226,25 @@ async def _load_account_by_id(workspace_id: str, account_id: str) -> dict[str, A
     return dict(row) if row else None
 
 
+async def _load_account_by_external_identity(
+    workspace_id: str, external_identity: str, channel_kind: str
+) -> dict[str, Any] | None:
+    """Load a seat by its PROVIDER-side id (the Unipile account id). SEAT-PIN-001:
+    a LinkedIn follow-up DM must ship from the SAME seat that sent the accepted
+    invite — RELGATE only sees that seat as a 1st-degree connection, so any other
+    seat's DM is held/lost. The invite handler stamps custom_fields.invite_account_id
+    (the Unipile account id = external_identity here), and this resolves it back to
+    the seat row so the send pins to it instead of the pool's LRU rotation."""
+    async with system_scope():
+        row = await fetch_one(
+            "SELECT id, connection_id, channel_kind, external_identity, status "
+            "FROM omni_sending_accounts WHERE workspace_id=$1 AND external_identity=$2 "
+            "AND channel_kind=$3 LIMIT 1",
+            workspace_id, external_identity, channel_kind,
+        )
+    return dict(row) if row else None
+
+
 async def _load_accounts_by_connection_name(
     workspace_id: str, connection_name: str, channel_kind: str
 ) -> list[dict[str, Any]]:
@@ -289,6 +308,7 @@ async def _resolve_sending_account(
     node_account_id: str | None,
     account_pool: str | None,
     connection_name: str | None = None,
+    pinned_external_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Pick the sending account for this send, or None to fall back to the bare
     connection bundle. Precedence: node pin → campaign pool (LRU) → an LRU seat
@@ -319,6 +339,18 @@ async def _resolve_sending_account(
         if acct and acct.get("channel_kind") == channel_kind and acct.get("status") in ("active", "warming"):
             return acct
         return None
+
+    # 1b. SEAT-PIN-001: a LinkedIn DM must ship from the seat that sent the accepted
+    #     invite — RELGATE only sees THAT seat as a 1st-degree connection, so the
+    #     pool's LRU rotation would pick a stranger seat and the send gets held
+    #     (not_connected). When the lead carries the inviting seat, pin to it,
+    #     overriding the pool. Single-seat campaigns are unaffected (one seat = the
+    #     pin). If the pinned seat is gone/paused, fall through rather than block —
+    #     RELGATE still holds a genuine non-connection downstream.
+    if pinned_external_id and channel == ChannelType.LINKEDIN_DM:
+        acct = await _load_account_by_external_identity(workspace_id, pinned_external_id, channel_kind)
+        if acct and acct.get("status") in ("active", "warming"):
+            return acct
 
     # 2. Campaign pool: LRU among eligible. account_pool gates whether the pool is
     #    consulted at all — only "campaign"/"round_robin" rotate; explicit "single"
@@ -436,6 +468,18 @@ async def build_command(
     is stamped so the transition worker increments that account's rate counter on
     the confirmed send. When no account resolves, the legacy connection_name path
     runs unchanged — saved graphs that only set connection_name see zero change."""
+    # SEAT-PIN-001: for a LinkedIn DM, pin to the seat that sent the accepted
+    # invite (invite_account_id, stamped on the lead by the invite handler) so the
+    # follow-up ships from the CONNECTED seat instead of a rotated stranger seat.
+    _cf = lead.get("custom_fields") or {}
+    if isinstance(_cf, str):
+        try:
+            _cf = json.loads(_cf)
+        except (ValueError, TypeError):
+            _cf = {}
+    pinned_external_id = (
+        _cf.get("invite_account_id") if channel == ChannelType.LINKEDIN_DM else None
+    )
     account = await _resolve_sending_account(
         workspace_id=workspace_id,
         workflow_id=str(lead.get("workflow_id")) if lead.get("workflow_id") else None,
@@ -443,6 +487,7 @@ async def build_command(
         node_account_id=sending_account_id,
         account_pool=account_pool,
         connection_name=connection_name,
+        pinned_external_id=pinned_external_id,
     )
     sending_account_id_used: str | None = None
     if account is not None:
