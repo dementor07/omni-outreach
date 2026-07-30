@@ -65,6 +65,27 @@ def test_event_nodes_park_and_declare_timeout():
         )
 
 
+def test_human_approval_parks_with_timeout():
+    """flow.human_approval must park AND declare timeout_seconds so an un-actioned
+    approval auto-rejects (the 'timeout' handle) instead of stranding 'waiting'
+    forever. Regression: timeout_hours was decorative — the node emitted no
+    timeout_seconds, so the worker's park-escape never armed."""
+    discover()
+    manifest, execute = get("flow.human_approval")
+    handles = {h.name for h in manifest.output_handles}
+    assert {"approved", "rejected", "timeout"} <= handles, "must expose the timeout handle"
+    ctx = NodeContext(
+        workspace_id="ws", workflow_id="wf", node_id="n1",
+        config={"prompt": "review this", "timeout_hours": 48},
+        lead={"id": "lead-1", "contact_id": "c1", "custom_fields": {}}, correlation_id="corr",
+    )
+    result = _run(execute(ctx))
+    assert result.park is True, "human_approval must park the lead"
+    assert (result.telemetry or {}).get("timeout_seconds") == 48 * 3600, (
+        "human_approval must declare timeout_seconds (timeout_hours*3600) to arm the escape"
+    )
+
+
 def test_no_node_emits_dead_wait_requested():
     """The wait.requested event (no consumer) must be gone from every event node."""
     for fname in ("email_opened.py", "link_clicked.py", "invite_accepted.py"):

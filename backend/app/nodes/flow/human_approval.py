@@ -98,11 +98,20 @@ async def execute(ctx: NodeContext) -> NodeResult:
     # actually waited for a human. With park=True the transition worker suspends
     # the lead (status='waiting'); it resumes only when the resolve endpoint
     # emits approval.resolved with the operator's chosen handle.
+    # timeout_seconds arms the transition worker's park-timeout escape (the same
+    # mechanism event.* nodes use): if no operator resolves the approval within
+    # timeout_hours, a delayed 'timeout' transition fires so the lead auto-rejects
+    # instead of stranding 'waiting' forever. Without this the timeout_hours field
+    # was decorative — an un-actioned approval never resolved.
     return NodeResult(
         handle="approved",
         events=events,
         park=True,
-        telemetry={"correlation_id": correlation_id, "parked": True},
+        telemetry={
+            "correlation_id": correlation_id,
+            "parked": True,
+            "timeout_seconds": float(cfg.timeout_hours) * 3600.0,
+        },
     )
 
 

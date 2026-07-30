@@ -1,28 +1,23 @@
-"""Unipile inbound-sync worker — poll-based reply detection (the reliable path).
+"""Unipile inbound-sync worker — poll-based reply + acceptance detection.
 
-Unipile push webhooks proved unreliable for LinkedIn: a real reply DID fire the
-``message_received`` webhook, but the payload shape did not carry a resolvable
-sender, so the contact never matched and no lead woke — the sequence would have
-kept sending follow-ups after a human replied (exactly what gets an account
-flagged). Rather than trust push, this worker POLLS Unipile's authoritative
-thread state on an interval and fires the same SM-8 wake the webhook would have.
+Unipile push webhooks proved unreliable for LinkedIn, so we poll. But polling
+must be CHEAP (Unipile is billed per call) and QUIET (LinkedIn flags accounts
+that "overdo a mechanism" — profile views especially). So both sweeps are
+**O(seats), not O(leads)**, and neither views a profile on a timer:
 
-Detection is exact, not heuristic:
-  * a lead that has sent a DM carries ``custom_fields.chat_id`` (the DM handler
-    stamps it so follow-ups thread onto the same conversation);
-  * for every lead parked ``waiting`` with a chat_id, read the last few messages;
-  * Unipile marks each message ``is_sender`` (1 = our seat sent it, 0 = inbound).
-    If the NEWEST message is inbound (is_sender == 0) and we have not processed
-    that message id yet, the contact has replied since our last send → halt.
+  * REPLY  — one ``list_chats`` per seat surfaces which threads have unread
+             inbound (``unread_count``). We only open the handful of threads that
+             both changed AND belong to an in-flight lead, confirm the newest
+             message is inbound, and halt. (The hard guarantee is the pre-send
+             reply gate in the transition worker; this just ends the wait early.)
+  * ACCEPT — one ``list_relations`` per seat lists everyone who accepted (each
+             carries member_id + public_identifier). We match those against leads
+             parked at event.invite_accepted and advance them. NO per-lead
+             ``member_profile`` (profile view) — that was the real ban vector.
 
-Idempotency: the newest inbound message id is stamped on the lead
-(``custom_fields.reply_seen_msg_id``) before the wake, and a per-cycle guard
-fires ``process_reply`` at most once per contact — so one reply produces one
-``message.received`` and one wake even across overlapping cycles. Once woken, the
-lead leaves ``waiting`` and is no longer polled.
-
-Runs as its own container (mirrors objective_worker / ai_jobs_worker); one
-``UnipileClient`` per workspace per cycle, bounded Unipile concurrency.
+Cadences are deliberately slow and jittered (a follow-up is days away; an invite
+takes hours/days to accept), so LinkedIn/Unipile see a human trickle, not a scan.
+Runs as its own container; one ``UnipileClient`` per workspace per cycle.
 """
 
 from __future__ import annotations
@@ -31,7 +26,9 @@ import asyncio
 import json
 import logging
 import os
+import random
 import signal
+from collections import defaultdict
 
 from app.config import settings
 from app.db import (
@@ -47,167 +44,137 @@ from app.services.unipile_client import UnipileClient, UnipileError, UnipileNotC
 
 log = logging.getLogger("unipile_sync")
 
-# How often to sweep in-flight threads for new inbound messages.
-POLL_INTERVAL_S = int(os.getenv("REPLY_POLL_INTERVAL_S", "60"))
-# How often to re-check parked invites for acceptance. Slower than replies: a
-# lead can sit at invite_accepted for days, so a tight cadence would fire an
-# enormous number of profile reads per lead. 5 min is ample for a connection.
-ACCEPT_INTERVAL_S = int(os.getenv("ACCEPT_POLL_INTERVAL_S", "300"))
-# Cap concurrent Unipile reads per workspace (the client already backs off 429s).
-_MAX_CONCURRENCY = int(os.getenv("REPLY_POLL_CONCURRENCY", "5"))
-# Only the last few messages matter — we only ever inspect the newest.
-_MESSAGES_LIMIT = 3
+# Reply threads change fast but a follow-up is days out — minutes of latency are
+# harmless (the pre-send gate is the hard stop). Acceptance is slower still.
+REPLY_INTERVAL_S = int(os.getenv("REPLY_POLL_INTERVAL_S", "180"))
+ACCEPT_INTERVAL_S = int(os.getenv("ACCEPT_POLL_INTERVAL_S", "1800"))
+_JITTER_PCT = 0.25  # ±25% so the cadence isn't clockwork
+_CHATS_PER_SEAT = int(os.getenv("REPLY_CHATS_PER_SEAT", "40"))
+_RELATIONS_PER_SEAT = int(os.getenv("ACCEPT_RELATIONS_PER_SEAT", "50"))
 _INVITE_NODE = "event.invite_accepted"
 
 
-async def _waiting_leads_with_chats() -> list[dict]:
-    """Every lead parked 'waiting' that has an open chat thread, across all
-    workspaces (system-scoped read; each is re-scoped by workspace when acted on).
-
-    ``chat_id`` is the LinkedIn/WhatsApp thread key stamped by the DM handler.
-    A lead with no chat has sent no message, so there is nothing to reply to.
-    """
-    async with system_scope():
-        return list(
-            await fetch_all(
-                """
-                SELECT l.id,
-                       l.workspace_id,
-                       l.contact_id,
-                       l.custom_fields->>'chat_id'            AS chat_id,
-                       l.custom_fields->>'reply_seen_msg_id'  AS reply_seen
-                FROM omni_leads l
-                WHERE l.status = 'waiting'
-                  AND l.contact_id IS NOT NULL
-                  AND COALESCE(l.custom_fields->>'chat_id', '') <> ''
-                """
-            )
-        )
-
-
-async def _stamp_reply_seen(ws: str, lead_id: str, msg_id: str) -> None:
-    """Record the processed inbound message id on the lead so a subsequent cycle
-    (before the wake un-parks it) does not re-fire on the same reply."""
-    async with system_scope():
-        await execute(
-            "UPDATE omni_leads SET custom_fields = COALESCE(custom_fields, '{}'::jsonb) || $1::jsonb, "
-            "updated_at = NOW() WHERE id = $2 AND workspace_id = $3",
-            json.dumps({"reply_seen_msg_id": msg_id}), lead_id, ws,
-        )
-
-
-async def _check_lead(
-    client: UnipileClient,
-    ws: str,
-    lead: dict,
-    *,
-    sem: asyncio.Semaphore,
-    lock: asyncio.Lock,
-    woken_contacts: set[str],
-) -> int:
-    """Inspect one lead's thread; fire the reply-halt if the newest message is a
-    fresh inbound. Returns the number of leads woken (0 or ≥1)."""
-    chat_id = lead["chat_id"]
-    async with sem:
-        try:
-            resp = await client.list_chat_messages(chat_id, limit=_MESSAGES_LIMIT)
-        except UnipileError as e:
-            log.warning("[unipile_sync] chat %s read failed: %s", chat_id, e)
-            return 0
-    items = resp.get("items") if isinstance(resp, dict) else None
-    if not items:
-        return 0
-    newest = items[0]
-    # is_sender: 1 = our seat sent it, 0 = inbound. Require an EXPLICIT inbound
-    # flag — never guess, and never treat our own send as a reply.
-    if newest.get("is_sender") != 0:
-        return 0
-    msg_id = newest.get("id")
-    if not msg_id or str(msg_id) == (lead.get("reply_seen") or ""):
-        return 0  # already processed this reply
-
-    contact_id = str(lead["contact_id"])
-    # At-most-once per contact per cycle (a contact can have >1 waiting lead).
-    async with lock:
-        if contact_id in woken_contacts:
-            await _stamp_reply_seen(ws, str(lead["id"]), str(msg_id))
-            return 0
-        woken_contacts.add(contact_id)
-
-    # Stamp the high-water mark BEFORE the wake so an overlapping cycle skips it.
-    await _stamp_reply_seen(ws, str(lead["id"]), str(msg_id))
-    text = newest.get("text") or ""
-    res = await inbound_reply.process_reply(
-        ws, contact_id, text, channel="linkedin", source_message_id=str(msg_id)
-    )
-    log.info(
-        "[unipile_sync] reply detected lead=%s contact=%s intent=%s woke=%s",
-        lead["id"], contact_id, res.get("intent"), res.get("woke_leads"),
-    )
-    return int(res.get("woke_leads") or 0)
-
-
-async def run_once() -> None:
-    """One sweep: poll every in-flight thread and halt any that got a reply."""
-    leads = await _waiting_leads_with_chats()
-    if not leads:
-        return
-    by_ws: dict[str, list[dict]] = {}
-    for lead in leads:
-        by_ws.setdefault(str(lead["workspace_id"]), []).append(lead)
-
-    total_woken = 0
-    for ws, ws_leads in by_ws.items():
-        try:
-            client = await UnipileClient.for_workspace(ws)
-        except UnipileNotConfigured:
-            continue  # workspace has no Unipile connection — nothing to poll
-        except UnipileError as e:
-            log.warning("[unipile_sync] client init failed for ws %s: %s", ws, e)
-            continue
-        sem = asyncio.Semaphore(_MAX_CONCURRENCY)
-        lock = asyncio.Lock()
-        woken_contacts: set[str] = set()
-        results = await asyncio.gather(
-            *(
-                _check_lead(client, ws, lead, sem=sem, lock=lock, woken_contacts=woken_contacts)
-                for lead in ws_leads
-            ),
-            return_exceptions=True,
-        )
-        for r in results:
-            if isinstance(r, Exception):
-                log.exception("[unipile_sync] lead check errored", exc_info=r)
-            else:
-                total_woken += r
-    if total_woken:
-        log.info("[unipile_sync] swept %d thread(s); woke %d lead(s)", len(leads), total_woken)
-
-
-# ── Acceptance sweep — advance leads parked at event.invite_accepted ──────────
+def _jittered(base: float) -> float:
+    return max(30.0, base * (1.0 + random.uniform(-_JITTER_PCT, _JITTER_PCT)))
 
 
 def _public_id(url: str | None) -> str | None:
-    """The slug after /in/ (mirrors _public_id_from_linkedin_url in webhooks_in
-    and public_id_from_linkedin_url in unipile.rs)."""
+    """The slug after /in/ (mirrors public_id_from_linkedin_url)."""
     if not url:
         return None
     slug = url.strip().rstrip("/").split("/in/")[-1].strip().lower()
     return slug or None
 
 
-async def _invite_leads() -> list[dict]:
-    """Every lead parked 'waiting' at event.invite_accepted that we can re-check
-    — it must carry the inviting seat (custom_fields.invite_account_id) and a
-    linkedin_url to resolve the member. Legacy invites (pre invite_account_id)
-    are skipped here; they still rely on the push webhook."""
+def _seat_ids(accounts) -> list[str]:
+    """Account ids from a list_accounts response (shape-tolerant)."""
+    items = accounts.get("items") if isinstance(accounts, dict) else accounts
+    ids: list[str] = []
+    for a in items or []:
+        aid = a.get("id") if isinstance(a, dict) else None
+        if aid:
+            ids.append(str(aid))
+    return ids
+
+
+# ── Reply sweep — one list_chats per seat, only open changed campaign threads ──
+
+
+async def _process_reply_for_lead(client: UnipileClient, ws: str, lead: dict) -> int:
+    """Confirm the lead's thread newest is inbound and halt. Only called for a
+    lead whose chat already showed unread — so this is a tiny, bounded read."""
+    chat_id = lead["chat_id"]
+    try:
+        resp = await client.list_chat_messages(str(chat_id), limit=2)
+    except UnipileError as e:
+        log.warning("[unipile_sync] chat %s read failed: %s", chat_id, e)
+        return 0
+    items = resp.get("items") if isinstance(resp, dict) else None
+    if not items:
+        return 0
+    newest = items[0]
+    if newest.get("is_sender") != 0:  # 1=our send, 0=inbound; explicit only
+        return 0
+    msg_id = newest.get("id")
+    if not msg_id or str(msg_id) == (lead.get("reply_seen") or ""):
+        return 0
+    async with system_scope():
+        await execute(
+            "UPDATE omni_leads SET custom_fields = COALESCE(custom_fields, '{}'::jsonb) || $1::jsonb, "
+            "updated_at = NOW() WHERE id = $2 AND workspace_id = $3",
+            json.dumps({"reply_seen_msg_id": str(msg_id)}), str(lead["id"]), ws,
+        )
+    res = await inbound_reply.process_reply(
+        ws, str(lead["contact_id"]), newest.get("text") or "",
+        channel="linkedin", source_message_id=str(msg_id),
+    )
+    log.info(
+        "[unipile_sync] reply detected lead=%s intent=%s woke=%s",
+        lead["id"], res.get("intent"), res.get("woke_leads"),
+    )
+    return int(res.get("woke_leads") or 0)
+
+
+async def run_reply_sweep() -> None:
+    async with system_scope():
+        leads = await fetch_all(
+            """
+            SELECT l.id, l.workspace_id, l.contact_id,
+                   l.custom_fields->>'chat_id'           AS chat_id,
+                   l.custom_fields->>'reply_seen_msg_id' AS reply_seen
+            FROM omni_leads l
+            WHERE l.status = 'waiting'
+              AND l.contact_id IS NOT NULL
+              AND COALESCE(l.custom_fields->>'chat_id', '') <> ''
+            """
+        )
+    if not leads:
+        return
+    # workspace -> {chat_id: lead}. The chat_id map is our "care set": we only
+    # ever act on threads that belong to an in-flight lead.
+    by_ws: dict[str, dict[str, dict]] = defaultdict(dict)
+    for lead in leads:
+        by_ws[str(lead["workspace_id"])][str(lead["chat_id"])] = lead
+
+    total_woken = 0
+    for ws, chat_map in by_ws.items():
+        try:
+            client = await UnipileClient.for_workspace(ws)
+            seats = _seat_ids(await client.list_accounts())
+        except (UnipileNotConfigured, UnipileError) as e:
+            log.warning("[unipile_sync] reply sweep skip ws %s: %s", ws, e)
+            continue
+        care = set(chat_map)
+        hits: list[dict] = []
+        for seat in seats:
+            try:
+                chats = await client.list_chats(seat, limit=_CHATS_PER_SEAT)
+            except UnipileError as e:
+                log.warning("[unipile_sync] list_chats(%s) failed: %s", seat, e)
+                continue
+            for chat in (chats.get("items") if isinstance(chats, dict) else None) or []:
+                cid = str(chat.get("id") or "")
+                if cid in care and int(chat.get("unread_count") or 0) > 0:
+                    hits.append(chat_map[cid])
+        for lead in hits:
+            total_woken += await _process_reply_for_lead(client, ws, lead)
+    if total_woken:
+        log.info("[unipile_sync] reply sweep woke %d lead(s)", total_woken)
+
+
+# ── Acceptance sweep — one list_relations per inviting seat, no profile views ──
+
+
+async def _parked_invites() -> list[dict]:
+    """Leads waiting at event.invite_accepted that carry the inviting seat + an
+    identity to match a relation against."""
     async with system_scope():
         return list(
             await fetch_all(
                 """
-                SELECT l.id,
-                       l.workspace_id,
+                SELECT l.id, l.workspace_id,
                        l.custom_fields->>'invite_account_id' AS account_id,
+                       l.custom_fields->>'provider_id'       AS provider_id,
                        c.linkedin_url
                 FROM omni_leads l
                 JOIN omni_workflow_nodes n ON n.id = l.current_node_id
@@ -215,91 +182,86 @@ async def _invite_leads() -> list[dict]:
                 WHERE l.status = 'waiting'
                   AND n.node_type = $1
                   AND COALESCE(l.custom_fields->>'invite_account_id', '') <> ''
-                  AND COALESCE(c.linkedin_url, '') <> ''
                 """,
                 _INVITE_NODE,
             )
         )
 
 
-async def _check_acceptance(
-    client: UnipileClient, ws: str, lead: dict, *, sem: asyncio.Semaphore
-) -> int:
-    """Re-check one parked invite through the inviting seat; resume the lead when
-    the recipient is now a first-degree connection. Returns 1 if resumed."""
-    public_id = _public_id(lead["linkedin_url"])
-    if not public_id:
-        return 0
-    async with sem:
-        try:
-            prof = await client.member_profile(lead["account_id"], public_id)
-        except UnipileError as e:
-            log.warning("[unipile_sync] profile read failed for %s: %s", public_id, e)
-            return 0
-    if not isinstance(prof, dict):
-        return 0
-    # Accept either signal Unipile exposes; require an explicit positive (never
-    # guess a missing field into an acceptance).
-    accepted = prof.get("network_distance") == "FIRST_DEGREE" or prof.get("is_relationship") is True
-    if not accepted:
-        return 0
-    resumed = await event_resume.resume_on_signal(ws, str(lead["id"]), "invite_accepted")
-    if resumed:
-        log.info("[unipile_sync] invite accepted (polled) lead=%s public_id=%s", lead["id"], public_id)
-    return 1 if resumed else 0
+def _relation_matches(provider_id: str | None, linkedin_url: str | None, connected: set[str]) -> bool:
+    """True when a parked invite's identity appears in a seat's connections set —
+    by the provider_id we stamped at invite, or the contact's URL slug."""
+    pid = (provider_id or "").strip()
+    slug = _public_id(linkedin_url) or ""
+    return bool((pid and pid in connected) or (slug and slug in connected))
 
 
-async def run_acceptance_once() -> None:
-    """One acceptance sweep: re-check every parked invite and advance the ones
-    that have connected."""
-    leads = await _invite_leads()
+async def _relations_id_set(client: UnipileClient, seat: str) -> set[str]:
+    """member_ids + public_identifiers of a seat's recent connections — the set a
+    parked invite must appear in to count as accepted. One call, no profile view."""
+    try:
+        resp = await client.list_relations(seat, limit=_RELATIONS_PER_SEAT)
+    except UnipileError as e:
+        log.warning("[unipile_sync] list_relations(%s) failed: %s", seat, e)
+        return set()
+    ids: set[str] = set()
+    for r in (resp.get("items") if isinstance(resp, dict) else None) or []:
+        if r.get("member_id"):
+            ids.add(str(r["member_id"]))
+        if r.get("public_identifier"):
+            ids.add(str(r["public_identifier"]).lower())
+    return ids
+
+
+async def run_acceptance_sweep() -> None:
+    leads = await _parked_invites()
     if not leads:
         return
-    by_ws: dict[str, list[dict]] = {}
+    # (workspace, inviting seat) -> leads. We only query seats that actually have
+    # a pending invite, so the call count is bounded by seats-with-pending-invites.
+    by_seat: dict[tuple[str, str], list[dict]] = defaultdict(list)
     for lead in leads:
-        by_ws.setdefault(str(lead["workspace_id"]), []).append(lead)
-    total = 0
-    for ws, ws_leads in by_ws.items():
+        by_seat[(str(lead["workspace_id"]), str(lead["account_id"]))].append(lead)
+
+    clients: dict[str, UnipileClient] = {}
+    advanced = 0
+    for (ws, seat), seat_leads in by_seat.items():
         try:
-            client = await UnipileClient.for_workspace(ws)
-        except UnipileNotConfigured:
+            client = clients.get(ws) or await UnipileClient.for_workspace(ws)
+            clients[ws] = client
+        except (UnipileNotConfigured, UnipileError) as e:
+            log.warning("[unipile_sync] acceptance skip ws %s: %s", ws, e)
             continue
-        except UnipileError as e:
-            log.warning("[unipile_sync] client init failed for ws %s: %s", ws, e)
+        connected = await _relations_id_set(client, seat)
+        if not connected:
             continue
-        sem = asyncio.Semaphore(_MAX_CONCURRENCY)
-        results = await asyncio.gather(
-            *(_check_acceptance(client, ws, lead, sem=sem) for lead in ws_leads),
-            return_exceptions=True,
-        )
-        for r in results:
-            if isinstance(r, Exception):
-                log.exception("[unipile_sync] acceptance check errored", exc_info=r)
-            else:
-                total += r
-    if total:
-        log.info("[unipile_sync] acceptance sweep: advanced %d lead(s)", total)
+        for lead in seat_leads:
+            if _relation_matches(lead.get("provider_id"), lead.get("linkedin_url"), connected):
+                if await event_resume.resume_on_signal(ws, str(lead["id"]), "invite_accepted"):
+                    advanced += 1
+                    log.info("[unipile_sync] invite accepted (relations) lead=%s", lead["id"])
+    if advanced:
+        log.info("[unipile_sync] acceptance sweep advanced %d lead(s)", advanced)
 
 
 async def _poll_loop(stop: asyncio.Event) -> None:
-    """Drive two cadences off one loop: replies every POLL_INTERVAL_S, acceptance
-    every ACCEPT_INTERVAL_S (throttled — parked invites live for days)."""
+    """Replies every ~REPLY_INTERVAL_S, acceptance every ~ACCEPT_INTERVAL_S, both
+    jittered. Acceptance runs on the first tick then on its slower cadence."""
     last_accept = 0.0
     while not stop.is_set():
         try:
-            await run_once()
+            await run_reply_sweep()
         except Exception:  # noqa: BLE001
-            # One bad sweep must never kill the loop.
             log.exception("[unipile_sync] reply sweep errored; continuing")
         now = asyncio.get_running_loop().time()
         if now - last_accept >= ACCEPT_INTERVAL_S:
             last_accept = now
             try:
-                await run_acceptance_once()
+                await run_acceptance_sweep()
             except Exception:  # noqa: BLE001
                 log.exception("[unipile_sync] acceptance sweep errored; continuing")
         try:
-            await asyncio.wait_for(stop.wait(), timeout=POLL_INTERVAL_S)
+            await asyncio.wait_for(stop.wait(), timeout=_jittered(REPLY_INTERVAL_S))
         except TimeoutError:
             pass
 
@@ -307,7 +269,7 @@ async def _poll_loop(stop: asyncio.Event) -> None:
 async def run() -> None:
     await init_pool(settings.database_url)
     await assert_rls_enforcing_role()
-    await bus.init_producer()  # process_reply publishes events + transitions
+    await bus.init_producer()
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -318,8 +280,8 @@ async def run() -> None:
             pass
 
     log.info(
-        "[unipile_sync] replies every %ds, acceptance every %ds",
-        POLL_INTERVAL_S, ACCEPT_INTERVAL_S,
+        "[unipile_sync] O(seats) sweeps — replies ~%ds, acceptance ~%ds (jittered, no profile views)",
+        REPLY_INTERVAL_S, ACCEPT_INTERVAL_S,
     )
     try:
         await _poll_loop(stop)

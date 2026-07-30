@@ -169,6 +169,17 @@ class UnipileClient:
         """A member's recent posts (newest first) — used for recency-gated personalization."""
         return await self._get(f"users/{provider_id}/posts", params={"account_id": account_id, "limit": limit})
 
+    async def list_relations(self, account_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
+        """A seat's LinkedIn connections (newest first). ONE call lists everyone who
+        accepted — the cheap, no-profile-view acceptance signal (each item carries
+        ``member_id`` = provider_id and ``public_identifier`` = the URL slug, which
+        match custom_fields.provider_id / the contact's linkedin_url). Vastly safer
+        than a per-lead ``member_profile`` (profile view) on a timer."""
+        params: dict[str, Any] = {"account_id": account_id, "limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        return await self._get("users/relations", params=params)
+
     async def company_profile(self, account_id: str, company_id: str) -> Any:
         return await self._get(f"linkedin/company/{company_id}", params={"account_id": account_id})
 
