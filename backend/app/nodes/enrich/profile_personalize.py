@@ -65,6 +65,14 @@ class ProfilePersonalizeConfig(BaseModel):
         ),
     )
     post_max_age_days: int = Field(30, ge=1, le=365, description="Only reference a post newer than this")
+    posts_to_keep: int = Field(
+        15, ge=0, le=30,
+        description=(
+            "How many recent posts to keep as a signal digest (recent_posts_context) so ai.compose "
+            "can find the BUYING SIGNAL (a hiring/growth/pipeline post) even when it isn't the newest. "
+            "0 = keep only the single latest post."
+        ),
+    )
     website_chars: int = Field(2000, ge=200, le=8000, description="Max homepage characters to summarise")
     fetch_website: bool = Field(True, description="Also fetch + summarise the company website")
 
@@ -133,6 +141,40 @@ def _recent_post(items: list[dict], max_age_days: int) -> tuple[str, datetime | 
         if best_dt is None or dt > best_dt:
             best, best_dt = re.sub(r"\s+", " ", text)[:500], dt
     return best, best_dt
+
+
+def _recent_posts_block(items: list[dict], max_age_days: int, keep: int) -> str:
+    """Newest-first digest of up to `keep` recent posts within the window, each with
+    its age, so ai.compose can find the BUYING SIGNAL (a hiring / growth / pipeline
+    post) even when it is not the newest post. The single-latest-post field misses
+    exactly this: the relevant signal is often an older post."""
+    if keep <= 0:
+        return ""
+    cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
+    scored: list[tuple[datetime, str]] = []
+    for p in items or []:
+        text = (p.get("text") or "").strip()
+        if not text:
+            continue
+        dt = _post_dt(p)
+        if dt is None or dt < cutoff:
+            continue
+        scored.append((dt, re.sub(r"\s+", " ", text)[:400]))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    scored = scored[:keep]
+    if not scored:
+        return ""
+    today = datetime.now(UTC).date()
+    lines = [
+        f"- ({dt.date().isoformat()}, {max(0, (today - dt.date()).days)}d ago) {text}"
+        for dt, text in scored
+    ]
+    return (
+        "Recent posts, newest first. Treat none of the time-bound wording as current. "
+        "Pick the ONE that is the strongest buying signal for us (hiring for a marketing / social "
+        "/ growth / SDR / sales / outreach role, or scaling, pipeline, lead-gen, distribution, "
+        "outbound) and build the opening on THAT, relating what we do to it:\n" + "\n".join(lines)
+    )
 
 
 def _post_context(post: str, posted_at: datetime | None) -> str:
@@ -266,13 +308,18 @@ async def execute(ctx: NodeContext) -> NodeResult:
     # 2) Recent post (recency-gated) → anti-hallucination context.
     if provider_id:
         try:
-            posts = await client.member_posts(seat, provider_id)
+            posts = await client.member_posts(seat, provider_id, limit=25)
             items = posts.get("items") if isinstance(posts, dict) else posts
             post, posted_at = _recent_post(items or [], cfg.post_max_age_days)
             if post:
                 enriched["latest_post"] = post
                 enriched["latest_post_at"] = posted_at.date().isoformat()
                 enriched["latest_post_context"] = _post_context(post, posted_at)
+            # The whole point: keep the recent history so compose can find the
+            # buying signal even when it is not the newest post.
+            block = _recent_posts_block(items or [], cfg.post_max_age_days, cfg.posts_to_keep)
+            if block:
+                enriched["recent_posts_context"] = block
         except UnipileError as e:
             log.info("[profile_personalize] posts fetch failed for %s: %s", provider_id, e)
 
