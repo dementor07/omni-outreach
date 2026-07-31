@@ -188,7 +188,16 @@ async def _run_compose(workspace_id: str, env: dict, payload: dict, api_key: str
         event_type="ai.compose.completed",
         entity_type="lead",
         entity_id=str(entity_id),
-        payload={"draft": result["draft"], "model": result["model"], "correlation_id": cid},
+        # The projector (_project_ai_job) stores payload.output into omni_ai_jobs.output,
+        # so the draft MUST be nested under `output` to be retrievable via GET /ai/jobs
+        # (the Approvals playground reads it back to preview a regenerated draft). Keep
+        # the flat keys too for any direct consumer.
+        payload={
+            "output": {"draft": result["draft"], "model": result["model"]},
+            "draft": result["draft"],
+            "model": result["model"],
+            "correlation_id": cid,
+        },
         correlation_id=cid,
     )
 
