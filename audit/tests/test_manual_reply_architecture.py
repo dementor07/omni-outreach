@@ -22,11 +22,13 @@ CONFIG = (REPO / "backend/app/config.py").read_text(encoding="utf-8")
 def test_manual_reply_pins_thread_seat_and_precreates_outcome():
     body = INBOX.split("async def send_reply", 1)[1]
     assert "invite_account_id" in body
+    assert "status IN ('active','warming')" in body
     assert "sending_account_id=pinned_account_id" in body
     assert "existing chat_id" in body
     assert "INSERT INTO omni_send_outcomes" in body
     assert "'manual_reply'" in body and "'queued'" in body
     assert body.index("INSERT INTO omni_send_outcomes") < body.index("publish_command(command)")
+    assert "reply blocked" in body and "wrong account" in body
 
 
 def test_manual_reply_result_never_enters_campaign_transition_logic():

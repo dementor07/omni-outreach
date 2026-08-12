@@ -472,7 +472,8 @@ async def send_reply(
         async with system_scope():
             seat = await fetch_one(
                 "SELECT id FROM omni_sending_accounts WHERE workspace_id=$1 "
-                "AND channel_kind='linkedin' AND external_identity=$2 LIMIT 1",
+                "AND channel_kind='linkedin' AND external_identity=$2 "
+                "AND status IN ('active','warming') LIMIT 1",
                 workspace_id,
                 str(invite_account_id),
             )
@@ -488,6 +489,7 @@ async def send_reply(
                 "WHERE o.workspace_id=$1 AND o.contact_id=$2 AND o.status='sent' "
                 "AND o.sending_account_id IS NOT NULL "
                 "AND ($3::text IS NULL OR sa.channel_kind=$3) "
+                "AND sa.status IN ('active','warming') "
                 "ORDER BY o.occurred_at DESC LIMIT 1",
                 workspace_id,
                 contact_id,
@@ -495,6 +497,15 @@ async def send_reply(
             )
         if last_seat:
             pinned_account_id = str(last_seat["sending_account_id"])
+
+    if channel == ChannelType.LINKEDIN_DM and not pinned_account_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "the LinkedIn seat for this conversation is unavailable; reply blocked "
+                "to prevent sending from the wrong account"
+            ),
+        )
 
     # Resolve the workspace connection for this channel's provider (fallback
     # only; a pinned seat causes build_command to load that seat's connection).
