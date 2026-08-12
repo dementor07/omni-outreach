@@ -2,15 +2,16 @@
 title: Deploy Pipeline (CI → Webhook → Contabo VPS)
 category: operations
 tags: [deploy, ci, webhook, systemd, docker, ufw, contabo]
-updated: 2026-06-12
+updated: 2026-08-12
 related: [[system-overview]], [[ci-watcher]], [[chrome-devtools-mcp-loop]]
 ---
 
 # Deploy Pipeline
 
-End-to-end deploy path from a `git push origin phase-out-non-v2` to running containers on
-the Contabo box. Verified live (full CI → webhook → redeploy → health-green chain) on
-2026-06-12.
+End-to-end deploy path from a deliberately dispatched, service-scoped GitHub Actions run
+to running containers on the Contabo box. The original automatic full-stack path was
+retired on 2026-08-12 because a routine UI/control-plane release could restart Flink and
+interrupt active customer campaigns.
 
 > **History:** the original pipeline targeted Hostinger `srv1575227.hstgr.cloud`
 > (145.223.21.222), which died ~2026-06-10 with all data. The replacement is a Contabo
@@ -20,11 +21,13 @@ the Contabo box. Verified live (full CI → webhook → redeploy → health-gree
 ## High-level flow
 
 ```
-git push origin phase-out-non-v2
+merge verified commit to phase-out-non-v2
    │
-   ▼
+   ▼  no automatic production mutation
+explicit workflow_dispatch with services + migration decision
+   │
 GitHub Actions (.github/workflows/ci.yml)
-   │  lint → test → build → deploy
+   │  lint → test → build → start scoped deploy → poll exact SHA to completion
    │
    ▼  curl -X POST https://13-140-169-62.sslip.io/deploy
 nginx (omni-v2-frontend container, /deploy location block)
@@ -35,16 +38,39 @@ deploy-webhook systemd service (host, port 9000)
    │  validates Bearer token (hmac.compare_digest)
    │  responds 202 Accepted IMMEDIATELY (nginx restarts mid-deploy)
    │  spawns daemon thread:
-   │    1. git pull origin phase-out-non-v2          (cwd=/home/omni-v2)
-   │    2. docker compose -p omni-outreach up -d --build \
-   │         db redpanda redis flink-jobmanager flink-taskmanager   ← infra ONLY
-   │    3. docker compose -f docker-compose.v2.yml -p omni-v2 \
-   │         up -d --build --remove-orphans
-   │    4. … exec -T backend-v2 alembic upgrade head
-   │    5. docker image prune -f
+   │    1. verify clean tree + exact SHA on phase-out-non-v2
+   │    2. build only X-Deploy-Services
+   │    3. optionally run Alembic from the new backend-v2 image
+   │    4. recreate only X-Deploy-Services with --no-deps
+   │       (frontend-v2 last so nginx resolves a recreated backend)
+   │    5. verify requested containers + local API + public /api + Flink 2/2
+   │    6. retain per-SHA status; CI polls until succeeded or failed
 ```
 
-Measured warm-cache redeploy: ~37 s end-to-end (step 2 ≈ 12 s, step 3 ≈ 21 s).
+The routine endpoint cannot touch Postgres, Redis, Redpanda, Flink job/task managers,
+the Flink orchestrator, or topics-init. Those need a separately approved maintenance
+window and an explicit C1/C2 state-preservation plan.
+
+## Dispatching a release
+
+Every dispatch needs fresh human approval for its exact SHA, services, and migration choice.
+For a control-plane + AI worker + UI release with no schema change:
+
+```sh
+gh workflow run CI --ref phase-out-non-v2 \
+  -f services=backend-v2,ai-jobs-v2,frontend-v2 \
+  -f run_migrations=false
+```
+
+`backend-v2` requires `frontend-v2` in the same scope because nginx otherwise retains the
+recreated backend container's previous IP. Unknown, duplicate, empty, stateful-infra, and
+ambiguous migration inputs fail closed before a deployment thread starts.
+The Actions job remains pending while the webhook reports `accepted`/`running`, tolerates
+the brief nginx restart, and only goes green after that exact SHA reports `succeeded`.
+Success requires every requested container to be running, all API dependency checks to be
+green through both localhost and the public nginx route, and exactly one RUNNING Flink job
+with all of its tasks RUNNING. The routine deploy does not restart Flink; it proves it stayed
+healthy.
 
 ## Box layout (single checkout, two compose projects)
 
@@ -98,9 +124,8 @@ Measured warm-cache redeploy: ~37 s end-to-end (step 2 ≈ 12 s, step 3 ≈ 21 s
 
 ## Self-healing properties verified 2026-06-12
 
-- Redeploy recreates flink-jobmanager → registered Flink job is wiped → `orchestrator-v2`
-  re-submits on its own restart; "Omni SOTA Orchestrator v0.2 (DAG-aware)" came back
-  RUNNING unaided.
+- Routine deploys preserve flink-jobmanager and the registered Flink job. A maintenance
+  restart still relies on `orchestrator-v2` to re-submit into a genuinely empty cluster.
 - `topics-init` re-runs idempotently (rpk create || true).
 - `alembic upgrade head` is a no-op when already at head (030 as of provisioning).
 
@@ -113,6 +138,13 @@ Measured warm-cache redeploy: ~37 s end-to-end (step 2 ≈ 12 s, step 3 ≈ 21 s
   the deploy job, not a nicety.
 - `gh run rerun <id> --failed` re-runs just the deploy job to e2e-test the webhook chain
   without a code push.
+
+## One-time rollout note
+
+The installed `/usr/local/bin/deploy-webhook.py` is still manually synchronized. When this
+change first lands, update and restart that systemd service over SSH before dispatching the
+first scoped release. Until then, do not invoke `/deploy`: the old installed copy performs
+a full-stack redeploy and ignores the new scope headers.
 
 ## Open follow-ups
 

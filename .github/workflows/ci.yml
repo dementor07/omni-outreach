@@ -5,6 +5,17 @@ on:
     branches: [master, phase-out-non-v2]
   pull_request:
     branches: [master, phase-out-non-v2]
+  workflow_dispatch:
+    inputs:
+      services:
+        description: "Comma-separated v2 services to rebuild and recreate"
+        required: true
+        type: string
+      run_migrations:
+        description: "Run Alembic from the freshly built backend-v2 image"
+        required: true
+        default: false
+        type: boolean
 
 jobs:
   lint:
@@ -84,9 +95,13 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: build
-    if: (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/phase-out-non-v2') && github.event_name == 'push'
+    # Production releases are deliberate and service-scoped. A merge/push must
+    # never restart the live app plane while campaigns are active.
+    if: github.ref == 'refs/heads/phase-out-non-v2' && github.event_name == 'workflow_dispatch'
     env:
       DEPLOY_WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
+      DEPLOY_SERVICES: ${{ inputs.services }}
+      RUN_MIGRATIONS: ${{ inputs.run_migrations }}
     steps:
       - name: Check deploy configuration
         id: deploy_config
@@ -98,15 +113,46 @@ jobs:
             echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Deploy to VPS
+      - name: Start scoped deployment
         if: steps.deploy_config.outputs.ready == 'true'
         run: |
           curl -sf \
-            --max-time 300 \
+            --max-time 30 \
             -X POST \
             -H "Authorization: Bearer $DEPLOY_WEBHOOK_SECRET" \
+            -H "X-Deploy-Operation: start" \
             -H "X-Deploy-SHA: $GITHUB_SHA" \
+            -H "X-Deploy-Services: $DEPLOY_SERVICES" \
+            -H "X-Run-Migrations: $RUN_MIGRATIONS" \
             https://13-140-169-62.sslip.io/deploy
+
+      - name: Wait for scoped deployment
+        if: steps.deploy_config.outputs.ready == 'true'
+        run: |
+          for attempt in $(seq 1 90); do
+            response="$(curl -sf \
+              --max-time 15 \
+              -X POST \
+              -H "Authorization: Bearer $DEPLOY_WEBHOOK_SECRET" \
+              -H "X-Deploy-Operation: status" \
+              -H "X-Deploy-SHA: $GITHUB_SHA" \
+              https://13-140-169-62.sslip.io/deploy)" || {
+                sleep 10
+                continue
+              }
+            state="$(python -c 'import json,sys; print(json.load(sys.stdin)["state"])' <<< "$response")"
+            if [ "$state" = "succeeded" ]; then
+              echo "Deployment completed for $GITHUB_SHA"
+              exit 0
+            fi
+            if [ "$state" = "failed" ]; then
+              echo "Deployment failed; inspect deploy-webhook.service on the VPS."
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "Deployment status timed out for $GITHUB_SHA"
+          exit 1
 
       - name: Report skipped deploy
         if: steps.deploy_config.outputs.ready != 'true'

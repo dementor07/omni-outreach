@@ -76,6 +76,10 @@
 - **Analyze every deploy-surface file before pushing.** Careful, stepwise, verified
   provisioning over fast-and-loose. Deploy = rebuild the exact image running the changed file
   (scp+restart is a no-op); migrations must be in the built image before `alembic upgrade head`.
+- **A merge is not deploy approval, and a routine release is never a full-stack restart.**
+  Production dispatches name the exact SHA, exact stateless services, and migration decision;
+  shared infra and Flink require their own approved maintenance window. The release stays
+  pending until the server reports that exact SHA succeeded.
 - **Verify live after every deploy, yourself** — curl + real navigation + `compose ps -a`.
 - **Every real outbound send, migration, destructive cleanup, or DB write needs explicit human
   approval each time.** Approval in one context does not carry to the next.
