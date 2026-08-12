@@ -120,18 +120,12 @@ Current v2 production, verified 2026-06-23:
 - Migrations must exist in the freshly built image before `alembic upgrade head`; then
   recreate the long-running service.
 
-Critical current caveat (re-verified 2026-08-12): the production checkout is at commit
-`6cd203c`, **10 commits behind** the local branch tip `0abe234`, but its working tree content
-is byte-identical to the local working tree (the newer commits were delivered by `scp`, not
-`git pull`). Containers were rebuilt from that dirty checkout. Production is therefore not
-reproducible from its checked-out Git commit — and migrations `054_send_spacing` and
-`055_ai_cost_ledger` are **applied to the production database while existing only as untracked
-files**, so a clean clone would not contain them.
-
-Do not run `git pull`, `checkout`, `stash`, or `reset` on the box: the uncommitted working tree
-is what production runs. Inspect and reconcile this drift before any deployment; do not
-clean/reset the server without explicit approval. Full drift analysis and the safe
-reconciliation procedure: [`CODEX_HANDOVER.md`](./CODEX_HANDOVER.md) §0.
+The production drift was reconciled on 2026-08-12. The checkout is now a clean,
+fast-forwarded `phase-out-non-v2`, and migrations `054_send_spacing` and
+`055_ai_cost_ledger` are tracked in Git as well as applied to the production database.
+The pre-reconciliation state is recoverable at
+`/home/omni-v2.bak-2026-08-12-d43cd1e` and branch `prod-snapshot-20260812`; do not deploy
+from that backup. Current release details and verification: [`CODEX_HANDOVER.md`](./CODEX_HANDOVER.md) §0.
 
 The older Hostinger-style system at `193.203.161.15:/home/omni/marketing-automation` is a
 separate legacy application, not this repository's v2 production stack.

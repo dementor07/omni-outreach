@@ -2,7 +2,8 @@
 
 ## 2026-08-12 architecture reconciliation addendum
 
-- Production and `origin/phase-out-non-v2` are now reproducible at `d43cd1e`.
+- Production and `origin/phase-out-non-v2` are now reproducible. The deployed
+  application release is `e3888f5` (the next commit only refreshes this handover).
   The previous production tree is preserved at
   `/home/omni-v2.bak-2026-08-12-d43cd1e` and branch `prod-snapshot-20260812`.
 - Boss campaign-view requirements are shipped: pending messages are campaign-scoped and
@@ -13,13 +14,16 @@
   not modify C1/C2 during deployment.
 - Manual inbox replies now pin to the originating LinkedIn seat/thread, create a durable
   queued-to-final send outcome, count seat capacity exactly once, and cannot advance or
-  terminalize a real campaign lead.
+  terminalize a real campaign lead. LinkedIn replies fail closed if that exact seat is not
+  active; both known reply threads currently resolve to the active Johnsy seat.
 - Deployed services: `backend-v2`, `transitions-v2`, `projector-v2`, `frontend-v2`.
   Post-deploy health was green, Alembic remained `055`, Flink remained RUNNING 2/2, and
   C1/C2 settings plus lead-status counts were unchanged across the switchover.
 - Verification: 618 Python audit tests, TypeScript, changed-file Ruff, diff checks, and 56
   Rust tests all passed. `no-mistakes` itself could not start because the box has no supported
   review agent installed/configured; its clean-worktree Linux checks were run manually.
+- Production verification of the C2 read model returned 23 pending messages, all newest-first
+  and all with prospect LinkedIn URL, connecting-seat name/id, and at least one evidence source.
 
 **Captured:** 2026-08-12 (Wednesday) ~06:40 UTC / 12:10 IST
 **Handover from:** Claude session (Aug 5–12)
@@ -30,60 +34,21 @@ This file is the **current-state snapshot**; those two are the durable rules.
 
 ---
 
-## 0. The one thing that will bite you first
+## 0. Repository and production are reconciled
 
-**The production checkout and the Git branch have diverged, and prod is the one that's ahead in
-content but behind in commits.**
+The old dirty-checkout warning is resolved. Production is on `phase-out-non-v2`, fast-forwarded
+from `origin`, with a clean tracked working tree. Migrations 054 and 055 and the previously
+box-only services/tests are committed, so a clean clone contains the schema production runs.
 
-| | Commit | Working tree |
-|---|---|---|
-| **Local repo** (`c:\Users\navij\Downloads\omni-outreach`) | `0abe234` | 20 modified files (+1389 lines) + untracked migrations/services |
-| **Prod box** (`/home/omni-v2`) | `6cd203c` — **10 commits behind** | Same *content* as local (verified by hash, modulo CRLF) |
+Recovery artifacts from before reconciliation:
 
-`6cd203c` **is** an ancestor of `0abe234`. The 10 missing commits were delivered to prod by
-`scp`-ing individual files, not by `git pull`. So the box's "dirty working tree" *is* the newer
-code. The containers were built from that dirty tree.
+- full checkout: `/home/omni-v2.bak-2026-08-12-d43cd1e`
+- Git snapshot branch: `prod-snapshot-20260812` at `8d78208`
 
-**Consequences — read before touching git on the box:**
-
-- ❌ **Never run `git pull` / `git checkout` / `git stash` / `git reset` on the box.** Those
-  changes are what production is running. A pull will conflict or clobber live code.
-- ⚠️ **Prod is not reproducible from its Git commit.** A clean clone + deploy today would ship
-  *older* code and would be **missing migrations 054 and 055 entirely** (they are untracked
-  files, yet both are applied to the prod DB — `alembic current` = `055 (head)`).
-- ✅ **The safe reconciliation** (do this early, with human approval):
-  1. Locally: commit the working tree in logical chunks, push the branch.
-  2. On the box: `cp -a /home/omni-v2 /home/omni-v2.bak-$(date +%F)` first.
-  3. Then `git stash list`-free pull, resolving so the resulting tree is byte-identical to the
-     local tree you just pushed. Diff before and after; the tree must not change content.
-  4. Rebuild nothing until the tree matches — the running images are already correct.
-
-The 10 commits on local but not on the box's HEAD:
-
-```
-0abe234 feat(enrich): keep recent-post digest so compose finds the buying signal
-793f38b feat(approvals): AI draft playground — regenerate with tone/prompt tweaks
-b79405e fix(ai-studio): return compose draft in the job output (playground)
-5261117 feat(seat-pin): pin LinkedIn DM to the inviting seat (SEAT-PIN-001)
-6dcb2e7 feat(linkedin_search): company-scoped people search for jobs lead-gen
-33c219a perf(unipile-sync): O(seats) sweeps + no profile views; fix approval timeout
-82ce5e8 fix(orchestrator): idempotent Flink submit — stop accumulating duplicate jobs
-a045232 feat(reply-stop): live pre-send reply gate (REPLY-GATE-001)
-611873d feat(invite-accept): poll-based acceptance detection (ACCEPT-POLL-001)
-11b3a58 feat(reply-stop): poll-based reply detection (REPLY-POLL-001)
-```
-
-Uncommitted locally and **not in any commit** (highest risk of loss):
-
-```
-backend/alembic/versions/054_send_spacing.py      ← APPLIED IN PROD
-backend/alembic/versions/055_ai_cost_ledger.py    ← APPLIED IN PROD
-backend/app/services/ai_pricing.py
-backend/app/services/mailer.py
-frontend/src/pages/InviteAccept.tsx
-audit/tests/test_send_once.py
-audit/tests/test_ai_pricing.py
-```
+The application images are code-baked. Health reports the exact build SHA; after a source change,
+rebuild/recreate every owning service as described in §9. Never use the backup checkout as a
+deploy source. The six root `*_CODEX_BRIEF.md` files in the Windows checkout are historical/local
+work briefs, not production runtime inputs and are intentionally untracked.
 
 ---
 
