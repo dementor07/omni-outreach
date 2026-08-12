@@ -28,7 +28,8 @@ export default function Card({
   return (
     <Tag
       className={clsx(
-        'min-w-0 rounded-2xl border transition-colors',
+        'min-w-0 rounded-2xl border',
+        'transition-colors',
         glass
           ? 'glass-panel border-white/40 dark:border-white/10'
           : 'border-slate-200/75 bg-white/95 dark:border-slate-800 dark:bg-slate-900/90',

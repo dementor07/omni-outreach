@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 os.environ.setdefault("DB_PASSWORD", "testpass")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production")
 os.environ.setdefault("REDIS_PASSWORD", "")
@@ -76,3 +78,38 @@ def test_extract_json_handles_fences_and_prose():
     assert ai_jobs._extract_json('Here you go: {"intent": "positive"} — done') == {"intent": "positive"}
     assert ai_jobs._extract_json("no json here") is None
     assert ai_jobs._extract_json("[1,2,3]") is None  # array, not an object
+
+
+@pytest.mark.asyncio
+async def test_compose_revision_keeps_campaign_draft_annotations_and_facts(monkeypatch):
+    captured: dict[str, str] = {}
+
+    async def fake_anthropic(_key, system, user, _max_tokens, *, model):
+        captured.update(system=system, user=user, model=model)
+        return "Revised draft", {"input_tokens": 10, "output_tokens": 4}
+
+    monkeypatch.setattr(ai_jobs, "_anthropic_text", fake_anthropic)
+    result = await ai_jobs.compose_message(
+        "secret",
+        "Follow up after an accepted LinkedIn invite",
+        {"first_name": "Asha", "extra": {"latest_post": "Hiring SDRs"}},
+        channel="linkedin",
+        tone="warm",
+        model="claude-sonnet-4-6",
+        original_draft="Hi Asha, your recent hiring push stood out.",
+        rewrite_note="Keep the close conversational.",
+        rewrite_directives=[{
+            "start": 14,
+            "end": 32,
+            "selected_text": "recent hiring push",
+            "instruction": "Name the SDR role from the evidence.",
+        }],
+    )
+
+    assert result["draft"] == "Revised draft"
+    assert captured["model"] == "claude-sonnet-4-6"
+    assert "Preserve unannotated wording" in captured["system"]
+    assert "Follow up after an accepted LinkedIn invite" in captured["user"]
+    assert "Hi Asha, your recent hiring push stood out." in captured["user"]
+    assert "Name the SDR role from the evidence." in captured["user"]
+    assert "Hiring SDRs" in captured["user"]

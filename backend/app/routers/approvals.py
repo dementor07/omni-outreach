@@ -22,14 +22,34 @@ from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.auth import AuthContext, get_current_workspace
 from app.db import execute, fetch_all, fetch_one, system_scope
+from app.routers.ai_studio import AiJobAccepted, AiJobCreate, create_job
 from app.services import bus
 from app.services.bus import publish_event
 
 router = APIRouter()
+
+# One topology rule shared by the list and regenerate paths: an approval's
+# campaign provenance is its direct upstream ai.compose node. COUNT OVER lets
+# both callers fail closed if a custom canvas fans multiple compose nodes into
+# one approval node.
+_COMPOSE_SOURCE_JOIN = """
+LEFT JOIN LATERAL (
+    SELECT n.id, n.config, COUNT(*) OVER () AS source_count
+    FROM omni_workflow_edges e
+    JOIN omni_workflow_nodes n
+      ON n.id = e.source_node_id
+     AND n.workspace_id = a.workspace_id
+     AND n.node_type = 'ai.compose'
+    WHERE e.target_node_id = a.node_id
+      AND e.workspace_id = a.workspace_id
+    ORDER BY e.id
+    LIMIT 1
+) compose_source ON TRUE
+"""
 
 
 class ApprovalEvidence(BaseModel):
@@ -44,6 +64,18 @@ class ApprovalEvidence(BaseModel):
     label: str
     url: str | None = None
     excerpt: str | None = None
+
+
+class ApprovalComposeContext(BaseModel):
+    """The exact campaign compose node that produced an approval's draft."""
+
+    node_id: uuid.UUID
+    instruction: str
+    channel: str = "email"
+    tone: str = "professional"
+    max_words: int = 120
+    model: str | None = None
+    provider: str = "anthropic"
 
 
 class ApprovalOut(BaseModel):
@@ -67,6 +99,40 @@ class ApprovalOut(BaseModel):
     sending_account_id: str | None = None
     sending_account_name: str | None = None
     evidence_sources: list[ApprovalEvidence] = Field(default_factory=list)
+    compose_context: ApprovalComposeContext | None = None
+
+
+def _compose_context(
+    node_id: uuid.UUID | None,
+    raw_config: Any,
+    source_count: int = 0,
+) -> ApprovalComposeContext | None:
+    """Normalize one unambiguous upstream ai.compose node for the UI.
+
+    A human-approval node can technically have multiple inbound compose edges.
+    Guessing which one authored the parked draft would recreate the provenance
+    bug in a subtler form, so ambiguous or missing sources fail closed.
+    """
+    if not node_id or source_count != 1:
+        return None
+    config = raw_config if isinstance(raw_config, dict) else {}
+    instruction = config.get("instruction")
+    if not isinstance(instruction, str) or not instruction.strip():
+        return None
+    try:
+        max_words = max(20, min(600, int(config.get("max_words") or 120)))
+    except (TypeError, ValueError):
+        max_words = 120
+    model = config.get("model")
+    return ApprovalComposeContext(
+        node_id=node_id,
+        instruction=instruction.strip(),
+        channel=str(config.get("channel") or "email"),
+        tone=str(config.get("tone") or "professional"),
+        max_words=max_words,
+        model=str(model) if model else None,
+        provider=str(config.get("provider") or "anthropic"),
+    )
 
 
 def _excerpt(value: Any, limit: int = 280) -> str | None:
@@ -135,13 +201,39 @@ class DraftBody(BaseModel):
     draft: str = Field(max_length=20000, description="The reviewed/edited AI draft")
 
 
+class RewriteDirective(BaseModel):
+    """A rewrite note anchored to an exact character range in original_draft."""
+
+    start: int = Field(ge=0)
+    end: int = Field(gt=0)
+    selected_text: str = Field(min_length=1, max_length=4000)
+    instruction: str = Field(min_length=2, max_length=4000)
+
+    @model_validator(mode="after")
+    def range_is_forward(self) -> RewriteDirective:
+        if self.end <= self.start:
+            raise ValueError("directive end must be greater than start")
+        return self
+
+
+class RegenerateBody(BaseModel):
+    original_draft: str = Field(min_length=1, max_length=20000)
+    campaign_instruction: str | None = Field(None, min_length=2, max_length=20000)
+    rewrite_note: str | None = Field(None, max_length=4000)
+    directives: list[RewriteDirective] = Field(default_factory=list, max_length=20)
+    tone: str | None = Field(None, max_length=40)
+    channel: str | None = Field(None, max_length=40)
+    max_words: int | None = Field(None, ge=20, le=600)
+    model: str | None = Field(None, max_length=120)
+
+
 @router.get("", response_model=list[ApprovalOut], summary="List pending approvals")
 async def list_approvals(
     _: AuthContext = Depends(get_current_workspace),
     campaign_id: uuid.UUID | None = Query(None, description="Only approvals for this campaign"),
 ) -> list[ApprovalOut]:
     rows = await fetch_all(
-        """
+        f"""
         SELECT a.id, a.lead_id, a.node_id, a.prompt, a.draft, a.status, a.created_at,
                l.workflow_id AS campaign_id, w.name AS campaign_name,
                COALESCE(
@@ -152,7 +244,10 @@ async def list_approvals(
                COALESCE(c.company, l.custom_fields->>'company') AS prospect_company,
                sa.external_identity AS sending_account_id,
                sa.display_name AS sending_account_name,
-               l.custom_fields AS lead_custom_fields
+               l.custom_fields AS lead_custom_fields,
+               compose_source.id AS compose_node_id,
+               compose_source.config AS compose_config,
+               COALESCE(compose_source.source_count, 0) AS compose_source_count
         FROM omni_approvals a
         LEFT JOIN omni_leads l ON l.id = a.lead_id AND l.workspace_id = a.workspace_id
         LEFT JOIN omni_workflows w ON w.id = l.workflow_id AND w.workspace_id = a.workspace_id
@@ -161,6 +256,7 @@ async def list_approvals(
           ON sa.workspace_id = a.workspace_id
          AND sa.channel_kind = 'linkedin'
          AND sa.external_identity = l.custom_fields->>'invite_account_id'
+        {_COMPOSE_SOURCE_JOIN}
         WHERE a.status = 'pending'
           AND ($1::uuid IS NULL OR l.workflow_id = $1)
         ORDER BY a.created_at DESC, a.id DESC
@@ -171,11 +267,94 @@ async def list_approvals(
     for row in rows:
         data = dict(row)
         custom_fields = data.pop("lead_custom_fields", {})
+        compose_node_id = data.pop("compose_node_id", None)
+        compose_config = data.pop("compose_config", None)
+        compose_source_count = int(data.pop("compose_source_count", 0) or 0)
         data["evidence_sources"] = _approval_evidence(
             custom_fields, data.get("prospect_linkedin_url")
         )
+        data["compose_context"] = _compose_context(
+            compose_node_id, compose_config, compose_source_count
+        )
         out.append(ApprovalOut.model_validate(data))
     return out
+
+
+@router.post(
+    "/{approval_id}/regenerate",
+    response_model=AiJobAccepted,
+    status_code=202,
+    summary="Regenerate a pending approval using its campaign context",
+)
+async def regenerate_approval(
+    approval_id: uuid.UUID,
+    body: RegenerateBody,
+    ctx: AuthContext = Depends(get_current_workspace),
+) -> AiJobAccepted:
+    """Queue a draft-only rewrite grounded in the originating compose node.
+
+    The source instruction is resolved server-side from the approval node's
+    direct upstream ai.compose node. The caller may tune it for this rewrite,
+    but a missing or ambiguous source never falls back to a global UI prompt.
+    """
+    row = await fetch_one(
+        f"""
+        SELECT a.lead_id, a.status,
+               compose_source.id AS compose_node_id,
+               compose_source.config AS compose_config,
+               COALESCE(compose_source.source_count, 0) AS compose_source_count
+        FROM omni_approvals a
+        {_COMPOSE_SOURCE_JOIN}
+        WHERE a.id = $1
+        """,
+        approval_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="approval not found")
+    if row["status"] != "pending":
+        raise HTTPException(status_code=409, detail=f"approval already {row['status']}")
+
+    source = _compose_context(
+        row.get("compose_node_id"),
+        row.get("compose_config"),
+        int(row.get("compose_source_count") or 0),
+    )
+    if not source:
+        raise HTTPException(
+            status_code=409,
+            detail="the originating ai.compose node is missing or ambiguous; regeneration was not queued",
+        )
+
+    for directive in body.directives:
+        if directive.end > len(body.original_draft):
+            raise HTTPException(status_code=422, detail="a rewrite selection is outside the current draft")
+        if body.original_draft[directive.start : directive.end] != directive.selected_text:
+            raise HTTPException(
+                status_code=422,
+                detail="the draft changed after a rewrite selection was annotated; select that text again",
+            )
+
+    config = {
+        "instruction": (body.campaign_instruction or source.instruction).strip(),
+        "rewrite_note": (body.rewrite_note or "").strip(),
+        "original_draft": body.original_draft,
+        "rewrite_directives": [directive.model_dump() for directive in body.directives],
+        "tone": body.tone or source.tone,
+        "channel": body.channel or source.channel,
+        "max_words": body.max_words or source.max_words,
+        "model": body.model or source.model,
+        "source_compose_node_id": str(source.node_id),
+        "source_provider": source.provider,
+    }
+    return await create_job(
+        AiJobCreate(
+            kind="compose",
+            entity_type="lead",
+            entity_id=row["lead_id"],
+            config=config,
+        ),
+        ctx,
+    )
 
 
 @router.patch("/{approval_id}/draft", status_code=202, summary="Edit an approval's AI draft (B1)")

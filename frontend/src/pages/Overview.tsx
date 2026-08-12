@@ -14,6 +14,7 @@ import Badge from '../components/Badge'
 import Button from '../components/Button'
 import EmptyState from '../components/EmptyState'
 import { ViewGrid } from '../components/ViewWidgets'
+import ViewPromptBar from '../components/ViewPromptBar'
 
 const DEAL_STAGE_ORDER = ['lead', 'qualified', 'meeting', 'proposal', 'closed_won', 'closed_lost']
 
@@ -51,6 +52,17 @@ export default function Overview() {
               <Button variant="primary" size="md" icon={Plus} onClick={() => navigate('/campaigns')}>New campaign</Button>
             </>
           }
+        />
+        <ViewPromptBar
+          viewId={view.id}
+          label="Ask Overview"
+          placeholder="Describe the mission-control view you need right now…"
+          suggestions={[
+            'Show active campaign health and recent errors',
+            'Add approvals needing attention',
+            'Show sends by status this week',
+            'Focus on C1 and C2 operational state',
+          ]}
         />
         <ViewGrid layout={view.layout} />
       </div>

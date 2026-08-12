@@ -187,6 +187,9 @@ async def _run_compose(workspace_id: str, env: dict, payload: dict, api_key: str
         tone=payload.get("tone") or "professional",
         max_words=int(payload.get("max_words") or 120),
         model=payload.get("model"),
+        original_draft=payload.get("original_draft"),
+        rewrite_note=payload.get("rewrite_note"),
+        rewrite_directives=payload.get("rewrite_directives") or [],
     )
     await ai_pricing.record_usage(
         workspace_id=workspace_id, kind="compose", model=result["model"],

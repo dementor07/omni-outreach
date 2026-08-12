@@ -675,7 +675,7 @@ export default function CampaignEditor() {
           not the tall PageHeader the scrolling pages use. The editor is a
           fixed-viewport canvas tool, so every row above the canvas is height
           stolen from the graph. */}
-      <div className="flex flex-col gap-1.5 border-b border-slate-200/80 pb-2 xl:flex-row xl:items-center xl:justify-between xl:gap-4 dark:border-slate-800">
+      <div className="flex flex-col gap-1.5 border-b border-slate-200/80 pb-2 lg:flex-row lg:items-center lg:justify-between lg:gap-4 dark:border-slate-800">
         <div className="flex min-w-0 items-center gap-2.5">
           <Link to="/campaigns" title="Back to campaigns" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800">
             <ArrowLeft size={16} />

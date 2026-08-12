@@ -480,8 +480,28 @@ async def create_from_campaign_spec(
     )
 
 
+@router.post(
+    "/workflows/validate-spec",
+    response_model=CampaignSpec,
+    summary="Validate an agent-authored campaign spec without creating it",
+)
+async def validate_campaign_spec(
+    body: CampaignSpec,
+    ctx: AuthContext = Depends(get_current_workspace),
+) -> CampaignSpec:
+    """Read-only validation seam for Codex/Claude/other agent harnesses."""
+    await _assert_campaign_spec_connections(body, ctx.workspace_id)
+    compile_campaign_spec(body)
+    return body
+
+
 class PromptWorkflowCreate(BaseModel):
     prompt: str = Field(min_length=8, max_length=4000)
+    connection_name: str | None = Field(
+        None,
+        max_length=120,
+        description="Anthropic BYOK connection to use; empty selects the newest one.",
+    )
     dry_run: bool = Field(
         False,
         description="Return the generated spec WITHOUT creating the workflow (preview).",
@@ -519,7 +539,10 @@ async def create_from_prompt(
     connections = await fetch_all("SELECT provider, name FROM omni_connections ORDER BY provider, name")
     try:
         spec = await generate_campaign_spec(
-            ctx.workspace_id, body.prompt, [dict(c) for c in connections]
+            ctx.workspace_id,
+            body.prompt,
+            [dict(c) for c in connections],
+            body.connection_name,
         )
     except ArchitectError as exc:
         raise HTTPException(status_code=422, detail=str(exc))

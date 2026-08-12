@@ -88,12 +88,13 @@ async def generate_campaign_spec(
     workspace_id: str,
     prompt: str,
     connections: list[dict[str, Any]],
+    connection_name: str | None = None,
 ) -> CampaignSpec:
     """Prompt + workspace connections → validated CampaignSpec (1 repair retry)."""
-    api_key = await anthropic_key(workspace_id)
+    api_key = await anthropic_key(workspace_id, connection_name)
     if not api_key:
         raise ArchitectError(
-            "no anthropic connection in this workspace — add one in Settings → Integrations to use prompt-to-campaign"
+            "the selected Anthropic connection is unavailable — add or choose one in Settings → Integrations"
         )
     user = f"{_connections_block(connections)}\n\nUser request:\n{prompt}"
     try:

@@ -21,10 +21,11 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+import uuid
 
 from app.nodes import NodeContext
 from app.nodes.flow.human_approval import _lead_draft, execute
-from app.routers.approvals import _approval_evidence
+from app.routers.approvals import _approval_evidence, _compose_context
 
 BACKEND = Path(__file__).resolve().parents[2] / "backend"
 ROUTER = (BACKEND / "app" / "routers" / "approvals.py").read_text(encoding="utf-8")
@@ -118,6 +119,32 @@ def test_approval_queue_identifies_prospect_seat_and_evidence():
     )
     assert {source.kind for source in sources} == {"hiring", "post", "website", "profile"}
     assert next(source for source in sources if source.kind == "post").url == "https://linkedin.com/in/prospect"
+
+
+def test_approval_compose_context_is_campaign_specific_and_fail_closed():
+    node_id = uuid.uuid4()
+    context = _compose_context(node_id, {
+        "instruction": "Message two: follow up on the prospect's hiring signal.",
+        "channel": "linkedin",
+        "tone": "direct",
+        "max_words": 90,
+        "model": "claude-sonnet-4-6",
+    }, 1)
+    assert context is not None
+    assert context.node_id == node_id
+    assert context.instruction.startswith("Message two")
+    assert context.max_words == 90
+    assert _compose_context(node_id, {"instruction": "ambiguous"}, 2) is None
+    assert _compose_context(node_id, {}, 1) is None
+
+
+def test_regeneration_resolves_provenance_and_validates_anchored_selections():
+    body = ROUTER.split("async def regenerate_approval", 1)[1]
+    assert "_COMPOSE_SOURCE_JOIN" in body
+    assert "n.node_type = 'ai.compose'" in ROUTER
+    assert "source_count" in body
+    assert "original_draft[directive.start : directive.end]" in body
+    assert "create_job(" in body, "approval rewrites must reuse the existing async AI job seam"
 
 
 def test_migration_adds_draft_column():

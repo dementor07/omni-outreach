@@ -12,6 +12,8 @@ Three pure surfaces, no DB/network:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -342,6 +344,27 @@ def test_connections_block_grounds_the_prompt():
     assert "provider=apollo name=apollo-main" in listed
 
 
+def test_campaign_ai_supports_named_byok_and_read_only_agent_validation():
+    import inspect
+    from app.routers import canvas
+    from app.services import campaign_architect
+
+    generate_src = inspect.getsource(campaign_architect.generate_campaign_spec)
+    validate_src = inspect.getsource(canvas.validate_campaign_spec)
+    assert "connection_name" in generate_src
+    assert "anthropic_key(workspace_id, connection_name)" in generate_src
+    assert "_assert_campaign_spec_connections" in validate_src
+    assert "compile_campaign_spec" in validate_src
+    assert "acquire(" not in validate_src, "agent validation must not write a workflow"
+
+    root = Path(__file__).resolve().parents[2]
+    architect_ui = (root / "frontend/src/components/CampaignArchitect.tsx").read_text(encoding="utf-8")
+    assert "Workspace key (BYOK)" in architect_ui
+    assert "Agent harness" in architect_ui
+    assert "Create draft campaign" in architect_ui
+    assert "canvas.validateSpec" in architect_ui
+
+
 def test_view_payload_normalizes_icon_and_validates_layout():
     view = validate_view_payload(
         {"name": "Morning brief", "icon": "not-a-real-icon", "layout": [_stat()]}
@@ -386,6 +409,16 @@ def test_default_overview_uses_only_catalogued_fields():
         refs += [m["field"] for m in q.get("metrics", []) if m.get("field")]
         for field in refs:
             assert field in entity.columns, f"{widget['id']}: unknown field {field!r} on {q['entity']}"
+
+
+def test_overview_and_custom_views_share_the_agent_composer():
+    root = Path(__file__).resolve().parents[2]
+    overview = (root / "frontend/src/pages/Overview.tsx").read_text(encoding="utf-8")
+    dynamic = (root / "frontend/src/pages/DynamicView.tsx").read_text(encoding="utf-8")
+    composer = (root / "frontend/src/components/ViewPromptBar.tsx").read_text(encoding="utf-8")
+    assert "<ViewPromptBar" in overview
+    assert "<ViewPromptBar" in dynamic
+    assert "views.edit(viewId, text)" in composer
 
 
 # ── DYNAMIC-002 step 2: agent edits a view ───────────────────────────────────

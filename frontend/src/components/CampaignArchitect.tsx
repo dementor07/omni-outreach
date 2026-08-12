@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  ArrowRight, Building2, ChevronDown, ChevronUp, GitBranch, Mail, MessageCircle,
+  ArrowRight, Building2, ChevronDown, ChevronUp, GitBranch, MessageCircle,
   Plus, Rocket, ShieldCheck, Sparkles, Target, Trash2, Users,
 } from 'lucide-react'
 import {
@@ -22,6 +22,7 @@ import { useToast } from './Toast'
 // DYNAMIC-001: 'prompt' is the natural-language mode — describe the campaign,
 // the backend architect turns it into a validated spec and compiles it.
 type AuthoringMode = 'prompt' | 'architect' | 'classic'
+type AiAuthoringSource = 'byok' | 'harness'
 
 interface DraftSource {
   provider: CampaignSourceProvider
@@ -126,7 +127,11 @@ const DEFAULT_CLASSIC: ClassicDraft = {
 export default function CampaignArchitect({ templates, connections = [], onCreated, onCancel }: Props) {
   const toast = useToast()
   const [mode, setMode] = useState<AuthoringMode>('prompt')
+  const [aiAuthoringSource, setAiAuthoringSource] = useState<AiAuthoringSource>('byok')
   const [promptText, setPromptText] = useState('')
+  const [harnessSpecText, setHarnessSpecText] = useState('')
+  const [architectConnection, setArchitectConnection] = useState('')
+  const [promptPreview, setPromptPreview] = useState<CampaignSpec | null>(null)
   const [promptBusy, setPromptBusy] = useState(false)
   const [name, setName] = useState('Connected-source contact campaign')
   const [targetContacts, setTargetContacts] = useState('25')
@@ -201,6 +206,7 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
     const firstAnthropic = anthropicConnections[0]?.name
     if (!firstAnthropic) return
     setScreeningConnection((current) => current || firstAnthropic)
+    setArchitectConnection((current) => current || firstAnthropic)
   }, [anthropicConnections])
 
   const buildResult = useMemo(() => buildSpec({
@@ -264,26 +270,47 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
     }
   }
 
-  // DYNAMIC-001: plain-language prompt → backend campaign architect → compiled
-  // workflow. The AI names the campaign; the result is a normal editable graph.
+  // DYNAMIC-001: both execution paths converge on the same validated CampaignSpec.
+  // BYOK calls the workspace model; an external agent harness hands its JSON spec
+  // back through Omni's read-only validator. Neither path writes until preview is
+  // explicitly confirmed below.
   const createPrompt = async () => {
-    const prompt = promptText.trim()
-    if (prompt.length < 8) {
-      toast.error('Describe the campaign in a sentence or two first.')
-      return
-    }
     setPromptBusy(true)
     try {
-      const result = await canvas.createFromPrompt(prompt)
-      if (!result.detail) {
-        toast.error('The architect returned a spec but no campaign was created.')
+      if (promptPreview) {
+        onCreated(await canvas.createFromSpec(promptPreview))
         return
       }
-      onCreated(result.detail)
+
+      if (aiAuthoringSource === 'byok') {
+        const prompt = promptText.trim()
+        if (prompt.length < 8) {
+          toast.error('Describe the campaign in a sentence or two first.')
+          return
+        }
+        if (!architectConnection) {
+          toast.error('Choose a workspace Anthropic connection first.')
+          return
+        }
+        const result = await canvas.createFromPrompt(prompt, true, architectConnection)
+        setPromptPreview(result.spec)
+        toast.success('Campaign plan ready — review it before creating the draft')
+      } else {
+        let parsed: CampaignSpec
+        try {
+          parsed = JSON.parse(harnessSpecText) as CampaignSpec
+        } catch {
+          toast.error('The agent harness output is not valid JSON yet.')
+          return
+        }
+        const validated = await canvas.validateSpec(parsed)
+        setPromptPreview(validated)
+        toast.success('Agent-authored plan passed Omni validation')
+      }
     } catch (err) {
       const detail =
         (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      toast.error(detail ?? (err instanceof Error ? err.message : 'Could not create campaign'))
+      toast.error(detail ?? (err instanceof Error ? err.message : 'Could not prepare campaign'))
     } finally {
       setPromptBusy(false)
     }
@@ -340,38 +367,89 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
 
           {mode === 'prompt' ? (
             <div className="space-y-4">
-              <ArchitectSection icon={Sparkles} title="Describe the campaign" subtitle="Audience, how many contacts you want, and what (if anything) to send. The architect only uses connections you actually have.">
-                <textarea
-                  autoFocus
-                  value={promptText}
-                  onChange={(event) => setPromptText(event.target.value)}
-                  rows={5}
-                  placeholder="e.g. Find 30 CEOs and CMOs at 10-100 person Indian software companies via Apollo, enrich their emails, then send a warm 2-step email sequence introducing our analytics product."
-                  className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
-                />
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {[
-                    'Find 25 founders at early-stage SaaS companies and create contacts with verified emails — no outreach yet',
-                    'Target CTOs at companies hiring backend engineers in India, connect on LinkedIn, then follow up with a short AI-personalised DM',
-                    'Build a list of 50 marketing directors at US agencies and send a 2-step email sequence about our reporting tool',
-                  ].map((example) => (
-                    <button
-                      key={example}
-                      type="button"
-                      onClick={() => setPromptText(example)}
-                      className="max-w-[320px] truncate rounded-full border border-slate-200 px-2.5 py-1 text-[11px] text-slate-500 transition-colors hover:border-brand-300 hover:text-brand-600 dark:border-slate-700 dark:text-slate-400"
-                      title={example}
-                    >
-                      {example}
-                    </button>
-                  ))}
-                </div>
-              </ArchitectSection>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs leading-relaxed text-slate-500 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-400">
-                The AI drafts a full campaign spec (sources → people → enrichment → messages), validates it against your
-                real connections, and compiles it into an ordinary canvas graph you can inspect and edit before running.
-                Requires an Anthropic connection in Settings → Integrations.
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => { setAiAuthoringSource('byok'); setPromptPreview(null) }}
+                  className={`rounded-2xl border p-4 text-left transition ${aiAuthoringSource === 'byok' ? 'border-brand-400 bg-brand-50 shadow-sm dark:border-brand-600 dark:bg-brand-950/25' : 'border-slate-200 bg-white hover:border-brand-200 dark:border-slate-800 dark:bg-slate-950/40'}`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">Workspace key (BYOK)</span>
+                    {aiAuthoringSource === 'byok' && <Badge label="selected" variant="success" />}
+                  </div>
+                  <p className="mt-1.5 text-xs leading-relaxed text-slate-500">Run the architect with a model connection stored in this workspace.</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAiAuthoringSource('harness'); setPromptPreview(null) }}
+                  className={`rounded-2xl border p-4 text-left transition ${aiAuthoringSource === 'harness' ? 'border-violet-400 bg-violet-50 shadow-sm dark:border-violet-600 dark:bg-violet-950/25' : 'border-slate-200 bg-white hover:border-violet-200 dark:border-slate-800 dark:bg-slate-950/40'}`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">Agent harness</span>
+                    {aiAuthoringSource === 'harness' && <Badge label="selected" variant="info" />}
+                  </div>
+                  <p className="mt-1.5 text-xs leading-relaxed text-slate-500">Bring a CampaignSpec from Codex, Claude Code, or another agent. Omni validates it before any write.</p>
+                </button>
               </div>
+
+              {aiAuthoringSource === 'byok' ? (
+                <ArchitectSection icon={Sparkles} title="Describe the campaign" subtitle="Audience, target count, sources, and what (if anything) to send. Preview is mandatory before creation.">
+                  <label className="mb-3 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    AI connection
+                    {anthropicConnections.length > 0 ? (
+                      <select
+                        value={architectConnection}
+                        onChange={(event) => { setArchitectConnection(event.target.value); setPromptPreview(null) }}
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+                      >
+                        {anthropicConnections.map((connection) => <option key={connection.id} value={connection.name}>{connection.name}</option>)}
+                      </select>
+                    ) : (
+                      <span className="mt-1 block rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-normal text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300">No Anthropic BYOK connection is configured.</span>
+                    )}
+                  </label>
+                  <textarea
+                    autoFocus
+                    value={promptText}
+                    onChange={(event) => { setPromptText(event.target.value); setPromptPreview(null) }}
+                    rows={5}
+                    placeholder="e.g. Find 30 CEOs and CMOs at 10-100 person Indian software companies via Apollo, enrich their emails, then send a warm 2-step email sequence introducing our analytics product."
+                    className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                  />
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {[
+                      'Find 25 founders at early-stage SaaS companies and create contacts with verified emails — no outreach yet',
+                      'Target CTOs at companies hiring backend engineers in India, connect on LinkedIn, then follow up with a short AI-personalised DM',
+                      'Build a list of 50 marketing directors at US agencies and send a 2-step email sequence about our reporting tool',
+                    ].map((example) => (
+                      <button key={example} type="button" onClick={() => { setPromptText(example); setPromptPreview(null) }} className="max-w-[320px] truncate rounded-full border border-slate-200 px-2.5 py-1 text-[11px] text-slate-500 transition-colors hover:border-brand-300 hover:text-brand-600 dark:border-slate-700 dark:text-slate-400" title={example}>
+                        {example}
+                      </button>
+                    ))}
+                  </div>
+                </ArchitectSection>
+              ) : (
+                <ArchitectSection icon={GitBranch} title="Import an agent-authored plan" subtitle="Paste one CampaignSpec JSON object. Omni checks its schema, connections, and compiled graph without creating a campaign.">
+                  <textarea
+                    autoFocus
+                    value={harnessSpecText}
+                    onChange={(event) => { setHarnessSpecText(event.target.value); setPromptPreview(null) }}
+                    rows={12}
+                    spellCheck={false}
+                    placeholder={'{\n  "name": "India SaaS founders",\n  "timezone": "Asia/Kolkata",\n  "target_contacts": 25,\n  "sources": [...],\n  "people": {...},\n  "enrichment": [],\n  "messages": []\n}'}
+                    className="w-full resize-y rounded-xl border border-slate-200 bg-slate-950 px-3 py-3 font-mono text-xs leading-relaxed text-emerald-200 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-slate-700"
+                  />
+                  <p className="mt-2 text-[11px] text-slate-500">Harness output never bypasses Omni: connection names must exist, node compilation must succeed, and creation still requires the review step below.</p>
+                </ArchitectSection>
+              )}
+
+              {promptPreview ? (
+                <CampaignSpecPreview spec={promptPreview} onRevise={() => setPromptPreview(null)} />
+              ) : (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs leading-relaxed text-slate-500 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-400">
+                  Step 1 prepares and validates a campaign plan. Step 2 shows the exact sources, enrichment, messages, safety bounds, and target before creating a draft workflow. Nothing activates automatically.
+                </div>
+              )}
             </div>
           ) : mode === 'architect' ? (
             <>
@@ -567,7 +645,9 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
           <div className="sticky bottom-0 -mx-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100/50 bg-white/80 px-5 py-5 backdrop-blur-xl dark:border-slate-800/50 dark:bg-slate-950/80">
             <p className="text-xs text-slate-500">
               {mode === 'prompt'
-                ? 'The generated campaign lands on the canvas — inspect it before running.'
+                ? promptPreview
+                  ? 'Plan validated. Creating it makes a draft workflow only — it does not activate or send.'
+                  : 'Prepare a plan first. Omni will show exactly what the AI or agent assembled before writing anything.'
                 : mode === 'architect'
                   ? 'Create the campaign, then inspect or tune the generated canvas.'
                   : 'Classic mode preserves the existing goal/template creation flow.'}
@@ -581,11 +661,17 @@ export default function CampaignArchitect({ templates, connections = [], onCreat
                 onClick={mode === 'prompt' ? createPrompt : mode === 'architect' ? createArchitect : createClassic}
                 disabled={
                   (mode === 'architect' && !architectReady) ||
-                  (mode === 'prompt' && (promptBusy || promptText.trim().length < 8))
+                  (mode === 'prompt' && (
+                    promptBusy ||
+                    (!promptPreview && aiAuthoringSource === 'byok' && (promptText.trim().length < 8 || !architectConnection)) ||
+                    (!promptPreview && aiAuthoringSource === 'harness' && harnessSpecText.trim().length < 2)
+                  ))
                 }
               >
                 {mode === 'prompt'
-                  ? promptBusy ? 'Designing campaign…' : 'Generate campaign'
+                  ? promptBusy
+                    ? promptPreview ? 'Creating draft…' : 'Preparing plan…'
+                    : promptPreview ? 'Create draft campaign' : aiAuthoringSource === 'byok' ? 'Preview AI plan' : 'Validate agent plan'
                   : mode === 'architect' ? 'Create campaign' : 'Create classic campaign'}
               </Button>
             </div>
@@ -825,7 +911,6 @@ function SourceRow({
   const serperConnections = connectionsForProvider(connections, 'serper')
   const linkfinderConnections = connectionsForProvider(connections, 'linkfinder')
   const isJobBoard = JOB_BOARD_PROVIDERS.has(source.provider)
-  const isSearch = SEARCH_PROVIDERS.has(source.provider)
   const isATS = NO_QUERY_PROVIDERS.has(source.provider)
   const isLinkFinderSource = LINKFINDER_SOURCE_PROVIDERS.has(source.provider)
   
@@ -1074,6 +1159,66 @@ function MessageRow({ index, message, onChange, onRemove }: { index: number; mes
         </Field>
       )}
     </div>
+  )
+}
+
+function CampaignSpecPreview({ spec, onRevise }: { spec: CampaignSpec; onRevise: () => void }) {
+  return (
+    <section className="overflow-hidden rounded-2xl border border-emerald-200 bg-white shadow-sm dark:border-emerald-900/60 dark:bg-slate-950/60">
+      <div className="flex flex-col gap-3 border-b border-emerald-100 bg-emerald-50/70 p-4 sm:flex-row sm:items-start sm:justify-between dark:border-emerald-900/40 dark:bg-emerald-950/20">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-emerald-700 dark:text-emerald-300"><ShieldCheck size={15} /> Validated campaign plan</div>
+          <h3 className="mt-1 text-lg font-black text-slate-950 dark:text-white">{spec.name}</h3>
+          <p className="mt-1 text-xs text-slate-500">Review this compiled intent before creating a draft workflow. Creation does not activate it.</p>
+        </div>
+        <Button variant="secondary" size="sm" onClick={onRevise}>Revise input</Button>
+      </div>
+      <div className="grid gap-4 p-4 lg:grid-cols-[1fr_1fr]">
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4">
+            <SummaryStat label="Contacts" value={String(spec.target_contacts)} />
+            <SummaryStat label="Sources" value={String(spec.sources.length)} />
+            <SummaryStat label="Enrichers" value={String(spec.enrichment?.length ?? 0)} />
+            <SummaryStat label="Messages" value={String(spec.messages?.length ?? 0)} />
+          </div>
+          <div className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+            <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">Discovery and people</p>
+            <div className="mt-2 space-y-2">
+              {spec.sources.map((source, index) => (
+                <div key={`${source.provider}-${index}`} className="flex items-start justify-between gap-3 text-xs">
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">{index + 1}. {source.provider.replace(/_/g, ' ')}</span>
+                  <span className="max-w-[60%] truncate text-right text-slate-500">{source.connection_name || source.query || source.keyword || source.input_data || 'No connection required'}</span>
+                </div>
+              ))}
+              {spec.people && <div className="flex items-start justify-between gap-3 border-t border-slate-100 pt-2 text-xs dark:border-slate-800"><span className="font-semibold text-slate-800 dark:text-slate-200">People finder</span><span className="text-right text-slate-500">{spec.people.provider || 'searxng_people'} · {(spec.people.titles || []).join(', ') || 'Any title'}</span></div>}
+            </div>
+          </div>
+        </div>
+        <div className="space-y-3">
+          <div className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+            <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">Message journey</p>
+            {(spec.messages?.length ?? 0) > 0 ? (
+              <div className="mt-2 space-y-2">
+                {spec.messages?.map((message, index) => (
+                  <div key={`${message.channel}-${index}`} className="rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-900">
+                    <div className="flex items-center justify-between gap-2"><span className="text-xs font-semibold text-slate-800 dark:text-slate-200">{index + 1}. {message.channel}{message.mode ? ` · ${message.mode}` : ''}</span>{message.ai_compose && <Badge label="AI compose" variant="violet" size="xs" />}</div>
+                    <p className="mt-1 line-clamp-2 text-[11px] text-slate-500">{message.ai_compose || message.message_template || message.subject_template || message.body_template || 'Configured message step'}</p>
+                  </div>
+                ))}
+              </div>
+            ) : <p className="mt-2 text-xs text-slate-500">No outreach steps. This plan only discovers and prepares contacts.</p>}
+          </div>
+          <div className="flex flex-wrap gap-2 rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-[11px] text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200">
+            <span className="font-bold">Safety:</span>
+            <span>{spec.bounds?.max_iterations ?? 5} max attempts</span>
+            <span>·</span>
+            <span>{spec.bounds?.max_spend_usd ? `$${spec.bounds.max_spend_usd} spend cap` : 'No spend cap specified'}</span>
+            <span>·</span>
+            <span>{spec.timezone || 'UTC'}</span>
+          </div>
+        </div>
+      </div>
+    </section>
   )
 }
 

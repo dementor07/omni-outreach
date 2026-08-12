@@ -8,6 +8,7 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { clsx } from 'clsx'
+import { BarChart3, Hash, LineChart, List, Table2 } from 'lucide-react'
 import { views, type ViewQueryResult, type WidgetInstance } from '../api/v2'
 import Card from './Card'
 
@@ -50,18 +51,29 @@ const HEIGHT_CLASSES: Record<number, string> = {
 }
 
 function WidgetShell({ widget, children }: { widget: WidgetInstance; children: React.ReactNode }) {
+  const Icon = {
+    stat: Hash,
+    table: Table2,
+    bar_chart: BarChart3,
+    line_chart: LineChart,
+    list: List,
+  }[widget.type] ?? Hash
   return (
     <Card
       padding="sm"
       className={clsx(
-        'flex h-full min-h-[120px] flex-col overflow-hidden',
+        'group relative flex h-full min-h-[140px] flex-col overflow-hidden border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 transition duration-200 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-lg dark:border-slate-800 dark:from-slate-950 dark:to-slate-900/40 dark:hover:border-brand-900',
         WIDTH_CLASSES[widget.width ?? 2] ?? WIDTH_CLASSES[2],
         HEIGHT_CLASSES[widget.height ?? 1] ?? '',
       )}
     >
-      <p className="mb-2 truncate text-[12px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-        {widget.title}
-      </p>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <p className="flex min-w-0 items-center gap-2 truncate text-[11px] font-bold uppercase tracking-[0.11em] text-slate-500 dark:text-slate-400">
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-600 transition group-hover:bg-brand-100 dark:bg-brand-950/50 dark:text-brand-300"><Icon size={13} /></span>
+          <span className="truncate">{widget.title}</span>
+        </p>
+        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-400 dark:bg-slate-800">Live</span>
+      </div>
       <div className="min-h-0 flex-1">{children}</div>
     </Card>
   )
@@ -72,7 +84,7 @@ function LoadingState() {
 }
 
 function ErrorState({ message }: { message: string }) {
-  return <p className="text-[12px] text-rose-500">{message}</p>
+  return <div className="grid min-h-20 place-items-center rounded-xl border border-dashed border-rose-200 bg-rose-50/60 text-[12px] text-rose-600 dark:border-rose-900/50 dark:bg-rose-950/20">{message}</div>
 }
 
 function StatWidget({ widget }: { widget: WidgetInstance }) {
@@ -83,7 +95,7 @@ function StatWidget({ widget }: { widget: WidgetInstance }) {
   const col = data?.columns[0]
   const value = first && col ? first[col] : 0
   return (
-    <p className="text-3xl font-bold tabular-nums text-slate-900 dark:text-white">
+    <p className="bg-gradient-to-r from-slate-950 to-brand-600 bg-clip-text text-4xl font-black tracking-tight text-transparent tabular-nums dark:from-white dark:to-brand-300">
       {formatCell(value ?? 0)}
     </p>
   )
@@ -97,7 +109,7 @@ function TableWidget({ widget }: { widget: WidgetInstance }) {
   return (
     <div className="h-full overflow-auto">
       <table className="w-full text-left text-[12px]">
-        <thead>
+        <thead className="sticky top-0 bg-white/95 backdrop-blur dark:bg-slate-950/95">
           <tr className="border-b border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-400">
             {data.columns.map((c) => (
               <th key={c} className="whitespace-nowrap px-2 py-1.5 font-medium">{c.replace(/_/g, ' ')}</th>
@@ -106,7 +118,7 @@ function TableWidget({ widget }: { widget: WidgetInstance }) {
         </thead>
         <tbody>
           {data.rows.map((row, i) => (
-            <tr key={i} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
+            <tr key={i} className="border-b border-slate-100 transition hover:bg-brand-50/60 last:border-0 dark:border-slate-800 dark:hover:bg-brand-950/20">
               {data.columns.map((c) => (
                 <td key={c} className="max-w-[220px] truncate px-2 py-1.5 text-slate-700 dark:text-slate-300">
                   {formatCell(row[c])}
@@ -137,9 +149,9 @@ function BarChartWidget({ widget }: { widget: WidgetInstance }) {
             <span className="w-28 shrink-0 truncate text-[11px] text-slate-500 dark:text-slate-400">
               {formatCell(row[labelCol])}
             </span>
-            <div className="h-4 flex-1 overflow-hidden rounded bg-slate-100 dark:bg-slate-800">
+            <div className="h-4 flex-1 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
               <div
-                className="h-full rounded bg-brand-500/80"
+                className="h-full rounded-full bg-gradient-to-r from-brand-400 to-brand-600 shadow-[0_0_12px_rgba(20,184,166,.18)]"
                 style={{ width: `${Math.max((value / max) * 100, 2)}%` }}
               />
             </div>
@@ -192,7 +204,7 @@ function ListWidget({ widget }: { widget: WidgetInstance }) {
   return (
     <ul className="space-y-1.5 overflow-auto">
       {data.rows.slice(0, 20).map((row, i) => (
-        <li key={i} className="rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800/60">
+        <li key={i} className="rounded-xl border border-transparent bg-slate-50 px-3 py-2 transition hover:border-brand-100 hover:bg-brand-50/60 dark:bg-slate-800/60 dark:hover:border-brand-900 dark:hover:bg-brand-950/20">
           <p className="truncate text-[12px] font-medium text-slate-800 dark:text-slate-200">
             {formatCell(row[titleCol])}
           </p>
@@ -226,7 +238,7 @@ export function WidgetRenderer({ widget }: { widget: WidgetInstance }) {
 
 export function ViewGrid({ layout, className }: { layout: WidgetInstance[]; className?: string }) {
   return (
-    <div className={clsx('grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4', className)}>
+    <div className={clsx('grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4', className)}>
       {layout.map((widget) => (
         <WidgetRenderer key={widget.id} widget={widget} />
       ))}

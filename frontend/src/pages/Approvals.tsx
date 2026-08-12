@@ -1,7 +1,7 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { UserCheck, Check, X, Clock, Sparkles, Save, Wand2, RefreshCw, ExternalLink, Linkedin } from 'lucide-react'
-import { approvals, ai, type Approval, type ApprovalEvidence, type AiJob } from '../api/v2'
+import { UserCheck, Check, X, Clock, Sparkles, Save, Wand2, RefreshCw, ExternalLink, Linkedin, TextSelect, Trash2 } from 'lucide-react'
+import { approvals, ai, type Approval, type ApprovalEvidence, type AiJob, type RewriteDirective } from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Button from '../components/Button'
@@ -128,36 +128,13 @@ function EvidenceSources({ sources }: { sources: ApprovalEvidence[] }) {
   )
 }
 
-// A sensible, EDITABLE starting instruction for the playground — the operator
-// tweaks it (or clicks a rewrite chip) and re-rolls. The hard humanization rules
-// (no em dashes, no AI cliches, self-refine) live in the compose system prompt,
-// so this stays focused on WHO we are, the signal to open on, and the shape.
-const DEFAULT_INSTRUCTION =
-  'Write the first LinkedIn DM to this lead (they just accepted the connection), from Outbound ' +
-  'Marketing Hub. We automate outbound: AI finds a company\'s ideal prospects, writes personalized ' +
-  'messages, and runs LinkedIn outreach plus follow-ups, so their team keeps the pipeline full ' +
-  'without the manual grind.\n\n' +
-  'Open on the strongest real buying signal in the facts, in this priority: (1) a specific role ' +
-  'they are hiring for, (2) a recent post about scaling / pipeline / lead-gen / outbound, (3) what ' +
-  'their website says they do. Name the exact role, listing, or post — do not generalize to "you are ' +
-  'hiring". Then bridge to how we solve exactly that, and end with ONE genuine question that follows ' +
-  'from the signal.\n\n' +
-  'Begin with "Hi {first_name},". 60 to 110 words.\n\n' +
-  'Example (hiring signal) — match this voice, not the content:\n' +
-  'Hi Sarah,\n' +
-  'Saw you are hiring an SDR at Nimbus. Usually that means outbound just went from side project to real priority.\n' +
-  'That is the part we take off your plate. We find the right-fit accounts, write the personalized first ' +
-  'messages, and run the LinkedIn follow-ups automatically, so whoever you hire spends their day in live ' +
-  'conversations instead of building lists.\n' +
-  'Are you bringing them on to own outbound end to end, or mostly to work inbound?'
-
-// Rewrite chips append a directive to the instruction, then the operator re-rolls.
+// Whole-draft notes stay separate from the campaign's source instruction. This
+// preserves provenance and makes the operator's one-off change obvious.
 const REWRITE_CHIPS: { label: string; hint: string }[] = [
-  { label: 'Name the exact role', hint: 'If they are hiring, name the exact role from the listing; do not generalize.' },
   { label: 'Warmer', hint: 'Warmer and more personal, founder to founder.' },
   { label: 'Shorter', hint: 'Keep it tight — 3 short lines max.' },
   { label: 'More direct', hint: 'Be more direct and confident; get to the point faster.' },
-  { label: 'Lead with our outcome', hint: 'Lead with the outcome we drive: a full pipeline without manual outbound.' },
+  { label: 'Use stronger evidence', hint: 'Lead with the strongest concrete fact available in the profile, post, hiring, or website evidence.' },
 ]
 
 // The knobs the ai.compose node exposes, surfaced 1:1 in the playground.
@@ -184,6 +161,7 @@ const LENGTHS: { value: number; label: string }[] = [
 // Values must match backend COMPOSE_MODELS; anything else falls back to Haiku.
 const MODELS: { value: string; label: string }[] = [
   { value: 'claude-haiku-4-5-20251001', label: 'Haiku — fast & cheap' },
+  { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6 — campaign default' },
   { value: 'claude-sonnet-5', label: 'Sonnet 5 — balanced' },
   { value: 'claude-opus-5', label: 'Opus 5 — best' },
 ]
@@ -194,31 +172,39 @@ interface ComposeSettings {
   channel: ComposeChannel
   maxWords: number
   model: string
+  rewriteNote: string
 }
 
-const DEFAULT_SETTINGS: ComposeSettings = {
-  instruction: DEFAULT_INSTRUCTION,
-  tone: 'warm',
-  channel: 'linkedin',
-  maxWords: 120,
-  model: 'claude-haiku-4-5-20251001',
+function settingsFromApproval(approval: Approval): ComposeSettings {
+  const source = approval.compose_context
+  return {
+    instruction: source?.instruction ?? '',
+    tone: (source?.tone as ComposeTone) || 'professional',
+    channel: (source?.channel as ComposeChannel) || 'email',
+    maxWords: source?.max_words ?? 120,
+    model: source?.model || 'claude-haiku-4-5-20251001',
+    rewriteNote: '',
+  }
 }
 
 // Poll the ad-hoc AI job until the compose draft is ready. The engine is async
 // (POST /ai/jobs -> ai.compose.completed -> projector), so we poll the job by id.
 // Every ai.compose knob is passed through `config`, which the worker reads.
-async function regenerateDraft(leadId: string, s: ComposeSettings): Promise<string> {
-  const { job_id } = await ai.runJob({
-    kind: 'compose',
-    entity_type: 'lead',
-    entity_id: leadId,
-    config: {
-      instruction: s.instruction,
-      tone: s.tone,
-      channel: s.channel,
-      max_words: s.maxWords,
-      model: s.model,
-    },
+async function regenerateDraft(
+  approvalId: string,
+  originalDraft: string,
+  s: ComposeSettings,
+  directives: RewriteDirective[],
+): Promise<string> {
+  const { job_id } = await approvals.regenerate(approvalId, {
+    original_draft: originalDraft,
+    campaign_instruction: s.instruction,
+    rewrite_note: s.rewriteNote,
+    directives,
+    tone: s.tone,
+    channel: s.channel,
+    max_words: s.maxWords,
+    model: s.model,
   })
   for (let attempt = 0; attempt < 30; attempt++) {
     await new Promise((r) => setTimeout(r, 2000))
@@ -251,11 +237,62 @@ const selectCls =
 function ApprovalCard({ approval }: { approval: Approval }) {
   const qc = useQueryClient()
   const toast = useToast()
+  const draftRef = useRef<HTMLTextAreaElement>(null)
   // null = not editing; otherwise the working draft text.
   const [editing, setEditing] = useState<string | null>(null)
   const [playgroundOpen, setPlaygroundOpen] = useState(false)
-  const [settings, setSettings] = useState<ComposeSettings>(DEFAULT_SETTINGS)
+  const sourceSettings = useMemo(() => settingsFromApproval(approval), [approval])
+  const [settings, setSettings] = useState<ComposeSettings>(() => settingsFromApproval(approval))
+  const [directives, setDirectives] = useState<RewriteDirective[]>([])
+  const [selection, setSelection] = useState<{ start: number; end: number; text: string } | null>(null)
+  const [selectionInstruction, setSelectionInstruction] = useState('')
   const patch = (p: Partial<ComposeSettings>) => setSettings((s) => ({ ...s, ...p }))
+
+  const updateSelection = () => {
+    const textarea = draftRef.current
+    if (!textarea || textarea.selectionEnd <= textarea.selectionStart) {
+      setSelection(null)
+      return
+    }
+    setSelection({
+      start: textarea.selectionStart,
+      end: textarea.selectionEnd,
+      text: textarea.value.slice(textarea.selectionStart, textarea.selectionEnd),
+    })
+  }
+
+  const addDirective = () => {
+    if (!selection) {
+      toast.error('Select the exact words you want to change first.')
+      return
+    }
+    if (selectionInstruction.trim().length < 2) {
+      toast.error('Add a short rewrite note for the selected text.')
+      return
+    }
+    setDirectives((current) => [
+      ...current,
+      {
+        start: selection.start,
+        end: selection.end,
+        selected_text: selection.text,
+        instruction: selectionInstruction.trim(),
+      },
+    ])
+    setSelectionInstruction('')
+    setSelection(null)
+  }
+
+  const togglePlayground = () => {
+    const opening = !playgroundOpen
+    setPlaygroundOpen(opening)
+    if (opening) {
+      setEditing((current) => current ?? approval.draft ?? '')
+      setSettings(sourceSettings)
+      setDirectives([])
+      setSelection(null)
+    }
+  }
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['approvals'] })
 
@@ -264,6 +301,9 @@ function ApprovalCard({ approval }: { approval: Approval }) {
     onSuccess: () => {
       toast.success('Draft updated')
       setEditing(null)
+      setPlaygroundOpen(false)
+      setDirectives([])
+      setSelection(null)
       setTimeout(invalidate, 400)
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not save draft'),
@@ -279,11 +319,13 @@ function ApprovalCard({ approval }: { approval: Approval }) {
   })
 
   const regenMut = useMutation({
-    mutationFn: () => regenerateDraft(approval.lead_id, settings),
+    mutationFn: () => regenerateDraft(approval.id, editing ?? approval.draft ?? '', settings, directives),
     onSuccess: (draft) => {
       // Land the regenerated text in the editable draft so it can be reviewed,
       // tweaked, then Saved (which persists it for the send) before Approve.
       setEditing(draft)
+      setDirectives([])
+      setSelection(null)
       toast.success('Regenerated — review, save, then approve')
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not regenerate'),
@@ -352,8 +394,14 @@ function ApprovalCard({ approval }: { approval: Approval }) {
           </div>
           {editing !== null ? (
             <textarea
+              ref={draftRef}
               value={editing}
-              onChange={(e) => setEditing(e.target.value)}
+              onChange={(e) => {
+                setEditing(e.target.value)
+                if (directives.length > 0) setDirectives([])
+                setSelection(null)
+              }}
+              onSelect={playgroundOpen ? updateSelection : undefined}
               rows={5}
               aria-label="AI draft"
               placeholder="Edit the AI-composed draft…"
@@ -366,7 +414,12 @@ function ApprovalCard({ approval }: { approval: Approval }) {
             {editing !== null ? (
               <>
                 <Button variant="primary" size="sm" icon={Save} onClick={() => saveMut.mutate()} disabled={busy}>Save draft</Button>
-                <Button variant="ghost" size="sm" onClick={() => setEditing(null)} disabled={busy}>Cancel</Button>
+                <Button variant="ghost" size="sm" onClick={() => {
+                  setEditing(null)
+                  setPlaygroundOpen(false)
+                  setDirectives([])
+                  setSelection(null)
+                }} disabled={busy}>Cancel</Button>
               </>
             ) : (
               <Button variant="secondary" size="sm" onClick={() => setEditing(approval.draft ?? '')} disabled={busy}>Edit draft</Button>
@@ -375,100 +428,187 @@ function ApprovalCard({ approval }: { approval: Approval }) {
               variant="ghost"
               size="sm"
               icon={Wand2}
-              onClick={() => setPlaygroundOpen((o) => !o)}
-              disabled={busy}
+              onClick={togglePlayground}
+              disabled={busy || !approval.compose_context}
+              title={approval.compose_context ? 'Rewrite with campaign context' : 'No unambiguous upstream ai.compose node was found'}
             >
-              {playgroundOpen ? 'Hide playground' : 'Regenerate…'}
+              {playgroundOpen ? 'Hide rewrite studio' : 'Regenerate with context…'}
             </Button>
           </div>
+          {!approval.compose_context && (
+            <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">
+              Contextual regeneration is unavailable because this approval does not resolve to exactly one upstream AI compose node. The draft can still be edited manually.
+            </p>
+          )}
 
-          {/* Playground: every ai.compose knob — instruction, tone, length,
-              model, channel — then re-roll the draft from this lead's data. */}
+          {/* Approval-specific rewrite studio. Provenance comes from the direct
+              upstream ai.compose node; selected ranges stay anchored to this
+              exact working draft and are validated again by the backend. */}
           {playgroundOpen && (
-            <div className="mt-3 space-y-2.5 rounded-md border border-slate-200 bg-white/70 p-2.5 dark:border-slate-700 dark:bg-slate-900/40">
-              <div className="flex items-center justify-between">
-                <div className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                  Compose playground — same options as the ai.compose node
+            <div className="mt-4 space-y-4 rounded-xl border border-violet-200 bg-white p-4 shadow-sm dark:border-violet-900/60 dark:bg-slate-950/70">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold uppercase tracking-[0.12em] text-violet-700 dark:text-violet-300">
+                    <Wand2 size={13} /> Contextual rewrite studio
+                    <span className="rounded-full bg-violet-50 px-2 py-0.5 font-mono text-[9px] tracking-normal text-violet-600 dark:bg-violet-950/50 dark:text-violet-300">
+                      node {approval.compose_context?.node_id.slice(0, 8)}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    Inherits this campaign message's real instruction and the evidence shown above. Regeneration only creates a review draft.
+                  </p>
                 </div>
                 <button
                   type="button"
                   disabled={regenMut.isPending}
-                  onClick={() => setSettings(DEFAULT_SETTINGS)}
+                  onClick={() => {
+                    setSettings(sourceSettings)
+                    setDirectives([])
+                    setSelection(null)
+                  }}
                   className="rounded-full px-2 py-0.5 text-[11px] text-slate-400 hover:text-slate-600 disabled:opacity-50 dark:hover:text-slate-200"
                 >
-                  Reset all
+                  Reset to campaign
                 </button>
               </div>
 
-              {/* Row of the four scalar knobs. */}
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <Field label="Tone">
-                  <select className={selectCls} value={settings.tone} disabled={regenMut.isPending}
-                    onChange={(e) => patch({ tone: e.target.value as ComposeTone })}>
-                    {TONES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-                  </select>
-                </Field>
-                <Field label="Length">
-                  <select className={selectCls} value={settings.maxWords} disabled={regenMut.isPending}
-                    onChange={(e) => patch({ maxWords: Number(e.target.value) })}>
-                    {LENGTHS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
-                  </select>
-                </Field>
-                <Field label="Model">
-                  <select className={selectCls} value={settings.model} disabled={regenMut.isPending}
-                    onChange={(e) => patch({ model: e.target.value })}>
-                    {MODELS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-                  </select>
-                </Field>
-                <Field label="Channel">
-                  <select className={selectCls} value={settings.channel} disabled={regenMut.isPending}
-                    onChange={(e) => patch({ channel: e.target.value as ComposeChannel })}>
-                    {CHANNELS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-                  </select>
-                </Field>
+              <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+                <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-200">
+                    <TextSelect size={13} className="text-violet-500" /> Annotate exact wording
+                  </div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                    Select words in the draft above, describe only how that selection should change, then add the note.
+                  </p>
+                  {selection ? (
+                    <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50/80 p-2.5 dark:border-violet-900/50 dark:bg-violet-950/25">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-violet-600">Current selection</div>
+                      <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-[12px] font-medium text-slate-800 dark:text-slate-100">“{selection.text}”</p>
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-lg border border-dashed border-slate-300 px-3 py-4 text-center text-[11px] text-slate-400 dark:border-slate-700">
+                      No text selected yet
+                    </div>
+                  )}
+                  <div className="mt-2 flex flex-col gap-2 sm:flex-row xl:flex-col 2xl:flex-row">
+                    <input
+                      value={selectionInstruction}
+                      onChange={(e) => setSelectionInstruction(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && selection) {
+                          e.preventDefault()
+                          addDirective()
+                        }
+                      }}
+                      placeholder="e.g. Use the exact hiring role from the evidence"
+                      disabled={regenMut.isPending}
+                      className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                    />
+                    <Button variant="secondary" size="sm" icon={TextSelect} onClick={addDirective} disabled={!selection || regenMut.isPending}>
+                      Add note
+                    </Button>
+                  </div>
+                  {directives.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      {directives.map((directive, index) => (
+                        <div key={`${directive.start}-${directive.end}-${index}`} className="rounded-lg border border-slate-200 bg-white p-2.5 dark:border-slate-700 dark:bg-slate-950">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-[11px] font-semibold text-slate-700 dark:text-slate-200">“{directive.selected_text}”</p>
+                              <p className="mt-0.5 text-[11px] text-slate-500">{directive.instruction}</p>
+                            </div>
+                            <button type="button" aria-label="Remove rewrite note" onClick={() => setDirectives((current) => current.filter((_, i) => i !== index))} className="shrink-0 rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/30">
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <section className="space-y-3">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <Field label="Tone">
+                      <select className={selectCls} value={settings.tone} disabled={regenMut.isPending}
+                        onChange={(e) => patch({ tone: e.target.value as ComposeTone })}>
+                        {TONES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                      </select>
+                    </Field>
+                    <Field label="Length">
+                      <select className={selectCls} value={settings.maxWords} disabled={regenMut.isPending}
+                        onChange={(e) => patch({ maxWords: Number(e.target.value) })}>
+                        {LENGTHS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
+                      </select>
+                    </Field>
+                    <Field label="Model">
+                      <select className={selectCls} value={settings.model} disabled={regenMut.isPending}
+                        onChange={(e) => patch({ model: e.target.value })}>
+                        {MODELS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                      </select>
+                    </Field>
+                    <Field label="Channel">
+                      <select className={selectCls} value={settings.channel} disabled={regenMut.isPending}
+                        onChange={(e) => patch({ channel: e.target.value as ComposeChannel })}>
+                        {CHANNELS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                      </select>
+                    </Field>
+                  </div>
+
+                  <div>
+                    <div className="mb-1 flex items-center justify-between gap-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      <span>Campaign instruction</span>
+                      <span className="font-normal text-slate-400">Inherited from this message node</span>
+                    </div>
+                    <textarea
+                      value={settings.instruction}
+                      onChange={(e) => patch({ instruction: e.target.value })}
+                      rows={5}
+                      aria-label="Campaign compose instruction"
+                      disabled={regenMut.isPending}
+                      className="w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-[11px] leading-relaxed text-slate-800 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-violet-900/40"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="mb-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300">Whole-draft note <span className="font-normal text-slate-400">(optional)</span></div>
+                    <textarea
+                      value={settings.rewriteNote}
+                      onChange={(e) => patch({ rewriteNote: e.target.value })}
+                      rows={2}
+                      placeholder="What should change across the message while keeping its campaign intent?"
+                      disabled={regenMut.isPending}
+                      className="w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] leading-relaxed text-slate-800 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {REWRITE_CHIPS.map((c) => (
+                      <button
+                        key={c.label}
+                        type="button"
+                        disabled={regenMut.isPending}
+                        onClick={() => patch({ rewriteNote: `${settings.rewriteNote.trim()}\n${c.hint}`.trim() })}
+                        className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 transition hover:border-violet-300 hover:text-violet-700 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-violet-700"
+                      >
+                        + {c.label}
+                      </button>
+                    ))}
+                  </div>
+                </section>
               </div>
 
-              {/* Instruction — the prompt itself. */}
-              <div>
-                <div className="mb-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                  Instruction — edit freely
-                </div>
-                <textarea
-                  value={settings.instruction}
-                  onChange={(e) => patch({ instruction: e.target.value })}
-                  rows={7}
-                  aria-label="Regeneration instruction"
-                  disabled={regenMut.isPending}
-                  className="w-full resize-y rounded-md border border-slate-200 bg-white px-2.5 py-2 font-mono text-[12px] leading-relaxed text-slate-800 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-violet-900/40"
-                />
-              </div>
-
-              {/* Rewrite chips append a directive to the instruction. */}
-              <div className="flex flex-wrap items-center gap-1.5">
-                {REWRITE_CHIPS.map((c) => (
-                  <button
-                    key={c.label}
-                    type="button"
-                    disabled={regenMut.isPending}
-                    onClick={() => patch({ instruction: `${settings.instruction.trim()}\n${c.hint}`.trim() })}
-                    className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 transition hover:border-violet-300 hover:text-violet-700 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-violet-700"
-                  >
-                    + {c.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col gap-2 border-t border-slate-100 pt-3 sm:flex-row sm:items-center">
                 <Button
                   variant="primary"
                   size="sm"
                   icon={RefreshCw}
                   onClick={() => regenMut.mutate()}
-                  disabled={regenMut.isPending || !settings.instruction.trim()}
+                  disabled={regenMut.isPending || !settings.instruction.trim() || !(editing ?? '').trim()}
                 >
-                  {regenMut.isPending ? 'Generating…' : 'Generate new draft'}
+                  {regenMut.isPending ? 'Generating…' : directives.length > 0 ? `Rewrite with ${directives.length} annotation${directives.length === 1 ? '' : 's'}` : 'Regenerate draft'}
                 </Button>
-                <span className="text-[11px] text-slate-400">Personalized from this lead's data. Doesn't send — lands in the draft above.</span>
+                <span className="text-[11px] text-slate-400">Uses campaign intent + current draft + lead evidence. Nothing is approved or sent.</span>
               </div>
             </div>
           )}

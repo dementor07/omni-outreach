@@ -619,10 +619,16 @@ export const canvas = {
     api.post<WorkflowDetail>('/canvas/workflows/from-goal', input).then((r) => r.data),
   createFromSpec: (input: CampaignSpec) =>
     api.post<WorkflowDetail>('/canvas/workflows/from-spec', input).then((r) => r.data),
+  validateSpec: (input: CampaignSpec) =>
+    api.post<CampaignSpec>('/canvas/workflows/validate-spec', input).then((r) => r.data),
   // DYNAMIC-001: plain-language prompt → validated spec → compiled campaign.
-  createFromPrompt: (prompt: string, dryRun = false) =>
+  createFromPrompt: (prompt: string, dryRun = false, connectionName?: string) =>
     api
-      .post<PromptWorkflowResult>('/canvas/workflows/from-prompt', { prompt, dry_run: dryRun })
+      .post<PromptWorkflowResult>('/canvas/workflows/from-prompt', {
+        prompt,
+        dry_run: dryRun,
+        connection_name: connectionName || undefined,
+      })
       .then((r) => r.data),
   get: (id: UUID) => api.get<WorkflowDetail>(`/canvas/workflows/${id}`).then((r) => r.data),
   validation: (id: UUID) =>
@@ -1078,6 +1084,7 @@ export interface Approval {
   sending_account_id: string | null
   sending_account_name: string | null
   evidence_sources: ApprovalEvidence[]
+  compose_context: ApprovalComposeContext | null
 }
 
 export interface ApprovalEvidence {
@@ -1087,11 +1094,48 @@ export interface ApprovalEvidence {
   excerpt: string | null
 }
 
+export interface ApprovalComposeContext {
+  node_id: UUID
+  instruction: string
+  channel: string
+  tone: string
+  max_words: number
+  model: string | null
+  provider: string
+}
+
+export interface RewriteDirective {
+  start: number
+  end: number
+  selected_text: string
+  instruction: string
+}
+
+export interface ApprovalRegenerateInput {
+  original_draft: string
+  campaign_instruction?: string
+  rewrite_note?: string
+  directives?: RewriteDirective[]
+  tone?: string
+  channel?: string
+  max_words?: number
+  model?: string
+}
+
+export interface AiJobAccepted {
+  job_id: UUID
+  kind: string
+  status: string
+  correlation_id: UUID
+}
+
 export const approvals = {
   list: (campaignId?: UUID) =>
     api.get<Approval[]>('/approvals', { params: { campaign_id: campaignId } }).then((r) => r.data),
   updateDraft: (id: UUID, draft: string) =>
     api.patch(`/approvals/${id}/draft`, { draft }).then((r) => r.data),
+  regenerate: (id: UUID, input: ApprovalRegenerateInput) =>
+    api.post<AiJobAccepted>(`/approvals/${id}/regenerate`, input).then((r) => r.data),
   resolve: (id: UUID, handle: 'approved' | 'rejected') =>
     api.post(`/approvals/${id}/resolve`, { handle }).then((r) => r.data),
 }
