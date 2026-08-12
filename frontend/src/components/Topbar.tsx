@@ -80,6 +80,7 @@ export default function Topbar({ onToggleSidebar }: TopbarProps) {
 
   const dot = apiOk ? 'bg-emerald-500' : apiOk === false ? 'bg-rose-500' : 'bg-slate-300'
   const label = checking ? 'Checking…' : apiOk ? 'API connected' : apiOk === false ? 'API offline' : 'No connection'
+  const shortLabel = checking ? 'Check' : apiOk ? 'Live' : apiOk === false ? 'Down' : 'API'
 
   // User menu — wired to the real signed-in user (was hardcoded "You").
   const meQ = useQuery({ queryKey: ['me'], queryFn: auth.me, staleTime: 5 * 60_000 })
@@ -131,6 +132,7 @@ export default function Topbar({ onToggleSidebar }: TopbarProps) {
             )}
           >
             <span className={clsx('inline-block h-2 w-2 rounded-full', dot, apiOk && 'ring-pulse')} />
+            <span className="sm:hidden">{shortLabel}</span>
             <span className="hidden sm:inline">{label}</span>
             <ChevronDown size={11} className="opacity-60" />
           </button>

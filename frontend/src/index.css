@@ -8,15 +8,19 @@
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    min-width: 320px;
+    background: #f8fafc;
   }
 
   body {
-    @apply text-slate-900 font-sans;
+    @apply min-h-screen font-sans text-slate-900;
     /* A barely-there warm tint in one corner — enough to keep the page from
        reading as flat clinical white, not enough to notice as "a gradient".
        Restraint over spectacle. */
     background-color: #f8fafc;
-    background-image: radial-gradient(70rem 70rem at 105% -15%, rgb(244 63 94 / 0.035), transparent 55%);
+    background-image:
+      radial-gradient(58rem 42rem at 104% -8%, rgb(244 63 94 / 0.055), transparent 56%),
+      radial-gradient(46rem 34rem at -12% 108%, rgb(14 165 233 / 0.035), transparent 62%);
     background-attachment: fixed;
   }
 
@@ -24,8 +28,20 @@
   body.dark {
     @apply text-slate-100;
     background-color: rgb(2 6 23);
-    background-image: radial-gradient(70rem 70rem at 105% -15%, rgb(244 63 94 / 0.06), transparent 55%);
+    background-image:
+      radial-gradient(58rem 42rem at 104% -8%, rgb(244 63 94 / 0.075), transparent 56%),
+      radial-gradient(46rem 34rem at -12% 108%, rgb(14 165 233 / 0.05), transparent 62%);
     background-attachment: fixed;
+  }
+
+  ::selection {
+    background: rgb(254 205 211 / 0.75);
+    color: rgb(136 19 55);
+  }
+
+  :where(a, button, [role='button']):focus-visible {
+    outline: 2px solid rgb(244 63 94 / 0.72);
+    outline-offset: 2px;
   }
 }
 
@@ -38,7 +54,7 @@
      sidebar). A touch frostier than a plain panel; legibility preserved by the
      high-ish base opacity. */
   .glass {
-    @apply bg-white/65 backdrop-blur-xl backdrop-saturate-150 dark:bg-slate-900/55;
+    @apply bg-white/80 backdrop-blur-xl backdrop-saturate-150 dark:bg-slate-950/80;
   }
 
   /* Stronger glass for floating overlays (popovers, menus, modals, the canvas
@@ -64,6 +80,11 @@
   .lift:hover {
     @apply -translate-y-0.5;
     box-shadow: 0 4px 10px -3px rgb(15 23 42 / 0.07), 0 10px 24px -8px rgb(15 23 42 / 0.10);
+  }
+
+  /* Consistent quiet inset surface for filters, evidence and secondary panels. */
+  .inset-surface {
+    @apply rounded-xl border border-slate-200/80 bg-slate-50/80 dark:border-slate-800 dark:bg-slate-950/35;
   }
 
   /* React Flow EdgeLabelRenderer — position + transform driven by --elx/--ely CSS vars
@@ -101,6 +122,13 @@
      animation-delay inline for a cascade. */
   .page-enter {
     animation: fade-in-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
   }
 
   @media (prefers-reduced-motion: reduce) {

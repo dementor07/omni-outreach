@@ -675,24 +675,24 @@ export default function CampaignEditor() {
           not the tall PageHeader the scrolling pages use. The editor is a
           fixed-viewport canvas tool, so every row above the canvas is height
           stolen from the graph. */}
-      <div className="flex flex-col gap-2 border-b border-slate-200/80 pb-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3 dark:border-slate-800">
+      <div className="flex flex-col gap-1.5 border-b border-slate-200/80 pb-2 xl:flex-row xl:items-center xl:justify-between xl:gap-4 dark:border-slate-800">
         <div className="flex min-w-0 items-center gap-2.5">
           <Link to="/campaigns" title="Back to campaigns" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800">
             <ArrowLeft size={16} />
           </Link>
-          <h1 className="truncate text-[17px] font-semibold tracking-tight text-slate-900 dark:text-white">{wf?.name ?? 'Campaign'}</h1>
+          <h1 className="shrink-0 truncate text-[17px] font-semibold tracking-tight text-slate-950 dark:text-white">{wf?.name ?? 'Campaign'}</h1>
           {wf && (
             <div className="flex shrink-0 items-center gap-2">
               <Badge variant={wf.status === 'active' ? 'success' : wf.status === 'paused' ? 'warning' : 'neutral'} label={wf.status} dot size="xs" />
               {objectiveQuery.data && (
                 <GoalStatusChip objective={objectiveQuery.data} onClick={() => setActiveTab('goal')} />
               )}
-              <span className="hidden text-[11px] text-slate-400 sm:inline">{wf.timezone} · {rfNodes.length} nodes · {rfEdges.length} edges</span>
+              <span className="hidden text-[11px] text-slate-400 2xl:inline">{wf.timezone} · {rfNodes.length} nodes · {rfEdges.length} edges</span>
               {dirty && <Badge variant="warning" label="unsaved" size="xs" />}
             </div>
           )}
         </div>
-        <div className="min-w-0 overflow-x-auto lg:shrink-0">
+        <div className="min-w-0 xl:shrink-0">
           <Tabs
             value={activeTab}
             onChange={(v) => setActiveTab(v)}

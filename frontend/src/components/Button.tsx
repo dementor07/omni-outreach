@@ -11,7 +11,7 @@ const variantClasses = {
   // Solid, deep brand fill with a restrained soft shadow. Confident, not loud —
   // no gradient or glow on a button that recurs across every screen.
   primary:
-    'bg-brand-600 text-white shadow-soft hover:bg-brand-700 disabled:opacity-50',
+    'border border-brand-700/20 bg-brand-600 text-white shadow-soft hover:-translate-y-px hover:bg-brand-700 hover:shadow-card disabled:opacity-50',
   secondary:
     'bg-white text-slate-700 border border-slate-200 shadow-soft hover:bg-slate-50 hover:text-slate-900 hover:border-slate-300 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700 dark:hover:bg-slate-800',
   ghost:
@@ -76,7 +76,7 @@ export default function Button({
   return (
     <Comp
       className={clsx(
-        'inline-flex items-center justify-center rounded-lg font-semibold transition-all duration-150 active:scale-[0.97]',
+        'inline-flex shrink-0 items-center justify-center rounded-lg font-semibold transition-all duration-150 active:scale-[0.97]',
         sizeClasses[size],
         variantClasses[variant],
         isDisabled && 'opacity-60 pointer-events-none',

@@ -23,15 +23,15 @@ export default function DataTable<T extends { id?: string }>({ columns, rows, on
   if (loading) return <div className="p-4 space-y-2">{[0,1,2].map(i => <div key={i} className="h-10 skeleton" />)}</div>
   if (!rows.length && (empty || emptyMessage)) return <>{empty || <div className="p-6 text-center text-sm text-slate-500">{emptyMessage}</div>}</>
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto rounded-xl border border-slate-200/80 dark:border-slate-800">
       <table className="w-full text-sm">
-        <thead>
+        <thead className="bg-slate-50/90 dark:bg-slate-950/45">
           <tr className="border-b border-slate-200 dark:border-slate-800">
             {columns.map((c) => (
               <th
                 key={c.key}
                 className={clsx(
-                  'whitespace-nowrap px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400',
+                  'whitespace-nowrap px-4 py-3 text-left text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400',
                   c.align === 'right' && 'text-right',
                   c.className,
                 )}
@@ -46,8 +46,8 @@ export default function DataTable<T extends { id?: string }>({ columns, rows, on
             <tr
               key={row.id || i}
               className={clsx(
-                'border-b border-slate-100 transition-colors last:border-b-0 dark:border-slate-800/60',
-                onRowClick && 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50',
+                'border-b border-slate-100 bg-white/70 transition-colors last:border-b-0 dark:border-slate-800/60 dark:bg-slate-900/40',
+                onRowClick && 'cursor-pointer hover:bg-brand-50/45 dark:hover:bg-brand-950/15',
               )}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
             >
@@ -55,7 +55,7 @@ export default function DataTable<T extends { id?: string }>({ columns, rows, on
                 <td
                   key={c.key}
                   className={clsx(
-                    'px-3 py-3 align-middle text-slate-700 dark:text-slate-300',
+                    'px-4 py-3.5 align-middle text-slate-700 dark:text-slate-300',
                     c.align === 'right' && 'text-right tabular-nums',
                     c.cellClassName,
                   )}

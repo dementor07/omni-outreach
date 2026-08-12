@@ -10,7 +10,7 @@ import Badge from '../components/Badge'
 import Avatar from '../components/Avatar'
 import EmptyState from '../components/EmptyState'
 import ChannelIcon, { CHANNEL_META } from '../components/ChannelIcon'
-import { FilterBar, SearchInput, Toggle } from '../components/FilterBar'
+import { FilterBar, SearchInput, Select, Toggle } from '../components/FilterBar'
 import { useToast } from '../components/Toast'
 import { timeAgo } from '../lib/format'
 
@@ -93,7 +93,7 @@ export default function Inbox() {
                     )}
                   >
                     <Ic size={12} />
-                    {meta.label}
+                    {channelLabel(channel, meta.label)}
                     <span className="tabular-nums opacity-70">{count.toLocaleString()}</span>
                   </button>
                 )
@@ -105,17 +105,16 @@ export default function Inbox() {
 
       <FilterBar>
         <SearchInput placeholder="Search by name or message…" value={search} onChange={setSearch} />
-        <select
+        <Select
           value={campaignFilter}
-          onChange={(e) => setCampaignFilter(e.target.value)}
-          aria-label="Filter by campaign"
-          className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-700 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+          onChange={setCampaignFilter}
+          className="min-w-44"
         >
           <option value="">All campaigns</option>
           {(campaignsQ.data ?? []).map((w) => (
             <option key={w.id} value={w.id}>{w.name}</option>
           ))}
-        </select>
+        </Select>
         <Toggle
           value={classFilter}
           onChange={(v) => setClassFilter(v as ClassFilter)}
@@ -175,6 +174,15 @@ function groupByChannel(threads: InboxThread[]): { channel: string; count: numbe
     .sort((a, b) => b.count - a.count)
 }
 
+function channelLabel(channel: string, fallback: string): string {
+  const normalized = channel.toLowerCase().replace(/[._-]+/g, ' ')
+  if (normalized.includes('linkedin') && normalized.includes('invite')) return 'Invites'
+  if (normalized.includes('linkedin') && (normalized.includes('dm') || normalized.includes('message'))) return 'DMs'
+  if (normalized.includes('whatsapp')) return 'WhatsApp'
+  if (normalized.includes('sms')) return 'SMS'
+  return fallback
+}
+
 // Resolve a human name for a thread — falls back to company, then a short id.
 // (The old UI rendered the raw contact_id, which read like a "lead id".)
 function contactName(t: Pick<InboxThread, 'first_name' | 'last_name' | 'company' | 'contact_id'>): string {
@@ -193,12 +201,12 @@ function ThreadRow({ thread }: { thread: InboxThread }) {
   const name = contactName(thread)
   return (
     <Link to={`/inbox/${thread.contact_id}`} className="block">
-      <Card padding="none" className="group cursor-pointer transition-shadow hover:shadow-sm">
-        <div className="flex items-start gap-3 p-4">
+      <Card padding="none" hover className="group cursor-pointer">
+        <div className="flex items-start gap-3 p-3.5 sm:p-4">
           <Avatar name={name} size={36} />
           <div className="min-w-0 flex-1">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{name}</span>
                 {thread.company && <span className="truncate text-xs text-slate-400">{thread.company}</span>}
                 <Badge label={channel} asChannel />

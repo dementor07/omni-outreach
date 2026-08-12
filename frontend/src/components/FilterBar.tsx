@@ -13,7 +13,7 @@ export function FilterBar({ children, className = '' }: FilterBarProps) {
   return (
     <div
       className={clsx(
-        'flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2 dark:border-slate-800 dark:bg-slate-900',
+        'flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200/80 bg-white/92 p-2.5 shadow-soft dark:border-slate-800 dark:bg-slate-900/90',
         className,
       )}
     >

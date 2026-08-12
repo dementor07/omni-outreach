@@ -59,13 +59,13 @@ export default function Layout({ children }: LayoutProps) {
           </>
         )}
 
-        <main className="min-w-0 flex-1">
+        <main className="min-w-0 flex-1 bg-slate-50/25 dark:bg-transparent">
           <Topbar onToggleSidebar={toggleSidebar} />
           {/* key on the route so the content re-mounts and the page-enter rise
               re-runs on every navigation — a single, app-wide "alive" cue. */}
           <div
             key={location.pathname}
-            className="page-enter mx-auto w-full max-w-[1400px] px-3 py-4 sm:px-6 sm:py-6 lg:px-8"
+            className="page-enter mx-auto w-full max-w-[1520px] px-3 py-4 sm:px-5 sm:py-6 lg:px-7 xl:px-8"
           >
             {children}
           </div>

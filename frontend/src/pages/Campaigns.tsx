@@ -16,7 +16,6 @@ import CampaignArchitect from '../components/CampaignArchitect'
 export default function Campaigns() {
   const qc = useQueryClient()
   const navigate = useNavigate()
-  const toast = useToast()
   const { data: campaigns = [], isLoading } = useQuery({ queryKey: ['workflows'], queryFn: canvas.list })
   const { data: templates = [] } = useQuery({ queryKey: ['campaign-templates'], queryFn: canvas.templates })
   const { data: connections = [] } = useQuery({ queryKey: ['integrations'], queryFn: () => integrations.list() })
@@ -52,11 +51,11 @@ export default function Campaigns() {
       )}
 
       {isLoading ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{[0, 1, 2].map((i) => <div key={i} className="h-28 skeleton rounded-2xl" />)}</div>
+        <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">{[0, 1, 2].map((i) => <div key={i} className="h-36 skeleton rounded-2xl" />)}</div>
       ) : campaigns.length === 0 ? (
         <Card><EmptyState icon={Megaphone} title="No campaigns yet" description="Create your first campaign and start building a sequence on the canvas." action={<Button variant="primary" size="sm" icon={Plus} onClick={() => setShowCreate(true)}>New campaign</Button>} /></Card>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
           {campaigns.map((c) => <CampaignCard key={c.id} c={c} />)}
         </div>
       )}
@@ -93,23 +92,23 @@ function CampaignCard({ c }: { c: Workflow }) {
   const stop = (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation() }
 
   return (
-    <Link to={`/campaigns/${c.id}`} className="block">
-      <Card padding="md" className="transition-shadow hover:shadow-md">
+    <Link to={`/campaigns/${c.id}`} className="block h-full">
+      <Card padding="md" hover className="flex h-full min-h-36 flex-col">
         <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-2.5">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-600 dark:bg-brand-900/30">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600 ring-1 ring-brand-100/70 dark:bg-brand-900/30 dark:ring-brand-800/50">
               <GitBranch size={16} />
             </span>
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{c.name}</p>
+              <p className="line-clamp-2 text-[15px] font-semibold leading-5 text-slate-950 dark:text-white">{c.name}</p>
               <p className="mt-0.5 text-[11px] uppercase tracking-[0.12em] text-slate-400">{c.timezone}</p>
             </div>
           </div>
-          <Badge label={c.status} variant={tone} dot />
+          <Badge label={c.status} variant={tone} dot size="xs" />
         </div>
-        <div className="mt-4 flex items-center justify-between">
+        <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-5">
           <p className="text-[11px] text-slate-400">Updated {new Date(c.updated_at).toLocaleDateString()}</p>
-          <div className="flex items-center gap-1" onClick={stop}>
+          <div className="ml-auto flex items-center gap-1" onClick={stop}>
             {!isArchived ? (
               <Button variant="ghost" size="sm" icon={Archive} isLoading={archiveMut.isPending}
                 onClick={(e) => { stop(e); archiveMut.mutate() }} aria-label={`Archive ${c.name}`}>

@@ -28,15 +28,15 @@ export default function Card({
   return (
     <Tag
       className={clsx(
-        'min-w-0 rounded-2xl border',
+        'min-w-0 rounded-2xl border transition-colors',
         glass
           ? 'glass-panel border-white/40 dark:border-white/10'
-          : 'bg-white border-slate-200/80 dark:border-slate-800 dark:bg-slate-900',
+          : 'border-slate-200/75 bg-white/95 dark:border-slate-800 dark:bg-slate-900/90',
         elevated && !glass && 'shadow-card',
         hover && 'lift cursor-pointer',
-        padding === 'sm' && 'p-4',
-        padding === 'md' && 'p-5',
-        padding === 'lg' && 'p-6',
+        padding === 'sm' && 'p-3.5 sm:p-4',
+        padding === 'md' && 'p-4 sm:p-5',
+        padding === 'lg' && 'p-4 sm:p-6',
         className,
       )}
       {...rest}

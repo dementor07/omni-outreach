@@ -31,7 +31,8 @@ interface StatCardProps {
 export default function StatCard({ label, value, icon: IconComp, trend, accent = 'brand', spark, hint }: StatCardProps) {
   const a = accentToken[accent]
   return (
-    <Card padding="md" className="group relative">
+    <Card padding="md" className="group relative overflow-hidden">
+      <span className={clsx('pointer-events-none absolute -right-6 -top-8 h-24 w-24 rounded-full blur-2xl', a.glow)} />
       <div className="flex items-start justify-between gap-3">
         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
           {label}
@@ -43,7 +44,7 @@ export default function StatCard({ label, value, icon: IconComp, trend, accent =
         )}
       </div>
       <div className="relative mt-3 flex items-baseline gap-2">
-        <span className="text-[28px] font-bold tabular-nums tracking-tight text-slate-900 dark:text-white">
+        <span className="text-[30px] font-bold tabular-nums tracking-[-0.035em] text-slate-950 dark:text-white">
           {typeof value === 'number' ? value.toLocaleString() : value}
         </span>
         {trend != null && (

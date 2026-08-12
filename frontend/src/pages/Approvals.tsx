@@ -98,29 +98,29 @@ function EvidenceSources({ sources }: { sources: ApprovalEvidence[] }) {
     )
   }
   return (
-    <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-800/30">
-      <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+    <div className="inset-surface mt-3 p-3.5">
+      <div className="mb-2.5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
         Evidence available to this draft
       </div>
-      <div className="space-y-2">
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
         {sources.map((source, index) => (
-          <div key={`${source.kind}-${index}`} className="flex items-start gap-2">
-            <span className="mt-0.5 rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-violet-700 shadow-sm dark:bg-slate-900 dark:text-violet-300">
-              {source.label}
-            </span>
-            <div className="min-w-0 flex-1 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
-              {source.excerpt && <span>{source.excerpt}</span>}
+          <div key={`${source.kind}-${index}`} className="rounded-lg border border-slate-200/80 bg-white/90 p-2.5 dark:border-slate-700 dark:bg-slate-900/70">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-violet-700 dark:text-violet-300">
+                {source.label}
+              </span>
               {source.url && (
                 <a
                   href={source.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="ml-1 inline-flex items-center gap-0.5 font-medium text-violet-600 hover:underline dark:text-violet-300"
+                  className="inline-flex shrink-0 items-center gap-0.5 text-[10px] font-semibold text-violet-600 hover:underline dark:text-violet-300"
                 >
-                  source <ExternalLink size={10} />
+                  Open <ExternalLink size={10} />
                 </a>
               )}
             </div>
+            {source.excerpt && <p className="mt-1.5 line-clamp-3 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">{source.excerpt}</p>}
           </div>
         ))}
       </div>
@@ -292,8 +292,8 @@ function ApprovalCard({ approval }: { approval: Approval }) {
   const busy = saveMut.isPending || resolveMut.isPending || regenMut.isPending
 
   return (
-    <Card padding="md">
-      <div className="flex items-start justify-between gap-3">
+    <Card padding="md" className="relative overflow-hidden border-l-4 border-l-amber-300 dark:border-l-amber-500/70">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
             <Clock size={11} />
@@ -305,7 +305,7 @@ function ApprovalCard({ approval }: { approval: Approval }) {
               </>
             )}
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]">
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px]">
             <div className="flex min-w-0 items-center gap-1.5">
               <Linkedin size={13} className="shrink-0 text-sky-600" />
               {approval.prospect_linkedin_url ? (
@@ -326,23 +326,26 @@ function ApprovalCard({ approval }: { approval: Approval }) {
             </div>
             <div className="text-slate-500 dark:text-slate-400">
               Connecting from <span className="font-semibold text-slate-700 dark:text-slate-200">{approval.sending_account_name || 'unknown seat'}</span>
-              {approval.sending_account_id && (
-                <span className="ml-1 font-mono text-[10px] text-slate-400" title={approval.sending_account_id}>
-                  ({approval.sending_account_id})
-                </span>
-              )}
+              {approval.sending_account_id && <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-500 dark:bg-slate-800" title={approval.sending_account_id}>ID {approval.sending_account_id.slice(0, 8)}</span>}
             </div>
           </div>
           <p className="mt-2 text-[13px] font-medium text-slate-700 dark:text-slate-200">{approval.prompt || 'Approval requested'}</p>
         </div>
-        <Badge label="pending" variant="warning" dot />
+        <div className="flex shrink-0 flex-wrap items-center gap-2 lg:flex-col lg:items-end">
+          <Badge label="pending review" variant="warning" dot />
+          <div className="flex items-center gap-2">
+            <Button variant="primary" size="sm" icon={Check} onClick={() => resolveMut.mutate('approved')} disabled={busy || editing !== null}>Approve</Button>
+            <Button variant="secondary" size="sm" icon={X} onClick={() => resolveMut.mutate('rejected')} disabled={busy || editing !== null}>Reject</Button>
+          </div>
+          <span className="hidden text-[10px] text-slate-400 lg:block">Review evidence and draft first</span>
+        </div>
       </div>
 
       <EvidenceSources sources={approval.evidence_sources} />
 
       {/* AI draft-review (B1): present when an upstream ai.compose populated it. */}
       {(approval.draft !== null || editing !== null) && (
-        <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50/50 p-3 dark:border-violet-900/40 dark:bg-violet-900/10">
+        <div className="mt-3 rounded-xl border border-violet-200/80 bg-violet-50/45 p-3.5 dark:border-violet-900/40 dark:bg-violet-900/10">
           <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-violet-700 dark:text-violet-300">
             <Sparkles size={12} />
             AI draft — review before approving
@@ -357,7 +360,7 @@ function ApprovalCard({ approval }: { approval: Approval }) {
               className="w-full resize-none rounded-md border border-slate-200 bg-white px-2.5 py-2 text-[13px] text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-violet-900/40"
             />
           ) : (
-            <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-slate-700 dark:text-slate-200">{approval.draft}</p>
+            <p className="max-w-[82ch] whitespace-pre-wrap text-[13px] leading-6 text-slate-700 dark:text-slate-200">{approval.draft}</p>
           )}
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {editing !== null ? (
@@ -472,10 +475,6 @@ function ApprovalCard({ approval }: { approval: Approval }) {
         </div>
       )}
 
-      <div className="mt-3 flex items-center gap-2">
-        <Button variant="primary" size="sm" icon={Check} onClick={() => resolveMut.mutate('approved')} disabled={busy || editing !== null}>Approve</Button>
-        <Button variant="secondary" size="sm" icon={X} onClick={() => resolveMut.mutate('rejected')} disabled={busy || editing !== null}>Reject</Button>
-      </div>
     </Card>
   )
 }

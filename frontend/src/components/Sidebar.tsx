@@ -75,8 +75,8 @@ export default function Sidebar({ collapsed = false }: SidebarProps) {
   return (
     <aside
       className={clsx(
-        'flex h-screen flex-col border-r border-slate-200/70 bg-white/70 backdrop-blur-xl transition-[width] duration-200 dark:border-slate-800/80 dark:bg-slate-950/70',
-        collapsed ? 'w-16' : 'w-60',
+        'flex h-screen flex-col border-r border-slate-200/80 bg-white/90 shadow-[1px_0_0_rgb(255_255_255/0.7)] backdrop-blur-xl transition-[width] duration-200 dark:border-slate-800/80 dark:bg-slate-950/90 dark:shadow-none',
+        collapsed ? 'w-16' : 'w-64',
       )}
     >
       {/* Logo lockup */}
@@ -85,7 +85,7 @@ export default function Sidebar({ collapsed = false }: SidebarProps) {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 space-y-4 overflow-y-auto px-2 py-3">
+      <nav className="flex-1 space-y-4 overflow-y-auto px-2.5 py-3">
         {NAV_GROUPS.map((group, gi) => (
           <div key={gi}>
             {group.label && !collapsed && (
@@ -104,7 +104,7 @@ export default function Sidebar({ collapsed = false }: SidebarProps) {
                       'group relative flex w-full items-center rounded-lg text-sm font-medium transition-colors duration-150',
                       collapsed ? 'h-9 justify-center px-0' : 'gap-2.5 px-2.5 py-1.5',
                       isActive
-                        ? 'bg-slate-100 text-slate-900 dark:bg-slate-800/80 dark:text-white'
+                        ? 'bg-brand-50/90 text-slate-950 shadow-[inset_0_0_0_1px_rgb(254_205_211/0.45)] dark:bg-brand-950/35 dark:text-white dark:shadow-[inset_0_0_0_1px_rgb(136_19_55/0.4)]'
                         : 'text-slate-500 hover:bg-slate-100/70 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-white',
                     )
                   }
