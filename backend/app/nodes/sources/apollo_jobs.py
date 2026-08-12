@@ -51,7 +51,7 @@ class ApolloJobsConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _require_id_or_domain(self) -> "ApolloJobsConfig":
+    def _require_id_or_domain(self) -> ApolloJobsConfig:
         # The lead may still supply a domain via domain_field at runtime, so a
         # bare config (neither id nor domain) is allowed — the handler falls back
         # to the lead's custom_fields. Nothing to enforce statically here beyond

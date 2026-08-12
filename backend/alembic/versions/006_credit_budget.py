@@ -15,8 +15,6 @@ once SUM(credits_consumed) >= credit_budget for a config.
 
 from collections.abc import Sequence
 
-from alembic import op
-
 revision: str = "006"
 down_revision: str | None = "005"
 branch_labels: str | Sequence[str] | None = None

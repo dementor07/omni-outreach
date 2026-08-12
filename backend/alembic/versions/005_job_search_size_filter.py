@@ -15,8 +15,6 @@ activates when at least one bound is set.
 
 from collections.abc import Sequence
 
-from alembic import op
-
 revision: str = "005"
 down_revision: str | None = "004"
 branch_labels: str | Sequence[str] | None = None

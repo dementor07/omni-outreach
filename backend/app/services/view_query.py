@@ -22,9 +22,10 @@ from __future__ import annotations
 
 import re
 import uuid as uuid_mod
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
-from typing import Any, Literal, Mapping
+from datetime import UTC, date, datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -158,7 +159,7 @@ class QueryFilter(BaseModel):
     value: Any = None
 
     @model_validator(mode="after")
-    def _bound_value(self) -> "QueryFilter":
+    def _bound_value(self) -> QueryFilter:
         if self.op in _VALUELESS_OPS:
             return self
         if self.value is None:
@@ -218,7 +219,7 @@ def _coerce(value: Any, tag: str, field: str) -> Any:
             if isinstance(value, datetime):
                 return value
             parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
         return str(value)
     except (ValueError, TypeError) as exc:
         raise QueryValidationError(f"filter value {value!r} is not a valid {tag} for field {field!r}") from exc

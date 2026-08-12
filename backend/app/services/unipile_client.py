@@ -38,7 +38,7 @@ class UnipileError(Exception):
     """A Unipile API call failed (network, auth, or non-2xx after retries)."""
 
 
-class UnipileNotConfigured(UnipileError):
+class UnipileNotConfigured(UnipileError):  # noqa: N818 - public compatibility name
     """No usable Unipile connection for this workspace."""
 
 

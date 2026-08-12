@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+
 from pydantic import BaseModel, Field
 
 from app.nodes import (
@@ -13,6 +14,7 @@ from app.nodes import (
     SideEffect,
     register,
 )
+
 
 class ReplyIntentConfig(BaseModel):
     fallback_handle: str = Field("unknown", description="Which path to take if the intent is not classified")
@@ -36,12 +38,12 @@ MANIFEST = NodeManifest(
 async def execute(ctx: NodeContext) -> NodeResult:
     cfg = ReplyIntentConfig(**ctx.config)
     correlation_id = ctx.correlation_id or str(uuid.uuid4())
-    
+
     intent = str(ctx.lead.get("last_inbound_intent") or cfg.fallback_handle).lower()
-    
+
     valid_handles = {"positive", "negative", "referral", "later", "unknown"}
     handle = intent if intent in valid_handles else cfg.fallback_handle
-    
+
     return NodeResult(
         handle=handle,
         telemetry={

@@ -20,8 +20,6 @@ no password.
 
 from collections.abc import Sequence
 
-from alembic import op
-
 revision: str = "018"
 down_revision: str | None = "017"
 branch_labels: str | Sequence[str] | None = None

@@ -6,7 +6,6 @@ from app.nodes import register
 
 from ._common import LinkedinCompanyUrlConfig, make_execute, make_manifest
 
-
 LINKFINDER_TYPE = "linkedin_company_to_employee_count"
 
 MANIFEST = make_manifest(

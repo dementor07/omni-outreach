@@ -13,7 +13,6 @@ from app.nodes import register
 
 from ._common import CompanyProfileConfig, make_execute, make_manifest
 
-
 RENIDLY_MODE = "company_profile"
 
 MANIFEST = make_manifest(

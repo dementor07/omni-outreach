@@ -16,8 +16,6 @@ migration created:
 
 from collections.abc import Sequence
 
-from alembic import op
-
 revision: str = "009"
 down_revision: str | None = "008"
 branch_labels: str | Sequence[str] | None = None

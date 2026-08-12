@@ -11,8 +11,6 @@ them directly. Upserts are keyed on the natural window keys.
 
 from collections.abc import Sequence
 
-from alembic import op
-
 revision: str = "016"
 down_revision: str | None = "015"
 branch_labels: str | Sequence[str] | None = None

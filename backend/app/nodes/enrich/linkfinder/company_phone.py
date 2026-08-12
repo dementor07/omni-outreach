@@ -6,7 +6,6 @@ from app.nodes import register
 
 from ._common import CompanyNameConfig, make_execute, make_manifest
 
-
 LINKFINDER_TYPE = "company_name_to_phone"
 
 MANIFEST = make_manifest(

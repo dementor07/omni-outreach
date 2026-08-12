@@ -6,7 +6,6 @@ from app.nodes import register
 
 from ._common import PersonProfileConfig, make_execute, make_manifest
 
-
 RENIDLY_MODE = "person_profile"
 
 MANIFEST = make_manifest(

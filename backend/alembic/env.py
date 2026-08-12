@@ -21,7 +21,7 @@ def get_url() -> str:
     db_password = os.environ.get("DB_PASSWORD", "")
     alembic_database_url = os.environ.get("ALEMBIC_DATABASE_URL", "")
     database_url = os.environ.get("DATABASE_URL", "")
-    
+
     url_to_use = alembic_database_url or database_url
     if url_to_use:
         url = url_to_use.replace("postgresql+asyncpg://", "postgresql://")

@@ -17,7 +17,7 @@ import logging
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import EmailStr, Field
 
 from app.nodes import (
     NodeCategory,

@@ -23,8 +23,6 @@ That way running upgrades doesn't choke on existing rows.
 
 from collections.abc import Sequence
 
-from alembic import op
-
 revision: str = "019"
 down_revision: str | None = "018"
 branch_labels: str | Sequence[str] | None = None

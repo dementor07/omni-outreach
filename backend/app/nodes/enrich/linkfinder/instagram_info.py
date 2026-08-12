@@ -6,7 +6,6 @@ from app.nodes import register
 
 from ._common import InstagramProfileConfig, make_execute, make_manifest
 
-
 LINKFINDER_TYPE = "instagram_profile_to_instagram_info"
 
 MANIFEST = make_manifest(

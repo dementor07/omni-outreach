@@ -6,7 +6,6 @@ from app.nodes import register
 
 from ._common import LinkFinderBaseConfig, make_execute, make_manifest
 
-
 LINKFINDER_TYPE = "linkedin_profile_to_email"
 
 MANIFEST = make_manifest(

@@ -8,8 +8,6 @@ Create Date: 2026-04-19
 
 from collections.abc import Sequence
 
-from alembic import op
-
 revision: str = "001"
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None

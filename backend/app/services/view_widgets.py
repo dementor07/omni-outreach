@@ -60,7 +60,7 @@ class WidgetInstance(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def validate_shape(self) -> "WidgetInstance":
+    def validate_shape(self) -> WidgetInstance:
         if not _WIDGET_ID_RE.fullmatch(self.id):
             raise ValueError(f"widget id {self.id!r} must match {_WIDGET_ID_RE.pattern}")
         q = self.query

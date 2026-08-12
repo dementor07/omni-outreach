@@ -11,8 +11,6 @@ already writes to. Without them, every CSV upload of a lead row fails with
 
 from collections.abc import Sequence
 
-from alembic import op
-
 revision: str = "010"
 down_revision: str | None = "009"
 branch_labels: str | Sequence[str] | None = None
