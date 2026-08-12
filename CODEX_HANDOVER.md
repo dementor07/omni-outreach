@@ -1,5 +1,26 @@
 # Codex Handover — OmniOutreach v2
 
+## 2026-08-12 architecture reconciliation addendum
+
+- Production and `origin/phase-out-non-v2` are now reproducible at `d43cd1e`.
+  The previous production tree is preserved at
+  `/home/omni-v2.bak-2026-08-12-d43cd1e` and branch `prod-snapshot-20260812`.
+- Boss campaign-view requirements are shipped: pending messages are campaign-scoped and
+  newest-first, prospect LinkedIn identity and the exact connecting seat are visible, and
+  the enrichment evidence available to composition is labelled as profile/post/hiring/website.
+- A node edit can explicitly copy only its changed fields to every same-type step in that
+  campaign, then publishes through the existing atomic graph save. It defaults off and did
+  not modify C1/C2 during deployment.
+- Manual inbox replies now pin to the originating LinkedIn seat/thread, create a durable
+  queued-to-final send outcome, count seat capacity exactly once, and cannot advance or
+  terminalize a real campaign lead.
+- Deployed services: `backend-v2`, `transitions-v2`, `projector-v2`, `frontend-v2`.
+  Post-deploy health was green, Alembic remained `055`, Flink remained RUNNING 2/2, and
+  C1/C2 settings plus lead-status counts were unchanged across the switchover.
+- Verification: 618 Python audit tests, TypeScript, changed-file Ruff, diff checks, and 56
+  Rust tests all passed. `no-mistakes` itself could not start because the box has no supported
+  review agent installed/configured; its clean-worktree Linux checks were run manually.
+
 **Captured:** 2026-08-12 (Wednesday) ~06:40 UTC / 12:10 IST
 **Handover from:** Claude session (Aug 5–12)
 **Scope:** full system state — repo, prod, live campaigns, blockers, open work.
