@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import hashlib
 import random
-
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timedelta
 from typing import Any, Literal
@@ -228,3 +227,29 @@ def jittered_seconds(base_seconds: float, jitter_pct: int, seed_key: str) -> flo
     rng = random.Random(int(digest, 16))
     factor = 1.0 + rng.uniform(-pct / 100.0, pct / 100.0)
     return float(base_seconds) * factor
+
+
+# ── inter-send spacing (SEND-SPACE-001) ──────────────────────────────────────
+# Distinct from jittered_seconds above: that spaces one lead's OWN sequence
+# steps (flow.delay). This spaces DIFFERENT leads' sends from the same campaign
+# so a cohort approved together does not fire in one burst (a LinkedIn ban
+# signature). The gate reserves a slot per send by advancing the campaign's
+# next_send_at by one jittered gap; a lead landing inside the gap is held.
+
+
+def jittered_gap_seconds(base_seconds: float, jitter_pct: int, rand_uniform: float) -> float:
+    """One inter-send spacing gap, ``base_seconds`` ± ``jitter_pct``%.
+
+    Each send RESERVATION wants an INDEPENDENT random gap (so the trickle is
+    uneven and human, not a metronome). Randomness is injected as ``rand_uniform``
+    in [-1.0, 1.0] — the caller passes ``random.uniform(-1, 1)`` — keeping this
+    pure and unit-testable. rand_uniform is clamped to [-1, 1] defensively.
+
+    Returns at least 1.0s for any positive base so a reservation always advances
+    the clock; ``base_seconds <= 0`` → 0.0 (spacing disabled)."""
+    if base_seconds <= 0:
+        return 0.0
+    pct = max(0, min(100, int(jitter_pct)))
+    r = max(-1.0, min(1.0, float(rand_uniform)))
+    factor = 1.0 + (pct / 100.0) * r
+    return max(1.0, float(base_seconds) * factor)

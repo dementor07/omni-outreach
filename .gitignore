@@ -15,6 +15,7 @@ omni-vault/.obsidian/
 # Claude Code — local MCP config (contains API keys)
 .mcp.json
 .claude/settings.local.json
+.claude/skills/
 
 # Gemini CLI — local MCP config (contains API keys)
 .gemini/settings.json
@@ -30,6 +31,13 @@ omni-vault/**/*.local.md
 
 # One-off personal scripts that operate outside the repo
 /clean_badges.py
+/list_tables.py
+
+# One-off browser/shell scratch generated during local verification
+/apify-signin.png
+/contacts_modal.yml
+/*.stackdump
+omni-vault/*.base
 
 # Dead multi-LLM bridge/conference harness output (removed 2026-05-25)
 .bridge_logs/

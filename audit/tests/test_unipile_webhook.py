@@ -32,6 +32,7 @@ os.environ.setdefault("REDIS_PASSWORD", "")
 REPO = Path(__file__).resolve().parents[2]
 WEBHOOK_SRC = (REPO / "backend/app/routers/webhooks_in.py").read_text(encoding="utf-8")
 RESUME_SRC = (REPO / "backend/app/services/event_resume.py").read_text(encoding="utf-8")
+INBOUND_REPLY_SRC = (REPO / "backend/app/services/inbound_reply.py").read_text(encoding="utf-8")
 UNIPILE_RS = (REPO / "backend-rust/src/handlers/unipile.rs").read_text(encoding="utf-8")
 
 
@@ -79,10 +80,13 @@ def test_resolver_matches_by_provider_id_then_public_id_and_only_when_parked():
 
 def test_message_event_forwards_to_reply_wake_path():
     body = _func_body(WEBHOOK_SRC, "receive_unipile_webhook")
-    # a message event classifies + wakes parked leads on the 'replied' handle.
-    assert "classify_reply(" in body
-    assert '"replied"' in body
-    assert "message.received" in body
+    # The webhook delegates to the shared implementation also used by the
+    # poller; that seam owns classify + message recording + replied wake-up.
+    assert "inbound_reply.process_reply(" in body
+    shared = _func_body(INBOUND_REPLY_SRC, "process_reply")
+    assert "classify_reply(" in shared
+    assert '"replied"' in shared
+    assert "message.received" in shared
 
 
 def test_unknown_event_is_a_safe_noop_202():
@@ -101,7 +105,10 @@ def test_unknown_event_is_a_safe_noop_202():
 def test_invite_persists_provider_id_under_custom_fields():
     # the webhook's precise match keys on custom_fields.provider_id; the invite
     # handler MUST nest it there (flat would be dropped by _apply_lead_mutations).
-    assert '"custom_fields": {"invited_at": "now", "provider_id": provider_id}' in UNIPILE_RS, (
+    assert (
+        '"custom_fields": {"invited_at": "now", "provider_id": provider_id, '
+        '"invite_account_id": unipile_account_id}' in UNIPILE_RS
+    ), (
         "invite handler must persist provider_id under the custom_fields envelope"
     )
 

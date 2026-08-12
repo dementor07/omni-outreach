@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { LayoutDashboard, Moon, Sun, Search, Command, ChevronDown, Settings, LogOut, RefreshCw } from 'lucide-react'
+import { LayoutDashboard, Moon, Sun, Search, Command, ChevronDown, Settings, LogOut, RefreshCw, Bell } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useTheme } from '../hooks/useTheme'
 import { apiBase, updateApiBase } from '../api/client'
-import { auth } from '../api/v2'
+import { auth, inbox } from '../api/v2'
 import Button from './Button'
 import Avatar from './Avatar'
 
@@ -159,6 +159,9 @@ export default function Topbar({ onToggleSidebar }: TopbarProps) {
           )}
         </div>
 
+        {/* Reply notifications */}
+        <NotificationBell />
+
         {/* Dark mode toggle */}
         <Button
           variant="ghost"
@@ -201,6 +204,102 @@ export default function Topbar({ onToggleSidebar }: TopbarProps) {
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+// Reply notifications — polls recent inbound replies; the unread badge compares
+// each reply's timestamp against a locally-stored "last seen" marker.
+function NotificationBell() {
+  const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const [lastSeen, setLastSeen] = useState<number>(() => Number(localStorage.getItem('inbox_last_seen') ?? 0))
+
+  const notifQ = useQuery({
+    queryKey: ['inbox-notifications'],
+    queryFn: () => inbox.notifications(20),
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+  })
+  const notifs = notifQ.data ?? []
+  const unread = notifs.filter((n) => new Date(n.occurred_at).getTime() > lastSeen).length
+
+  useEffect(() => {
+    if (!open) return
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [open])
+
+  function markAllSeen() {
+    const now = Date.now()
+    localStorage.setItem('inbox_last_seen', String(now))
+    setLastSeen(now)
+  }
+
+  function openThread(contactId: string) {
+    markAllSeen()
+    setOpen(false)
+    navigate(`/inbox/${contactId}`)
+  }
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+        aria-label={`Reply notifications${unread > 0 ? ` (${unread} unread)` : ''}`}
+      >
+        <Bell size={16} />
+        {unread > 0 && (
+          <span className="absolute -right-0.5 -top-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">
+            {unread > 9 ? '9+' : unread}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="glass-panel absolute right-0 top-11 z-50 w-80 overflow-hidden rounded-2xl border border-white/40 dark:border-white/10">
+          <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2.5 dark:border-slate-800">
+            <p className="text-sm font-semibold text-slate-900 dark:text-white">Replies</p>
+            {unread > 0 && (
+              <button onClick={markAllSeen} className="text-[11px] font-semibold text-brand-600 hover:underline dark:text-brand-400">
+                Mark all read
+              </button>
+            )}
+          </div>
+          <div className="max-h-96 overflow-y-auto">
+            {notifs.length === 0 ? (
+              <p className="px-3 py-6 text-center text-sm text-slate-500">No replies yet.</p>
+            ) : (
+              notifs.map((n) => {
+                const nm = [n.first_name, n.last_name].filter(Boolean).join(' ').trim() || n.company || 'Contact'
+                const isUnread = new Date(n.occurred_at).getTime() > lastSeen
+                return (
+                  <button
+                    key={n.id}
+                    onClick={() => openThread(n.contact_id)}
+                    className={clsx(
+                      'flex w-full items-start gap-2.5 border-b border-slate-50 px-3 py-2.5 text-left transition-colors hover:bg-slate-50 dark:border-slate-800/60 dark:hover:bg-slate-800/50',
+                      isUnread && 'bg-brand-50/40 dark:bg-brand-900/10',
+                    )}
+                  >
+                    <Avatar name={nm} size={28} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate text-sm font-medium text-slate-900 dark:text-white">{nm}</span>
+                        <span className="flex-shrink-0 text-[10px] text-slate-400">{new Date(n.occurred_at).toLocaleDateString()}</span>
+                      </div>
+                      <p className="truncate text-xs text-slate-500">{n.snippet ?? 'Replied'}</p>
+                    </div>
+                    {isUnread && <span className="mt-1 h-2 w-2 flex-shrink-0 rounded-full bg-brand-500" />}
+                  </button>
+                )
+              })
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

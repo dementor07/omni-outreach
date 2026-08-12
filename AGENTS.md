@@ -1,6 +1,11 @@
 # OmniOutreach agent guide
 
-## Read first: OPINIONS.md
+## Read first: CODEX_HANDOVER.md, then OPINIONS.md
+
+[`CODEX_HANDOVER.md`](./CODEX_HANDOVER.md) is the **current-state snapshot** (captured
+2026-08-12): live campaign state, repo↔prod drift, active blockers, and open work. Read it
+before touching anything — especially §0 (drift) and §5 (send-safety invariants), which cover
+live outbound traffic to real people.
 
 Before making tradeoff decisions, read [`OPINIONS.md`](./OPINIONS.md) — the durable beliefs
 about *how we work here* (verification bar, anti-bloat rules, product intent, deploy safety).
@@ -115,19 +120,26 @@ Current v2 production, verified 2026-06-23:
 - Migrations must exist in the freshly built image before `alembic upgrade head`; then
   recreate the long-running service.
 
-Critical current caveat: on 2026-06-23 the production checkout was at commit `944be7c`
-with more than 20 modified/untracked source files, while the repository branch had advanced
-to `db28139`. Containers had been rebuilt from that dirty checkout. Production is therefore
-not reproducible from its checked-out Git commit, and ordinary pulls/deploys may preserve
-or conflict with box-only files. Inspect and reconcile this drift before any deployment;
-do not clean/reset the server without explicit approval.
+Critical current caveat (re-verified 2026-08-12): the production checkout is at commit
+`6cd203c`, **10 commits behind** the local branch tip `0abe234`, but its working tree content
+is byte-identical to the local working tree (the newer commits were delivered by `scp`, not
+`git pull`). Containers were rebuilt from that dirty checkout. Production is therefore not
+reproducible from its checked-out Git commit — and migrations `054_send_spacing` and
+`055_ai_cost_ledger` are **applied to the production database while existing only as untracked
+files**, so a clean clone would not contain them.
+
+Do not run `git pull`, `checkout`, `stash`, or `reset` on the box: the uncommitted working tree
+is what production runs. Inspect and reconcile this drift before any deployment; do not
+clean/reset the server without explicit approval. Full drift analysis and the safe
+reconciliation procedure: [`CODEX_HANDOVER.md`](./CODEX_HANDOVER.md) §0.
 
 The older Hostinger-style system at `193.203.161.15:/home/omni/marketing-automation` is a
 separate legacy application, not this repository's v2 production stack.
 
 ## Sources of truth
 
-- Schema: `backend/alembic/versions/` plus `alembic current` on production.
+- Current state snapshot: `CODEX_HANDOVER.md` (2026-08-12) — campaigns, drift, blockers.
+- Schema: `backend/alembic/versions/` plus `alembic current` on production (now `055`).
 - Runtime: live containers, logs, Flink API, API health, and database rows win over docs.
 - Current operational guide: `omni-vault/wiki/operations/deploy-pipeline.md`.
 - Architecture intent: `omni-vault/wiki/architecture/0001-v2-nuke.md` and verified pages

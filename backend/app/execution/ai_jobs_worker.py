@@ -38,7 +38,7 @@ from aiokafka import AIOKafkaConsumer
 
 from app.config import settings
 from app.db import assert_rls_enforcing_role, close_pool, fetch_all, fetch_one, init_pool, system_scope
-from app.services import ai_jobs, bus
+from app.services import ai_jobs, ai_pricing, bus
 
 log = logging.getLogger("ai_jobs_worker")
 
@@ -147,6 +147,10 @@ async def _run_score(workspace_id: str, env: dict, payload: dict, api_key: str, 
     scored = 0
     for row in rows:
         result = await ai_jobs.score_lead(api_key, icp, _lead_facts(dict(row)))
+        await ai_pricing.record_usage(
+            workspace_id=workspace_id, kind="score", model=result["model"],
+            usage=result.get("usage") or {}, lead_id=str(row["id"]),
+        )
         await bus.publish_event(
             workspace_id=workspace_id,
             event_type="ai.score.completed",
@@ -182,6 +186,11 @@ async def _run_compose(workspace_id: str, env: dict, payload: dict, api_key: str
         channel=payload.get("channel") or "email",
         tone=payload.get("tone") or "professional",
         max_words=int(payload.get("max_words") or 120),
+        model=payload.get("model"),
+    )
+    await ai_pricing.record_usage(
+        workspace_id=workspace_id, kind="compose", model=result["model"],
+        usage=result.get("usage") or {}, lead_id=str(entity_id),
     )
     await bus.publish_event(
         workspace_id=workspace_id,
@@ -207,6 +216,11 @@ async def _run_classify(workspace_id: str, env: dict, payload: dict, api_key: st
     if not body:
         raise ai_jobs.AiJobError("classify job needs a reply body")
     result = await ai_jobs.classify_reply(api_key, body)
+    await ai_pricing.record_usage(
+        workspace_id=workspace_id, kind="classify", model=result["model"],
+        usage=result.get("usage") or {},
+        lead_id=str(env["entity_id"]) if env.get("entity_id") else None,
+    )
     await bus.publish_event(
         workspace_id=workspace_id,
         event_type="ai.classify.completed",

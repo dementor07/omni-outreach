@@ -313,6 +313,35 @@ export const workspaces = {
     api.post<WorkspaceInvite>(`/workspaces/${id}/invites`, { email, role }).then((r) => r.data),
   revokeInvite: (id: UUID, inviteId: UUID) =>
     api.delete(`/workspaces/${id}/invites/${inviteId}`).then((r) => r.data),
+  // Redeem an invite token. Mounted at the router root (the token encodes the
+  // workspace). Returns a fresh JWT scoped to the joined workspace.
+  acceptInvite: (token: string) =>
+    api
+      .post<{ workspace_id: UUID; role: string; access_token: string; token_type: string }>(
+        '/workspaces/invites/accept',
+        { token },
+      )
+      .then((r) => r.data),
+  // Public: describe an invite so the accept page can show sign-in vs create-account.
+  inviteInfo: (token: string) =>
+    api
+      .get<{
+        valid: boolean
+        reason?: string
+        email?: string
+        role?: string
+        workspace_name?: string
+        has_account?: boolean
+      }>('/workspaces/invites/info', { params: { token } })
+      .then((r) => r.data),
+  // Public: create an account for the invited email + join the workspace in one step.
+  registerAccept: (token: string, password: string) =>
+    api
+      .post<{ workspace_id: UUID; role: string; access_token: string; token_type: string }>(
+        '/workspaces/invites/register-accept',
+        { token, password },
+      )
+      .then((r) => r.data),
 }
 
 // ── Nodes (manifest registry) ────────────────────────────────────────────────
@@ -855,11 +884,30 @@ export const projections = {
 // ── Inbox ────────────────────────────────────────────────────────────────────
 export interface InboxThread {
   contact_id: UUID
+  first_name: string | null
+  last_name: string | null
+  company: string | null
+  headline: string | null
   last_message_at: ISODate
   message_count: number
+  inbound_count: number
+  sent_count: number
+  last_inbound_at: ISODate | null
   last_classification: string | null
   last_snippet: string | null
   last_channel: string | null
+}
+
+export interface InboxNotification {
+  id: UUID
+  contact_id: UUID
+  first_name: string | null
+  last_name: string | null
+  company: string | null
+  channel: string
+  snippet: string | null
+  classification: string | null
+  occurred_at: ISODate
 }
 
 export interface InboxMessage {
@@ -887,9 +935,12 @@ export interface ReplyAccepted {
 }
 
 export const inbox = {
-  threads: (limit = 50) => api.get<InboxThread[]>('/inbox/threads', { params: { limit } }).then((r) => r.data),
+  threads: (limit = 50, workflowId?: UUID) =>
+    api.get<InboxThread[]>('/inbox/threads', { params: { limit, workflow_id: workflowId } }).then((r) => r.data),
   thread: (contactId: UUID, limit = 200) =>
     api.get<InboxMessage[]>(`/inbox/threads/${contactId}`, { params: { limit } }).then((r) => r.data),
+  notifications: (limit = 20) =>
+    api.get<InboxNotification[]>('/inbox/notifications', { params: { limit } }).then((r) => r.data),
   suggest: (contactId: UUID) =>
     api.post<ReplySuggestion>(`/inbox/threads/${contactId}/suggest`).then((r) => r.data),
   reply: (contactId: UUID, body: { body: string; subject?: string; channel?: string }) =>
@@ -1019,10 +1070,26 @@ export interface Approval {
   draft: string | null
   status: string
   created_at: ISODate
+  campaign_id: UUID | null
+  campaign_name: string | null
+  prospect_name: string | null
+  prospect_linkedin_url: string | null
+  prospect_company: string | null
+  sending_account_id: string | null
+  sending_account_name: string | null
+  evidence_sources: ApprovalEvidence[]
+}
+
+export interface ApprovalEvidence {
+  kind: 'hiring' | 'post' | 'website' | 'profile'
+  label: string
+  url: string | null
+  excerpt: string | null
 }
 
 export const approvals = {
-  list: () => api.get<Approval[]>('/approvals').then((r) => r.data),
+  list: (campaignId?: UUID) =>
+    api.get<Approval[]>('/approvals', { params: { campaign_id: campaignId } }).then((r) => r.data),
   updateDraft: (id: UUID, draft: string) =>
     api.patch(`/approvals/${id}/draft`, { draft }).then((r) => r.data),
   resolve: (id: UUID, handle: 'approved' | 'rejected') =>

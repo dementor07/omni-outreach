@@ -121,7 +121,12 @@ interface NodeConfigPanelProps {
   saving: boolean
   connections?: Connection[]
   wiredOutputHandles?: string[]
-  onSave: (config: Record<string, unknown>) => void
+  sameTypeCount?: number
+  onSave: (
+    config: Record<string, unknown>,
+    applyChangedFieldsToSameType?: boolean,
+    changedFields?: string[],
+  ) => void
   onDelete?: () => void
   onClose: () => void
 }
@@ -133,6 +138,7 @@ export default function NodeConfigPanel({
   saving,
   connections = [],
   wiredOutputHandles = [],
+  sameTypeCount = 1,
   onSave,
   onDelete,
   onClose,
@@ -140,6 +146,7 @@ export default function NodeConfigPanel({
   const fields = useMemo(() => fieldsFromSchema(manifest.config_schema as JsonSchema), [manifest])
   const [values, setValues] = useState<Record<string, unknown>>(initialConfig)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [applyToSameType, setApplyToSameType] = useState(false)
 
   // Reset the form when switching to a different node.
   useEffect(() => {
@@ -147,6 +154,7 @@ export default function NodeConfigPanel({
     setShowAdvanced(
       (manifest.advanced_fields ?? []).some((name) => !isEmpty(initialConfig[name])),
     )
+    setApplyToSameType(false)
   }, [nodeId, initialConfig, manifest.advanced_fields])
 
   function setField(name: string, value: unknown) {
@@ -176,14 +184,18 @@ export default function NodeConfigPanel({
 
   function handleSave() {
     if (manifest.type === 'condition.rules') {
-      onSave({
+      const clean = {
         match: values.match === 'any' ? 'any' : 'all',
         rules: rules.map((rule) => ({
           field: rule.field.trim(),
           operator: rule.operator,
           ...(!VALUELESS_OPERATORS.has(rule.operator) ? { value: rule.value } : {}),
         })),
-      })
+      }
+      const changed = ['match', 'rules'].filter(
+        (name) => JSON.stringify(clean[name as keyof typeof clean]) !== JSON.stringify(initialConfig[name]),
+      )
+      onSave(clean, applyToSameType, changed)
       return
     }
     // Drop empty strings so optional fields don't persist as ""
@@ -193,7 +205,11 @@ export default function NodeConfigPanel({
       if (isEmpty(v)) continue
       clean[f.name] = f.type === 'integer' || f.type === 'number' ? Number(v) : v
     }
-    onSave(clean)
+    const changed = new Set<string>()
+    for (const name of new Set([...Object.keys(initialConfig), ...Object.keys(clean)])) {
+      if (JSON.stringify(initialConfig[name]) !== JSON.stringify(clean[name])) changed.add(name)
+    }
+    onSave(clean, applyToSameType, [...changed])
   }
 
   return (
@@ -308,6 +324,20 @@ export default function NodeConfigPanel({
 
       {/* Footer */}
       <div className="space-y-2 border-t border-slate-100 px-4 py-3 dark:border-slate-800">
+        {sameTypeCount > 1 && (
+          <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-violet-100 bg-violet-50/60 px-2.5 py-2 text-[11px] text-violet-800 dark:border-violet-900/40 dark:bg-violet-950/20 dark:text-violet-200">
+            <input
+              type="checkbox"
+              checked={applyToSameType}
+              onChange={(event) => setApplyToSameType(event.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="block font-semibold">Apply changed fields to all {sameTypeCount} {nodeLabel(manifest.type)} steps</span>
+              <span className="block opacity-75">Only fields changed in this form are copied; stage-specific settings remain intact.</span>
+            </span>
+          </label>
+        )}
         {missingRequired.length > 0 && (
           <p className="rounded-md bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
             Required: {missingRequired.join(', ')}

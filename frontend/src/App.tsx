@@ -2,6 +2,7 @@ import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import ErrorBoundary from './components/ErrorBoundary'
 import Layout from './components/Layout'
 import Login from './pages/Login'
+import InviteAccept from './pages/InviteAccept'
 
 // WORKSPACE
 import Overview from './pages/Overview'
@@ -49,6 +50,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/invite" element={<InviteAccept />} />
       <Route element={<RequireAuth />}>
         <Route path="/" element={<Overview />} />
 

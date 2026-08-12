@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import signal
 import uuid
 from datetime import UTC, datetime
@@ -33,7 +34,16 @@ from aiokafka import AIOKafkaConsumer
 
 import app.nodes as noderegistry
 from app.config import settings
-from app.db import acquire, assert_rls_enforcing_role, close_pool, execute, fetch_all, fetch_one, init_pool, system_scope
+from app.db import (
+    acquire,
+    assert_rls_enforcing_role,
+    close_pool,
+    execute,
+    fetch_all,
+    fetch_one,
+    init_pool,
+    system_scope,
+)
 from app.execution import commands
 from app.services import bus, company_kg, email_verification, inbound_reply, send_policy, suppression
 from app.services.unipile_client import UnipileClient, UnipileError, UnipileNotConfigured
@@ -934,7 +944,8 @@ async def _workflow_send_controls(workspace_id: str, workflow_id: str | None) ->
     async with system_scope():
         row = await fetch_one(
             "SELECT timezone, earliest_hour, latest_hour, days_of_week, "
-            "daily_cap, sends_today, day_anchor "
+            "daily_cap, sends_today, day_anchor, "
+            "send_spacing_seconds, send_spacing_jitter_pct, next_send_at "
             "FROM omni_workflows WHERE id=$1 AND workspace_id=$2",
             workflow_id, workspace_id,
         )
@@ -1151,7 +1162,125 @@ async def _gate_send(
             await _hold_send(workspace_id, lead, node, correlation_id, hold, reason="daily_cap")
             return True
 
+    # (3) SEND-SPACE-001 — inter-send spacing. The finest-grained throttle: once
+    # inside the window and under cap, trickle sends out with a jittered gap so a
+    # cohort approved/released together doesn't burst from one seat. Fails OPEN —
+    # any error proceeds unspaced (never halts a send).
+    try:
+        if await _spacing_hold(workspace_id, lead, node, workflow_id, controls, correlation_id):
+            return True
+    except Exception:  # noqa: BLE001 — spacing must never halt a send
+        log.exception("send-spacing errored for lead %s; proceeding unspaced", lead.get("id"))
+
     return False
+
+
+async def _spacing_hold(
+    workspace_id: str,
+    lead: dict,
+    node: dict,
+    workflow_id: str | None,
+    controls: dict,
+    correlation_id: str | None,
+) -> bool:
+    """Hold this send so a cohort trickles out with a jittered gap. True = HELD.
+
+    Reserve-once, release-on-retry: the first pass atomically advances the
+    campaign's next_send_at by one jittered gap and records THIS send's slot on
+    the lead (custom_fields._spacing_send_at); the delayed __retry__ re-enters
+    here, sees the slot has arrived, clears it, and lets the send proceed. The
+    per-lead marker makes redelivery idempotent — a redelivered first pass is
+    treated as a retry and never re-reserves."""
+    spacing = int(controls.get("send_spacing_seconds") or 0)
+    if spacing <= 0 or not workflow_id:
+        return False
+
+    now = datetime.now(UTC)
+    cf = lead.get("custom_fields") or {}
+    if isinstance(cf, str):
+        try:
+            cf = json.loads(cf)
+        except (TypeError, ValueError):
+            cf = {}
+
+    existing = cf.get("_spacing_send_at")
+    if existing:
+        try:
+            slot = datetime.fromisoformat(str(existing))
+        except (TypeError, ValueError):
+            slot = None
+        if slot is not None:
+            if slot.tzinfo is None:
+                slot = slot.replace(tzinfo=UTC)
+            remaining = (slot - now).total_seconds()
+            if remaining > 1.0:
+                # A retry fired ahead of the reserved slot — keep holding.
+                await _hold_send(workspace_id, lead, node, correlation_id, remaining, reason="spacing")
+                return True
+            # Slot reached: release. Clear the marker so a later send node for
+            # this same lead (a follow-up DM) reserves its own fresh slot.
+            await _clear_spacing_slot(workspace_id, str(lead["id"]))
+            return False
+
+    # First pass: reserve this send's slot by advancing the campaign clock.
+    jitter = int(controls.get("send_spacing_jitter_pct") or 0)
+    gap = send_policy.jittered_gap_seconds(float(spacing), jitter, random.uniform(-1.0, 1.0))
+    assigned = await _reserve_spacing_slot(workspace_id, workflow_id, gap)
+    if assigned is None:
+        return False  # workflow row vanished — fail open (send now)
+    if assigned.tzinfo is None:
+        assigned = assigned.replace(tzinfo=UTC)
+    hold = (assigned - now).total_seconds()
+    if hold <= 1.0:
+        return False  # first in the cohort — clock advanced, send now
+    await _set_spacing_slot(workspace_id, str(lead["id"]), assigned)
+    await _hold_send(workspace_id, lead, node, correlation_id, hold, reason="spacing")
+    return True
+
+
+async def _reserve_spacing_slot(
+    workspace_id: str, workflow_id: str, gap_seconds: float
+) -> datetime | None:
+    """Atomically advance omni_workflows.next_send_at by one gap and return the
+    slot assigned to THIS send (the pre-advance value, clamped to now). The row
+    lock serialises concurrent reservations so each send gets a distinct slot."""
+    async with system_scope():
+        row = await fetch_one(
+            """
+            UPDATE omni_workflows
+            SET next_send_at = GREATEST(COALESCE(next_send_at, NOW()), NOW())
+                               + make_interval(secs => $3),
+                updated_at = NOW()
+            WHERE id = $1 AND workspace_id = $2
+            RETURNING next_send_at - make_interval(secs => $3) AS assigned_slot
+            """,
+            workflow_id, workspace_id, float(gap_seconds),
+        )
+    return row["assigned_slot"] if row else None
+
+
+async def _set_spacing_slot(workspace_id: str, lead_id: str, slot: datetime) -> None:
+    """Record this send's reserved slot on the lead so the delayed retry releases
+    at the right moment (and a redelivered first pass is treated as a retry)."""
+    async with system_scope():
+        await execute(
+            "UPDATE omni_leads SET custom_fields = "
+            "COALESCE(custom_fields,'{}'::jsonb) || jsonb_build_object('_spacing_send_at', $3::text) "
+            "WHERE id=$1 AND workspace_id=$2",
+            lead_id, workspace_id, slot.isoformat(),
+        )
+
+
+async def _clear_spacing_slot(workspace_id: str, lead_id: str) -> None:
+    """Drop the spacing marker once the slot is reached so the next send node for
+    this lead reserves a fresh slot."""
+    async with system_scope():
+        await execute(
+            "UPDATE omni_leads SET custom_fields = "
+            "(COALESCE(custom_fields,'{}'::jsonb) - '_spacing_send_at') "
+            "WHERE id=$1 AND workspace_id=$2",
+            lead_id, workspace_id,
+        )
 
 
 async def _hold_send(
@@ -1330,6 +1459,30 @@ def _classify_emitted_events(events: list[dict]) -> str:
     return "dead_on_arrival"
 
 
+async def _already_sent_this_node(workspace_id: str, lead_id: str, node_id: str) -> bool:
+    """SEND-ONCE-001: has THIS lead already CONFIRMED a send on THIS node?
+
+    A LinkedIn invite/DM is a once-per-lead action, but the invite node can be
+    re-entered by a stale hold/retry redelivery or by an orchestrator ``__retry__``
+    emitted for a send that already reported ``sent`` — each re-entry re-dispatches
+    the intent, so the seat burns another provider API call for one logical send.
+    LinkedIn dedupes the message itself, but the repeated invite calls are a
+    ban-risk pattern (observed ~3x/lead on C2 before this guard).
+
+    Distinct from DEDUP-SEND-001 (``_dedupe_send``), which suppresses re-contacting
+    a person ANOTHER lead already messaged and deliberately EXCLUDES the lead's own
+    sends (so M1 doesn't block M2). This guards the lead's OWN re-entry of the SAME
+    node. A DM sequence is unaffected — M1/M2/M3 are distinct node ids. A failed
+    send leaves no ``sent`` row, so a genuine retry still proceeds."""
+    async with system_scope():
+        row = await fetch_one(
+            "SELECT 1 FROM omni_send_outcomes "
+            "WHERE workspace_id=$1 AND lead_id=$2 AND node_id=$3 AND status='sent' LIMIT 1",
+            workspace_id, lead_id, node_id,
+        )
+    return row is not None
+
+
 async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: dict, correlation_id: str | None) -> None:
     """Run the target node's execute() and route its output.
 
@@ -1474,6 +1627,22 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
     # = always-on. Internal/non-send nodes are never gated. Evaluated before DNC
     # so a held send doesn't even reach the suppression query.
     if node_type in _OUTBOUND_SEND_CHANNELS:
+        # SEND-ONCE-001: at-most-once send per (lead, node). A re-fire — a stale
+        # hold/retry redelivery, or an orchestrator __retry__ emitted for a send
+        # that already reported 'sent' — must NOT re-dispatch the intent. Each
+        # re-dispatch burns another provider API call for one logical send
+        # (LinkedIn dedupes the message, but the repeated invite calls are a
+        # ban-risk pattern — observed ~3x/lead on C2). The confirmed-send ledger
+        # is the durable witness; this runs FIRST so a duplicate short-circuits
+        # before any schedule/dedupe/gate work and never re-publishes. A HELD send
+        # wrote no 'sent' row, so the legitimate hold->retry->send still proceeds;
+        # only a re-entry AFTER a confirmed send is dropped.
+        if await _already_sent_this_node(workspace_id, str(lead["id"]), str(node["id"])):
+            log.info(
+                "SEND-ONCE-001: lead %s already sent node %s (%s) — dropping duplicate re-fire",
+                lead["id"], node["id"], node_type,
+            )
+            return
         workflow_id = str(node.get("workflow_id") or lead.get("workflow_id") or "") or None
         start_at, end_at = await _workflow_schedule(workspace_id, workflow_id)
         now = datetime.now(UTC)
@@ -2162,10 +2331,14 @@ def _send_provider_ids(meta: dict, lead_mutations: dict) -> dict:
     chat_id (DM thread), invitation_id (invite), message_id, provider_id. The
     muscle returns these in lead_mutations (chat_id/provider_id) and result
     details (invitation_id/message_id)."""
-    details = meta.get("details") if isinstance(meta.get("details"), dict) else {}
+    telemetry = meta.get("telemetry") if isinstance(meta.get("telemetry"), dict) else {}
+    details = meta.get("details") if isinstance(meta.get("details"), dict) else telemetry
+    mutations = lead_mutations or {}
+    if isinstance(mutations, dict) and isinstance(mutations.get("custom_fields"), dict):
+        mutations = mutations["custom_fields"]
     out: dict[str, str] = {}
     for key in ("chat_id", "ig_chat_id", "tg_chat_id", "provider_id", "invitation_id", "message_id"):
-        val = (lead_mutations or {}).get(key) or details.get(key)
+        val = mutations.get(key) or details.get(key)
         if val:
             out[key] = str(val)
     return out
@@ -2179,6 +2352,7 @@ async def _emit_send_outcome(
     meta: dict,
     lead_mutations: dict,
     correlation_id: str | None,
+    firing_node_id: str | None = None,
 ) -> None:
     """OBSERVABILITY-001: a durable, per-lead, cross-queryable record of EVERY
     outbound send attempt (all channels, not just email) — status, the failure
@@ -2211,15 +2385,19 @@ async def _emit_send_outcome(
                 "command_id": command_id,
                 "attempt": attempt,
                 "channel": node_type.split(".", 1)[-1],
-                "mode": meta.get("mode"),
+                "mode": meta.get("mode") or (meta.get("telemetry") or {}).get("event"),
                 "status": status,
                 "lead_id": str(lead_id),
                 "contact_id": str(lead_row.get("contact_id")) if lead_row.get("contact_id") else None,
                 "workflow_id": str(lead_row.get("workflow_id")) if lead_row.get("workflow_id") else None,
-                "node_id": str(meta.get("node_id") or "") or None,
+                # SEND-ONCE-001 keys its at-most-once guard on this. The muscle
+                # doesn't reliably echo node_id, so fall back to the FIRING node
+                # (source_node_id) — the node that produced this outcome — so the
+                # ledger row is always attributable to its send node.
+                "node_id": str(meta.get("node_id") or firing_node_id or "") or None,
                 "sending_account_id": str(meta.get("sending_account_id") or "") or None,
-                "provider": meta.get("provider"),
-                "provider_status_code": meta.get("provider_status_code"),
+                "provider": meta.get("provider") or (meta.get("telemetry") or {}).get("provider"),
+                "provider_status_code": meta.get("provider_status_code") or (meta.get("telemetry") or {}).get("provider_status_code"),
                 "error_code": error_code,
                 "error_detail": error_detail,
                 "provider_ids": _send_provider_ids(meta, lead_mutations),
@@ -2251,6 +2429,140 @@ async def _emit_send_outcome(
             )
         except Exception:  # noqa: BLE001
             log.exception("failed to emit sender.delivery_result for account %s", account_id)
+
+
+async def _handle_manual_reply_transition(meta: dict, handle: str) -> None:
+    """Finalize an inbox one-shot send without advancing a campaign lead.
+
+    Manual replies use a synthetic lead id so a reply can never move or
+    terminalize the real campaign lead.  The inbox route creates a durable
+    ``queued`` outcome before publishing; this function atomically claims that
+    row, records the muscle result, and counts a confirmed send against the
+    sending seat.  The queued-row claim makes the path idempotent under Kafka
+    redelivery.
+    """
+    command_id = str(meta.get("command_id") or "")
+    if not command_id:
+        log.error("manual reply transition without command_id; dropping")
+        return
+
+    async with system_scope():
+        queued = await fetch_one(
+            "SELECT workspace_id, contact_id, workflow_id, channel, sending_account_id "
+            "FROM omni_send_outcomes "
+            "WHERE command_id=$1 AND attempt=0 AND mode='manual_reply' AND status='queued' "
+            "ORDER BY occurred_at DESC LIMIT 1",
+            command_id,
+        )
+    if not queued:
+        log.info("manual reply %s already finalized or unknown; skipping", command_id)
+        return
+
+    row = dict(queued)
+    workspace_id = str(row["workspace_id"])
+    echoed_workspace_id = meta.get("workspace_id")
+    if echoed_workspace_id and str(echoed_workspace_id) != workspace_id:
+        log.error(
+            "manual reply workspace mismatch: command=%s echoed=%s actual=%s — refusing",
+            command_id,
+            echoed_workspace_id,
+            workspace_id,
+        )
+        return
+
+    raw_status = str(meta.get("status") or "").lower()
+    status = raw_status if raw_status in {"sent", "failed", "skipped"} else "failed"
+    error_detail = str(meta.get("error") or "") or None
+    if handle == "__retry__" and status == "failed" and not error_detail:
+        error_detail = "manual reply provider failure (automatic replay is disabled)"
+    error_code = error_detail.split(":", 1)[0].strip()[:120] if error_detail else None
+    telemetry = meta.get("telemetry") if isinstance(meta.get("telemetry"), dict) else {}
+    provider_status_code = meta.get("provider_status_code") or telemetry.get("provider_status_code")
+    try:
+        provider_status_code = int(provider_status_code) if provider_status_code is not None else None
+    except (TypeError, ValueError):
+        provider_status_code = None
+    lead_mutations = meta.get("lead_mutations") if isinstance(meta.get("lead_mutations"), dict) else {}
+    provider_ids = _send_provider_ids(meta, lead_mutations)
+
+    # Persist returned thread handles on the real conversation's lead(s), but
+    # deliberately leave their journey status/current node untouched.
+    mutation_fields = lead_mutations.get("custom_fields")
+    if not isinstance(mutation_fields, dict):
+        mutation_fields = {
+            key: value
+            for key, value in lead_mutations.items()
+            if key in {"chat_id", "ig_chat_id", "tg_chat_id", "provider_id"} and value
+        }
+    if mutation_fields and row.get("contact_id"):
+        async with system_scope():
+            await execute(
+                "UPDATE omni_leads SET custom_fields=COALESCE(custom_fields,'{}'::jsonb) || $1::jsonb, "
+                "updated_at=NOW() WHERE workspace_id=$2 AND contact_id=$3 "
+                "AND ($4::uuid IS NULL OR workflow_id=$4)",
+                json.dumps(mutation_fields),
+                workspace_id,
+                row["contact_id"],
+                row.get("workflow_id"),
+            )
+
+    account_id = str(row.get("sending_account_id") or "") or None
+    if status == "sent" and account_id:
+        # A human reply consumes seat capacity, but must not mutate an active
+        # campaign's automation cap.  Passing workflow_id=None is intentional.
+        await _increment_send_counters(workspace_id, account_id, None, command_id)
+
+    # Finalize only after the idempotent side effects above.  If either raises,
+    # the queued row remains retryable; duplicate delivery is safe because the
+    # counter has its own command-id claim and JSONB merge is idempotent.
+    async with system_scope():
+        finalized = await fetch_one(
+            "UPDATE omni_send_outcomes SET status=$1, provider=$2, provider_status_code=$3, "
+            "error_code=$4, error_detail=$5, provider_ids=$6::jsonb, retriable=$7, "
+            "occurred_at=NOW() "
+            "WHERE workspace_id=$8 AND command_id=$9 AND attempt=0 "
+            "AND mode='manual_reply' AND status='queued' RETURNING id",
+            status,
+            meta.get("provider") or telemetry.get("provider"),
+            provider_status_code,
+            error_code,
+            error_detail,
+            json.dumps(provider_ids),
+            bool(meta.get("is_retriable")),
+            workspace_id,
+            command_id,
+        )
+    if not finalized:
+        return
+
+    try:
+        await bus.publish_event(
+            workspace_id=workspace_id,
+            event_type="send.outcome",
+            entity_type="contact",
+            entity_id=str(row.get("contact_id") or command_id),
+            payload={
+                "command_id": command_id,
+                "attempt": 0,
+                "channel": row.get("channel"),
+                "mode": "manual_reply",
+                "status": status,
+                "lead_id": None,
+                "contact_id": str(row["contact_id"]) if row.get("contact_id") else None,
+                "workflow_id": str(row["workflow_id"]) if row.get("workflow_id") else None,
+                "node_id": None,
+                "sending_account_id": account_id,
+                "provider": meta.get("provider") or telemetry.get("provider"),
+                "provider_status_code": provider_status_code,
+                "error_code": error_code,
+                "error_detail": error_detail,
+                "provider_ids": provider_ids,
+                "retriable": bool(meta.get("is_retriable")),
+            },
+            correlation_id=meta.get("correlation_id"),
+        )
+    except Exception:  # noqa: BLE001 — the durable row is already finalized
+        log.exception("failed to emit manual reply outcome for command %s", command_id)
 
 
 async def _claim_parked_node(workspace_id: str, lead_id: str, node_id: str) -> bool:
@@ -2291,6 +2603,9 @@ async def handle_transition(t: dict) -> None:
     # synthetics) shares one correlation_id instead of each minting its own.
     correlation_id = meta.get("correlation_id") or str(uuid.uuid4())
     lead_mutations = meta.get("lead_mutations") or {}
+    if source_node_id == "inbox-reply":
+        await _handle_manual_reply_transition(meta, handle)
+        return
     if not (lead_id and source_node_id):
         return
 
@@ -2378,6 +2693,7 @@ async def handle_transition(t: dict) -> None:
             meta,
             lead_mutations,
             correlation_id,
+            firing_node_id=str(firing_node.get("id") or source_node_id or "") or None,
         )
 
     # Rate-counter increment on a CONFIRMED send. A real outbound result carries

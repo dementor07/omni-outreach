@@ -321,10 +321,29 @@ async def _project_send_outcome(env: dict[str, Any]) -> None:
             retriable, occurred_at
         )
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17,$18)
-        ON CONFLICT (workspace_id, command_id, attempt) DO NOTHING
+        ON CONFLICT (workspace_id, command_id, attempt) DO UPDATE SET
+            lead_id = COALESCE(EXCLUDED.lead_id, omni_send_outcomes.lead_id),
+            contact_id = COALESCE(EXCLUDED.contact_id, omni_send_outcomes.contact_id),
+            workflow_id = COALESCE(EXCLUDED.workflow_id, omni_send_outcomes.workflow_id),
+            node_id = COALESCE(EXCLUDED.node_id, omni_send_outcomes.node_id),
+            channel = EXCLUDED.channel,
+            mode = COALESCE(EXCLUDED.mode, omni_send_outcomes.mode),
+            sending_account_id = COALESCE(
+                EXCLUDED.sending_account_id, omni_send_outcomes.sending_account_id
+            ),
+            status = EXCLUDED.status,
+            provider = COALESCE(EXCLUDED.provider, omni_send_outcomes.provider),
+            provider_status_code = COALESCE(
+                EXCLUDED.provider_status_code, omni_send_outcomes.provider_status_code
+            ),
+            error_code = EXCLUDED.error_code,
+            error_detail = EXCLUDED.error_detail,
+            provider_ids = EXCLUDED.provider_ids,
+            retriable = EXCLUDED.retriable,
+            occurred_at = EXCLUDED.occurred_at
         """,
         env["workspace_id"],
-        p.get("lead_id") or env.get("entity_id"),
+        p.get("lead_id") or (env.get("entity_id") if env.get("entity_type") == "lead" else None),
         p.get("contact_id"),
         p.get("workflow_id"),
         p.get("node_id"),

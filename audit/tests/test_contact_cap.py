@@ -104,11 +104,17 @@ def test_worker_terminalizes_goal_capped_via_terminalize_lead():
     assert "goal_cap" in seg, "goal_cap marker not stamped for Leads/Analytics"
 
 
-def test_create_contact_still_creates_when_under_cap():
+def test_create_contact_still_creates_when_under_cap(monkeypatch):
     """Functional: with no objective (cap not reached), the node still emits
     contact.created from a discovered person — the cap must not break the happy path."""
     from app.nodes import NodeContext
-    from app.nodes.crm.create_contact import execute as create_contact
+    from app.nodes.crm import create_contact as create_contact_node
+
+    async def _no_active_duplicate(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(create_contact_node, "fetch_one", _no_active_duplicate)
+    create_contact = create_contact_node.execute
 
     # workflow_id=None skips the cap check entirely (manual/single-contact flow).
     ctx = NodeContext(

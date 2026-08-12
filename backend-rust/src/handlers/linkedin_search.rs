@@ -8,7 +8,10 @@
 //!
 //! Payload contract (set by `source.linkedin_search`):
 //!   - `unipile_account_id`  str  — the seat that runs the search
-//!   - `keywords`            str  — free-text query
+//!   - `keywords`            str  — role/free-text query (applied within company)
+//!   - `company_name`        str  — when set, resolve it to a LinkedIn company id
+//!                                  and scope the people search to that company's
+//!                                  real employees (the reliable, non-fuzzy path)
 //!   - `fetch_count`         int  — cap on people returned
 //!   - `people_key`          str  — custom_fields key to write
 //!   - `search_params`       obj  — optional extra Unipile search facets
@@ -101,6 +104,46 @@ fn member_to_person(m: &Value) -> Option<Value> {
     }))
 }
 
+/// POST a `/linkedin/search` body. Ok(json) on 2xx; Err((msg, retriable)) else.
+async fn post_search(
+    client: &reqwest::Client,
+    base: &str,
+    api_key: &str,
+    account_id: &str,
+    body: &Value,
+) -> Result<Value, (String, bool)> {
+    match client
+        .post(format!("{base}/api/v1/linkedin/search"))
+        .header("X-API-KEY", api_key)
+        .header("content-type", "application/json")
+        .query(&[("account_id", account_id)])
+        .json(body)
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => Ok(r.json().await.unwrap_or(json!({}))),
+        Ok(r) => {
+            let s = r.status();
+            Err((
+                format!("linkedin search HTTP {s}"),
+                s.is_server_error() || s.as_u16() == 429,
+            ))
+        }
+        Err(e) => Err((format!("linkedin search network: {e}"), true)),
+    }
+}
+
+/// The top company id from a `category: companies` search response. Handles the
+/// id arriving as a string ("76821216") or a number.
+fn first_company_id(v: &Value) -> Option<String> {
+    let items = v.get("items").or_else(|| v.get("results")).and_then(|x| x.as_array())?;
+    items.iter().find_map(|c| {
+        c.get("id")
+            .and_then(|x| x.as_str().map(str::to_string).or_else(|| x.as_i64().map(|n| n.to_string())))
+            .filter(|s| !s.is_empty())
+    })
+}
+
 pub async fn handle_linkedin_search(command: &ActionCommand) -> ExecutionResult {
     let (api_key, base) = match unipile_creds(command).await {
         Ok(v) => v,
@@ -112,46 +155,53 @@ pub async fn handle_linkedin_search(command: &ActionCommand) -> ExecutionResult 
         return common::fail(command, "LINKEDIN_SEARCH_ACCOUNT_MISSING", false);
     }
     let keywords = common::s(command, "keywords");
+    let company_name = common::s(command, "company_name");
     let fetch_count = command.payload["fetch_count"].as_i64().unwrap_or(25).clamp(1, 100) as usize;
     let people_key = {
         let k = common::s(command, "people_key");
         if k.is_empty() { "people".to_string() } else { k }
     };
 
-    // Build the search body: keyword + any extra facets the node supplied.
+    let client = ProxyManager::create_client(command.lead.proxy_settings.clone())
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    // COMPANY-SCOPED (the reliable path): resolve the company NAME to a LinkedIn
+    // company id via a `category: companies` search, then scope the people search
+    // to that id with the structured `company` facet — so we get that company's
+    // real employees, not people whose name/description fuzzily matches the term.
+    // If resolution fails, fall back to an unscoped keyword search (never error).
+    let mut company_ids: Vec<String> = Vec::new();
+    if !company_name.is_empty() {
+        let cbody = json!({ "api": "classic", "category": "companies", "keywords": company_name });
+        if let Ok(cval) = post_search(&client, &base, &api_key, &account_id, &cbody).await {
+            if let Some(id) = first_company_id(&cval) {
+                company_ids.push(id);
+            }
+        }
+    }
+
+    // Build the people search body: role keywords, scoped to the company id when
+    // resolved, plus any extra facets the node supplied.
     let mut body = json!({ "api": "classic", "category": "people", "keywords": keywords });
-    if let Some(extra) = command.payload.get("search_params").and_then(|v| v.as_object()) {
-        if let Some(obj) = body.as_object_mut() {
+    if let Some(obj) = body.as_object_mut() {
+        if !company_ids.is_empty() {
+            obj.insert("company".to_string(), json!(company_ids));
+        }
+        if let Some(extra) = command.payload.get("search_params").and_then(|v| v.as_object()) {
             for (k, v) in extra {
                 obj.insert(k.clone(), v.clone());
             }
         }
     }
 
-    let client = ProxyManager::create_client(command.lead.proxy_settings.clone())
-        .unwrap_or_else(|_| reqwest::Client::new());
-
-    let resp = client
-        .post(format!("{}/api/v1/linkedin/search", base))
-        .header("X-API-KEY", &api_key)
-        .header("content-type", "application/json")
-        .query(&[("account_id", account_id.as_str())])
-        .json(&body)
-        .send()
-        .await;
-    credentials::release(command.credential_ref.as_deref().unwrap_or("")).await;
-
-    let value: Value = match resp {
-        Ok(r) if r.status().is_success() => r.json().await.unwrap_or(json!({})),
-        Ok(r) => {
-            let status = r.status();
-            let retriable = status.is_server_error() || status.as_u16() == 429;
-            let mut result = common::fail(command, format!("linkedin search HTTP {status}"), retriable);
-            result.metadata.insert("next_handle".to_string(), json!("error"));
-            return result;
+    let value: Value = match post_search(&client, &base, &api_key, &account_id, &body).await {
+        Ok(v) => {
+            credentials::release(command.credential_ref.as_deref().unwrap_or("")).await;
+            v
         }
-        Err(e) => {
-            let mut result = common::fail(command, format!("linkedin search network: {e}"), true);
+        Err((msg, retriable)) => {
+            credentials::release(command.credential_ref.as_deref().unwrap_or("")).await;
+            let mut result = common::fail(command, msg, retriable);
             result.metadata.insert("next_handle".to_string(), json!("error"));
             return result;
         }

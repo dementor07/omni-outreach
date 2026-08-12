@@ -3,12 +3,20 @@
 //! Hits LinkedIn's public **jobs-guest** endpoint (no auth, no key, no Apify
 //! credits), parses the job cards for the hiring company + its `/company/<slug>`,
 //! then fetches each company's public page to read the JSON-LD
-//! `numberOfEmployees.value`. The output is byte-for-byte the same
+//! `numberOfEmployees.value`. The output is a superset of the same
 //! `custom_fields[<companies_key>]` shape `apify::extract_companies` emits —
 //! including `employee_count` — so the entire downstream v2 graph (size-gate
 //! `condition.field_match employee_count < 100` → `crm.resolve_company` →
 //! `source.serper_people` → `ai.screen_person` → `crm.create_contact`) runs
 //! completely unchanged. Only the fetch mechanism differs from `apify`.
+//!
+//! Additive vs `apify`: each company also carries the hiring signal it surfaced
+//! on — `job_titles` (exact posted roles), `job_keywords` (which search terms
+//! matched), `job_listings` (a "Hiring: X, Y" summary), and `job_description`
+//! (the full body of the representative posting, fetched from its job-detail
+//! page). These flow through `resolve_company` into the contact so `ai.compose`
+//! can open on the exact role AND what the posting actually asks for, instead of
+//! a generic observation.
 //!
 //! Payload contract (set by `source.linkedin_jobs_guest`, mirrors
 //! `source.linkedin_jobs` minus the credential):
@@ -31,6 +39,9 @@ use std::time::Duration;
 const GUEST_SEARCH: &str =
     "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search";
 const COMPANY_BASE: &str = "https://www.linkedin.com/company/";
+// Guest job-detail endpoint: the search cards carry only the title, so the full
+// job DESCRIPTION is fetched per posting from here.
+const JOB_DETAIL_BASE: &str = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/";
 const PAGE_SIZE: i64 = 10; // guest endpoint returns 10 cards/page
 const MAX_PAGES: i64 = 40; // hard ceiling (400 cards) regardless of max_results
 // A real browser UA — the guest endpoint returns 999/empty to obvious bots.
@@ -57,8 +68,10 @@ pub async fn handle_linkedin_jobs_guest(command: &ActionCommand) -> ExecutionRes
     };
 
     // 1. Paginate the guest search per keyword, collecting cards until we hit
-    //    max_results or an empty page. Dedupe companies by slug (fallback name).
-    let mut by_key: HashMap<String, Card> = HashMap::new();
+    //    max_results or an empty page. Dedupe companies by slug (fallback name),
+    //    ACCUMULATING every posted role + which keyword surfaced it — that is the
+    //    buying signal compose later references ("hiring a Social Media Manager").
+    let mut by_key: HashMap<String, CompanyAgg> = HashMap::new();
     let mut cards_seen = 0usize;
     'kw: for kw in &keywords {
         for page in 0..MAX_PAGES {
@@ -85,7 +98,18 @@ pub async fn handle_linkedin_jobs_guest(command: &ActionCommand) -> ExecutionRes
                 if key.is_empty() {
                     continue;
                 }
-                by_key.entry(key).or_insert(c);
+                let agg = by_key.entry(key).or_insert_with(|| CompanyAgg {
+                    company: c.company.clone(),
+                    slug: c.slug.clone(),
+                    titles: Vec::new(),
+                    keywords: Vec::new(),
+                    job_id: String::new(),
+                });
+                if agg.job_id.is_empty() && !c.job_id.is_empty() {
+                    agg.job_id = c.job_id.clone();
+                }
+                push_distinct(&mut agg.titles, &c.title);
+                push_distinct(&mut agg.keywords, kw);
                 if cards_seen as i64 >= max_results {
                     break 'kw;
                 }
@@ -100,13 +124,14 @@ pub async fn handle_linkedin_jobs_guest(command: &ActionCommand) -> ExecutionRes
         return result;
     }
 
-    // 2. Per unique company, fetch the public company page for headcount.
+    // 2. Per unique company, fetch the public company page for headcount, and
+    //    emit the accumulated hiring signal alongside the apify-shape fields.
     let mut companies: Vec<Value> = Vec::with_capacity(by_key.len());
-    for card in by_key.values() {
-        let employee_count = if card.slug.is_empty() {
+    for agg in by_key.values() {
+        let employee_count = if agg.slug.is_empty() {
             None
         } else {
-            let cu = format!("{COMPANY_BASE}{}", card.slug);
+            let cu = format!("{COMPANY_BASE}{}", agg.slug);
             let ec = match fetch(&cu).await {
                 Ok(html) => parse_employee_count(&html),
                 Err(_) => None,
@@ -114,19 +139,47 @@ pub async fn handle_linkedin_jobs_guest(command: &ActionCommand) -> ExecutionRes
             tokio::time::sleep(Duration::from_millis(COMPANY_FETCH_GAP_MS)).await;
             ec
         };
-        let company_url = if card.slug.is_empty() {
+        // Fetch the representative posting's full DESCRIPTION — the search cards
+        // only carry the title, so the body (the richest buying signal) is on the
+        // job-detail page. One extra fetch per company, gap-throttled like above.
+        let job_description = if agg.job_id.is_empty() {
             String::new()
         } else {
-            format!("{COMPANY_BASE}{}", card.slug)
+            let ju = format!("{JOB_DETAIL_BASE}{}", agg.job_id);
+            let d = match fetch(&ju).await {
+                Ok(html) => parse_job_description(&html).unwrap_or_default(),
+                Err(_) => String::new(),
+            };
+            tokio::time::sleep(Duration::from_millis(COMPANY_FETCH_GAP_MS)).await;
+            d
+        };
+        let company_url = if agg.slug.is_empty() {
+            String::new()
+        } else {
+            format!("{COMPANY_BASE}{}", agg.slug)
+        };
+        // "Hiring: Social Media Manager, Growth Marketer" — the human-readable
+        // listing string compose opens on. `description` keeps the apify key for
+        // backward compat; job_titles/job_keywords carry the structured signal.
+        let listing = if agg.titles.is_empty() {
+            String::new()
+        } else {
+            format!("Hiring: {}", agg.titles.join(", "))
         };
         companies.push(json!({
-            "company_name": card.company,
+            "company_name": agg.company,
             "company_url": company_url,
             "sector": "",
             "industry": "",
             "employee_count": employee_count,
             "raw_size": employee_count.map(|n| n.to_string()).unwrap_or_default(),
-            "description": if card.title.is_empty() { String::new() } else { format!("Hiring: {}", card.title) },
+            "description": listing.clone(),
+            // The buying signal: the exact roles posted, and which of our search
+            // keywords each company matched (why it surfaced).
+            "job_titles": agg.titles,
+            "job_keywords": agg.keywords,
+            "job_listings": listing,
+            "job_description": job_description,
         }));
     }
 
@@ -149,6 +202,28 @@ struct Card {
     company: String,
     slug: String,
     title: String,
+    job_id: String,
+}
+
+/// Every job posting seen for one company across the keyword sweep — the buying
+/// signal. `titles` are the exact posted roles; `keywords` are which of our
+/// search terms surfaced the company (so compose knows *why* it matched, e.g.
+/// "social media manager" vs "sdr"). `job_id` is the first posting's id, used to
+/// fetch its full DESCRIPTION. All de-duplicated in encounter order.
+struct CompanyAgg {
+    company: String,
+    slug: String,
+    titles: Vec<String>,
+    keywords: Vec<String>,
+    job_id: String,
+}
+
+/// Append `item` (trimmed) to `v` if it is non-empty and not already present.
+fn push_distinct(v: &mut Vec<String>, item: &str) {
+    let t = item.trim();
+    if !t.is_empty() && !v.iter().any(|x| x == t) {
+        v.push(t.to_string());
+    }
 }
 
 fn build_guest_url(keyword: &str, location: Option<&str>, date_posted: &str, start: i64) -> String {
@@ -202,7 +277,8 @@ fn parse_cards(html: &str) -> Vec<Card> {
         if company.is_empty() && slug.is_empty() {
             continue;
         }
-        out.push(Card { company, slug, title });
+        let job_id = job_posting_id(card);
+        out.push(Card { company, slug, title, job_id });
     }
     out
 }
@@ -229,6 +305,40 @@ fn company_slug(card: &str) -> String {
         .unwrap_or("")
         .trim()
         .to_string()
+}
+
+/// Extract the numeric jobPosting id from a search card. The card carries
+/// `data-entity-urn="urn:li:jobPosting:3812345678"`; we read the digits after
+/// `jobPosting:`. Empty when absent (older/edge markup).
+fn job_posting_id(card: &str) -> String {
+    match card.find("jobPosting:") {
+        Some(i) => card[i + "jobPosting:".len()..]
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect(),
+        None => String::new(),
+    }
+}
+
+/// Pull the job DESCRIPTION text out of a guest job-detail page. The body sits in
+/// a `<div class="show-more-less-html__markup …">…</div>` (fallback
+/// `description__text`); we take a bounded window from there, strip tags/entities,
+/// collapse whitespace, and cap the length so one posting can't bloat the command.
+fn parse_job_description(html: &str) -> Option<String> {
+    let anchor = html
+        .find("show-more-less-html__markup")
+        .or_else(|| html.find("description__text"))?;
+    let after = &html[anchor..];
+    let gt = after.find('>')?; // end of the opening div tag
+    let body = &after[gt + 1..];
+    let window = &body[..body.len().min(8000)];
+    let text = strip_and_unescape(window);
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() {
+        None
+    } else {
+        Some(collapsed.chars().take(1500).collect())
+    }
 }
 
 /// Read the JSON-LD `"numberOfEmployees":{"value":N}` (or `minValue` fallback)
@@ -320,7 +430,7 @@ mod tests {
     // page (nested <a>), one without (plain text).
     const CARDS: &str = r#"
     <li>
-      <div class="base-search-card">
+      <div class="base-search-card" data-entity-urn="urn:li:jobPosting:3812345678">
         <h3 class="base-search-card__title">
             Head of Marketing
         </h3>
@@ -343,9 +453,23 @@ mod tests {
         assert_eq!(cards[0].company, "Alankaram & Co");
         assert_eq!(cards[0].slug, "alankaram");
         assert_eq!(cards[0].title, "Head of Marketing");
+        assert_eq!(cards[0].job_id, "3812345678"); // from data-entity-urn
         assert_eq!(cards[1].company, "GGV");
         assert_eq!(cards[1].slug, ""); // no LinkedIn page -> no slug
         assert_eq!(cards[1].title, "AGM/DGM – Marketing"); // &#8211; decoded
+        assert_eq!(cards[1].job_id, ""); // no jobPosting urn -> empty
+    }
+
+    #[test]
+    fn parses_job_description() {
+        let html = r#"<section><div class="show-more-less-html__markup relative">
+            <p>We are hiring a <strong>Growth Marketer</strong> to own outbound.</p>
+            <ul><li>Run email &amp; LinkedIn campaigns</li></ul>
+        </div></section>"#;
+        let d = parse_job_description(html).unwrap();
+        assert!(d.contains("Growth Marketer"), "{d}");
+        assert!(d.contains("email & LinkedIn"), "{d}");
+        assert!(parse_job_description("<div>no markup here</div>").is_none());
     }
 
     #[test]
@@ -355,6 +479,16 @@ mod tests {
         let range = r#""numberOfEmployees":{"minValue":51,"maxValue":200}"#;
         assert_eq!(parse_employee_count(range), Some(51));
         assert_eq!(parse_employee_count("no such field"), None);
+    }
+
+    #[test]
+    fn push_distinct_dedupes_and_trims() {
+        let mut v = Vec::new();
+        push_distinct(&mut v, "  Social Media Manager ");
+        push_distinct(&mut v, "Social Media Manager"); // dup -> ignored
+        push_distinct(&mut v, ""); // empty -> ignored
+        push_distinct(&mut v, "Growth Marketer");
+        assert_eq!(v, vec!["Social Media Manager".to_string(), "Growth Marketer".to_string()]);
     }
 
     #[test]

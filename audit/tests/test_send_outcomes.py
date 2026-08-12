@@ -153,9 +153,10 @@ def test_emit_is_called_from_handle_transition():
 def test_projector_persists_idempotently():
     body = _func_body(PROJ_SRC, "_project_send_outcome")
     assert "INSERT INTO omni_send_outcomes" in body
-    assert "ON CONFLICT (workspace_id, command_id, attempt) DO NOTHING" in body, (
-        "redelivery of the same (command_id, attempt) must not double-record"
+    assert "ON CONFLICT (workspace_id, command_id, attempt) DO UPDATE SET" in body, (
+        "redelivery must update the same (command_id, attempt), never insert a duplicate"
     )
+    assert "status = EXCLUDED.status" in body, "a pre-created queued attempt must finalize"
     # the failure reason is persisted, not dropped at the projection boundary.
     assert "error_detail" in body and "provider_ids" in body
 

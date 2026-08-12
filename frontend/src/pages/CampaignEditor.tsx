@@ -14,7 +14,7 @@ import { clsx } from 'clsx'
 import {
   ArrowLeft, Search, GitBranch, Save, Undo2, Redo2, Maximize2, Minimize2, Plus,
   Users, Settings as SettingsIcon, Trash2, Play, Target, Layers3, ArrowUp, ArrowDown, X,
-  AlertTriangle, CheckCircle2, UserPlus,
+  AlertTriangle, CheckCircle2, UserPlus, MessageSquareText,
 } from 'lucide-react'
 import {
   canvas,
@@ -46,6 +46,7 @@ import DataTable from '../components/DataTable'
 import SequentialBuilder from '../components/SequentialBuilder'
 import ObjectivePanel from '../components/ObjectivePanel'
 import Select from '../components/Select'
+import { ApprovalQueue } from './Approvals'
 
 // Category → icon + accent now lives in utils/nodeVisuals (shared with the
 // linear SequentialBuilder so a node looks identical in either view).
@@ -460,14 +461,30 @@ export default function CampaignEditor() {
     toast.success(`Added ${stages.length}-source enrichment stack. First source has highest priority; later sources fill gaps.`)
   }, [manifestByType, pushState, rfEdges, rfNodes, setRfEdges, setRfNodes, toast])
 
-  const updateNodeConfig = useCallback((nodeId: string, config: Record<string, unknown>) => {
+  const updateNodeConfig = useCallback((
+    nodeId: string,
+    config: Record<string, unknown>,
+    applyToSameType = false,
+    changedFields: string[] = [],
+  ) => {
+    const sourceType = rfNodes.find((node) => node.id === nodeId)?.data.manifest.type
     setRfNodes((ns) => {
-      const next = ns.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, config } } : n))
+      const next = ns.map((n) => {
+        if (n.id === nodeId) return { ...n, data: { ...n.data, config } }
+        if (!applyToSameType || !sourceType || n.data.manifest.type !== sourceType) return n
+
+        const propagated = { ...n.data.config }
+        for (const field of changedFields) {
+          if (Object.prototype.hasOwnProperty.call(config, field)) propagated[field] = config[field]
+          else delete propagated[field]
+        }
+        return { ...n, data: { ...n.data, config: propagated } }
+      })
       pushState(next, rfEdges)
       return next
     })
     setDirty(true)
-  }, [rfEdges, setRfNodes, pushState])
+  }, [rfEdges, rfNodes, setRfNodes, pushState])
 
   const deleteNode = useCallback((nodeId: string) => {
     setRfNodes((ns) => ns.filter((n) => n.id !== nodeId))
@@ -632,7 +649,14 @@ export default function CampaignEditor() {
             saving={false}
             connections={connectionsQuery.data ?? []}
             wiredOutputHandles={selectedWiredOutputHandles}
-            onSave={(config) => { updateNodeConfig(selectedNode.id, config); setSelectedNodeId(null) }}
+            sameTypeCount={rfNodes.filter((node) => node.data.manifest.type === selectedNode.data.manifest.type).length}
+            onSave={(config, applyToSameType, changedFields) => {
+              updateNodeConfig(selectedNode.id, config, applyToSameType, changedFields)
+              if (applyToSameType && changedFields?.length) {
+                toast.success(`Applied ${changedFields.length} changed field${changedFields.length === 1 ? '' : 's'} across this campaign. Save the graph to publish.`)
+              }
+              setSelectedNodeId(null)
+            }}
             onDelete={() => deleteNode(selectedNode.id)}
             onClose={() => setSelectedNodeId(null)}
           />
@@ -677,6 +701,7 @@ export default function CampaignEditor() {
               { value: 'audience', label: 'Audience', icon: UserPlus },
               { value: 'goal', label: 'Goal', icon: Target },
               { value: 'leads', label: 'Leads', icon: Users },
+              { value: 'messages', label: 'Messages', icon: MessageSquareText },
               { value: 'settings', label: 'Settings', icon: SettingsIcon },
             ]}
           />
@@ -734,8 +759,12 @@ export default function CampaignEditor() {
                           saving={false}
                           connections={connectionsQuery.data ?? []}
                           wiredOutputHandles={selectedWiredOutputHandles}
-                          onSave={(config) => {
-                            updateNodeConfig(selectedNode.id, config)
+                          sameTypeCount={rfNodes.filter((node) => node.data.manifest.type === selectedNode.data.manifest.type).length}
+                          onSave={(config, applyToSameType, changedFields) => {
+                            updateNodeConfig(selectedNode.id, config, applyToSameType, changedFields)
+                            if (applyToSameType && changedFields?.length) {
+                              toast.success(`Applied ${changedFields.length} changed field${changedFields.length === 1 ? '' : 's'} across this campaign. Save the graph to publish.`)
+                            }
                             setSelectedNodeId(null)
                           }}
                           onClose={() => setSelectedNodeId(null)}
@@ -784,6 +813,18 @@ export default function CampaignEditor() {
                 rows={leadsQuery.data ?? []}
                 loading={leadsQuery.isLoading}
               />
+            </Card>
+          )}
+
+          {activeTab === 'messages' && (
+            <Card padding="lg" className="h-full overflow-auto">
+              <div className="mb-4">
+                <h2 className="text-[15px] font-semibold text-slate-900 dark:text-white">Pending campaign messages</h2>
+                <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">
+                  Newest first. Each draft identifies the prospect, the connecting LinkedIn seat, and the evidence available to composition.
+                </p>
+              </div>
+              <ApprovalQueue campaignId={id} />
             </Card>
           )}
 

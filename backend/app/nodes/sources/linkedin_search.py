@@ -62,20 +62,19 @@ async def execute(ctx: NodeContext) -> NodeResult:
     cfg = LinkedInSearchConfig(**ctx.config)
     correlation_id = ctx.correlation_id or str(uuid.uuid4())
 
-    # Company-scoped mode: read the lead's company dict and search by its NAME, so
-    # inside a for_each(companies) each search returns that company's real people
-    # (classic keyword search on a company name surfaces its employees) rather than
-    # a global title match. This is what makes jobs→company→people find the actual
-    # decision-maker at a small firm instead of random strangers.
-    keywords = cfg.keywords
+    # Company-scoped mode: pass the company NAME to the muscle, which resolves it
+    # to a LinkedIn company id and scopes the people search to that company's real
+    # employees via the structured `company` facet — NOT a fuzzy name keyword.
+    # That's the difference between "Zylu's co-founder" and a random person whose
+    # name happens to contain the company term. `keywords` stays the ROLE filter
+    # (e.g. "marketing"), applied within the company.
+    company_name = ""
     if cfg.company_field:
         company = (ctx.lead.get("custom_fields") or {}).get(cfg.company_field) or {}
         company_name = (company.get("company_name") or company.get("name") or "").strip()
-        if company_name:
-            keywords = f"{cfg.keywords} {company_name}".strip() if cfg.keywords else company_name
-    if not keywords.strip():
-        # Nothing to search (no static keywords and no resolvable company) — end
-        # this branch honestly rather than firing an empty, everyone-matches search.
+    if not company_name and not cfg.keywords.strip():
+        # No company to scope to AND no static keywords — end this branch honestly
+        # rather than firing an empty, everyone-matches search.
         return NodeResult(handle="empty", telemetry={"correlation_id": correlation_id, "reason": "no query"})
 
     return NodeResult(
@@ -89,7 +88,8 @@ async def execute(ctx: NodeContext) -> NodeResult:
                     "provider": "unipile",
                     "connection_name": cfg.connection_name,
                     "unipile_account_id": cfg.unipile_account_id,
-                    "keywords": keywords,
+                    "keywords": cfg.keywords,
+                    "company_name": company_name,
                     "fetch_count": cfg.fetch_count,
                     "people_key": cfg.people_key,
                     "search_params": cfg.search_params,

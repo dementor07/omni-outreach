@@ -217,3 +217,21 @@ def test_jittered_seconds_is_deterministic_and_bounded():
     # disabled / zero-base pass through unchanged
     assert jittered_seconds(base, 0, key) == base
     assert jittered_seconds(0.0, 50, key) == 0.0
+
+
+def test_jittered_gap_seconds_bounds_and_disable():
+    from app.services.send_policy import jittered_gap_seconds
+    base = 600.0  # 10 minutes
+    # no jitter → exactly base regardless of rand
+    assert jittered_gap_seconds(base, 0, 0.9) == base
+    # full +jitter / -jitter at the rand extremes
+    assert jittered_gap_seconds(base, 40, 1.0) == 840.0
+    assert jittered_gap_seconds(base, 40, -1.0) == 360.0
+    # rand_uniform is clamped to [-1, 1] (a rogue caller can't exceed the band)
+    assert jittered_gap_seconds(base, 40, 5.0) == 840.0
+    assert jittered_gap_seconds(base, 40, -5.0) == 360.0
+    # mid rand interpolates
+    assert jittered_gap_seconds(base, 50, 0.5) == 600.0 * (1 + 0.25)
+    # disabled base → 0 (spacing off); positive base never returns < 1s
+    assert jittered_gap_seconds(0.0, 40, 1.0) == 0.0
+    assert jittered_gap_seconds(1.0, 100, -1.0) == 1.0

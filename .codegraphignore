@@ -1,0 +1,9 @@
+# Keep CodeGraph focused on the LIVE v2 spine. The vault holds dead external
+# projects (outreach-dashboard, outreach-automation) and raw notes that pollute
+# symbol/edge results — exclude them so explore() stays on real code.
+omni-vault/
+node_modules/
+.venv/
+dist/
+build/
+**/__pycache__/

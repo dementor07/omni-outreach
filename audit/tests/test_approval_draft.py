@@ -24,6 +24,7 @@ from pathlib import Path
 
 from app.nodes import NodeContext
 from app.nodes.flow.human_approval import _lead_draft, execute
+from app.routers.approvals import _approval_evidence
 
 BACKEND = Path(__file__).resolve().parents[2] / "backend"
 ROUTER = (BACKEND / "app" / "routers" / "approvals.py").read_text(encoding="utf-8")
@@ -88,6 +89,35 @@ def test_patch_draft_is_event_sourced_and_frozen():
 def test_list_returns_draft():
     body = ROUTER.split("async def list_approvals", 1)[1]
     assert "draft" in body.split("FROM omni_approvals", 1)[0]
+
+
+def test_approval_queue_is_newest_first_and_campaign_scoped():
+    body = ROUTER.split("async def list_approvals", 1)[1]
+    assert "campaign_id:" in body
+    assert "($1::uuid IS NULL OR l.workflow_id = $1)" in body
+    assert "ORDER BY a.created_at DESC, a.id DESC" in body
+
+
+def test_approval_queue_identifies_prospect_seat_and_evidence():
+    body = ROUTER.split("async def list_approvals", 1)[1]
+    assert "prospect_linkedin_url" in body
+    assert "sa.external_identity AS sending_account_id" in body
+    assert "sa.display_name AS sending_account_name" in body
+    assert "invite_account_id" in body
+
+    sources = _approval_evidence(
+        {
+            "hiring_signal": "Hiring two account executives",
+            "job_url": "https://example.com/jobs/1",
+            "recent_post": "The founder wrote about pipeline quality.",
+            "website_summary": "A revenue intelligence platform.",
+            "website_url": "https://example.com",
+            "profile_headline": "VP Sales",
+        },
+        "https://linkedin.com/in/prospect",
+    )
+    assert {source.kind for source in sources} == {"hiring", "post", "website", "profile"}
+    assert next(source for source in sources if source.kind == "post").url == "https://linkedin.com/in/prospect"
 
 
 def test_migration_adds_draft_column():

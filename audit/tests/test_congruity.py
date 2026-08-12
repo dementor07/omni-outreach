@@ -149,7 +149,7 @@ def test_clean_company_name_strips_taglines_only():
 
 
 # ── PEOPLE-CHAIN: crm.create_contact must build identity from the discovered person ─
-def test_create_contact_reads_discovered_person_not_just_config():
+def test_create_contact_reads_discovered_person_not_just_config(monkeypatch):
     """REGRESSION (people stage): node config is passed verbatim — it is NOT
     interpolated with the lead's custom_fields. So crm.create_contact MUST read
     the screened person from custom_fields[person_field], or the Naukri/LinkedIn
@@ -158,7 +158,13 @@ def test_create_contact_reads_discovered_person_not_just_config():
     import asyncio as _asyncio
 
     from app.nodes import NodeContext
-    from app.nodes.crm.create_contact import execute as _create_contact
+    from app.nodes.crm import create_contact as create_contact_node
+
+    async def _no_active_duplicate(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(create_contact_node, "fetch_one", _no_active_duplicate)
+    _create_contact = create_contact_node.execute
 
     # Discovered person, empty config -> contact built from the person row.
     ctx = NodeContext(

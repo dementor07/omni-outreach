@@ -30,6 +30,18 @@ class Settings(BaseSettings):
     # dev works out of the box; set PUBLIC_BASE_URL to the prod host in prod.
     public_base_url: str = ""
 
+    # Transactional email (workspace invites, system notices) via STANDARD SMTP —
+    # deliberately distinct from campaign sending (which uses per-workspace
+    # connections + the Rust muscle). For Gmail: SMTP_HOST=smtp.gmail.com,
+    # SMTP_PORT=587, SMTP_USER=<address>, SMTP_PASSWORD=<16-char app password>.
+    # Empty SMTP_HOST => transactional email is off (the app still runs).
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""  # From address; defaults to smtp_user when empty
+    smtp_from_name: str = "Omni"
+
     unipile_base: str = ""
     unipile_api_key: str = ""
     unipile_webhook_secret: str = ""  # HMAC verification for webhooks
@@ -43,17 +55,6 @@ class Settings(BaseSettings):
 
     # SOTA Event Bus
     kafka_brokers: str = "redpanda:9092"
-    event_bus_mode: str = "streaming"
-    # Execution authority. Decides which plane actually side-effects on outbound commands.
-    #   "legacy"  — Python queue only; bus emission skipped entirely
-    #   "shadow"  — Bus + Python queue (Python authoritative, Rust observer)  ← default
-    #   "muscle"  — Bus only; queue insert skipped (Rust authoritative)
-    execution_mode: str = "shadow"
-    # Per-channel muscle cutover. Comma-separated channel names that are
-    # authoritatively executed by the Rust muscle (Python queue insert skipped).
-    # Channels NOT in this list still flow through the legacy dispatcher.
-    # Example: "email,linkedin_invite,linkedin_dm"
-    channel_muscle_mode: str = ""
     # Symmetric secret for the muscle ↔ control-plane internal API. Issued to
     # the Rust container as MUSCLE_SHARED_SECRET. Never exposed to end users.
     muscle_shared_secret: str = ""
@@ -112,6 +113,10 @@ class Settings(BaseSettings):
     def get_public_base_url(self) -> str:
         """External base URL for tracking links (T3). Falls back to frontend_url."""
         return (self.public_base_url or self.frontend_url).rstrip("/")
+
+    def smtp_configured(self) -> bool:
+        """True when the standard transactional SMTP mailer can send."""
+        return bool(self.smtp_host and self.smtp_user and self.smtp_password)
 
     def get_redis_url(self) -> str:
         import urllib.parse

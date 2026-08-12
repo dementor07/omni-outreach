@@ -20,8 +20,16 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
 
-from app.auth import AuthContext, create_access_token, get_current_user, get_current_workspace
+from app.auth import (
+    AuthContext,
+    create_access_token,
+    get_current_user,
+    get_current_workspace,
+    hash_password,
+)
+from app.config import settings
 from app.db import execute, fetch_all, fetch_one, system_scope
+from app.services import mailer
 from app.services.workspaces import _unique_slug, list_user_workspaces
 
 router = APIRouter()
@@ -46,6 +54,11 @@ class InviteCreate(BaseModel):
 
 class InviteAccept(BaseModel):
     token: str
+
+
+class InviteRegister(BaseModel):
+    token: str
+    password: str
 
 
 def _check_role(role: str | None, *allowed: str) -> None:
@@ -296,12 +309,35 @@ async def create_invite(
             token,
             expires_at,
         )
+        ws = await fetch_one("SELECT name FROM workspaces WHERE id=$1", workspace_id)
+        inviter = await fetch_one("SELECT email FROM users WHERE id=$1", ctx.user_id)
+
+    # Send the invitation email via the standard transactional mailer. The invite
+    # row + token are already committed, so a mail failure does NOT lose the invite
+    # (the owner can resend / share the link). We surface ``email_sent`` so the UI
+    # can tell the user whether the email actually went out.
+    accept_url = f"{settings.frontend_url.rstrip('/')}/invite?token={token}"
+    subject, html, text = mailer.invite_email(
+        accept_url=accept_url,
+        workspace_name=(dict(ws) if ws else {}).get("name") or "your workspace",
+        inviter=(dict(inviter) if inviter else {}).get("email"),
+        role=body.role,
+    )
+    email_sent, email_error = True, None
+    try:
+        await mailer.send_email(email, subject, html=html, text=text)
+    except mailer.MailerError as e:
+        email_sent, email_error = False, str(e)
+        log.warning("invite email to %s not sent: %s", email, e)
+
     return {
         "id": str(row["id"]),
         "email": email,
         "role": body.role,
         "token": token,
         "expires_at": expires_at.isoformat(),
+        "email_sent": email_sent,
+        "email_error": email_error,
     }
 
 
@@ -373,6 +409,93 @@ async def accept_invite(
     return {
         "workspace_id": workspace_id,
         "role": invite["role"],
+        "access_token": create_access_token(user_id, workspace_id),
+        "token_type": "bearer",
+    }
+
+
+@router.get("/invites/info")
+async def invite_info(token: str) -> dict:
+    """Public: describe an invite by its token so the accept page can render the
+    right action — 'sign in' if the invited email already has an account, or
+    'create account' if not. Exposes only the invited email + workspace name +
+    role (nothing sensitive; the token is the bearer of authority)."""
+    async with system_scope():
+        inv = await fetch_one(
+            """
+            SELECT wi.invited_email, wi.role, wi.expires_at, wi.accepted_at,
+                   w.name AS workspace_name
+            FROM workspace_invites wi
+            JOIN workspaces w ON w.id = wi.workspace_id
+            WHERE wi.token = $1
+            """,
+            token,
+        )
+        if not inv:
+            return {"valid": False, "reason": "not_found"}
+        if inv["accepted_at"]:
+            return {"valid": False, "reason": "already_accepted"}
+        if inv["expires_at"] < datetime.now(UTC):
+            return {"valid": False, "reason": "expired"}
+        user = await fetch_one("SELECT 1 FROM users WHERE email=$1", inv["invited_email"])
+    return {
+        "valid": True,
+        "email": inv["invited_email"],
+        "role": inv["role"],
+        "workspace_name": inv["workspace_name"],
+        "has_account": bool(user),
+    }
+
+
+@router.post("/invites/register-accept")
+async def register_and_accept(body: InviteRegister) -> dict:
+    """Public: for an invitee with NO account yet — create their account using the
+    invite's own email and drop them straight into the invited workspace with the
+    invited role, in one step. Returns a JWT scoped to that workspace.
+
+    The email is taken from the invite (never user input), so it always matches —
+    no 'wrong email' mismatch. If an account already exists for the email, we 409
+    so the page can send them to sign-in instead."""
+    if len(body.password) < 8:
+        raise HTTPException(status_code=422, detail="Password must be at least 8 characters")
+    async with system_scope():
+        inv = await fetch_one(
+            """
+            SELECT id, workspace_id, invited_email, role, expires_at, accepted_at
+            FROM workspace_invites WHERE token=$1
+            """,
+            body.token,
+        )
+        if not inv:
+            raise HTTPException(status_code=404, detail="invite not found")
+        if inv["accepted_at"]:
+            raise HTTPException(status_code=410, detail="invite already accepted")
+        if inv["expires_at"] < datetime.now(UTC):
+            raise HTTPException(status_code=410, detail="invite expired")
+        email = inv["invited_email"].lower()
+        if await fetch_one("SELECT id FROM users WHERE email=$1", email):
+            raise HTTPException(
+                status_code=409,
+                detail="An account already exists for this email — please sign in to accept.",
+            )
+        user = await fetch_one(
+            "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id",
+            email,
+            hash_password(body.password),
+        )
+        user_id = str(user["id"])
+        workspace_id = str(inv["workspace_id"])
+        await execute(
+            "INSERT INTO workspace_members (workspace_id, user_id, role) "
+            "VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+            workspace_id,
+            user_id,
+            inv["role"],
+        )
+        await execute("UPDATE workspace_invites SET accepted_at=NOW() WHERE id=$1", inv["id"])
+    return {
+        "workspace_id": workspace_id,
+        "role": inv["role"],
         "access_token": create_access_token(user_id, workspace_id),
         "token_type": "bearer",
     }

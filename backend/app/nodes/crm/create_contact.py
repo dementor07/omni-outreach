@@ -22,6 +22,7 @@ import uuid
 
 from pydantic import BaseModel, EmailStr, Field, HttpUrl
 
+from app.db import acquire, fetch_one, system_scope
 from app.nodes import (
     NodeCategory,
     NodeContext,
@@ -31,7 +32,6 @@ from app.nodes import (
     SideEffect,
     register,
 )
-from app.db import acquire, system_scope
 
 
 class CreateContactConfig(BaseModel):
@@ -157,6 +157,31 @@ async def execute(ctx: NodeContext) -> NodeResult:
     # ON CONFLICT (id) upsert then merges fields. Previously this was a fresh
     # uuid4() per fire, so one person became N rows (Benjamin Kaplan x9).
     contact_id = _contact_id(ctx.workspace_id, identity["linkedin_url"], identity["email"])
+
+    # CONTACT-DEDUP-LEAD: one person = one ACTIVE journey across the whole
+    # workspace. The contact id is deterministic (same person → same id), so if
+    # ANY other active lead already owns this contact — whether a duplicate in
+    # this campaign (a re-seed / two searches surfacing them) OR the same person
+    # being pursued by a DIFFERENT campaign — don't spawn a second outreach path.
+    # Two campaigns must never message the same person. Terminalize this lead via
+    # the goal_capped seam (the worker ends it + accounts it at any fan-out
+    # barrier, so the parent isn't left hanging). A contact whose prior journey
+    # already ENDED (terminal status) is free to be pursued again.
+    async with system_scope():
+        dup = await fetch_one(
+            "SELECT id, workflow_id FROM omni_leads WHERE workspace_id=$1 "
+            "AND contact_id=$2 AND id::text <> $3 "
+            "AND status NOT IN ('cancelled','errored','suppressed','completed','ended') "
+            "LIMIT 1",
+            ctx.workspace_id, contact_id,
+            str(ctx.lead.get("id") or "00000000-0000-0000-0000-000000000000"),
+        )
+    if dup:
+        return NodeResult(
+            handle="goal_capped",
+            telemetry={"goal_capped": True, "reason": "contact_active_in_another_journey"},
+        )
+
     events: list[dict] = [
         {
             "event_type": "contact.created",

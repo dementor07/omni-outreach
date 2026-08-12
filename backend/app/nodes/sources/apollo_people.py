@@ -72,7 +72,7 @@ MANIFEST = NodeManifest(
     output_handles=(
         NodeHandle("default", "1+ people found; list lands in custom_fields[people_key]"),
         NodeHandle("empty", "No people matched"),
-        NodeHandle("on_error", "Search call failed"),
+
     ),
     capabilities=("connection:apollo",),
     side_effect=SideEffect.NETWORK,

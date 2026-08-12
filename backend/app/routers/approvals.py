@@ -19,9 +19,9 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.auth import AuthContext, get_current_workspace
@@ -32,6 +32,20 @@ from app.services.bus import publish_event
 router = APIRouter()
 
 
+class ApprovalEvidence(BaseModel):
+    """A fact source that was available to the compose step.
+
+    This is deliberately derived from the lead snapshot instead of inferred from
+    the prose in the draft.  Operators can therefore inspect the real source
+    material without pretending that a fuzzy text match proves provenance.
+    """
+
+    kind: Literal["hiring", "post", "website", "profile"]
+    label: str
+    url: str | None = None
+    excerpt: str | None = None
+
+
 class ApprovalOut(BaseModel):
     id: uuid.UUID
     lead_id: uuid.UUID
@@ -40,6 +54,76 @@ class ApprovalOut(BaseModel):
     draft: str | None
     status: str
     created_at: datetime
+    # Which campaign parked this approval — lets the UI filter by campaign so an
+    # operator can tell a campaign-specific problem (e.g. duplicate approvals in
+    # one campaign) from a global one.
+    campaign_id: uuid.UUID | None = None
+    campaign_name: str | None = None
+    prospect_name: str | None = None
+    prospect_linkedin_url: str | None = None
+    prospect_company: str | None = None
+    # Provider-side id + human label of the LinkedIn seat that sent the invite.
+    # The id disambiguates duplicate display names (two Hemanshu seats exist).
+    sending_account_id: str | None = None
+    sending_account_name: str | None = None
+    evidence_sources: list[ApprovalEvidence] = Field(default_factory=list)
+
+
+def _excerpt(value: Any, limit: int = 280) -> str | None:
+    if not isinstance(value, str):
+        return None
+    clean = " ".join(value.split()).strip()
+    if not clean:
+        return None
+    return clean if len(clean) <= limit else clean[: limit - 1].rstrip() + "…"
+
+
+def _approval_evidence(custom_fields: Any, linkedin_url: str | None) -> list[ApprovalEvidence]:
+    """Normalize the enrichment facts handed to ai.compose into UI provenance."""
+    if isinstance(custom_fields, str):
+        try:
+            custom_fields = json.loads(custom_fields)
+        except (TypeError, ValueError):
+            custom_fields = {}
+    cf = custom_fields if isinstance(custom_fields, dict) else {}
+    sources: list[ApprovalEvidence] = []
+
+    hiring = _excerpt(cf.get("hiring_signal") or cf.get("job_signal"))
+    if hiring:
+        sources.append(ApprovalEvidence(
+            kind="hiring",
+            label="Hiring signal",
+            url=cf.get("job_url") if isinstance(cf.get("job_url"), str) else None,
+            excerpt=hiring,
+        ))
+
+    post = _excerpt(
+        cf.get("latest_post_context")
+        or cf.get("latest_post")
+        or cf.get("recent_post")
+        or cf.get("recent_posts_context")
+    )
+    if post:
+        sources.append(ApprovalEvidence(
+            kind="post", label="LinkedIn post", url=linkedin_url, excerpt=post,
+        ))
+
+    website = _excerpt(cf.get("website_summary") or cf.get("company_about"))
+    if website:
+        website_url = cf.get("website_url")
+        sources.append(ApprovalEvidence(
+            kind="website",
+            label="Company website",
+            url=website_url if isinstance(website_url, str) else None,
+            excerpt=website,
+        ))
+
+    profile = _excerpt(cf.get("profile_about") or cf.get("profile_headline") or cf.get("headline"))
+    if profile:
+        sources.append(ApprovalEvidence(
+            kind="profile", label="LinkedIn profile", url=linkedin_url, excerpt=profile,
+        ))
+    return sources
 
 
 class ResolveBody(BaseModel):
@@ -52,16 +136,46 @@ class DraftBody(BaseModel):
 
 
 @router.get("", response_model=list[ApprovalOut], summary="List pending approvals")
-async def list_approvals(_: AuthContext = Depends(get_current_workspace)) -> list[ApprovalOut]:
+async def list_approvals(
+    _: AuthContext = Depends(get_current_workspace),
+    campaign_id: uuid.UUID | None = Query(None, description="Only approvals for this campaign"),
+) -> list[ApprovalOut]:
     rows = await fetch_all(
         """
-        SELECT id, lead_id, node_id, prompt, draft, status, created_at
-        FROM omni_approvals
-        WHERE status = 'pending'
-        ORDER BY created_at ASC
-        """
+        SELECT a.id, a.lead_id, a.node_id, a.prompt, a.draft, a.status, a.created_at,
+               l.workflow_id AS campaign_id, w.name AS campaign_name,
+               COALESCE(
+                   NULLIF(BTRIM(CONCAT_WS(' ', c.first_name, c.last_name)), ''),
+                   NULLIF(BTRIM(CONCAT_WS(' ', l.custom_fields->>'first_name', l.custom_fields->>'last_name')), '')
+               ) AS prospect_name,
+               COALESCE(c.linkedin_url, l.custom_fields->>'linkedin_url') AS prospect_linkedin_url,
+               COALESCE(c.company, l.custom_fields->>'company') AS prospect_company,
+               sa.external_identity AS sending_account_id,
+               sa.display_name AS sending_account_name,
+               l.custom_fields AS lead_custom_fields
+        FROM omni_approvals a
+        LEFT JOIN omni_leads l ON l.id = a.lead_id AND l.workspace_id = a.workspace_id
+        LEFT JOIN omni_workflows w ON w.id = l.workflow_id AND w.workspace_id = a.workspace_id
+        LEFT JOIN omni_contacts c ON c.id = l.contact_id AND c.workspace_id = a.workspace_id
+        LEFT JOIN omni_sending_accounts sa
+          ON sa.workspace_id = a.workspace_id
+         AND sa.channel_kind = 'linkedin'
+         AND sa.external_identity = l.custom_fields->>'invite_account_id'
+        WHERE a.status = 'pending'
+          AND ($1::uuid IS NULL OR l.workflow_id = $1)
+        ORDER BY a.created_at DESC, a.id DESC
+        """,
+        campaign_id,
     )
-    return [ApprovalOut.model_validate(r) for r in rows]
+    out: list[ApprovalOut] = []
+    for row in rows:
+        data = dict(row)
+        custom_fields = data.pop("lead_custom_fields", {})
+        data["evidence_sources"] = _approval_evidence(
+            custom_fields, data.get("prospect_linkedin_url")
+        )
+        out.append(ApprovalOut.model_validate(data))
+    return out
 
 
 @router.patch("/{approval_id}/draft", status_code=202, summary="Edit an approval's AI draft (B1)")

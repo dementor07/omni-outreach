@@ -25,6 +25,7 @@ from typing import Any
 import httpx
 
 from app.db import fetch_one, system_scope
+from app.services import ai_pricing
 from app.services.encryption import decrypt
 
 log = logging.getLogger(__name__)
@@ -32,6 +33,20 @@ log = logging.getLogger(__name__)
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+
+# Models the compose playground may pick. Haiku is the cheap default; Sonnet/Opus
+# are the "spend more for a better draft" upgrades. Anything off this list falls
+# back to DEFAULT_MODEL so an operator can never send an arbitrary model string
+# (or a costlier one than we intend) straight to the billing endpoint.
+COMPOSE_MODELS = {
+    "claude-haiku-4-5-20251001",
+    "claude-sonnet-5",
+    "claude-opus-5",
+}
+
+
+def _coerce_model(model: str | None) -> str:
+    return model if model in COMPOSE_MODELS else DEFAULT_MODEL
 
 
 class AiJobError(RuntimeError):
@@ -60,10 +75,15 @@ async def anthropic_key(workspace_id: str) -> str | None:
     return bundle.get("api_key") or bundle.get("apiKey")
 
 
-async def _anthropic_text(api_key: str, system: str, user: str, max_tokens: int) -> str:
-    """One bounded Anthropic Messages call → the text content. Raises AiJobError."""
+async def _anthropic_text(
+    api_key: str, system: str, user: str, max_tokens: int, *, model: str = DEFAULT_MODEL
+) -> tuple[str, dict[str, int]]:
+    """One bounded Anthropic Messages call → (text, usage). Raises AiJobError.
+
+    Returns the REAL token ``usage`` from the response alongside the text so the
+    caller can price + record the call (AI-COST-001)."""
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=45.0) as client:
             resp = await client.post(
                 ANTHROPIC_URL,
                 headers={
@@ -72,7 +92,7 @@ async def _anthropic_text(api_key: str, system: str, user: str, max_tokens: int)
                     "content-type": "application/json",
                 },
                 json={
-                    "model": DEFAULT_MODEL,
+                    "model": model,
                     "max_tokens": max_tokens,
                     "system": system,
                     "messages": [{"role": "user", "content": user}],
@@ -83,9 +103,17 @@ async def _anthropic_text(api_key: str, system: str, user: str, max_tokens: int)
     if resp.status_code != 200:
         raise AiJobError(f"anthropic HTTP {resp.status_code}")
     try:
-        return (resp.json()["content"][0]["text"] or "").strip()
-    except (KeyError, IndexError, ValueError) as e:
+        body = resp.json()
+        # Adaptive-thinking models (Sonnet 5 / 4.6+) can emit a `thinking` block
+        # BEFORE the text block, so content[0] is not always the answer. Join every
+        # text block and skip thinking/other block types.
+        blocks = body.get("content") or []
+        text = "".join(
+            b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("type") == "text"
+        ).strip()
+    except (KeyError, IndexError, ValueError, AttributeError) as e:
         raise AiJobError("anthropic returned an unexpected response shape") from e
+    return text, ai_pricing.usage_from_response(body)
 
 
 def _extract_json(text: str) -> dict[str, Any] | None:
@@ -118,7 +146,7 @@ async def score_lead(api_key: str, icp: str, lead_facts: dict[str, Any]) -> dict
         f"ICP:\n{icp}\n\n"
         f"Lead facts:\n{json.dumps(lead_facts, separators=(',', ':'), default=str)}"
     )
-    text = await _anthropic_text(api_key, _SCORE_SYSTEM, user, 400)
+    text, usage = await _anthropic_text(api_key, _SCORE_SYSTEM, user, 400)
     parsed = _extract_json(text)
     if not parsed or "score" not in parsed:
         raise AiJobError("score response was not valid JSON with a score")
@@ -130,15 +158,37 @@ async def score_lead(api_key: str, icp: str, lead_facts: dict[str, Any]) -> dict
     reasons = parsed.get("reasons") or []
     if not isinstance(reasons, list):
         reasons = [str(reasons)]
-    return {"score": score, "reasons": [str(r)[:300] for r in reasons][:6], "model": DEFAULT_MODEL}
+    return {
+        "score": score,
+        "reasons": [str(r)[:300] for r in reasons][:6],
+        "model": DEFAULT_MODEL,
+        "usage": usage,
+    }
 
 
 # ── Compose ──────────────────────────────────────────────────────────────────
 
+# The system prompt carries the role + the hard humanization rules that must hold
+# no matter what the operator's instruction says. em-dashes and the stock AI
+# phrases are the #1 "written by a bot" tells, so they are banned at the system
+# level (the campaign muscle bans them in the node instruction; this keeps the
+# playground path consistent). The "check before finishing" line is a single-call
+# self-refine: the model self-corrects in one request, no costly second pass.
 _COMPOSE_SYSTEM = (
-    "You write {tone} outbound {channel} messages for B2B outreach. Output is the "
-    "message body only — no subject line, no signature, no preamble. Keep it under "
-    "{max_words} words. Reference the lead's facts only if present and relevant."
+    "You are a top B2B SDR writing a {tone} {channel} message to ONE real person. "
+    "Output the message body only: no subject line, no signature, no preamble, no "
+    "quotes around it. Keep it under {max_words} words.\n"
+    "Open on a specific, verifiable signal about them or their company (a role "
+    "they are hiring for, a recent post, what their site says they do) and relate "
+    "it to the value being pitched. Reference facts only if present; never invent "
+    "them.\n"
+    "Sound human: write like you would actually type to one person. NEVER use em "
+    "dashes or en dashes (use periods and commas). Do NOT use AI cliches ('that's "
+    "exactly', 'here's the thing', 'in today's', 'I hope this finds you well', "
+    "'game-changer', 'unlock', 'leverage', 'seamless', 'elevate', 'supercharge'). "
+    "No emojis.\n"
+    "Before finishing, silently check the draft against every rule above and "
+    "rewrite anything that fails. Output only the final message."
 )
 
 
@@ -150,17 +200,23 @@ async def compose_message(
     channel: str = "email",
     tone: str = "professional",
     max_words: int = 120,
+    model: str | None = None,
 ) -> dict[str, Any]:
-    """Draft a per-lead outreach message. Returns {draft:str, model:str}."""
+    """Draft a per-lead outreach message. Returns {draft:str, model:str}.
+
+    ``model`` is coerced to the COMPOSE_MODELS allowlist (Haiku default). The
+    playground exposes Haiku/Sonnet/Opus so an operator can trade cost for
+    quality per regeneration."""
+    resolved = _coerce_model(model)
     system = _COMPOSE_SYSTEM.format(tone=tone, channel=channel, max_words=max_words)
     user = (
         f"Operator instructions:\n{instruction}\n\n"
         f"Lead facts:\n{json.dumps(lead_facts, separators=(',', ':'), default=str)}"
     )
-    text = await _anthropic_text(api_key, system, user, max_words * 8)
+    text, usage = await _anthropic_text(api_key, system, user, max_words * 8, model=resolved)
     if not text:
         raise AiJobError("compose returned an empty draft")
-    return {"draft": text[:4000], "model": DEFAULT_MODEL}
+    return {"draft": text[:4000], "model": resolved, "usage": usage}
 
 
 # ── Classify ──────────────────────────────────────────────────────────────────
@@ -180,7 +236,7 @@ _CLASSIFY_SYSTEM = (
 async def classify_reply(api_key: str, body: str) -> dict[str, Any]:
     """Classify one reply's intent. Returns {intent, confidence, reason, model}."""
     truncated = body[:4000]
-    text = await _anthropic_text(api_key, _CLASSIFY_SYSTEM, truncated, 200)
+    text, usage = await _anthropic_text(api_key, _CLASSIFY_SYSTEM, truncated, 200)
     parsed = _extract_json(text)
     intent = (parsed or {}).get("intent")
     if intent not in _INTENTS:
@@ -190,4 +246,10 @@ async def classify_reply(api_key: str, body: str) -> dict[str, Any]:
     except (TypeError, ValueError):
         confidence = 0.5
     reason = str((parsed or {}).get("reason", ""))[:200]
-    return {"intent": intent, "confidence": confidence, "reason": reason, "model": DEFAULT_MODEL}
+    return {
+        "intent": intent,
+        "confidence": confidence,
+        "reason": reason,
+        "model": DEFAULT_MODEL,
+        "usage": usage,
+    }
