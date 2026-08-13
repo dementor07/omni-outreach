@@ -13,8 +13,15 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
+from uuid import UUID
 
+from app.services.ai_authoring import (
+    AuthoringProviderError,
+    authoring_text,
+    load_authoring_connection,
+)
 from app.services.ai_jobs import AiJobError, _anthropic_text, _extract_json, anthropic_key
 from app.services.view_query import entity_catalog
 from app.services.view_widgets import ViewLayoutError, WidgetInstance, validate_layout
@@ -81,13 +88,21 @@ def _validate(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def _run_architect(api_key: str, system: str, user: str, original: str) -> dict[str, Any]:
+def validate_candidate_view(payload: dict[str, Any]) -> dict[str, Any]:
+    """Public validation seam for external agent-harness ViewSpecs."""
+    return _validate(payload)
+
+
+ModelCall = Callable[[str, str, int], Awaitable[str]]
+
+
+async def _run_architect(call_model: ModelCall, system: str, user: str, original: str) -> dict[str, Any]:
     """The shared prompt→JSON→validate loop with one repair retry. Used by both
     generate (from scratch) and edit (from a current layout) so the validation
     and repair discipline lives in ONE place."""
     try:
-        text = await _anthropic_text(api_key, system, user, MAX_TOKENS)
-    except AiJobError as exc:
+        text = await call_model(system, user, MAX_TOKENS)
+    except (AiJobError, AuthoringProviderError) as exc:
         raise ViewArchitectError(f"model call failed: {exc}") from exc
     payload = _extract_json(text)
     if payload is None:
@@ -102,8 +117,8 @@ async def _run_architect(api_key: str, system: str, user: str, original: str) ->
             f"\n\nOriginal request:\n{original}"
         )
         try:
-            text = await _anthropic_text(api_key, system, repair, MAX_TOKENS)
-        except AiJobError as exc:
+            text = await call_model(system, repair, MAX_TOKENS)
+        except (AiJobError, AuthoringProviderError) as exc:
             raise ViewArchitectError(f"model repair call failed: {exc}") from exc
         payload = _extract_json(text)
         if payload is None:
@@ -124,21 +139,109 @@ async def _require_key(workspace_id: str) -> str:
     return api_key
 
 
-async def generate_view(workspace_id: str, prompt: str) -> dict[str, Any]:
-    """Prompt → validated view payload {name, description, icon, layout} (1 repair retry)."""
+async def _model_call(
+    workspace_id: str,
+    connection_id: UUID | None,
+    model: str | None,
+) -> ModelCall:
+    """Resolve one explicit provider call, or the legacy Anthropic fallback.
+
+    New authoring surfaces always pass ``connection_id``. The fallback remains
+    only for the existing /generate and /edit API contracts.
+    """
+    if connection_id is not None:
+        connection = await load_authoring_connection(workspace_id, connection_id)
+
+        async def selected(system: str, user: str, max_tokens: int) -> str:
+            return await authoring_text(
+                connection,
+                system=system,
+                user=user,
+                model=model,
+                max_tokens=max_tokens,
+            )
+
+        return selected
+
     api_key = await _require_key(workspace_id)
-    return await _run_architect(api_key, _system_prompt(), prompt, prompt)
+
+    async def legacy_anthropic(system: str, user: str, max_tokens: int) -> str:
+        text, _usage = await _anthropic_text(api_key, system, user, max_tokens)
+        return text
+
+    return legacy_anthropic
+
+
+def validate_annotation_targets(
+    current: dict[str, Any], annotations: list[dict[str, str]] | None
+) -> list[dict[str, str]]:
+    """Normalize notes and reject targets that no longer exist in the view."""
+    widget_ids = {
+        str(widget.get("id"))
+        for widget in current.get("layout") or []
+        if isinstance(widget, dict) and widget.get("id")
+    }
+    normalized: list[dict[str, str]] = []
+    for annotation in annotations or []:
+        widget_id = str(annotation.get("widget_id") or "").strip()
+        note = str(annotation.get("note") or "").strip()
+        if widget_id not in widget_ids:
+            raise ViewArchitectError(f"annotation target {widget_id!r} is stale or not part of this view")
+        if not note:
+            raise ViewArchitectError(f"annotation for widget {widget_id!r} is empty")
+        normalized.append({"widget_id": widget_id, "note": note[:1000]})
+    return normalized
+
+
+def _annotation_block(current: dict[str, Any], annotations: list[dict[str, str]]) -> str:
+    if not annotations:
+        return ""
+    widgets = {
+        str(widget.get("id")): widget
+        for widget in current.get("layout") or []
+        if isinstance(widget, dict) and widget.get("id")
+    }
+    grounded = [
+        {**annotation, "current_widget": widgets[annotation["widget_id"]]}
+        for annotation in annotations
+    ]
+    return (
+        "\n\nWIDGET-SPECIFIC ANNOTATIONS:\n"
+        f"{json.dumps(grounded)}\n"
+        "Treat every annotation as scoped to its current_widget. Preserve all "
+        "unannotated widgets unless the whole-view instruction requires a change."
+    )
+
+
+async def generate_view(
+    workspace_id: str,
+    prompt: str,
+    *,
+    connection_id: UUID | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Prompt → validated view payload {name, description, icon, layout} (1 repair retry)."""
+    call_model = await _model_call(workspace_id, connection_id, model)
+    return await _run_architect(call_model, _system_prompt(), prompt, prompt)
 
 
 async def edit_view(
-    workspace_id: str, current: dict[str, Any], instruction: str
+    workspace_id: str,
+    current: dict[str, Any],
+    instruction: str,
+    *,
+    annotations: list[dict[str, str]] | None = None,
+    connection_id: UUID | None = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """DYNAMIC-002 step 2: current view + a plain-language instruction → the
     REVISED view, re-validated through the same whitelist. The model gets the
     full current layout and must return the FULL new one (not a diff), so the
     result always compiles as a complete view. This is the call the Tier-3 MCP
     server will make on the user's behalf."""
-    api_key = await _require_key(workspace_id)
+    normalized_annotations = validate_annotation_targets(current, annotations)
+    call_model = await _model_call(workspace_id, connection_id, model)
+    instruction = instruction.strip() or "Apply the widget-specific annotations."
     user = (
         "Here is the CURRENT view as JSON. Apply the user's instruction and return "
         "the COMPLETE revised view as ONE JSON object (same schema: name, "
@@ -146,5 +249,6 @@ async def edit_view(
         "change, and preserve widget ids that stay.\n\n"
         f"CURRENT VIEW:\n{json.dumps(current)}\n\n"
         f"INSTRUCTION:\n{instruction}"
+        f"{_annotation_block(current, normalized_annotations)}"
     )
-    return await _run_architect(api_key, _system_prompt(), user, instruction)
+    return await _run_architect(call_model, _system_prompt(), user, instruction)

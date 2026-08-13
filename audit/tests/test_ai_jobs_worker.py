@@ -21,7 +21,9 @@ Run from backend/:
 
 from __future__ import annotations
 
+import ast
 import os
+from pathlib import Path
 
 import pytest
 
@@ -113,3 +115,24 @@ async def test_compose_revision_keeps_campaign_draft_annotations_and_facts(monke
     assert "Hi Asha, your recent hiring push stood out." in captured["user"]
     assert "Name the SDR role from the evidence." in captured["user"]
     assert "Hiring SDRs" in captured["user"]
+
+
+def test_every_anthropic_text_consumer_unpacks_usage_tuple():
+    """Prevent control-plane callers from passing the helper's (text, usage)
+    tuple to JSON/text parsers as though it were a string."""
+    backend = Path(__file__).resolve().parents[2] / "backend" / "app"
+    bad_calls: list[str] = []
+    for path in backend.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Await):
+                continue
+            call = node.value.value
+            if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Name):
+                continue
+            if call.func.id != "_anthropic_text":
+                continue
+            target = node.targets[0] if len(node.targets) == 1 else None
+            if not isinstance(target, (ast.Tuple, ast.List)) or len(target.elts) != 2:
+                bad_calls.append(f"{path.relative_to(backend)}:{node.lineno}")
+    assert not bad_calls, f"_anthropic_text callers must unpack text and usage: {bad_calls}"

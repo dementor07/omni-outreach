@@ -50,21 +50,48 @@ export const PROVIDERS: ProviderSpec[] = [
   // ── AI providers ───────────────────────────────────────────────────────────
   {
     id: 'anthropic', name: 'Anthropic (Claude)', category: 'ai', icon: Sparkles,
-    blurb: 'Powers ICP screening, lead scoring, AI compose, and reply classification.',
+    blurb: 'Claude models for view authoring, ICP screening, compose, and classification.',
     docsUrl: 'https://console.anthropic.com/settings/keys',
-    fields: [{ key: 'api_key', label: 'API key', type: 'secret', placeholder: 'sk-ant-…' }],
+    fields: [
+      { key: 'api_key', label: 'API key', type: 'secret', placeholder: 'sk-ant-…' },
+      { key: 'default_model', label: 'Default model', type: 'text', placeholder: 'claude-sonnet-4-20250514', optional: true, metadata: true },
+    ],
   },
   {
     id: 'openai', name: 'OpenAI', category: 'ai', icon: Sparkles,
-    blurb: 'Alternative model provider for message composition and scoring.',
+    blurb: 'OpenAI Responses API for agentic view authoring and other AI work.',
     docsUrl: 'https://platform.openai.com/api-keys',
-    fields: [{ key: 'api_key', label: 'API key', type: 'secret', placeholder: 'sk-…' }],
+    fields: [
+      { key: 'api_key', label: 'API key', type: 'secret', placeholder: 'sk-…' },
+      { key: 'default_model', label: 'Default model', type: 'text', placeholder: 'gpt-5.4-mini', optional: true, metadata: true },
+    ],
+  },
+  {
+    id: 'openrouter', name: 'OpenRouter', category: 'ai', icon: Sparkles,
+    blurb: 'Route view-authoring requests to a model available through OpenRouter.',
+    docsUrl: 'https://openrouter.ai/settings/keys',
+    fields: [
+      { key: 'api_key', label: 'API key', type: 'secret', placeholder: 'sk-or-v1-…' },
+      { key: 'default_model', label: 'Default model', type: 'text', placeholder: 'openai/gpt-5.4-mini', optional: true, metadata: true },
+    ],
   },
   {
     id: 'gemini', name: 'Google Gemini', category: 'ai', icon: Sparkles,
-    blurb: 'Google model provider for AI composition workflows.',
+    blurb: 'Gemini models for validated view authoring and AI workflows.',
     docsUrl: 'https://aistudio.google.com/apikey',
-    fields: [API_KEY],
+    fields: [
+      API_KEY,
+      { key: 'default_model', label: 'Default model', type: 'text', placeholder: 'gemini-2.5-flash', optional: true, metadata: true },
+    ],
+  },
+  {
+    id: 'openai_compatible', name: 'OpenAI-compatible API', category: 'ai', icon: Sparkles,
+    blurb: 'Connect another provider that exposes an OpenAI-compatible chat completions endpoint.',
+    fields: [
+      API_KEY,
+      { key: 'base_url', label: 'API base URL', type: 'text', placeholder: 'https://provider.example.com/api', metadata: true },
+      { key: 'default_model', label: 'Default model', type: 'text', placeholder: 'provider/model-name', metadata: true },
+    ],
   },
   {
     id: 'mindstudio', name: 'MindStudio', category: 'ai', icon: Sparkles,

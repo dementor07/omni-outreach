@@ -12,6 +12,7 @@ Three pure surfaces, no DB/network:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -365,6 +366,33 @@ def test_campaign_ai_supports_named_byok_and_read_only_agent_validation():
     assert "canvas.validateSpec" in architect_ui
 
 
+@pytest.mark.asyncio
+async def test_campaign_architect_unpacks_ai_usage_tuple(monkeypatch):
+    """AI-COST-001 changed the helper contract to (text, usage); campaign
+    generation must pass only text into the JSON extractor."""
+    from app.services import campaign_architect
+
+    async def fake_key(_workspace_id, _connection_name=None):
+        return "not-a-real-key"
+
+    async def fake_anthropic(*_args, **_kwargs):
+        payload = {
+            "name": "Tuple contract",
+            "target_contacts": 5,
+            "sources": [{"provider": "searxng", "query": "B2B SaaS"}],
+            "messages": [],
+        }
+        return json.dumps(payload), {"input_tokens": 10, "output_tokens": 5}
+
+    monkeypatch.setattr(campaign_architect, "anthropic_key", fake_key)
+    monkeypatch.setattr(campaign_architect, "_anthropic_text", fake_anthropic)
+
+    spec = await campaign_architect.generate_campaign_spec(
+        "workspace", "Find five B2B SaaS companies", []
+    )
+    assert spec.name == "Tuple contract"
+
+
 def test_view_payload_normalizes_icon_and_validates_layout():
     view = validate_view_payload(
         {"name": "Morning brief", "icon": "not-a-real-icon", "layout": [_stat()]}
@@ -415,10 +443,12 @@ def test_overview_and_custom_views_share_the_agent_composer():
     root = Path(__file__).resolve().parents[2]
     overview = (root / "frontend/src/pages/Overview.tsx").read_text(encoding="utf-8")
     dynamic = (root / "frontend/src/pages/DynamicView.tsx").read_text(encoding="utf-8")
+    surface = (root / "frontend/src/components/ComposableView.tsx").read_text(encoding="utf-8")
     composer = (root / "frontend/src/components/ViewPromptBar.tsx").read_text(encoding="utf-8")
-    assert "<ViewPromptBar" in overview
-    assert "<ViewPromptBar" in dynamic
-    assert "views.edit(viewId, text)" in composer
+    assert "<ComposableView" in overview
+    assert "<ComposableView" in dynamic
+    assert "<ViewPromptBar" in surface
+    assert "views.author(view.id" in composer
 
 
 # ── DYNAMIC-002 step 2: agent edits a view ───────────────────────────────────

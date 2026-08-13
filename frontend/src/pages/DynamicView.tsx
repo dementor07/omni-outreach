@@ -12,8 +12,7 @@ import { views } from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import Button from '../components/Button'
 import EmptyState from '../components/EmptyState'
-import { ViewGrid } from '../components/ViewWidgets'
-import ViewPromptBar from '../components/ViewPromptBar'
+import ComposableView from '../components/ComposableView'
 import { useToast } from '../components/Toast'
 
 export default function DynamicView() {
@@ -86,13 +85,11 @@ export default function DynamicView() {
         }
       />
 
-      <ViewPromptBar
-        viewId={id}
+      <ComposableView
+        view={view}
         placeholder="Reshape this view — e.g. 'add a sends-by-status bar chart' or 'make the trend weekly'"
         suggestions={['Add campaign status', 'Show recent errors', 'Make the trend weekly']}
       />
-
-      <ViewGrid layout={view.layout} />
     </div>
   )
 }

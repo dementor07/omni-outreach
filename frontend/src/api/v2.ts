@@ -1351,6 +1351,41 @@ export interface ViewDef {
   updated_at: ISODate
 }
 
+export interface ViewAnnotationInput {
+  widget_id: string
+  note: string
+}
+
+export interface ViewAuthoringConnection {
+  id: UUID
+  provider: string
+  name: string
+  adapter: 'anthropic' | 'openai_responses' | 'openai_compatible' | 'gemini'
+  default_model: string
+}
+
+export interface ViewCandidate {
+  name: string
+  description: string
+  icon: string
+  layout: WidgetInstance[]
+}
+
+export type ViewAuthorRequest =
+  | {
+      source: 'connection'
+      instruction: string
+      annotations: ViewAnnotationInput[]
+      connection_id: UUID
+      model?: string
+    }
+  | {
+      source: 'harness'
+      instruction?: string
+      annotations: ViewAnnotationInput[]
+      candidate_view: ViewCandidate
+    }
+
 export interface ViewQueryResult {
   columns: string[]
   rows: Record<string, unknown>[]
@@ -1378,6 +1413,9 @@ export const views = {
   // DYNAMIC-002: reshape an existing view by plain-language instruction.
   edit: (id: UUID, instruction: string) =>
     api.post<ViewDef>(`/views/${id}/edit`, { instruction }).then((r) => r.data),
+  authoringConnections: () => api.get<ViewAuthoringConnection[]>('/views/authoring/connections').then((r) => r.data),
+  validateCandidate: (candidate: ViewCandidate) => api.post<ViewCandidate>('/views/validate', candidate).then((r) => r.data),
+  author: (id: UUID, body: ViewAuthorRequest) => api.post<ViewDef>(`/views/${id}/author`, body).then((r) => r.data),
   query: (spec: ViewQuerySpec) => api.post<ViewQueryResult>('/views/query', spec).then((r) => r.data),
   widgetCatalog: () => api.get<Record<string, unknown>>('/views/widgets').then((r) => r.data),
 }

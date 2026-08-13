@@ -15,7 +15,7 @@ RLS on the request-scoped connection.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -23,8 +23,15 @@ from pydantic import BaseModel, Field
 
 from app.auth import AuthContext, get_current_workspace
 from app.db import acquire, fetch_all, fetch_one
+from app.services.ai_authoring import list_authoring_connections
 from app.services.default_view import DEFAULT_LAYOUT, DEFAULT_VIEW_NAME
-from app.services.view_architect import ViewArchitectError, edit_view, generate_view
+from app.services.view_architect import (
+    ViewArchitectError,
+    edit_view,
+    generate_view,
+    validate_annotation_targets,
+    validate_candidate_view,
+)
 from app.services.view_query import QuerySpec, QueryValidationError, build_query, entity_catalog
 from app.services.view_widgets import ViewLayoutError, validate_layout, widget_manifests
 
@@ -66,6 +73,42 @@ class ViewEdit(BaseModel):
     instruction: str = Field(min_length=3, max_length=2000)
 
 
+class ViewAnnotation(BaseModel):
+    widget_id: str = Field(min_length=1, max_length=120)
+    note: str = Field(min_length=1, max_length=1000)
+
+
+class ViewCandidate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field("", max_length=200)
+    icon: str = Field("layout-dashboard", max_length=40)
+    layout: list[dict[str, Any]] = Field(min_length=1, max_length=12)
+
+
+class ViewCandidateOut(BaseModel):
+    name: str
+    description: str
+    icon: str
+    layout: list[dict[str, Any]]
+
+
+class ViewAuthoringConnectionOut(BaseModel):
+    id: UUID
+    provider: str
+    name: str
+    adapter: str
+    default_model: str
+
+
+class ViewAuthorRequest(BaseModel):
+    source: Literal["connection", "harness"]
+    instruction: str = Field("", max_length=2000)
+    annotations: list[ViewAnnotation] = Field(default_factory=list, max_length=50)
+    connection_id: UUID | None = None
+    model: str | None = Field(None, max_length=160)
+    candidate_view: dict[str, Any] | None = None
+
+
 class QueryResult(BaseModel):
     columns: list[str]
     rows: list[dict[str, Any]]
@@ -89,6 +132,34 @@ def _row_to_out(row: dict) -> ViewOut:
 
 
 # ── Static routes FIRST ──────────────────────────────────────────────────────
+
+
+@router.get(
+    "/authoring/connections",
+    response_model=list[ViewAuthoringConnectionOut],
+    summary="Connected AI providers that can author a validated view",
+)
+async def get_authoring_connections(
+    ctx: AuthContext = Depends(get_current_workspace),
+) -> list[ViewAuthoringConnectionOut]:
+    rows = await list_authoring_connections(ctx.workspace_id)
+    return [ViewAuthoringConnectionOut.model_validate(row) for row in rows]
+
+
+@router.post(
+    "/validate",
+    response_model=ViewCandidateOut,
+    summary="Validate an external agent-harness ViewSpec without writing it",
+)
+async def validate_view_candidate(
+    body: ViewCandidate,
+    _: AuthContext = Depends(get_current_workspace),
+) -> ViewCandidateOut:
+    try:
+        candidate = validate_candidate_view(body.model_dump(mode="json"))
+    except ViewLayoutError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return ViewCandidateOut.model_validate(candidate)
 
 
 @router.get(
@@ -220,39 +291,20 @@ async def generate_view_from_prompt(
     return _row_to_out(dict(row))
 
 
-@router.post(
-    "/{view_id}/edit",
-    response_model=ViewOut,
-    summary="Edit a view with a plain-language instruction",
-    description=(
-        "DYNAMIC-002: reshape an existing view by describing the change — 'add a "
-        "failures-by-provider chart', 'make the trend weekly', 'drop the tasks "
-        "widget'. The view architect gets the current layout + the instruction and "
-        "returns the full revised layout, re-validated through the same whitelist, "
-        "then saved. This is the core dynamic interaction (and the call an external "
-        "agent / the MCP server makes). Requires an anthropic connection."
-    ),
-)
-async def edit_view_with_prompt(
-    view_id: UUID, body: ViewEdit, ctx: AuthContext = Depends(get_current_workspace)
-) -> ViewOut:
+async def _load_view_payload(view_id: UUID) -> tuple[ViewOut, dict[str, Any]]:
     current = await fetch_one("SELECT * FROM omni_views WHERE id=$1", view_id)
     if not current:
         raise HTTPException(status_code=404, detail="view not found")
-    current_view = _row_to_out(dict(current))
-    try:
-        revised = await edit_view(
-            ctx.workspace_id,
-            {
-                "name": current_view.name,
-                "description": current_view.description,
-                "icon": current_view.icon,
-                "layout": current_view.layout,
-            },
-            body.instruction,
-        )
-    except ViewArchitectError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+    view = _row_to_out(dict(current))
+    return view, {
+        "name": view.name,
+        "description": view.description,
+        "icon": view.icon,
+        "layout": view.layout,
+    }
+
+
+async def _save_view_revision(view_id: UUID, revised: dict[str, Any]) -> ViewOut:
     row = await fetch_one(
         """
         UPDATE omni_views
@@ -269,6 +321,66 @@ async def edit_view_with_prompt(
     if not row:
         raise HTTPException(status_code=404, detail="view not found")
     return _row_to_out(dict(row))
+
+
+@router.post(
+    "/{view_id}/edit",
+    response_model=ViewOut,
+    summary="Edit a view with a plain-language instruction",
+    description=(
+        "DYNAMIC-002: reshape an existing view by describing the change — 'add a "
+        "failures-by-provider chart', 'make the trend weekly', 'drop the tasks "
+        "widget'. The view architect gets the current layout + the instruction and "
+        "returns the full revised layout, re-validated through the same whitelist, "
+        "then saved. This is the core dynamic interaction (and the call an external "
+        "agent / the MCP server makes). Requires an anthropic connection."
+    ),
+)
+async def edit_view_with_prompt(
+    view_id: UUID, body: ViewEdit, ctx: AuthContext = Depends(get_current_workspace)
+) -> ViewOut:
+    _, current_payload = await _load_view_payload(view_id)
+    try:
+        revised = await edit_view(ctx.workspace_id, current_payload, body.instruction)
+    except ViewArchitectError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await _save_view_revision(view_id, revised)
+
+
+@router.post(
+    "/{view_id}/author",
+    response_model=ViewOut,
+    summary="Apply a view revision from an explicit connected API or agent harness",
+)
+async def author_view(
+    view_id: UUID,
+    body: ViewAuthorRequest,
+    ctx: AuthContext = Depends(get_current_workspace),
+) -> ViewOut:
+    _, current_payload = await _load_view_payload(view_id)
+    annotations = [annotation.model_dump(mode="json") for annotation in body.annotations]
+    try:
+        validate_annotation_targets(current_payload, annotations)
+        if body.source == "connection":
+            if body.connection_id is None:
+                raise ViewArchitectError("choose a connected AI provider")
+            if not body.instruction.strip() and not annotations:
+                raise ViewArchitectError("add a view instruction or at least one widget annotation")
+            revised = await edit_view(
+                ctx.workspace_id,
+                current_payload,
+                body.instruction,
+                annotations=annotations,
+                connection_id=body.connection_id,
+                model=body.model,
+            )
+        else:
+            if body.candidate_view is None:
+                raise ViewArchitectError("paste and validate a complete agent-authored ViewSpec first")
+            revised = validate_candidate_view(body.candidate_view)
+    except (ViewArchitectError, ViewLayoutError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await _save_view_revision(view_id, revised)
 
 
 # ── CRUD ─────────────────────────────────────────────────────────────────────

@@ -285,7 +285,9 @@ async def screen_contacts_icp(
             lines.append(f"{i}. {name} | {(r['headline'] or '')[:90]} | {r['company'] or ''}")
         async with sem:
             try:
-                text = await _anthropic_text(key, system, "Contacts:\n" + "\n".join(lines), 1200)
+                text, _usage = await _anthropic_text(
+                    key, system, "Contacts:\n" + "\n".join(lines), 1200
+                )
             except Exception:  # noqa: BLE001 — one bad batch must not fail the whole pass
                 return []
         obj = _extract_json(text) or {}

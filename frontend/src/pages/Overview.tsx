@@ -13,8 +13,7 @@ import Card, { CardHeader } from '../components/Card'
 import Badge from '../components/Badge'
 import Button from '../components/Button'
 import EmptyState from '../components/EmptyState'
-import { ViewGrid } from '../components/ViewWidgets'
-import ViewPromptBar from '../components/ViewPromptBar'
+import ComposableView from '../components/ComposableView'
 
 const DEAL_STAGE_ORDER = ['lead', 'qualified', 'meeting', 'proposal', 'closed_won', 'closed_lost']
 
@@ -53,8 +52,8 @@ export default function Overview() {
             </>
           }
         />
-        <ViewPromptBar
-          viewId={view.id}
+        <ComposableView
+          view={view}
           label="Ask Overview"
           placeholder="Describe the mission-control view you need right now…"
           suggestions={[
@@ -64,7 +63,6 @@ export default function Overview() {
             'Focus on C1 and C2 operational state',
           ]}
         />
-        <ViewGrid layout={view.layout} />
       </div>
     )
   }
