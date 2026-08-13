@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { UserCheck, Check, X, Clock, Sparkles, Save, Wand2, RefreshCw, ExternalLink, Linkedin, TextSelect, Trash2 } from 'lucide-react'
+import { UserCheck, Check, X, Clock, Sparkles, Save, Wand2, RefreshCw, ExternalLink, Linkedin, TextSelect, Trash2, Maximize2, Minimize2 } from 'lucide-react'
 import { approvals, ai, type Approval, type ApprovalEvidence, type AiJob, type RewriteDirective } from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
@@ -240,6 +240,7 @@ function ApprovalCard({ approval }: { approval: Approval }) {
   const draftRef = useRef<HTMLTextAreaElement>(null)
   // null = not editing; otherwise the working draft text.
   const [editing, setEditing] = useState<string | null>(null)
+  const [draftExpanded, setDraftExpanded] = useState(false)
   const [playgroundOpen, setPlaygroundOpen] = useState(false)
   const sourceSettings = useMemo(() => settingsFromApproval(approval), [approval])
   const [settings, setSettings] = useState<ComposeSettings>(() => settingsFromApproval(approval))
@@ -301,6 +302,7 @@ function ApprovalCard({ approval }: { approval: Approval }) {
     onSuccess: () => {
       toast.success('Draft updated')
       setEditing(null)
+      setDraftExpanded(false)
       setPlaygroundOpen(false)
       setDirectives([])
       setSelection(null)
@@ -388,9 +390,23 @@ function ApprovalCard({ approval }: { approval: Approval }) {
       {/* AI draft-review (B1): present when an upstream ai.compose populated it. */}
       {(approval.draft !== null || editing !== null) && (
         <div className="mt-3 rounded-xl border border-violet-200/80 bg-violet-50/45 p-3.5 dark:border-violet-900/40 dark:bg-violet-900/10">
-          <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-violet-700 dark:text-violet-300">
-            <Sparkles size={12} />
-            AI draft — review before approving
+          <div className="mb-1.5 flex items-center justify-between gap-3 text-[11px] font-semibold text-violet-700 dark:text-violet-300">
+            <span className="flex items-center gap-1.5">
+              <Sparkles size={12} />
+              AI draft — review before approving
+            </span>
+            {editing !== null && (
+              <button
+                type="button"
+                onClick={() => setDraftExpanded((current) => !current)}
+                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold text-violet-600 transition hover:bg-violet-100 dark:text-violet-300 dark:hover:bg-violet-950/50"
+                aria-pressed={draftExpanded}
+                aria-label={draftExpanded ? 'Collapse draft editor' : 'Expand draft editor'}
+              >
+                {draftExpanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+                {draftExpanded ? 'Collapse' : 'Expand'}
+              </button>
+            )}
           </div>
           {editing !== null ? (
             <textarea
@@ -402,10 +418,10 @@ function ApprovalCard({ approval }: { approval: Approval }) {
                 setSelection(null)
               }}
               onSelect={playgroundOpen ? updateSelection : undefined}
-              rows={5}
+              rows={draftExpanded ? 14 : 5}
               aria-label="AI draft"
               placeholder="Edit the AI-composed draft…"
-              className="w-full resize-none rounded-md border border-slate-200 bg-white px-2.5 py-2 text-[13px] text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-violet-900/40"
+              className={`w-full min-h-[130px] resize-y rounded-md border border-slate-200 bg-white px-2.5 py-2 text-[13px] leading-6 text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-violet-900/40 ${draftExpanded ? 'h-[55vh] max-h-[720px]' : 'max-h-[420px]'}`}
             />
           ) : (
             <p className="max-w-[82ch] whitespace-pre-wrap text-[13px] leading-6 text-slate-700 dark:text-slate-200">{approval.draft}</p>
@@ -416,6 +432,7 @@ function ApprovalCard({ approval }: { approval: Approval }) {
                 <Button variant="primary" size="sm" icon={Save} onClick={() => saveMut.mutate()} disabled={busy}>Save draft</Button>
                 <Button variant="ghost" size="sm" onClick={() => {
                   setEditing(null)
+                  setDraftExpanded(false)
                   setPlaygroundOpen(false)
                   setDirectives([])
                   setSelection(null)
