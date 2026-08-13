@@ -415,10 +415,12 @@ def test_overview_and_custom_views_share_the_agent_composer():
     root = Path(__file__).resolve().parents[2]
     overview = (root / "frontend/src/pages/Overview.tsx").read_text(encoding="utf-8")
     dynamic = (root / "frontend/src/pages/DynamicView.tsx").read_text(encoding="utf-8")
+    surface = (root / "frontend/src/components/ComposableView.tsx").read_text(encoding="utf-8")
     composer = (root / "frontend/src/components/ViewPromptBar.tsx").read_text(encoding="utf-8")
-    assert "<ViewPromptBar" in overview
-    assert "<ViewPromptBar" in dynamic
-    assert "views.edit(viewId, text)" in composer
+    assert "<ComposableView" in overview
+    assert "<ComposableView" in dynamic
+    assert "<ViewPromptBar" in surface
+    assert "views.author(view.id" in composer
 
 
 # ── DYNAMIC-002 step 2: agent edits a view ───────────────────────────────────
