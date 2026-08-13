@@ -439,14 +439,20 @@ def test_default_overview_uses_only_catalogued_fields():
             assert field in entity.columns, f"{widget['id']}: unknown field {field!r} on {q['entity']}"
 
 
-def test_overview_and_custom_views_share_the_agent_composer():
+def test_saved_layouts_and_agent_composer_have_one_overview_surface():
     root = Path(__file__).resolve().parents[2]
     overview = (root / "frontend/src/pages/Overview.tsx").read_text(encoding="utf-8")
-    dynamic = (root / "frontend/src/pages/DynamicView.tsx").read_text(encoding="utf-8")
+    app = (root / "frontend/src/App.tsx").read_text(encoding="utf-8")
+    sidebar = (root / "frontend/src/components/Sidebar.tsx").read_text(encoding="utf-8")
     surface = (root / "frontend/src/components/ComposableView.tsx").read_text(encoding="utf-8")
     composer = (root / "frontend/src/components/ViewPromptBar.tsx").read_text(encoding="utf-8")
     assert "<ComposableView" in overview
-    assert "<ComposableView" in dynamic
+    assert "views.list" in overview
+    assert "overview-layout" in overview
+    assert "LegacyViewRedirect" in app
+    assert "My Views" not in sidebar
+    assert not (root / "frontend/src/pages/DynamicView.tsx").exists()
+    assert not (root / "frontend/src/pages/Views.tsx").exists()
     assert "<ViewPromptBar" in surface
     assert "views.author(view.id" in composer
 

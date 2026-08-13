@@ -1383,8 +1383,40 @@ export type ViewAuthorRequest =
       source: 'harness'
       instruction?: string
       annotations: ViewAnnotationInput[]
-      candidate_view: ViewCandidate
+      candidate_view?: ViewCandidate
+      harness_job_id?: UUID
     }
+
+export type AgentJobStatus = 'queued' | 'working' | 'succeeded' | 'failed' | 'cancelled' | 'expired'
+
+export interface AgentHarnessJob {
+  id: UUID
+  kind: string
+  target_type: string
+  target_id: UUID
+  status: AgentJobStatus
+  result: ViewCandidate | Record<string, unknown> | null
+  progress: { at: ISODate; message: string }[]
+  error: string | null
+  requested_harness_id: string | null
+  harness_id: string | null
+  attempts: number
+  claimed_at: ISODate | null
+  last_heartbeat_at: ISODate | null
+  completed_at: ISODate | null
+  applied_at: ISODate | null
+  expires_at: ISODate
+  created_at: ISODate
+  updated_at: ISODate
+}
+
+export interface AgentHarnessWorker {
+  harness_id: string
+  state: 'listening' | 'working' | 'waiting'
+  job_id: UUID | null
+  last_seen_at: ISODate
+  active_until: ISODate
+}
 
 export interface ViewQueryResult {
   columns: string[]
@@ -1416,6 +1448,15 @@ export const views = {
   authoringConnections: () => api.get<ViewAuthoringConnection[]>('/views/authoring/connections').then((r) => r.data),
   validateCandidate: (candidate: ViewCandidate) => api.post<ViewCandidate>('/views/validate', candidate).then((r) => r.data),
   author: (id: UUID, body: ViewAuthorRequest) => api.post<ViewDef>(`/views/${id}/author`, body).then((r) => r.data),
+  createHarnessJob: (id: UUID, body: { instruction: string; annotations: ViewAnnotationInput[]; harness_id: string }) =>
+    api.post<AgentHarnessJob>(`/views/${id}/harness-jobs`, body).then((r) => r.data),
   query: (spec: ViewQuerySpec) => api.post<ViewQueryResult>('/views/query', spec).then((r) => r.data),
   widgetCatalog: () => api.get<Record<string, unknown>>('/views/widgets').then((r) => r.data),
+}
+
+export const agentHarness = {
+  workers: () => api.get<AgentHarnessWorker[]>('/agent-harness/workers').then((r) => r.data),
+  jobs: () => api.get<AgentHarnessJob[]>('/agent-harness/jobs', { params: { limit: 50 } }).then((r) => r.data),
+  job: (id: UUID) => api.get<AgentHarnessJob>(`/agent-harness/jobs/${id}`).then((r) => r.data),
+  cancel: (id: UUID) => api.post<AgentHarnessJob>(`/agent-harness/jobs/${id}/cancel`).then((r) => r.data),
 }

@@ -22,6 +22,7 @@ from app.db import assert_rls_enforcing_role, close_pool, close_redis, init_pool
 from app.logging_config import get_logger, setup_logging
 from app.nodes import discover as discover_nodes
 from app.routers import (
+    agent_harness,
     ai_studio,
     api_keys,
     approvals,
@@ -159,6 +160,7 @@ app.include_router(templates.router, prefix="/templates", tags=["templates"])
 app.include_router(tones.router, prefix="/tones", tags=["tones"])
 app.include_router(views.router, prefix="/views", tags=["views"])
 app.include_router(objectives.router, prefix="/objectives", tags=["objectives"])
+app.include_router(agent_harness.router, prefix="/agent-harness", tags=["agent-harness"])
 
 # Unipile control plane (UNIPILE-FULL group C/D): account health, inbox reads,
 # inmail-balance, native webhook CRUD — synchronous Unipile API reads (not muscle).

@@ -1,4 +1,4 @@
-import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, Outlet, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import ErrorBoundary from './components/ErrorBoundary'
 import Layout from './components/Layout'
 import Login from './pages/Login'
@@ -22,8 +22,6 @@ import Approvals from './pages/Approvals'
 import Analytics from './pages/Analytics'
 import ActivityPage from './pages/ActivityPage'
 import AiStudio from './pages/AiStudio'
-import Views from './pages/Views'
-import DynamicView from './pages/DynamicView'
 // SETUP
 import Integrations from './pages/Integrations'
 import LeadSources from './pages/LeadSources'
@@ -44,6 +42,11 @@ function RequireAuth() {
       </ErrorBoundary>
     </Layout>
   )
+}
+
+function LegacyViewRedirect() {
+  const { id } = useParams()
+  return <Navigate to={id ? `/?view=${encodeURIComponent(id)}` : '/'} replace />
 }
 
 export default function App() {
@@ -73,8 +76,9 @@ export default function App() {
         <Route path="/analytics" element={<Analytics />} />
         <Route path="/activity" element={<ActivityPage />} />
         <Route path="/ai-studio" element={<AiStudio />} />
-        <Route path="/views" element={<Views />} />
-        <Route path="/views/:id" element={<DynamicView />} />
+        {/* Saved layouts now live inside Overview; old bookmarks remain valid. */}
+        <Route path="/views" element={<LegacyViewRedirect />} />
+        <Route path="/views/:id" element={<LegacyViewRedirect />} />
 
         {/* Setup */}
         <Route path="/integrations" element={<Integrations />} />

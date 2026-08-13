@@ -72,3 +72,6 @@ frontend/src/pages/_legacy/
 
 # PMB local memory workspace marker (per-machine, never committed)
 .pmb/
+
+# Local agent-harness lease files (contain short-lived plaintext lease tokens)
+.omni-harness/

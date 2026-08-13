@@ -1,9 +1,9 @@
-import { useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Users, Contact as ContactIcon, KanbanSquare, Inbox as InboxIcon,
-  Megaphone, Sparkles, Plus, TrendingUp, Flame, Pencil,
+  Megaphone, Sparkles, Plus, TrendingUp, Flame, Copy,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { projections, inbox, canvas, ai, views, type Deal, type LeadScore } from '../api/v2'
@@ -14,6 +14,7 @@ import Badge from '../components/Badge'
 import Button from '../components/Button'
 import EmptyState from '../components/EmptyState'
 import ComposableView from '../components/ComposableView'
+import { useToast } from '../components/Toast'
 
 const DEAL_STAGE_ORDER = ['lead', 'qualified', 'meeting', 'proposal', 'closed_won', 'closed_lost']
 
@@ -26,18 +27,67 @@ const DEAL_STAGE_ORDER = ['lead', 'qualified', 'meeting', 'proposal', 'closed_wo
  */
 export default function Overview() {
   const navigate = useNavigate()
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const selectedViewId = searchParams.get('view')
   const defaultViewQ = useQuery({
     queryKey: ['default-view'],
     queryFn: views.default,
+    enabled: !selectedViewId,
     retry: false,
     staleTime: 60_000,
+  })
+  const selectedViewQ = useQuery({
+    queryKey: ['view', selectedViewId],
+    queryFn: () => views.get(selectedViewId!),
+    enabled: Boolean(selectedViewId),
+    retry: false,
+    staleTime: 60_000,
+  })
+  const listQ = useQuery({
+    queryKey: ['views'],
+    queryFn: views.list,
+    staleTime: 30_000,
+  })
+  const view = selectedViewId ? selectedViewQ.data : defaultViewQ.data
+
+  useEffect(() => {
+    if (!selectedViewId && defaultViewQ.isSuccess) {
+      qc.invalidateQueries({ queryKey: ['views'] })
+    }
+  }, [defaultViewQ.isSuccess, qc, selectedViewId])
+
+  useEffect(() => {
+    if (selectedViewId && selectedViewQ.isError) {
+      setSearchParams({}, { replace: true })
+      toast.error('That layout no longer exists. Showing Overview.')
+    }
+  }, [selectedViewId, selectedViewQ.isError, setSearchParams, toast])
+
+  const duplicate = useMutation({
+    mutationFn: () => {
+      if (!view) throw new Error('Wait for the current layout to load.')
+      return views.create({
+        name: `${view.name} copy`.slice(0, 80),
+        description: view.description,
+        icon: view.icon,
+        layout: view.layout,
+      })
+    },
+    onSuccess: (created) => {
+      qc.invalidateQueries({ queryKey: ['views'] })
+      setSearchParams({ view: created.id })
+      toast.success(`Layout "${created.name}" created`)
+    },
+    onError: () => toast.error('Could not duplicate this layout'),
   })
 
   // While loading, show the static page (it has its own skeletons) so there's
   // never a blank flash. On success, render the stored view. On error, the
   // static page is the permanent fallback.
-  if (defaultViewQ.isSuccess && defaultViewQ.data.layout.length > 0) {
-    const view = defaultViewQ.data
+  if (view && view.layout.length > 0) {
+    const layouts = listQ.data ?? [view]
     return (
       <div className="space-y-6">
         <PageHeader
@@ -46,10 +96,21 @@ export default function Overview() {
           title={view.name}
           description={view.description || 'Live state of your pipeline — a view you can reshape.'}
           actions={
-            <>
-              <Button variant="secondary" size="md" icon={Pencil} onClick={() => navigate(`/views/${view.id}`)}>Edit view</Button>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <label className="sr-only" htmlFor="overview-layout">Overview layout</label>
+              <select
+                id="overview-layout"
+                value={view.id}
+                onChange={(event) => setSearchParams({ view: event.target.value })}
+                className="min-w-44 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-brand-950"
+                title="Switch Overview layout"
+              >
+                {!layouts.some((layout) => layout.id === view.id) && <option value={view.id}>{view.name}</option>}
+                {layouts.map((layout) => <option key={layout.id} value={layout.id}>{layout.name}</option>)}
+              </select>
+              <Button variant="secondary" size="md" icon={Copy} isLoading={duplicate.isPending} onClick={() => duplicate.mutate()}>Duplicate layout</Button>
               <Button variant="primary" size="md" icon={Plus} onClick={() => navigate('/campaigns')}>New campaign</Button>
-            </>
+            </div>
           }
         />
         <ComposableView

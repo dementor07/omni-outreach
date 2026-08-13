@@ -130,6 +130,45 @@ npx tsc --noEmit
 npm run dev          # Vite dev server; proxies /api to the live backend (see vite.config.ts)
 ```
 
+### External agent harness
+
+Overview authoring can use a workspace-owned Codex, Claude Code, OpenCode, or other
+agent harness through the generic durable broker. Create a workspace API key in Settings,
+keep it in the local environment, and start the continuous runner from a checkout:
+
+```bash
+export OMNI_API_URL="https://your-omni-host.example/api"
+export OMNI_API_KEY="<workspace key>"       # never passed as a CLI flag or printed
+export OMNI_HARNESS_NAME="codex:my-machine"
+python scripts/omni_harness.py run --engine codex
+```
+
+`run` holds 25-second polls continuously. When it claims a job, it invokes non-interactive
+Codex in an isolated per-job directory with a strict ViewSpec output schema, renews the
+lease while Codex works, returns the validated candidate, and immediately polls again.
+The Omni broker credential is removed from the child process environment. To use another
+agent executable, pass an argv template (no shell is used):
+
+```bash
+python scripts/omni_harness.py run --engine command \
+  --command 'my-agent --brief {brief} --schema {schema} --out {result}'
+```
+
+The client writes the grounded brief and short-lived lease under the gitignored
+`.omni-harness/` directory. `poll` / `listen` and the commands below remain available for
+manual relay and recovery; their default stdout is compact TOON (`--format json` is also
+available):
+
+```bash
+python scripts/omni_harness.py progress --job <uuid> --message "Rebuilding the widget layout"
+python scripts/omni_harness.py complete --job <uuid> --result revised-view.json
+```
+
+Postgres owns queue/lease/result durability; Redis only wakes a held poll and exposes
+short-lived `listening` / `working` presence. The backend validates the candidate through
+the same widget/query whitelist as connected-API authoring, and a signed-in user must
+explicitly apply it. Harness jobs publish no campaign event or outbound command.
+
 `audit/findings.json` is a running engineering ledger (issues found / fixed, with
 evidence). Read it for history; re-verify any "FIXED" claim against the live system before
 trusting it.

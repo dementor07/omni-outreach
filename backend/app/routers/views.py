@@ -23,6 +23,8 @@ from pydantic import BaseModel, Field
 
 from app.auth import AuthContext, get_current_workspace
 from app.db import acquire, fetch_all, fetch_one
+from app.routers.agent_harness import AgentJobOut
+from app.services import agent_harness
 from app.services.ai_authoring import list_authoring_connections
 from app.services.default_view import DEFAULT_LAYOUT, DEFAULT_VIEW_NAME
 from app.services.view_architect import (
@@ -107,6 +109,17 @@ class ViewAuthorRequest(BaseModel):
     connection_id: UUID | None = None
     model: str | None = Field(None, max_length=160)
     candidate_view: dict[str, Any] | None = None
+    harness_job_id: UUID | None = None
+
+
+class ViewHarnessJobCreate(BaseModel):
+    instruction: str = Field("", max_length=2000)
+    annotations: list[ViewAnnotation] = Field(default_factory=list, max_length=50)
+    harness_id: str = Field(
+        min_length=1,
+        max_length=80,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
 
 
 class QueryResult(BaseModel):
@@ -304,12 +317,17 @@ async def _load_view_payload(view_id: UUID) -> tuple[ViewOut, dict[str, Any]]:
     }
 
 
-async def _save_view_revision(view_id: UUID, revised: dict[str, Any]) -> ViewOut:
+async def _save_view_revision(
+    view_id: UUID,
+    revised: dict[str, Any],
+    *,
+    expected_version: Any,
+) -> ViewOut:
     row = await fetch_one(
         """
         UPDATE omni_views
         SET name=$1, description=$2, icon=$3, layout=$4::jsonb, updated_at=NOW()
-        WHERE id=$5
+        WHERE id=$5 AND updated_at=$6
         RETURNING *
         """,
         revised["name"],
@@ -317,10 +335,74 @@ async def _save_view_revision(view_id: UUID, revised: dict[str, Any]) -> ViewOut
         revised["icon"],
         json.dumps(revised["layout"]),
         view_id,
+        expected_version,
     )
     if not row:
+        exists = await fetch_one("SELECT id FROM omni_views WHERE id=$1", view_id)
+        if exists:
+            raise HTTPException(
+                status_code=409,
+                detail="this view changed while the revision was being authored; retry from the latest layout",
+            )
         raise HTTPException(status_code=404, detail="view not found")
     return _row_to_out(dict(row))
+
+
+@router.post(
+    "/{view_id}/harness-jobs",
+    response_model=AgentJobOut,
+    status_code=202,
+    summary="Queue a grounded view-authoring job for an external agent harness",
+)
+async def create_view_harness_job(
+    view_id: UUID,
+    body: ViewHarnessJobCreate,
+    ctx: AuthContext = Depends(get_current_workspace),
+) -> AgentJobOut:
+    current_view, current_payload = await _load_view_payload(view_id)
+    annotations = [annotation.model_dump(mode="json") for annotation in body.annotations]
+    try:
+        validate_annotation_targets(current_payload, annotations)
+    except ViewArchitectError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not body.instruction.strip() and not annotations:
+        raise HTTPException(
+            status_code=422,
+            detail="add a view instruction or at least one widget annotation",
+        )
+
+    payload = {
+        "task": (
+            "Return one complete revised ViewSpec JSON object. Preserve everything "
+            "that was not requested, including stable widget IDs."
+        ),
+        "current_view": current_payload,
+        "whole_view_instruction": body.instruction.strip(),
+        "widget_annotations": annotations,
+        "widget_catalog": {"widgets": widget_manifests(), **entity_catalog()},
+        "output_contract": {
+            "name": "1-80 characters",
+            "description": "0-200 characters",
+            "icon": "a catalogued icon or layout-dashboard",
+            "layout": "1-12 validated widget objects with stable IDs where preserved",
+        },
+        "safety": [
+            "Return data only; do not call campaign, send, or integration endpoints.",
+            "Do not request or include credentials.",
+            "Omni will validate the candidate and require a human to apply it.",
+        ],
+    }
+    row = await agent_harness.create_job(
+        workspace_id=ctx.workspace_id,
+        kind="view.author",
+        target_type="view",
+        target_id=view_id,
+        target_version=current_view.updated_at,
+        payload=payload,
+        created_by=ctx.user_id,
+        requested_harness_id=body.harness_id,
+    )
+    return AgentJobOut.model_validate(row)
 
 
 @router.post(
@@ -339,12 +421,16 @@ async def _save_view_revision(view_id: UUID, revised: dict[str, Any]) -> ViewOut
 async def edit_view_with_prompt(
     view_id: UUID, body: ViewEdit, ctx: AuthContext = Depends(get_current_workspace)
 ) -> ViewOut:
-    _, current_payload = await _load_view_payload(view_id)
+    current_view, current_payload = await _load_view_payload(view_id)
     try:
         revised = await edit_view(ctx.workspace_id, current_payload, body.instruction)
     except ViewArchitectError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return await _save_view_revision(view_id, revised)
+    return await _save_view_revision(
+        view_id,
+        revised,
+        expected_version=current_view.updated_at,
+    )
 
 
 @router.post(
@@ -357,8 +443,9 @@ async def author_view(
     body: ViewAuthorRequest,
     ctx: AuthContext = Depends(get_current_workspace),
 ) -> ViewOut:
-    _, current_payload = await _load_view_payload(view_id)
+    current_view, current_payload = await _load_view_payload(view_id)
     annotations = [annotation.model_dump(mode="json") for annotation in body.annotations]
+    applied_job_id: UUID | None = None
     try:
         validate_annotation_targets(current_payload, annotations)
         if body.source == "connection":
@@ -375,12 +462,35 @@ async def author_view(
                 model=body.model,
             )
         else:
-            if body.candidate_view is None:
-                raise ViewArchitectError("paste and validate a complete agent-authored ViewSpec first")
-            revised = validate_candidate_view(body.candidate_view)
+            if body.harness_job_id is not None:
+                job = await agent_harness.get_job(body.harness_job_id)
+                if job is None or job["kind"] != "view.author" or job["target_id"] != view_id:
+                    raise ViewArchitectError("the harness job does not belong to this view")
+                if job["status"] != "succeeded" or not isinstance(job.get("result"), dict):
+                    raise ViewArchitectError("the harness job has not produced a validated ViewSpec")
+                if job.get("target_version") != current_view.updated_at:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="this view changed after the harness job was created; queue a fresh job",
+                    )
+                revised = validate_candidate_view(job["result"])
+                applied_job_id = body.harness_job_id
+            else:
+                if body.candidate_view is None:
+                    raise ViewArchitectError(
+                        "queue a harness job or paste and validate a complete agent-authored ViewSpec"
+                    )
+                revised = validate_candidate_view(body.candidate_view)
     except (ViewArchitectError, ViewLayoutError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return await _save_view_revision(view_id, revised)
+    saved = await _save_view_revision(
+        view_id,
+        revised,
+        expected_version=current_view.updated_at,
+    )
+    if applied_job_id is not None:
+        await agent_harness.mark_applied(applied_job_id)
+    return saved
 
 
 # ── CRUD ─────────────────────────────────────────────────────────────────────
