@@ -67,6 +67,11 @@
 - **Nothing merges without a fresh-eyes gate.** Review → test → e2e-with-evidence → PR, run in
   a *fresh context* so the author's blind spots are caught. (Kun measured 68% of ungated
   changes carried bugs.) On this repo the gate is `no-mistakes` on the Linux deploy box.
+- **A gate is a release boundary, not an inner loop.** Use targeted local checks while shaping
+  a change; consolidate related work; run one proportional gate before merge/deploy. Do not
+  create a GitHub/CI/deploy round-trip for every small edit. Full cross-stack gates belong to
+  hot-path, schema, auth/tenant, and infrastructure changes; visual-only work ordinarily needs
+  frontend typecheck/build and live visual evidence.
 - **Delegate outcomes, not keystrokes, and explain the why** so the executor can improve on it.
 - **On a mistake, update the memory/opinion file — don't just re-explain.** A recurring
   correction is a missing rule here, not a one-time scolding.

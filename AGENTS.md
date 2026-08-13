@@ -22,10 +22,14 @@ We work as a manager-of-agents shop. The pipeline:
 2. **Implement** — small, committed, documented steps. For long unattended objectives, **gnhf**
    (`gnhf "<objective>"`) runs one small committed change per fresh-context iteration onto a
    `gnhf/<slug>` branch with a `notes.md` log, auto-rolling-back failures.
-3. **Gate — nothing merges ungated.** **no-mistakes** runs review → test → docs → lint → push
-   → PR → CI in an isolated worktree; each stage passes or stops with a finding. The binary is
-   Linux-only, so the gate lives on the deploy box (`13.140.169.62`), not this Windows machine.
-   Locally, still run the full verification below before handing a change to the gate.
+3. **Gate once at the release boundary — nothing merges ungated.** The inner loop uses the
+   smallest relevant checks and does not push every micro-edit through GitHub. Before a coherent
+   merge/release, **no-mistakes** runs review → proportional tests → docs → lint → push → PR → CI
+   in an isolated worktree. The binary is Linux-only, so the gate lives on the deploy box
+   (`13.140.169.62`), not this Windows machine. If it is unavailable, run one clean isolated
+   manual equivalent and record that limitation; do not repeatedly retry ceremony. Full
+   cross-stack verification is reserved for hot-path, schema, auth/tenant, and infrastructure
+   changes. Visual-only work normally needs frontend typecheck/build plus live visual evidence.
 4. **Steward** — on a recurring mistake, update `OPINIONS.md` / project memory, don't re-explain.
 
 Any CLI an agent drives should follow the **AXI** principles ([axi.md](https://axi.md)):
