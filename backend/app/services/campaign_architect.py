@@ -98,7 +98,7 @@ async def generate_campaign_spec(
         )
     user = f"{_connections_block(connections)}\n\nUser request:\n{prompt}"
     try:
-        text = await _anthropic_text(api_key, _SYSTEM, user, MAX_TOKENS)
+        text, _usage = await _anthropic_text(api_key, _SYSTEM, user, MAX_TOKENS)
     except AiJobError as exc:
         raise ArchitectError(f"model call failed: {exc}") from exc
 
@@ -115,7 +115,7 @@ async def generate_campaign_spec(
             f"\n\n{_connections_block(connections)}\n\nOriginal request:\n{prompt}"
         )
         try:
-            text = await _anthropic_text(api_key, _SYSTEM, repair, MAX_TOKENS)
+            text, _usage = await _anthropic_text(api_key, _SYSTEM, repair, MAX_TOKENS)
         except AiJobError as exc:
             raise ArchitectError(f"model repair call failed: {exc}") from exc
         payload = _extract_json(text)

@@ -12,6 +12,7 @@ Three pure surfaces, no DB/network:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -363,6 +364,33 @@ def test_campaign_ai_supports_named_byok_and_read_only_agent_validation():
     assert "Agent harness" in architect_ui
     assert "Create draft campaign" in architect_ui
     assert "canvas.validateSpec" in architect_ui
+
+
+@pytest.mark.asyncio
+async def test_campaign_architect_unpacks_ai_usage_tuple(monkeypatch):
+    """AI-COST-001 changed the helper contract to (text, usage); campaign
+    generation must pass only text into the JSON extractor."""
+    from app.services import campaign_architect
+
+    async def fake_key(_workspace_id, _connection_name=None):
+        return "not-a-real-key"
+
+    async def fake_anthropic(*_args, **_kwargs):
+        payload = {
+            "name": "Tuple contract",
+            "target_contacts": 5,
+            "sources": [{"provider": "searxng", "query": "B2B SaaS"}],
+            "messages": [],
+        }
+        return json.dumps(payload), {"input_tokens": 10, "output_tokens": 5}
+
+    monkeypatch.setattr(campaign_architect, "anthropic_key", fake_key)
+    monkeypatch.setattr(campaign_architect, "_anthropic_text", fake_anthropic)
+
+    spec = await campaign_architect.generate_campaign_spec(
+        "workspace", "Find five B2B SaaS companies", []
+    )
+    assert spec.name == "Tuple contract"
 
 
 def test_view_payload_normalizes_icon_and_validates_layout():
