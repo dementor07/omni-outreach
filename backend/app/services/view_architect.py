@@ -17,12 +17,12 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import UUID
 
-from app.services.ai_jobs import AiJobError, _anthropic_text, _extract_json, anthropic_key
 from app.services.ai_authoring import (
     AuthoringProviderError,
     authoring_text,
     load_authoring_connection,
 )
+from app.services.ai_jobs import AiJobError, _anthropic_text, _extract_json, anthropic_key
 from app.services.view_query import entity_catalog
 from app.services.view_widgets import ViewLayoutError, WidgetInstance, validate_layout
 
