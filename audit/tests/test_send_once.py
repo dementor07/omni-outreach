@@ -111,6 +111,119 @@ def test_fire_node_calls_guard():
 # ── the outcome carries node_id so the guard can match ──────────────────────────
 
 
+# ── SEND-ONCE-002: the drop must not STRAND the lead ───────────────────────────
+#
+# The original guard bare-returned. A lead still parked ON the send node then sat
+# there forever, because every later re-fire hit the same guard. Live fallout:
+# 13 C1/C2 leads whose invite/DM reached a real prospect but whose sequence never
+# resumed — the 8 invite cases could never reach event.invite_accepted, so their
+# acceptance would never have started a DM.
+
+
+def _lead(node_id: str, current: str | None):
+    return {"id": "lead1", "current_node_id": current, "workflow_id": "wf1"}, {"id": node_id}
+
+
+@pytest.mark.asyncio
+async def test_stranded_lead_advances_on_the_sent_edge(monkeypatch):
+    """Parked ON the already-sent node → resume down the same edge a real send takes."""
+    from app.execution import transition_worker as tw
+
+    advanced: dict = {}
+
+    async def fake_edge(ws, node_id, handle):
+        assert handle == "sent", "recovery must use the success edge, not on_error"
+        return {"target_node_id": "next-node"}
+
+    async def fake_advance(ws, lead_id, target, corr):
+        advanced.update(lead_id=lead_id, target=target)
+
+    async def fail_terminalize(*a, **kw):
+        raise AssertionError("must advance, not terminalize, when a sent edge exists")
+
+    monkeypatch.setattr(tw, "_outgoing_edge", fake_edge)
+    monkeypatch.setattr(tw, "_advance_and_fire", fake_advance)
+    monkeypatch.setattr(tw, "_terminalize_lead", fail_terminalize)
+
+    lead, node = _lead("nodeA", "nodeA")
+    assert await tw._resume_after_confirmed_send("ws", lead, node, "corr") is True
+    assert advanced == {"lead_id": "lead1", "target": "next-node"}
+
+
+@pytest.mark.asyncio
+async def test_stranded_lead_at_a_leaf_terminalizes_honestly(monkeypatch):
+    """No sent edge → complete the lead rather than leave it parked."""
+    from app.execution import transition_worker as tw
+
+    ended: dict = {}
+
+    async def fake_edge(ws, node_id, handle):
+        return None
+
+    async def fake_terminalize(ws, lead_id, status, corr):
+        ended.update(lead_id=lead_id, status=status)
+
+    monkeypatch.setattr(tw, "_outgoing_edge", fake_edge)
+    monkeypatch.setattr(tw, "_terminalize_lead", fake_terminalize)
+
+    lead, node = _lead("nodeA", "nodeA")
+    assert await tw._resume_after_confirmed_send("ws", lead, node, "corr") is True
+    # 'sent' is a success handle, so the honest leaf status is completed.
+    assert ended == {"lead_id": "lead1", "status": "completed"}
+
+
+@pytest.mark.asyncio
+async def test_already_advanced_lead_is_left_alone(monkeypatch):
+    """The ordinary stale redelivery: the lead moved on, so dropping is correct.
+
+    This is the half that must NOT regress — re-advancing a lead that already
+    progressed would drag it backwards through the graph.
+    """
+    from app.execution import transition_worker as tw
+
+    async def fail(*a, **kw):
+        raise AssertionError("a lead that already advanced must not be touched")
+
+    monkeypatch.setattr(tw, "_outgoing_edge", fail)
+    monkeypatch.setattr(tw, "_advance_and_fire", fail)
+    monkeypatch.setattr(tw, "_terminalize_lead", fail)
+
+    lead, node = _lead("nodeA", "some-later-node")
+    assert await tw._resume_after_confirmed_send("ws", lead, node, "corr") is False
+
+
+@pytest.mark.asyncio
+async def test_terminal_lead_with_no_node_is_left_alone(monkeypatch):
+    """current_node_id is NULL on a terminalized lead — never resurrect it."""
+    from app.execution import transition_worker as tw
+
+    async def fail(*a, **kw):
+        raise AssertionError("a terminal lead must not be resumed")
+
+    monkeypatch.setattr(tw, "_outgoing_edge", fail)
+    monkeypatch.setattr(tw, "_advance_and_fire", fail)
+    monkeypatch.setattr(tw, "_terminalize_lead", fail)
+
+    lead, node = _lead("nodeA", None)
+    assert await tw._resume_after_confirmed_send("ws", lead, node, "corr") is False
+
+
+def test_fire_node_never_bare_returns_on_the_guard():
+    """The guard branch must consult the recovery helper, not just return."""
+    tree = ast.parse(TW_SRC)
+    fn = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == "_fire_node"
+    )
+    calls = {
+        node.func.id for node in ast.walk(fn)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "_resume_after_confirmed_send" in calls, (
+        "_fire_node must resume a stranded lead, not bare-return on the SEND-ONCE guard"
+    )
+
+
 @pytest.mark.asyncio
 async def test_emit_send_outcome_falls_back_to_firing_node_id(monkeypatch):
     from app.execution import transition_worker as tw

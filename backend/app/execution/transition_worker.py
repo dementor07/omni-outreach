@@ -1483,6 +1483,43 @@ async def _already_sent_this_node(workspace_id: str, lead_id: str, node_id: str)
     return row is not None
 
 
+async def _resume_after_confirmed_send(
+    workspace_id: str, lead: dict, node: dict, correlation_id: str | None
+) -> bool:
+    """SEND-ONCE-002: dropping a duplicate dispatch must not STRAND the lead.
+
+    SEND-ONCE-001 refuses to re-dispatch a node this lead already sent. That is
+    right for the common case — a stale redelivery arriving AFTER the lead moved
+    on — but it was a bare ``return``, so a lead still parked ON the send node
+    stayed there forever: every later re-fire hits the same guard, and no other
+    path advances it. Observed live 2026-08-14: 13 C1/C2 leads whose invite or DM
+    had genuinely reached a real prospect but whose sequence never resumed. The 8
+    invite cases could never reach ``event.invite_accepted``, so even if those
+    people accepted, no DM would ever have been sent.
+
+    A lead sitting on a send node that already has a confirmed ``sent`` outcome is
+    always an anomaly — waiting for acceptance or a reply happens on
+    ``event.invite_accepted`` / ``condition.replied``, never on the send node — so
+    the recovery is unambiguous: route it down the same ``sent`` edge a real
+    success takes, or terminalize honestly at a leaf.
+
+    Returns True when the lead was stranded and has been resumed; False when it
+    had already advanced (an ordinary stale redelivery, correctly dropped).
+    """
+    if str(lead.get("current_node_id") or "") != str(node["id"]):
+        return False
+    sent_edge = await _outgoing_edge(workspace_id, str(node["id"]), "sent")
+    if sent_edge:
+        await _advance_and_fire(
+            workspace_id, str(lead["id"]), str(sent_edge["target_node_id"]), correlation_id
+        )
+    else:
+        await _terminalize_lead(
+            workspace_id, str(lead["id"]), _leaf_terminal_status("sent"), correlation_id
+        )
+    return True
+
+
 async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: dict, correlation_id: str | None) -> None:
     """Run the target node's execute() and route its output.
 
@@ -1638,10 +1675,17 @@ async def _fire_node(workspace_id: str, lead: dict, contact: dict | None, node: 
         # wrote no 'sent' row, so the legitimate hold->retry->send still proceeds;
         # only a re-entry AFTER a confirmed send is dropped.
         if await _already_sent_this_node(workspace_id, str(lead["id"]), str(node["id"])):
-            log.info(
-                "SEND-ONCE-001: lead %s already sent node %s (%s) — dropping duplicate re-fire",
-                lead["id"], node["id"], node_type,
-            )
+            if await _resume_after_confirmed_send(workspace_id, lead, node, correlation_id):
+                log.info(
+                    "SEND-ONCE-002: lead %s was stranded on already-sent node %s (%s) — "
+                    "resumed on 'sent' instead of re-dispatching",
+                    lead["id"], node["id"], node_type,
+                )
+            else:
+                log.info(
+                    "SEND-ONCE-001: lead %s already sent node %s (%s) — dropping duplicate re-fire",
+                    lead["id"], node["id"], node_type,
+                )
             return
         workflow_id = str(node.get("workflow_id") or lead.get("workflow_id") or "") or None
         start_at, end_at = await _workflow_schedule(workspace_id, workflow_id)
