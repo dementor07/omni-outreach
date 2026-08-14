@@ -23,8 +23,11 @@ class AgentJobOut(BaseModel):
     kind: str
     target_type: str
     target_id: UUID
+    target_version: datetime | None
+    origin: Literal["harness", "connection", "import"]
     status: JobStatus
     result: dict[str, Any] | None
+    review: dict[str, Any]
     progress: list[dict[str, Any]]
     error: str | None
     requested_harness_id: str | None
@@ -32,6 +35,7 @@ class AgentJobOut(BaseModel):
     attempts: int
     claimed_at: datetime | None
     last_heartbeat_at: datetime | None
+    lease_expires_at: datetime | None
     completed_at: datetime | None
     applied_at: datetime | None
     expires_at: datetime
@@ -47,11 +51,22 @@ class AgentWorkerOut(BaseModel):
     active_until: datetime
 
 
+class AgentWorkerSnapshotOut(BaseModel):
+    available: bool
+    workers: list[AgentWorkerOut]
+
+
 class AgentPollRequest(BaseModel):
     harness_id: str = Field(
         min_length=1,
         max_length=80,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
+    runner_id: UUID = Field(
+        description=(
+            "Private runner-instance identity. Reuse it for reconnects from the same "
+            "local harness state; a different live owner is rejected."
+        )
     )
     wait_seconds: int = Field(agent_harness.MAX_POLL_SECONDS, ge=0, le=agent_harness.MAX_POLL_SECONDS)
 
@@ -89,15 +104,44 @@ def _out(row: dict[str, Any]) -> AgentJobOut:
 
 
 def _broker_error(exc: agent_harness.AgentHarnessError) -> HTTPException:
-    code = status.HTTP_409_CONFLICT if isinstance(exc, agent_harness.AgentLeaseError) else status.HTTP_422_UNPROCESSABLE_ENTITY
+    code = (
+        status.HTTP_409_CONFLICT
+        if isinstance(
+            exc,
+            (
+                agent_harness.AgentLeaseError,
+                agent_harness.AgentJobConflictError,
+                agent_harness.AgentRunnerConflictError,
+            ),
+        )
+        else status.HTTP_422_UNPROCESSABLE_ENTITY
+    )
     return HTTPException(status_code=code, detail=str(exc))
+
+
+@router.get(
+    "/workers/status",
+    response_model=AgentWorkerSnapshotOut,
+    summary="Harness presence with observability availability",
+    description=(
+        "A healthy empty workers list definitively means no active poll. When "
+        "available is false, durable jobs are still safe but Redis presence could "
+        "not be observed, so callers must not label the harness offline."
+    ),
+)
+async def worker_status(
+    ctx: AuthContext = Depends(get_workspace_any),
+) -> AgentWorkerSnapshotOut:
+    return AgentWorkerSnapshotOut.model_validate(
+        await agent_harness.worker_presence(ctx.workspace_id)
+    )
 
 
 @router.get(
     "/workers",
     response_model=list[AgentWorkerOut],
     summary="Active harness presence for this workspace",
-    description="Ephemeral Redis-backed presence. An empty list is definitive: no harness currently holds a poll or live lease.",
+    description="Compatibility list-only presence endpoint.",
 )
 async def workers(ctx: AuthContext = Depends(get_workspace_any)) -> list[AgentWorkerOut]:
     rows = await agent_harness.list_active_workers(ctx.workspace_id)
@@ -127,11 +171,12 @@ async def poll(
     body: AgentPollRequest,
     ctx: AuthContext = Depends(get_apikey_workspace),
 ) -> AgentJobClaim | Response:
-    claimed = await agent_harness.poll_for_job(
-        ctx.workspace_id,
-        body.harness_id,
-        body.wait_seconds,
-    )
+    try:
+        claimed = await agent_harness.poll_for_job(
+            ctx.workspace_id, body.harness_id, body.runner_id, body.wait_seconds
+        )
+    except agent_harness.AgentHarnessError as exc:
+        raise _broker_error(exc) from exc
     if claimed is None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     row, lease_token = claimed
@@ -173,6 +218,27 @@ async def cancel(
         if current is None:
             raise HTTPException(status_code=404, detail="agent job not found")
         raise HTTPException(status_code=409, detail=f"job is already {current['status']}")
+    return _out(row)
+
+
+@router.post(
+    "/jobs/{job_id}/discard",
+    response_model=AgentJobOut,
+    summary="Discard one unapplied completed proposal",
+)
+async def discard(
+    job_id: UUID,
+    _: AuthContext = Depends(get_current_workspace),
+) -> AgentJobOut:
+    row = await agent_harness.discard_proposal(job_id)
+    if row is None:
+        current = await agent_harness.get_job(job_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="agent proposal not found")
+        raise HTTPException(
+            status_code=409,
+            detail=f"proposal cannot be discarded because it is {current['status']}",
+        )
     return _out(row)
 
 

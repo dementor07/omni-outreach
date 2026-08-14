@@ -109,8 +109,43 @@ def test_widget_annotations_are_grounded_and_stale_targets_fail():
         )
 
 
-def test_view_author_route_requires_explicit_connection_or_validated_candidate():
+def test_view_author_route_requires_a_reviewed_versioned_proposal():
     router_src = inspect.getsource(__import__("app.routers.views", fromlist=["author_view"]).author_view)
 
-    assert "body.connection_id is None" in router_src
+    assert "proposal_id" in router_src
+    assert "ready_to_apply" in router_src
+    assert "fresh_review" in router_src
+    assert "target_version" in router_src
     assert "validate_candidate_view" in router_src
+
+
+@pytest.mark.asyncio
+async def test_open_proposal_recovery_queries_the_target_not_recent_history(monkeypatch):
+    from app.routers import views as views_router
+
+    view_id = uuid4()
+    seen: dict[str, object] = {}
+
+    async def fake_load(received_id):
+        assert received_id == view_id
+        return object(), _view()
+
+    async def fake_open(**kwargs):
+        seen.update(kwargs)
+        return None
+
+    monkeypatch.setattr(views_router, "_load_view_payload", fake_load)
+    monkeypatch.setattr(
+        views_router.agent_harness,
+        "get_open_job_for_target",
+        fake_open,
+    )
+
+    result = await views_router.get_open_view_proposal(view_id, object())
+
+    assert result is None
+    assert seen == {
+        "kind": "view.author",
+        "target_type": "view",
+        "target_id": view_id,
+    }

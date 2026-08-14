@@ -233,6 +233,7 @@ async def edit_view(
     annotations: list[dict[str, str]] | None = None,
     connection_id: UUID | None = None,
     model: str | None = None,
+    grounding: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """DYNAMIC-002 step 2: current view + a plain-language instruction → the
     REVISED view, re-validated through the same whitelist. The model gets the
@@ -250,5 +251,16 @@ async def edit_view(
         f"CURRENT VIEW:\n{json.dumps(current)}\n\n"
         f"INSTRUCTION:\n{instruction}"
         f"{_annotation_block(current, normalized_annotations)}"
+        + (
+            "\n\nRLS-SCOPED LIVE GROUNDING (captured before this request):\n"
+            + json.dumps(grounding, default=str)
+            + "\nUse these exact campaign identities and observed query results. "
+              "A campaign-labelled widget must filter by that campaign's workflow_id; "
+              "a sent-message widget must also filter send_outcomes.status to 'sent'. "
+              "send_outcomes cannot substantiate a delivered/delivery label. "
+              "do not evade a requested correction by relabelling it as a global metric."
+            if grounding
+            else ""
+        )
     )
     return await _run_architect(call_model, _system_prompt(), user, instruction)

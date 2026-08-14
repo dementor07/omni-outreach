@@ -9,6 +9,7 @@ client. The API key is accepted only through OMNI_API_KEY and is never printed.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -20,8 +21,16 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from uuid import UUID, uuid4
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 
 VIEW_SPEC_SCHEMA: dict[str, Any] = {
@@ -176,6 +185,18 @@ def _harness_name(value: str | None) -> str:
     return normalized
 
 
+def _broker_identity() -> str:
+    """Return an opaque identity for this API endpoint and workspace key.
+
+    The API does not currently expose a workspace identifier before polling.
+    Keying the local Codex session by the endpoint plus the high-entropy API key
+    prevents a reused harness label from carrying context across workspaces. The
+    credential itself is never persisted or printed.
+    """
+    base, key = _config()
+    return hashlib.sha256(f"{base}\0{key}".encode()).hexdigest()
+
+
 def _request(method: str, path: str, body: dict[str, Any] | None = None, timeout: int = 40) -> tuple[int, Any]:
     base, key = _config()
     data = json.dumps(body).encode("utf-8") if body is not None else None
@@ -204,7 +225,11 @@ def _request(method: str, path: str, body: dict[str, Any] | None = None, timeout
         if exc.code == 401:
             next_step = "Check OMNI_API_KEY or mint a fresh workspace key in Settings."
         elif exc.code == 409:
-            next_step = "The lease is no longer live. Poll again; never reuse an old claim file."
+            next_step = (
+                "Keep the original runner active or retry after its broker lease expires."
+                if "runner" in str(detail).lower()
+                else "The job lease is no longer live. Poll again; never reuse an old claim file."
+            )
         elif exc.code == 422:
             next_step = "Correct the candidate or request shape described by the error, then retry."
         else:
@@ -263,7 +288,7 @@ def _load_claim(root: Path, job_id: str) -> tuple[dict[str, Any], Path]:
         raise CliError("claim_unreadable", str(exc), "Remove the corrupt local claim and poll again.", 2) from exc
 
 
-def _poll_once(args: argparse.Namespace, *, silent_empty: bool) -> bool:
+def _poll_once(args: argparse.Namespace, runner_id: UUID, *, silent_empty: bool) -> bool:
     harness_id = _harness_name(args.name)
     print(
         f"[omni-harness] listening as {harness_id!r}; held poll up to {args.wait}s",
@@ -273,7 +298,11 @@ def _poll_once(args: argparse.Namespace, *, silent_empty: bool) -> bool:
     status, claim = _request(
         "POST",
         "/agent-harness/jobs/poll",
-        {"harness_id": harness_id, "wait_seconds": args.wait},
+        {
+            "harness_id": harness_id,
+            "runner_id": str(runner_id),
+            "wait_seconds": args.wait,
+        },
         timeout=args.wait + 15,
     )
     if status == 204 or claim is None:
@@ -307,12 +336,14 @@ def _poll_once(args: argparse.Namespace, *, silent_empty: bool) -> bool:
 
 
 def command_poll(args: argparse.Namespace) -> None:
-    _poll_once(args, silent_empty=False)
+    with _local_runner(args) as (_, _, _, runner_id):
+        _poll_once(args, runner_id, silent_empty=False)
 
 
 def command_listen(args: argparse.Namespace) -> None:
-    while not _poll_once(args, silent_empty=True):
-        print("[omni-harness] no job; reconnecting", file=sys.stderr, flush=True)
+    with _local_runner(args) as (_, _, _, runner_id):
+        while not _poll_once(args, runner_id, silent_empty=True):
+            print("[omni-harness] no job; reconnecting", file=sys.stderr, flush=True)
 
 
 def _lease_from_claim(claim: dict[str, Any]) -> dict[str, Any]:
@@ -341,7 +372,14 @@ def _agent_environment() -> dict[str, str]:
     return {key: value for key, value in os.environ.items() if key.upper() in allowed}
 
 
-def _prompt_for(claim: dict[str, Any]) -> str:
+def _prompt_for(claim: dict[str, Any], *, resumable: bool = False) -> str:
+    continuity = (
+        "This is a dedicated resumable Codex harness session. Earlier turns may help "
+        "with product intent and terminology, but this job's grounded brief is the "
+        "authority for current facts. Never carry old metric values into this result. "
+        if resumable
+        else ""
+    )
     return (
         "You are the view-authoring harness for Omni Outreach. Work only from the grounded "
         "job brief below. Return exactly one complete ViewSpec JSON object matching the "
@@ -349,12 +387,14 @@ def _prompt_for(claim: dict[str, Any]) -> str:
         "send messages, or change campaign state. Preserve unrequested widgets and stable "
         "widget IDs. Apply each widget annotation only to its named widget unless the "
         "whole-view instruction necessarily affects another widget. Use only entities and "
-        "fields present in widget_catalog.\n\nGROUNDED JOB BRIEF:\n"
+        "fields present in widget_catalog. "
+        + continuity
+        + "\n\nGROUNDED JOB BRIEF:\n"
         + json.dumps(claim["payload"], indent=2, ensure_ascii=False)
     )
 
 
-def _codex_command(args: argparse.Namespace, directory: Path, schema_path: Path, result_path: Path) -> list[str]:
+def _codex_prefix(args: argparse.Namespace) -> list[str]:
     prefix = shlex.split(args.codex_command, posix=os.name != "nt")
     if not prefix:
         raise CliError("codex_command_empty", "--codex-command is empty", "Use the default npx command or provide a Codex executable.", 2)
@@ -366,16 +406,262 @@ def _codex_command(args: argparse.Namespace, directory: Path, schema_path: Path,
             "Install Codex CLI or keep the default 'npx -y @openai/codex' command.",
             5,
         )
-    command = [executable, *prefix[1:], "exec", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only"]
+    return [executable, *prefix[1:]]
+
+
+def _codex_result_options(args: argparse.Namespace, schema_path: Path, result_path: Path) -> list[str]:
+    options: list[str] = []
     if args.model:
-        command.extend(["--model", args.model])
-    command.extend([
-        "-C", str(directory),
+        options.extend(["--model", args.model])
+    options.extend([
         "--output-schema", str(schema_path),
         "--output-last-message", str(result_path),
-        "-",
     ])
-    return command
+    return options
+
+
+def _codex_command(args: argparse.Namespace, directory: Path, schema_path: Path, result_path: Path) -> list[str]:
+    """Build the original isolated, non-persisted Codex invocation."""
+    return [
+        *_codex_prefix(args),
+        "exec", "--ephemeral",
+        "--skip-git-repo-check", "--sandbox", "read-only",
+        *_codex_result_options(args, schema_path, result_path),
+        "-C", str(directory),
+        "-",
+    ]
+
+
+def _codex_session_paths(
+    root: Path,
+    harness_id: str,
+    broker_identity: str,
+) -> tuple[Path, Path]:
+    # Broker labels allow ':' but Windows paths do not. Keep a readable prefix
+    # and a collision-resistant suffix so distinct labels never share context.
+    readable = re.sub(r"[^A-Za-z0-9._-]", "-", harness_id).strip("-._")[:50] or "agent"
+    suffix = hashlib.sha256(
+        f"{broker_identity}\0{harness_id}".encode(),
+    ).hexdigest()[:12]
+    directory = root / "sessions" / f"{readable}-{suffix}"
+    return directory, directory / "session.local.json"
+
+
+def _read_codex_session(
+    path: Path,
+    harness_id: str,
+    broker_identity: str,
+) -> str | None:
+    if not path.exists():
+        return None
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+        session_id = str(state["session_id"])
+        UUID(session_id)
+    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise CliError(
+            "codex_session_unreadable",
+            f"resumable session state is invalid: {exc}",
+            f"Move {path} aside to intentionally start a fresh dedicated session.",
+            2,
+        ) from exc
+    if (
+        state.get("harness_id") != harness_id
+        or state.get("broker_identity") != broker_identity
+    ):
+        raise CliError(
+            "codex_session_mismatch",
+            "resumable session belongs to a different harness or Omni workspace",
+            f"Use the original --name or move {path} aside before starting over.",
+            2,
+        )
+    return session_id
+
+
+def _write_private_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    try:
+        temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        try:
+            os.chmod(temporary, 0o600)
+        except OSError:
+            pass
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _write_codex_session(
+    path: Path,
+    harness_id: str,
+    broker_identity: str,
+    session_id: str,
+) -> None:
+    UUID(session_id)
+    _write_private_json(
+        path,
+        {
+            "version": 2,
+            "harness_id": harness_id,
+            "broker_identity": broker_identity,
+            "session_id": session_id,
+        },
+    )
+
+
+def _runner_instance_id(
+    root: Path,
+    harness_id: str,
+    broker_identity: str,
+) -> UUID:
+    directory, _ = _codex_session_paths(root, harness_id, broker_identity)
+    path = directory / "runner.local.json"
+    if not path.exists():
+        _write_private_json(
+            path,
+            {
+                "version": 1,
+                "harness_id": harness_id,
+                "broker_identity": broker_identity,
+                "runner_id": str(uuid4()),
+            },
+        )
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+        runner_id = UUID(str(state["runner_id"]))
+    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise CliError(
+            "runner_state_unreadable",
+            f"runner identity state is invalid: {exc}",
+            f"Move {path} aside only after the old broker lease expires.",
+            2,
+        ) from exc
+    if (
+        state.get("harness_id") != harness_id
+        or state.get("broker_identity") != broker_identity
+    ):
+        raise CliError(
+            "runner_state_mismatch",
+            "runner identity belongs to a different harness or Omni workspace",
+            f"Use the original --name or move {path} aside after its broker lease expires.",
+            2,
+        )
+    return runner_id
+
+
+def _thread_id_from_jsonl(output: str) -> str:
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") != "thread.started":
+            continue
+        thread_id = str(event.get("thread_id", ""))
+        try:
+            UUID(thread_id)
+        except ValueError as exc:
+            raise CliError(
+                "codex_session_id_invalid",
+                "Codex returned a malformed thread.started identifier",
+                "Upgrade or repair the configured Codex CLI before retrying.",
+                5,
+            ) from exc
+        return thread_id
+    raise CliError(
+        "codex_session_id_missing",
+        "Codex JSONL did not include thread.started",
+        "Check that the configured Codex CLI supports exec --json, then retry.",
+        5,
+    )
+
+
+def _resumable_codex_command(
+    args: argparse.Namespace,
+    root: Path,
+    harness_id: str,
+    broker_identity: str,
+    schema_path: Path,
+    result_path: Path,
+) -> tuple[list[str], str | None, Path]:
+    """Build a dedicated saved session or resume it for the next broker job."""
+    session_dir, state_path = _codex_session_paths(root, harness_id, broker_identity)
+    session_dir.mkdir(parents=True, exist_ok=True)
+    session_id = _read_codex_session(state_path, harness_id, broker_identity)
+    common = ["--json", *_codex_result_options(args, schema_path, result_path)]
+    if session_id is None:
+        command = [
+            *_codex_prefix(args), "exec",
+            "--skip-git-repo-check", "--sandbox", "read-only",
+            *common,
+            "-C", str(session_dir), "-",
+        ]
+    else:
+        command = [
+            *_codex_prefix(args), "exec",
+            "--skip-git-repo-check", "--sandbox", "read-only",
+            "resume", *common,
+            session_id, "-",
+        ]
+    return command, session_id, state_path
+
+
+def _lock_descriptor(descriptor: int) -> None:
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    if os.name == "nt":
+        msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+    else:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock_descriptor(descriptor: int) -> None:
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    if os.name == "nt":
+        msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+    else:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+
+
+@contextmanager
+def _harness_runner_lock(
+    root: Path,
+    harness_id: str,
+    broker_identity: str,
+) -> Iterator[None]:
+    directory, _ = _codex_session_paths(root, harness_id, broker_identity)
+    directory.mkdir(parents=True, exist_ok=True)
+    lock_path = directory / "runner.lock"
+    flags = os.O_CREAT | os.O_RDWR
+    if os.name == "nt":
+        flags |= os.O_BINARY
+    descriptor = os.open(lock_path, flags, 0o600)
+    try:
+        try:
+            os.chmod(lock_path, 0o600)
+        except OSError:
+            pass
+        if os.fstat(descriptor).st_size == 0:
+            os.write(descriptor, b"\0")
+            os.fsync(descriptor)
+        try:
+            _lock_descriptor(descriptor)
+        except OSError as exc:
+            raise CliError(
+                "runner_busy",
+                f"another local runner owns harness {harness_id!r}",
+                "Keep that runner active or stop it, then retry; stale lock files are harmless.",
+                5,
+            ) from exc
+        try:
+            yield
+        finally:
+            try:
+                _unlock_descriptor(descriptor)
+            except OSError:
+                pass
+    finally:
+        os.close(descriptor)
 
 
 def _external_command(args: argparse.Namespace, directory: Path, schema_path: Path, result_path: Path, brief_path: Path) -> list[str]:
@@ -410,74 +696,165 @@ def _stop_process(process: subprocess.Popen[str]) -> None:
         process.wait(timeout=5)
 
 
-def _execute_claim(args: argparse.Namespace, claim: dict[str, Any], root: Path) -> None:
+def _execute_claim_unlocked(
+    args: argparse.Namespace,
+    claim: dict[str, Any],
+    root: Path,
+    broker_identity: str | None = None,
+) -> None:
     job_id = str(claim["id"])
     directory = _job_dir(root, job_id)
     claim_path, brief_path = _write_claim(root, claim)
-    schema_path = _write_schema(root, job_id)
-    result_path = directory / "result.json"
-    result_path.unlink(missing_ok=True)
-    command = (
-        _codex_command(args, directory, schema_path, result_path)
-        if args.engine == "codex"
-        else _external_command(args, directory, schema_path, result_path, brief_path)
-    )
-
-    _job_event(claim, "progress", message=f"Invoking {args.engine} in an isolated job directory")
-    print(f"[omni-harness] job {job_id}: starting {args.engine}", file=sys.stderr, flush=True)
-    started = time.monotonic()
-    process = subprocess.Popen(
-        command,
-        cwd=directory,
-        env=_agent_environment(),
-        stdin=subprocess.PIPE if args.engine == "codex" else subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    prompt = _prompt_for(claim) if args.engine == "codex" else None
-    first_wait = True
-    while True:
-        try:
-            stdout, stderr = process.communicate(
-                input=prompt if first_wait else None,
-                timeout=args.heartbeat_seconds,
-            )
-            break
-        except subprocess.TimeoutExpired:
-            first_wait = False
-            try:
-                _job_event(claim, "heartbeat")
-                elapsed = int(time.monotonic() - started)
-                if elapsed and elapsed % 60 < args.heartbeat_seconds:
-                    _job_event(claim, "progress", message=f"{args.engine} is still working ({elapsed}s)")
-            except CliError as exc:
-                _stop_process(process)
-                if exc.code == "http_409":
-                    print(f"[omni-harness] job {job_id}: lease ended; agent stopped", file=sys.stderr, flush=True)
-                    return
-                raise
-
-    if process.returncode != 0:
-        detail = (stderr or stdout or f"{args.engine} exited {process.returncode}").strip()[-1200:]
-        raise CliError("agent_failed", detail, "Inspect the local job directory, correct the agent setup, and queue a fresh job.", 5)
+    process: subprocess.Popen[str] | None = None
     try:
-        result = json.loads(result_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise CliError("agent_result_invalid", str(exc), "The agent must write one complete ViewSpec JSON object to the result path.", 5) from exc
-    _job_event(claim, "complete", result=result)
-    claim_path.unlink(missing_ok=True)
-    print(f"[omni-harness] job {job_id}: validated result returned; polling again", file=sys.stderr, flush=True)
+        schema_path = _write_schema(root, job_id)
+        result_path = directory / "result.json"
+        result_path.unlink(missing_ok=True)
+        resumable = args.engine == "codex" and (
+            getattr(args, "codex_session_mode", "ephemeral") == "resumable"
+        )
+        expected_session_id: str | None = None
+        session_state_path: Path | None = None
+        if resumable:
+            broker_identity = broker_identity or _broker_identity()
+            command, expected_session_id, session_state_path = _resumable_codex_command(
+                args,
+                root,
+                str(claim["_harness_id"]),
+                broker_identity,
+                schema_path,
+                result_path,
+            )
+        elif args.engine == "codex":
+            command = _codex_command(args, directory, schema_path, result_path)
+        else:
+            command = _external_command(args, directory, schema_path, result_path, brief_path)
+
+        execution_description = (
+            "a dedicated resumable session"
+            if resumable
+            else "an isolated job directory"
+        )
+        _job_event(
+            claim,
+            "progress",
+            message=f"Invoking {args.engine} in {execution_description}",
+        )
+        print(
+            f"[omni-harness] job {job_id}: starting {args.engine}",
+            file=sys.stderr,
+            flush=True,
+        )
+        started = time.monotonic()
+        process = subprocess.Popen(
+            command,
+            cwd=directory,
+            env=_agent_environment(),
+            stdin=subprocess.PIPE if args.engine == "codex" else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        prompt = _prompt_for(claim, resumable=resumable) if args.engine == "codex" else None
+        first_wait = True
+        while True:
+            try:
+                stdout, stderr = process.communicate(
+                    input=prompt if first_wait else None,
+                    timeout=args.heartbeat_seconds,
+                )
+                break
+            except subprocess.TimeoutExpired:
+                first_wait = False
+                try:
+                    _job_event(claim, "heartbeat")
+                    elapsed = int(time.monotonic() - started)
+                    if elapsed and elapsed % 60 < args.heartbeat_seconds:
+                        _job_event(
+                            claim,
+                            "progress",
+                            message=f"{args.engine} is still working ({elapsed}s)",
+                        )
+                except CliError as exc:
+                    if exc.code == "http_409":
+                        print(
+                            f"[omni-harness] job {job_id}: lease ended; agent stopped",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        return
+                    raise
+
+        if process.returncode != 0:
+            detail = (
+                stderr or stdout or f"{args.engine} exited {process.returncode}"
+            ).strip()[-1200:]
+            raise CliError(
+                "agent_failed",
+                detail,
+                "Inspect the local job directory, correct the agent setup, and queue a fresh job.",
+                5,
+            )
+        try:
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise CliError(
+                "agent_result_invalid",
+                str(exc),
+                "The agent must write one complete ViewSpec JSON object to the result path.",
+                5,
+            ) from exc
+        if resumable:
+            emitted_session_id = _thread_id_from_jsonl(stdout)
+            if expected_session_id is not None and emitted_session_id != expected_session_id:
+                raise CliError(
+                    "codex_session_changed",
+                    "Codex resumed a different session than the harness recorded",
+                    f"Stop the runner and inspect {session_state_path} before retrying.",
+                    5,
+                )
+            if expected_session_id is None:
+                assert session_state_path is not None
+                assert broker_identity is not None
+                _write_codex_session(
+                    session_state_path,
+                    str(claim["_harness_id"]),
+                    broker_identity,
+                    emitted_session_id,
+                )
+        _job_event(claim, "complete", result=result)
+        print(
+            f"[omni-harness] job {job_id}: validated result returned; polling again",
+            file=sys.stderr,
+            flush=True,
+        )
+    finally:
+        if process is not None:
+            _stop_process(process)
+        claim_path.unlink(missing_ok=True)
 
 
-def _claim_once(args: argparse.Namespace) -> dict[str, Any] | None:
+def _execute_claim(
+    args: argparse.Namespace,
+    claim: dict[str, Any],
+    root: Path,
+    broker_identity: str | None = None,
+) -> None:
+    _execute_claim_unlocked(args, claim, root, broker_identity)
+
+
+def _claim_once(args: argparse.Namespace, runner_id: UUID) -> dict[str, Any] | None:
     harness_id = _harness_name(args.name)
     _, claim = _request(
         "POST",
         "/agent-harness/jobs/poll",
-        {"harness_id": harness_id, "wait_seconds": args.wait},
+        {
+            "harness_id": harness_id,
+            "runner_id": str(runner_id),
+            "wait_seconds": args.wait,
+        },
         timeout=args.wait + 15,
     )
     if claim is None:
@@ -486,8 +863,12 @@ def _claim_once(args: argparse.Namespace) -> dict[str, Any] | None:
     return claim
 
 
-def command_run(args: argparse.Namespace) -> None:
-    root = _state_root(args.state_dir)
+def _run_poll_loop(
+    args: argparse.Namespace,
+    root: Path,
+    broker_identity: str | None,
+    runner_id: UUID,
+) -> None:
     harness_id = _harness_name(args.name)
     print(
         f"[omni-harness] {harness_id!r} running with engine={args.engine}; continuous {args.wait}s polls",
@@ -495,12 +876,12 @@ def command_run(args: argparse.Namespace) -> None:
         flush=True,
     )
     while True:
-        claim = _claim_once(args)
+        claim = _claim_once(args, runner_id)
         if claim is None:
             print("[omni-harness] poll returned empty; reconnecting", file=sys.stderr, flush=True)
             continue
         try:
-            _execute_claim(args, claim, root)
+            _execute_claim(args, claim, root, broker_identity)
         except CliError as exc:
             print(_toon({"error": exc.code, "cause": exc.cause, "next": exc.next_step}), file=sys.stderr)
             try:
@@ -508,6 +889,31 @@ def command_run(args: argparse.Namespace) -> None:
             except CliError as fail_exc:
                 print(_toon({"error": fail_exc.code, "cause": fail_exc.cause, "next": fail_exc.next_step}), file=sys.stderr)
             (_job_dir(root, str(claim["id"])) / "claim.local.json").unlink(missing_ok=True)
+
+
+@contextmanager
+def _local_runner(
+    args: argparse.Namespace,
+) -> Iterator[tuple[Path, str, str, UUID]]:
+    root = _state_root(args.state_dir)
+    harness_id = _harness_name(args.name)
+    broker_identity = _broker_identity()
+    with _harness_runner_lock(root, harness_id, broker_identity):
+        runner_id = _runner_instance_id(root, harness_id, broker_identity)
+        yield root, harness_id, broker_identity, runner_id
+
+
+def command_run(args: argparse.Namespace) -> None:
+    resumable = args.engine == "codex" and (
+        getattr(args, "codex_session_mode", "ephemeral") == "resumable"
+    )
+    with _local_runner(args) as (root, _, broker_identity, runner_id):
+        _run_poll_loop(
+            args,
+            root,
+            broker_identity if resumable else None,
+            runner_id,
+        )
 
 
 def _lease_body(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
@@ -574,6 +980,15 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--wait", type=int, choices=range(1, 26), default=25, metavar="1..25")
     run.add_argument("--heartbeat-seconds", type=int, choices=range(10, 61), default=20, metavar="10..60")
     run.add_argument("--engine", choices=("codex", "command"), default="codex")
+    run.add_argument(
+        "--codex-session-mode",
+        choices=("ephemeral", "resumable"),
+        default="resumable",
+        help=(
+            "Codex context policy: one dedicated saved CLI session resumed across jobs "
+            "(default), or isolated per job; this never attaches to or wakes a desktop chat"
+        ),
+    )
     run.add_argument("--model", help="Optional Codex model override")
     run.add_argument("--codex-command", default=os.environ.get("OMNI_CODEX_COMMAND", "npx -y @openai/codex@0.147.0"), help="Codex argv prefix (default: tested Codex CLI 0.147.0)")
     run.add_argument("--command", help="External argv template; supports {brief}, {schema}, {result}, {job_dir}")

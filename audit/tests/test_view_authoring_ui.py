@@ -13,8 +13,19 @@ def test_overview_exposes_real_lavish_style_targets_and_source_routing():
     assert "Connected API" in composer
     assert "Agent harness" in composer
     assert "Copy grounded brief" in composer
-    assert "views.validateCandidate" in composer
+    assert "views.createProposal" in composer
+    assert "views.openProposal(view.id)" in composer
+    assert "views.grounding(view.id)" in composer
+    assert "ready_to_apply" in composer
+    assert "Current result" in composer and "Proposed result" in composer
+    assert "Generate proposal" in composer
+    assert "Apply reviewed proposal" in composer
+    assert "views.author(view.id" in composer
+    assert "views.author(view.id, {\n          source: 'connection'" not in composer
     assert "views.author" in composer
+    assert "queryKey: ['view-open-proposal', view.id]" in composer
+    assert "enabled: !activeJobId" in composer
+    assert "enabled: source === 'harness' && !activeJobId" not in composer
     assert "data-annotation-target" in widgets
     assert "Queue note" in widgets
 

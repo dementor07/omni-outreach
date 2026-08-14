@@ -152,6 +152,25 @@ _LIST_OPS = frozenset({"in", "not_in"})
 _MAX_LIST_VALUES = 200
 _MAX_VALUE_LEN = 500
 
+# Projection enums are part of the query contract. Keep each domain named here
+# so workers, prompts, and regression tests have one importable source instead
+# of repeating subtly different status lists.
+SEND_OUTCOME_STATUSES = frozenset({"queued", "sent", "failed", "skipped"})
+CAMPAIGN_STATUSES = frozenset({"draft", "active", "paused", "archived"})
+LEAD_STATUSES = frozenset({
+    "active", "waiting", "completed", "errored", "cancelled",
+    "converted", "ended", "suppressed", "invalid",
+})
+MESSAGE_DIRECTIONS = frozenset({"inbound", "outbound"})
+
+ENUM_VALUES: dict[tuple[str, str], frozenset[str]] = {
+    ("send_outcomes", "status"): SEND_OUTCOME_STATUSES,
+    ("campaigns", "status"): CAMPAIGN_STATUSES,
+    ("leads", "status"): LEAD_STATUSES,
+    ("messages", "direction"): MESSAGE_DIRECTIONS,
+}
+_ENUM_FILTER_OPS = frozenset({"eq", "neq", "in", "not_in"})
+
 
 class QueryFilter(BaseModel):
     field: str = Field(max_length=64)
@@ -196,6 +215,26 @@ class QuerySpec(BaseModel):
     time_bucket: Literal["day", "week", "month"] | None = None
     sort: list[QuerySort] = Field(default_factory=list, max_length=3)
     limit: int = Field(50, ge=1, le=500)
+
+    @model_validator(mode="after")
+    def _validate_enum_filters(self) -> QuerySpec:
+        for item in self.filters:
+            allowed = ENUM_VALUES.get((self.entity, item.field))
+            if allowed is None:
+                continue
+            if item.op not in _ENUM_FILTER_OPS:
+                raise ValueError(
+                    f"operator {item.op!r} is not valid for enum field "
+                    f"{self.entity}.{item.field}; use one of {sorted(_ENUM_FILTER_OPS)}"
+                )
+            raw = item.value if isinstance(item.value, list) else [item.value]
+            unknown = sorted({str(value) for value in raw} - allowed)
+            if unknown:
+                raise ValueError(
+                    f"filter value(s) {unknown} are not valid for "
+                    f"{self.entity}.{item.field}; use one of {sorted(allowed)}"
+                )
+        return self
 
 
 @dataclass(frozen=True)
@@ -371,6 +410,11 @@ def entity_catalog() -> dict[str, Any]:
                 "fields": dict(e.columns),
                 "time_field": e.time_field,
                 "default_columns": list(e.default_columns),
+                "enum_values": {
+                    field: sorted(values)
+                    for (entity_name, field), values in ENUM_VALUES.items()
+                    if entity_name == name
+                },
             }
             for name, e in ENTITIES.items()
         },

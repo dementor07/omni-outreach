@@ -130,6 +130,16 @@ npx tsc --noEmit
 npm run dev          # Vite dev server; proxies /api to the live backend (see vite.config.ts)
 ```
 
+### Grounded Overview proposals
+
+Editing an existing Overview layout is proposal-based for every authoring source. A connected
+BYOK provider, an external harness, and a manually imported ViewSpec all produce the same durable
+proposal; none auto-saves the live view. Omni freezes the starting view revision, executes current
+and proposed queries under workspace RLS, records authoritative campaign identities/statuses, and
+shows before/after rows plus semantic blockers. Schema-valid output is not enough to enable Apply.
+The user must explicitly Apply one fresh, review-ready proposal or discard it before authoring a
+different one. This contract changes only `omni_views`; it cannot publish campaign/send actions.
+
 ### External agent harness
 
 Overview authoring can use a workspace-owned Codex, Claude Code, OpenCode, or other
@@ -140,14 +150,32 @@ keep it in the local environment, and start the continuous runner from a checkou
 export OMNI_API_URL="https://your-omni-host.example/api"
 export OMNI_API_KEY="<workspace key>"       # never passed as a CLI flag or printed
 export OMNI_HARNESS_NAME="codex:my-machine"
-python scripts/omni_harness.py run --engine codex
+python scripts/omni_harness.py run --engine codex --codex-session-mode resumable
 ```
 
 `run` holds 25-second polls continuously. When it claims a job, it invokes non-interactive
-Codex in an isolated per-job directory with a strict ViewSpec output schema, renews the
-lease while Codex works, returns the validated candidate, and immediately polls again.
-The Omni broker credential is removed from the child process environment. To use another
-agent executable, pass an argv template (no shell is used):
+Codex with a strict ViewSpec output schema, renews the lease while Codex works, returns the
+validated candidate, and immediately polls again. `resumable` creates one dedicated saved
+Codex CLI session for that harness label and resumes it for later jobs, so product intent and
+terminology can accumulate across iterations. Every prompt still makes the current grounded
+brief authoritative for live values. Run only one resumable process per harness label; a local
+lock fails closed if a second process tries to use the session.
+
+This is a dedicated CLI session, **not the currently open ChatGPT/Codex desktop task**. The
+repository runner has no supported way to wake an idle desktop task or inject a turn into it.
+An already-active task can claim one job manually with `listen`, read the resulting `briefFile`,
+and use `progress` / `heartbeat` / `complete`; it stops participating when that task turn ends.
+Use the resumable CLI mode for unattended polling. The original isolated behavior remains
+available explicitly:
+
+```bash
+python scripts/omni_harness.py run --engine codex --codex-session-mode ephemeral
+```
+
+The Omni broker credential and `CODEX_THREAD_ID` are removed from the child process environment.
+To intentionally reset accumulated CLI context, stop the runner and move that harness's
+`.omni-harness/sessions/*/session.local.json` aside. To use another agent
+executable, pass an argv template (no shell is used):
 
 ```bash
 python scripts/omni_harness.py run --engine command \
@@ -160,7 +188,9 @@ manual relay and recovery; their default stdout is compact TOON (`--format json`
 available):
 
 ```bash
+python scripts/omni_harness.py listen --name "codex-task:active-manual-relay"
 python scripts/omni_harness.py progress --job <uuid> --message "Rebuilding the widget layout"
+python scripts/omni_harness.py heartbeat --job <uuid>
 python scripts/omni_harness.py complete --job <uuid> --result revised-view.json
 ```
 

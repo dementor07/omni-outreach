@@ -18,6 +18,10 @@
   Verify **past every network/process boundary** yourself; do not ask the human to eyeball it.
 - **Tests are necessary, not sufficient.** They lock regressions; they do not prove behavior.
   After tests pass, read the live logs / DB / Flink state / API.
+- **Schema-valid is not semantically valid.** Agent-authored queries must run against live,
+  RLS-scoped data and show their before/after results before Apply. Any label that claims a
+  campaign, status, or outcome must be checked against authoritative IDs and projection enums;
+  a plausible zero or a globally aggregated count is not evidence.
 - **Don't declare victory early.** Call a stub a stub. If a step was skipped, say so. If a
   claim is "should work," it isn't verified. Report outcomes faithfully with the evidence.
 - **When a write "logs right but doesn't persist," look for a second writer of that row.**

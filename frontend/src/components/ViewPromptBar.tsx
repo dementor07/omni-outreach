@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, Bot, Braces, Cable, Check, Copy, MessageSquarePlus, Radio, SlidersHorizontal, Sparkles, Terminal, Upload, X } from 'lucide-react'
+import { Activity, AlertTriangle, Bot, Braces, Cable, Check, Copy, MessageSquarePlus, Radio, RefreshCw, SlidersHorizontal, Sparkles, Terminal, Upload, X } from 'lucide-react'
 import {
   agentHarness,
   views,
   type AgentHarnessJob,
+  type AgentHarnessWidgetReview,
   type ViewAuthoringConnection,
   type ViewCandidate,
   type ViewDef,
@@ -55,6 +56,110 @@ function providerLabel(connection: ViewAuthoringConnection): string {
   return `${names[connection.provider] ?? connection.provider} · ${connection.name}`
 }
 
+function shortTime(value: string | null | undefined): string {
+  if (!value) return 'not reported'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? 'not reported' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+function reviewRows(rows: Record<string, unknown>[]): string {
+  if (rows.length === 0) return 'No rows'
+  const visible = rows.length === 1 ? rows[0] : rows.slice(0, 3)
+  const suffix = rows.length > 3 ? `\n… ${rows.length - 3} more rows` : ''
+  return `${JSON.stringify(visible, null, 2)}${suffix}`
+}
+
+function WidgetReview({ change }: { change: AgentHarnessWidgetReview }) {
+  const renamed = change.before_title !== change.after_title
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950/60">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="font-mono text-[10px] font-bold text-slate-500">#{change.widget_id}</p>
+          <p className="mt-0.5 text-xs font-bold text-slate-800 dark:text-slate-100">
+            {renamed ? <><span className="text-slate-500 line-through">{change.before_title || 'Untitled'}</span><span className="mx-1.5 text-slate-400">→</span>{change.after_title || 'Untitled'}</> : change.after_title || change.before_title || 'Untitled widget'}
+          </p>
+        </div>
+        <span className={`rounded-full px-2 py-1 text-[9px] font-bold ${change.query_changed ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
+          {change.query_changed ? 'Query changed' : 'Presentation only'}
+        </span>
+      </div>
+      <div className="mt-3 grid gap-2 lg:grid-cols-2">
+        <div>
+          <p className="mb-1 text-[9px] font-bold uppercase tracking-[0.1em] text-slate-500">Current result</p>
+          <pre className="max-h-36 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-100 px-2.5 py-2 text-[10px] leading-relaxed text-slate-700 dark:bg-slate-900 dark:text-slate-300">{reviewRows(change.before_rows)}</pre>
+        </div>
+        <div>
+          <p className="mb-1 text-[9px] font-bold uppercase tracking-[0.1em] text-emerald-700 dark:text-emerald-300">Proposed result</p>
+          <pre className="max-h-36 overflow-auto whitespace-pre-wrap rounded-lg bg-emerald-50 px-2.5 py-2 text-[10px] leading-relaxed text-emerald-950 dark:bg-emerald-950/30 dark:text-emerald-200">{reviewRows(change.after_rows)}</pre>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ProposalReview({
+  job,
+  candidate,
+  isApplying,
+  onApply,
+  onStartFresh,
+}: {
+  job: AgentHarnessJob
+  candidate: ViewCandidate
+  isApplying: boolean
+  onApply: () => void
+  onStartFresh: () => void
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/30">
+        <p className="flex items-center gap-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-200"><Check size={13} /> Structurally valid proposal</p>
+        <p className="mt-1 text-[10px] leading-relaxed text-emerald-700 dark:text-emerald-300"><strong>{candidate.name}</strong> · {candidate.layout.length} widgets · authored by {job.origin === 'connection' ? 'connected API' : job.origin === 'import' ? 'manual import' : 'agent harness'}. Nothing has been applied. Review the live evidence below.</p>
+      </div>
+
+      {!job.review?.captured_at ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+          <p className="flex items-center gap-1.5 font-bold"><AlertTriangle size={13} /> Live query review unavailable</p>
+          <p className="mt-1 text-[10px] leading-relaxed">Omni has not supplied before/after query results for this proposal. Apply remains disabled; create a fresh grounded proposal.</p>
+        </div>
+      ) : (
+        <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/45">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500">Live query review</p>
+              <p className="mt-1 text-[10px] text-slate-500">Captured {new Date(job.review.captured_at).toLocaleString()} against this unapplied proposal.</p>
+            </div>
+            <span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${job.review.all_queries_valid ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300' : 'bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300'}`}>
+              {job.review.all_queries_valid ? 'All queries ran' : 'Query execution failed'}
+            </span>
+          </div>
+          {(job.review.blocking_issues ?? []).length > 0 && (
+            <div className="space-y-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[10px] text-rose-900 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200">
+              {(job.review.blocking_issues ?? []).map((issue, index) => <p key={`${issue.code}-${index}`} className="flex gap-1.5"><AlertTriangle size={11} className="mt-0.5 shrink-0" /><span>{issue.message}</span></p>)}
+            </div>
+          )}
+          {(job.review.warnings ?? []).length > 0 && (
+            <div className="space-y-1 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[10px] text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+              {(job.review.warnings ?? []).map((warning, index) => <p key={`${warning.code}-${index}`} className="flex gap-1.5"><AlertTriangle size={11} className="mt-0.5 shrink-0" /><span>{warning.message}</span></p>)}
+            </div>
+          )}
+          {(job.review.changed_widgets ?? []).length > 0 ? (job.review.changed_widgets ?? []).map((change) => (
+            <WidgetReview key={change.widget_id} change={change} />
+          )) : (
+            <p className="rounded-lg bg-white px-2.5 py-2 text-[10px] text-slate-500 dark:bg-slate-900">No widget-level result changes were reported.</p>
+          )}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" icon={Upload} isLoading={isApplying} disabled={isApplying || !job.review?.ready_to_apply} onClick={onApply}>Apply reviewed proposal</Button>
+        <Button variant="secondary" size="sm" icon={RefreshCw} disabled={isApplying} onClick={onStartFresh}>Discard & start fresh</Button>
+      </div>
+    </div>
+  )
+}
+
 export default function ViewPromptBar({
   view,
   label = 'Author this view',
@@ -79,6 +184,10 @@ export default function ViewPromptBar({
   const [validatedCandidate, setValidatedCandidate] = useState<ViewCandidate | null>(null)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [selectedHarnessId, setSelectedHarnessId] = useState('')
+  const [submittedInstruction, setSubmittedInstruction] = useState('')
+  const [submittedHarnessId, setSubmittedHarnessId] = useState('')
+  const [submittedAnnotationCount, setSubmittedAnnotationCount] = useState(0)
+  const [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(() => new Set())
 
   const connectionsQ = useQuery({
     queryKey: ['view-authoring-connections'],
@@ -92,15 +201,18 @@ export default function ViewPromptBar({
     staleTime: 5 * 60_000,
   })
   const workersQ = useQuery({
-    queryKey: ['agent-harness-workers'],
-    queryFn: agentHarness.workers,
+    queryKey: ['agent-harness-worker-status'],
+    queryFn: agentHarness.workerStatus,
     enabled: source === 'harness',
     refetchInterval: source === 'harness' ? 2_000 : false,
   })
-  const recentJobsQ = useQuery({
-    queryKey: ['agent-harness-jobs'],
-    queryFn: agentHarness.jobs,
-    enabled: source === 'harness' && !activeJobId,
+  const openProposalQ = useQuery({
+    queryKey: ['view-open-proposal', view.id],
+    queryFn: () => views.openProposal(view.id),
+    // Every authoring path creates the same durable proposal. Recovery must not
+    // depend on whichever source toggle survived a browser refresh or where the
+    // proposal happens to fall in a bounded workspace job history.
+    enabled: !activeJobId,
     staleTime: 5_000,
   })
   const jobQ = useQuery({
@@ -113,9 +225,27 @@ export default function ViewPromptBar({
     },
   })
   const connections = useMemo(() => connectionsQ.data ?? [], [connectionsQ.data])
-  const workers = useMemo(() => workersQ.data ?? [], [workersQ.data])
+  const workers = useMemo(() => workersQ.data?.workers ?? [], [workersQ.data?.workers])
+  const presenceAvailable = workersQ.data?.available ?? false
   const activeJob = jobQ.data
   const selectedConnection = connections.find((connection) => connection.id === connectionId)
+  const draftLocked = Boolean(
+    activeJob && !activeJob.applied_at && ['queued', 'working', 'succeeded'].includes(activeJob.status),
+  )
+  const leaseExpired = Boolean(
+    activeJob?.status === 'working' &&
+    activeJob.lease_expires_at &&
+    new Date(activeJob.lease_expires_at).getTime() <= Date.now(),
+  )
+  const liveJobWorker = activeJob?.harness_id
+    ? workers.find((worker) =>
+        worker.harness_id === activeJob.harness_id &&
+        worker.job_id === activeJob.id &&
+        worker.state === 'working' &&
+        new Date(worker.active_until).getTime() > Date.now(),
+      )
+    : undefined
+  const activelyWorking = activeJob?.status === 'working' && !leaseExpired && Boolean(liveJobWorker)
 
   useEffect(() => {
     localStorage.setItem(SOURCE_STORAGE_KEY, source)
@@ -149,17 +279,18 @@ export default function ViewPromptBar({
 
   useEffect(() => {
     if (activeJobId) return
-    const recoverable = recentJobsQ.data?.find((job) =>
-      job.kind === 'view.author' &&
-      job.target_type === 'view' &&
-      job.target_id === view.id &&
-      !job.applied_at &&
-      ['queued', 'working', 'succeeded'].includes(job.status),
-    )
+    const recoverable = openProposalQ.data
+    if (recoverable && dismissedJobIds.has(recoverable.id)) return
     if (recoverable) setActiveJobId(recoverable.id)
-  }, [activeJobId, recentJobsQ.data, view.id])
+  }, [activeJobId, dismissedJobIds, openProposalQ.data])
 
-  const finishUpdate = (updated: ViewDef) => {
+  useEffect(() => {
+    if (!activeJob) return
+    if (activeJob.requested_harness_id) setSubmittedHarnessId(activeJob.requested_harness_id)
+    setSource(activeJob.origin === 'connection' ? 'connection' : 'harness')
+  }, [activeJob])
+
+  const finishUpdate = (updated: ViewDef, appliedHarnessJobId: string | null) => {
     qc.setQueryData(['view', view.id], updated)
     qc.setQueryData<ViewDef | undefined>(['default-view'], (current) => current?.id === updated.id ? updated : current)
     qc.invalidateQueries({ queryKey: ['view-widget'] })
@@ -167,48 +298,60 @@ export default function ViewPromptBar({
     setInstruction('')
     setCandidateText('')
     setValidatedCandidate(null)
-    if (activeJobId) {
+    if (appliedHarnessJobId) {
       qc.setQueryData<AgentHarnessJob[]>(['agent-harness-jobs'], (jobs) =>
-        jobs?.map((job) => job.id === activeJobId ? { ...job, applied_at: new Date().toISOString() } : job),
+        jobs?.map((job) => job.id === appliedHarnessJobId ? { ...job, applied_at: new Date().toISOString() } : job),
       )
+      setActiveJobId(null)
+      setSubmittedInstruction('')
+      setSubmittedHarnessId('')
+      setSubmittedAnnotationCount(0)
     }
-    setActiveJobId(null)
     qc.invalidateQueries({ queryKey: ['agent-harness-jobs'] })
+    qc.invalidateQueries({ queryKey: ['view-open-proposal', view.id] })
     onClearAnnotations()
     onUpdated?.(updated)
     toast.success('View updated')
   }
 
   const apply = useMutation({
-    mutationFn: () => {
-      const groundedAnnotations = annotations.map(({ widget_id, note }) => ({ widget_id, note }))
-      if (source === 'connection') {
-        return views.author(view.id, {
-          source: 'connection',
-          connection_id: connectionId,
-          model: model.trim() || undefined,
-          instruction: instruction.trim(),
-          annotations: groundedAnnotations,
-        })
-      }
+    mutationFn: async () => {
       if (!validatedCandidate) throw new Error('Validate the agent-authored ViewSpec first.')
       if (activeJob?.status === 'succeeded' && activeJobId) {
-        return views.author(view.id, {
-          source: 'harness',
-          instruction: instruction.trim(),
-          annotations: groundedAnnotations,
-          harness_job_id: activeJobId,
+        const updated = await views.author(view.id, {
+          source: activeJob.origin,
+          annotations: [],
+          proposal_id: activeJobId,
         })
+        return { updated, appliedHarnessJobId: activeJobId }
       }
-      return views.author(view.id, {
-        source: 'harness',
-        instruction: instruction.trim(),
-        annotations: groundedAnnotations,
-        candidate_view: validatedCandidate,
-      })
+      throw new Error('Create a reviewed proposal before applying this ViewSpec.')
     },
-    onSuccess: finishUpdate,
+    onSuccess: ({ updated, appliedHarnessJobId }) => finishUpdate(updated, appliedHarnessJobId),
     onError: (error: unknown) => toast.error(errorDetail(error, 'Could not apply that view change')),
+  })
+
+  const proposeConnection = useMutation({
+    mutationFn: () => views.createProposal(view.id, {
+      source: 'connection',
+      connection_id: connectionId,
+      model: model.trim() || undefined,
+      instruction: instruction.trim(),
+      annotations: annotations.map(({ widget_id, note }) => ({ widget_id, note })),
+    }),
+    onSuccess: (job) => {
+      setSubmittedInstruction(instruction.trim())
+      setSubmittedAnnotationCount(annotations.length)
+      setActiveJobId(job.id)
+      setValidatedCandidate(job.result as ViewCandidate)
+      qc.setQueryData(['agent-harness-job', job.id], job)
+      qc.setQueryData(['view-open-proposal', view.id], job)
+      qc.invalidateQueries({ queryKey: ['agent-harness-jobs'] })
+      if (annotationMode) onToggleAnnotationMode()
+      onClearAnnotations()
+      toast.success('Connected provider proposal ready for review')
+    },
+    onError: (error: unknown) => toast.error(errorDetail(error, 'Could not generate a reviewed proposal')),
   })
 
   const queueHarnessJob = useMutation({
@@ -218,11 +361,17 @@ export default function ViewPromptBar({
       harness_id: selectedHarnessId,
     }),
     onSuccess: (job) => {
+      setSubmittedInstruction(instruction.trim())
+      setSubmittedHarnessId(job.requested_harness_id ?? selectedHarnessId)
+      setSubmittedAnnotationCount(annotations.length)
       setActiveJobId(job.id)
       setValidatedCandidate(null)
       setCandidateText('')
       qc.setQueryData(['agent-harness-job', job.id], job)
+      qc.setQueryData(['view-open-proposal', view.id], job)
       qc.invalidateQueries({ queryKey: ['agent-harness-jobs'] })
+      if (annotationMode) onToggleAnnotationMode()
+      onClearAnnotations()
       toast.success(job.status === 'working' ? 'Harness is working' : 'Job queued for the active harness')
     },
     onError: (error: unknown) => toast.error(errorDetail(error, 'Could not queue the harness job')),
@@ -232,9 +381,22 @@ export default function ViewPromptBar({
     mutationFn: () => agentHarness.cancel(activeJobId!),
     onSuccess: (job) => {
       qc.setQueryData(['agent-harness-job', job.id], job)
+      qc.setQueryData(['view-open-proposal', view.id], null)
       toast.success('Harness job cancelled')
     },
     onError: (error: unknown) => toast.error(errorDetail(error, 'Could not cancel the harness job')),
+  })
+
+  const discardProposal = useMutation({
+    mutationFn: () => agentHarness.discard(activeJobId!),
+    onSuccess: (job) => {
+      qc.setQueryData(['agent-harness-job', job.id], job)
+      qc.setQueryData(['view-open-proposal', view.id], null)
+      qc.invalidateQueries({ queryKey: ['agent-harness-jobs'] })
+      startFreshHarnessRequest()
+      toast.success('Proposal discarded; the live view was not changed')
+    },
+    onError: (error: unknown) => toast.error(errorDetail(error, 'Could not discard this proposal')),
   })
 
   const validateCandidate = useMutation({
@@ -245,12 +407,19 @@ export default function ViewPromptBar({
       } catch {
         throw new Error('The harness output is not valid JSON yet.')
       }
-      return views.validateCandidate(parsed as ViewCandidate)
+      return views.createProposal(view.id, {
+        source: 'import',
+        candidate_view: parsed as ViewCandidate,
+      })
     },
-    onSuccess: (candidate) => {
-      setActiveJobId(null)
-      setValidatedCandidate(candidate)
-      toast.success('ViewSpec validated — review the summary, then apply')
+    onSuccess: (job) => {
+      setSource('harness')
+      setActiveJobId(job.id)
+      setValidatedCandidate(job.result as ViewCandidate)
+      qc.setQueryData(['agent-harness-job', job.id], job)
+      qc.setQueryData(['view-open-proposal', view.id], job)
+      qc.invalidateQueries({ queryKey: ['agent-harness-jobs'] })
+      toast.success('Imported ViewSpec is ready for live review')
     },
     onError: (error: unknown) => {
       setValidatedCandidate(null)
@@ -259,49 +428,73 @@ export default function ViewPromptBar({
   })
 
   const copyHarnessBrief = async () => {
-    const brief = {
-      task: 'Return one complete revised ViewSpec JSON object. Preserve anything not requested.',
-      current_view: {
-        name: view.name,
-        description: view.description,
-        icon: view.icon,
-        layout: view.layout,
-      },
-      whole_view_instruction: instruction.trim(),
-      widget_annotations: annotations.map(({ widget_id, note }) => ({ widget_id, note })),
-      widget_catalog: catalogQ.data ?? 'Fetch GET /api/views/widgets before authoring.',
-      output_contract: {
-        name: '1-80 characters',
-        description: '0-200 characters',
-        icon: 'catalogued icon',
-        layout: '1-12 validated widget objects with stable IDs where preserved',
-      },
-    }
     try {
+      const grounding = await views.grounding(view.id)
+      const brief = {
+        task: 'Return one complete revised ViewSpec JSON object. Preserve anything not requested.',
+        current_view: {
+          name: view.name,
+          description: view.description,
+          icon: view.icon,
+          layout: view.layout,
+        },
+        whole_view_instruction: instruction.trim(),
+        widget_annotations: annotations.map(({ widget_id, note }) => ({ widget_id, note })),
+        grounding,
+        grounding_contract: [
+          'Treat captured campaign IDs and widget query results as authoritative for this workspace.',
+          "Campaign metrics require an exact workflow_id; sent counts also require status='sent'.",
+          'Never infer delivered messages from send_outcomes.',
+        ],
+        widget_catalog: catalogQ.data ?? 'Fetch GET /api/views/widgets before authoring.',
+        output_contract: {
+          name: '1-80 characters',
+          description: '0-200 characters',
+          icon: 'catalogued icon',
+          layout: '1-12 validated widget objects with stable IDs where preserved',
+        },
+      }
       await navigator.clipboard.writeText(JSON.stringify(brief, null, 2))
       toast.success('Grounded harness brief copied')
-    } catch {
-      toast.error('Clipboard access failed. Copy the brief from a browser that allows clipboard access.')
+    } catch (error: unknown) {
+      toast.error(errorDetail(error, 'Could not capture live grounding or write it to the clipboard'))
     }
   }
 
   const canApplyConnection = Boolean(
-    connectionId && (instruction.trim().length >= 3 || annotations.length > 0),
+    connectionId && !draftLocked && !openProposalQ.isPending &&
+    (instruction.trim().length >= 3 || annotations.length > 0),
   )
   const canQueueHarness = Boolean(
     (instruction.trim().length >= 3 || annotations.length > 0) &&
     Boolean(selectedHarnessId) &&
+    !openProposalQ.isPending &&
     (!activeJob || TERMINAL_JOB_STATES.has(activeJob.status)),
   )
+
+  const startFreshHarnessRequest = () => {
+    if (activeJobId) {
+      setDismissedJobIds((current) => new Set(current).add(activeJobId))
+    }
+    setActiveJobId(null)
+    setValidatedCandidate(null)
+    setSubmittedInstruction('')
+    setSubmittedHarnessId('')
+    setSubmittedAnnotationCount(0)
+  }
 
   if (!expanded) {
     const status = activeJob?.status
     const statusLabel = status === 'working'
-      ? `${activeJob?.harness_id ?? 'Harness'} working`
+      ? leaseExpired
+        ? 'Harness reconnecting'
+        : activelyWorking
+          ? `${activeJob?.harness_id ?? 'Harness'} working`
+          : 'Harness claimed job'
       : status === 'queued'
         ? 'Harness job queued'
         : status === 'succeeded'
-          ? 'Harness result ready'
+          ? `${activeJob?.origin === 'connection' ? 'Connected API' : activeJob?.origin === 'import' ? 'Imported' : 'Harness'} proposal ready`
           : null
     return (
       <div className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-white/75 px-3 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between dark:border-slate-800 dark:bg-slate-950/55">
@@ -312,8 +505,8 @@ export default function ViewPromptBar({
             <p className="truncate text-[10px] text-slate-500">Use a connected API, a live agent harness, or annotate a specific widget.</p>
           </div>
           {statusLabel && (
-            <button type="button" onClick={onExpand} className={`ml-1 inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[9px] font-bold ${status === 'succeeded' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300' : 'bg-violet-100 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300'}`}>
-              {status !== 'succeeded' && <span className="h-1.5 w-1.5 rounded-full bg-current blink" />}{statusLabel}
+            <button type="button" onClick={onExpand} className={`ml-1 inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[9px] font-bold ${status === 'succeeded' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300' : leaseExpired ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300' : 'bg-violet-100 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300'}`}>
+              {status !== 'succeeded' && <span className={`h-1.5 w-1.5 rounded-full bg-current ${activelyWorking || status === 'queued' ? 'blink' : ''}`} />}{statusLabel}
             </button>
           )}
         </div>
@@ -352,24 +545,27 @@ export default function ViewPromptBar({
             <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100/80 p-1 dark:border-slate-700 dark:bg-slate-900">
               <button
                 type="button"
+                disabled={draftLocked}
                 onClick={() => setSource('connection')}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold transition ${source === 'connection' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white' : 'text-slate-500'}`}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${source === 'connection' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white' : 'text-slate-500'}`}
               >
                 <Cable size={13} /> Connected API
               </button>
               <button
                 type="button"
+                disabled={draftLocked}
                 onClick={() => setSource('harness')}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold transition ${source === 'harness' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white' : 'text-slate-500'}`}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${source === 'harness' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white' : 'text-slate-500'}`}
               >
                 <Bot size={13} /> Agent harness
               </button>
             </div>
             <button
               type="button"
+              disabled={draftLocked}
               onClick={onToggleAnnotationMode}
               aria-pressed={annotationMode}
-              className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[11px] font-bold transition ${annotationMode ? 'border-brand-400 bg-brand-600 text-white shadow-sm' : 'border-brand-200 bg-white text-brand-700 hover:border-brand-400 dark:border-brand-900 dark:bg-slate-900 dark:text-brand-300'}`}
+              className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[11px] font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${annotationMode ? 'border-brand-400 bg-brand-600 text-white shadow-sm' : 'border-brand-200 bg-white text-brand-700 hover:border-brand-400 dark:border-brand-900 dark:bg-slate-900 dark:text-brand-300'}`}
             >
               <MessageSquarePlus size={14} /> {annotationMode ? 'Annotation mode on' : 'Annotate widgets'}
               {annotations.length > 0 && <span className="rounded-full bg-white/90 px-1.5 py-0.5 text-[9px] text-brand-700">{annotations.length}</span>}
@@ -391,13 +587,13 @@ export default function ViewPromptBar({
               <div className="grid gap-2 lg:grid-cols-[minmax(220px,.8fr)_minmax(180px,.55fr)]">
                 <label className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500">
                   AI connection
-                  <select value={connectionId} onChange={(event) => setConnectionId(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal normal-case tracking-normal text-slate-800 outline-none focus:border-brand-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
+                  <select value={connectionId} disabled={draftLocked} onChange={(event) => setConnectionId(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal normal-case tracking-normal text-slate-800 outline-none focus:border-brand-400 disabled:cursor-not-allowed disabled:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-800">
                     {connections.map((connection) => <option key={connection.id} value={connection.id}>{providerLabel(connection)}</option>)}
                   </select>
                 </label>
                 <label className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500">
                   Model
-                  <input value={model} onChange={(event) => setModel(event.target.value)} placeholder="Model ID" className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal normal-case tracking-normal text-slate-800 outline-none focus:border-brand-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
+                  <input value={model} disabled={draftLocked} onChange={(event) => setModel(event.target.value)} placeholder="Model ID" className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal normal-case tracking-normal text-slate-800 outline-none focus:border-brand-400 disabled:cursor-not-allowed disabled:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-800" />
                 </label>
               </div>
             ) : (
@@ -405,19 +601,31 @@ export default function ViewPromptBar({
                 No supported AI authoring connection is configured. Connect Anthropic, OpenAI, OpenRouter, Gemini, or an OpenAI-compatible API in <a href="/integrations" className="font-bold underline">Integrations</a>.
               </div>
             )}
-            <textarea value={instruction} onChange={(event) => setInstruction(event.target.value)} rows={2} placeholder={placeholder} className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm leading-6 text-slate-800 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:ring-brand-950" />
+            <textarea value={draftLocked ? submittedInstruction : instruction} disabled={draftLocked} onChange={(event) => setInstruction(event.target.value)} rows={2} placeholder={draftLocked ? 'This instruction is frozen with the proposal below.' : placeholder} className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm leading-6 text-slate-800 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 disabled:cursor-not-allowed disabled:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:disabled:bg-slate-800 dark:focus:ring-brand-950" />
             <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
               {suggestions.length > 0 && (
                 <div className="flex min-w-0 flex-wrap gap-1.5">
                   {suggestions.map((suggestion) => (
-                    <button key={suggestion} type="button" onClick={() => setInstruction(suggestion)} className="max-w-[310px] truncate rounded-full border border-slate-200 bg-white/80 px-2.5 py-1 text-[11px] text-slate-500 transition hover:border-brand-300 hover:text-brand-700 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-400" title={suggestion}>{suggestion}</button>
+                    <button key={suggestion} type="button" disabled={draftLocked} onClick={() => setInstruction(suggestion)} className="max-w-[310px] truncate rounded-full border border-slate-200 bg-white/80 px-2.5 py-1 text-[11px] text-slate-500 transition hover:border-brand-300 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-400" title={suggestion}>{suggestion}</button>
                   ))}
                 </div>
               )}
-              <Button className="shrink-0" icon={Sparkles} isLoading={apply.isPending} disabled={!canApplyConnection || apply.isPending} onClick={() => apply.mutate()}>
-                {apply.isPending ? 'Composing…' : annotations.length > 0 ? `Apply ${annotations.length} annotation${annotations.length === 1 ? '' : 's'}` : 'Apply view'}
+              <Button className="shrink-0" icon={Sparkles} isLoading={proposeConnection.isPending} disabled={!canApplyConnection || proposeConnection.isPending} onClick={() => proposeConnection.mutate()}>
+                {proposeConnection.isPending ? 'Composing…' : annotations.length > 0 ? `Review ${annotations.length} annotation${annotations.length === 1 ? '' : 's'}` : 'Generate proposal'}
               </Button>
             </div>
+            {activeJob?.status === 'succeeded' && validatedCandidate && (
+              <>
+                <ProposalReview
+                  job={activeJob}
+                  candidate={validatedCandidate}
+                  isApplying={apply.isPending}
+                  onApply={() => apply.mutate()}
+                  onStartFresh={() => discardProposal.mutate()}
+                />
+                {discardProposal.isPending && <p className="text-[10px] text-slate-500">Discarding proposal…</p>}
+              </>
+            )}
           </div>
         ) : (
           <div className="space-y-3 rounded-2xl border border-violet-200 bg-white/90 p-3 dark:border-violet-900/60 dark:bg-slate-950/60">
@@ -428,13 +636,18 @@ export default function ViewPromptBar({
                     <p className="flex items-center gap-1.5 text-xs font-bold text-violet-900 dark:text-violet-100"><Radio size={14} /> Live harness</p>
                     <p className="mt-1 text-[11px] leading-relaxed text-violet-700 dark:text-violet-300">Codex, Claude Code, or OpenCode holds a workspace poll and claims one grounded job at a time.</p>
                   </div>
-                  <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold ${workers.length > 0 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300' : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
-                    <span className={`h-1.5 w-1.5 rounded-full ${workers.length > 0 ? 'bg-emerald-500 ring-pulse' : 'bg-slate-400'}`} />
-                    {workers.length > 0 ? `${workers.length} active` : 'offline'}
+                  <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold ${workers.length > 0 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300' : !presenceAvailable ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300' : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${workers.length > 0 ? 'bg-emerald-500 ring-pulse' : !presenceAvailable ? 'bg-amber-500' : 'bg-slate-400'}`} />
+                    {workers.length > 0 ? `${workers.length} online` : presenceAvailable ? 'offline' : 'status unavailable'}
                   </span>
                 </div>
 
-                {workers.length > 0 ? (
+                {draftLocked ? (
+                  <div className="rounded-xl border border-violet-200 bg-white/80 px-3 py-2.5 dark:border-violet-900 dark:bg-slate-950/45">
+                    <p className="text-[9px] font-bold uppercase tracking-[0.1em] text-violet-700 dark:text-violet-300">Submitted runner</p>
+                    <p className="mt-1 truncate font-mono text-[10px] font-semibold text-slate-700 dark:text-slate-200">{submittedHarnessId || activeJob?.requested_harness_id || activeJob?.harness_id || 'Assigned harness'}</p>
+                  </div>
+                ) : workers.length > 0 ? (
                   <label className="block text-[9px] font-bold uppercase tracking-[0.1em] text-violet-700 dark:text-violet-300">
                     Run with
                     <select value={selectedHarnessId} onChange={(event) => setSelectedHarnessId(event.target.value)} className="mt-1 w-full rounded-lg border border-violet-200 bg-white px-2.5 py-2 font-mono text-[10px] font-semibold normal-case tracking-normal text-slate-700 outline-none focus:border-violet-400 dark:border-violet-900 dark:bg-slate-950 dark:text-slate-200">
@@ -443,22 +656,39 @@ export default function ViewPromptBar({
                       ))}
                     </select>
                   </label>
+                ) : !presenceAvailable ? (
+                  <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/70 p-2.5 text-[10px] leading-relaxed text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                    <p className="flex items-center gap-1.5 font-bold"><AlertTriangle size={12} /> Harness presence cannot be observed</p>
+                    <p className="mt-1.5">Durable jobs remain safe, but Omni cannot currently say whether a runner is polling. Retry after Redis presence recovers.</p>
+                  </div>
                 ) : (
                   <div className="rounded-xl border border-dashed border-violet-300 bg-white/70 p-2.5 text-[10px] leading-relaxed text-violet-700 dark:border-violet-800 dark:bg-slate-950/40 dark:text-violet-300">
                     <p className="flex items-center gap-1.5 font-bold"><Terminal size={12} /> No harness is polling yet</p>
-                    <code className="mt-1.5 block overflow-x-auto rounded-lg bg-slate-950 px-2 py-1.5 font-mono text-[9px] text-emerald-300">python scripts/omni_harness.py run --engine codex</code>
+                    <code className="mt-1.5 block overflow-x-auto rounded-lg bg-slate-950 px-2 py-1.5 font-mono text-[9px] text-emerald-300">python scripts/omni_harness.py run --engine codex --codex-session-mode resumable</code>
                     <p className="mt-1.5">Set <code>OMNI_API_URL</code> and <code>OMNI_API_KEY</code> locally. The key is never shown in Omni or returned in a job.</p>
                   </div>
                 )}
 
-                <textarea value={instruction} onChange={(event) => setInstruction(event.target.value)} rows={4} placeholder="What should the harness change across this view? Widget annotations are added automatically…" className="w-full resize-y rounded-xl border border-violet-200 bg-white px-3 py-2 text-xs leading-relaxed text-slate-800 outline-none focus:border-violet-400 dark:border-violet-900 dark:bg-slate-950 dark:text-slate-100" />
+                <textarea
+                  value={draftLocked ? submittedInstruction : instruction}
+                  onChange={(event) => setInstruction(event.target.value)}
+                  rows={4}
+                  disabled={draftLocked}
+                  placeholder={draftLocked ? 'The submitted instruction is frozen with this job.' : 'What should the harness change across this view? Widget annotations are added automatically…'}
+                  className="w-full resize-y rounded-xl border border-violet-200 bg-white px-3 py-2 text-xs leading-relaxed text-slate-800 outline-none focus:border-violet-400 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 dark:border-violet-900 dark:bg-slate-950 dark:text-slate-100 dark:disabled:bg-slate-900"
+                />
+                {draftLocked && (
+                  <p className="text-[10px] leading-relaxed text-violet-700 dark:text-violet-300">
+                    This request is frozen in job <span className="font-mono font-semibold">{activeJob?.id.slice(0, 8)}</span>{submittedAnnotationCount > 0 ? ` with ${submittedAnnotationCount} widget note${submittedAnnotationCount === 1 ? '' : 's'}` : ''}. Changes made now would not affect that job.
+                  </p>
+                )}
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button size="sm" icon={Bot} isLoading={queueHarnessJob.isPending} disabled={!canQueueHarness || queueHarnessJob.isPending} onClick={() => queueHarnessJob.mutate()}>
-                    {queueHarnessJob.isPending ? 'Queuing…' : 'Send to harness'}
+                  <Button size="sm" icon={Bot} isLoading={queueHarnessJob.isPending} disabled={draftLocked || !canQueueHarness || queueHarnessJob.isPending} onClick={() => queueHarnessJob.mutate()}>
+                    {draftLocked ? 'Request submitted' : queueHarnessJob.isPending ? 'Queuing…' : 'Send to harness'}
                   </Button>
-                  <Button variant="secondary" size="sm" icon={Copy} onClick={copyHarnessBrief} disabled={catalogQ.isLoading}>Copy grounded brief</Button>
+                  <Button variant="secondary" size="sm" icon={Copy} onClick={copyHarnessBrief} disabled={draftLocked || catalogQ.isLoading}>Copy grounded brief</Button>
                 </div>
-                <p className="text-[10px] leading-relaxed text-violet-600 dark:text-violet-400">The job contains the current ViewSpec and widget catalog—not provider credentials. It cannot publish actions or touch campaign execution.</p>
+                <p className="text-[10px] leading-relaxed text-violet-600 dark:text-violet-400">The job contains the current ViewSpec, live RLS-scoped widget results, authoritative campaign IDs/status counts, and the widget catalog—not provider credentials. It cannot publish actions or touch campaign execution.</p>
               </div>
 
               <div className="min-h-[250px] rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/45">
@@ -476,10 +706,11 @@ export default function ViewPromptBar({
                       <div>
                         <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">Live job</p>
                         <p className="mt-0.5 font-mono text-[11px] font-semibold text-slate-700 dark:text-slate-200">{activeJob.id}</p>
+                        <p className="mt-1 text-[9px] text-slate-400">Based on view revision {shortTime(activeJob.target_version)}</p>
                       </div>
-                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold ${activeJob.status === 'succeeded' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300' : activeJob.status === 'working' ? 'bg-violet-100 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300' : activeJob.status === 'queued' ? 'bg-sky-100 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300' : 'bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300'}`}>
-                        {(activeJob.status === 'queued' || activeJob.status === 'working') && <span className="h-1.5 w-1.5 rounded-full bg-current blink" />}
-                        {activeJob.status}
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold ${activeJob.status === 'succeeded' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300' : leaseExpired ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300' : activeJob.status === 'working' ? 'bg-violet-100 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300' : activeJob.status === 'queued' ? 'bg-sky-100 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300' : 'bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300'}`}>
+                        {(activeJob.status === 'queued' || activelyWorking) && <span className="h-1.5 w-1.5 rounded-full bg-current blink" />}
+                        {leaseExpired ? 'reconnecting' : activelyWorking ? 'working' : activeJob.status === 'working' ? 'claimed' : activeJob.status}
                       </span>
                     </div>
 
@@ -490,10 +721,24 @@ export default function ViewPromptBar({
                       </div>
                     )}
 
-                    {activeJob.status === 'working' && (
+                    {activelyWorking && (
                       <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-xs text-violet-900 dark:border-violet-900 dark:bg-violet-950/30 dark:text-violet-100">
                         <p className="flex items-center gap-1.5 font-bold"><Activity size={13} className="blink" /> {activeJob.harness_id ?? 'Harness'} is actively working</p>
-                        <p className="mt-1 text-[10px] leading-relaxed text-violet-700 dark:text-violet-300">Lease attempt {activeJob.attempts}. Heartbeats keep ownership live; an abandoned lease returns safely to the queue.</p>
+                        <p className="mt-1 text-[10px] leading-relaxed text-violet-700 dark:text-violet-300">Lease attempt {activeJob.attempts}. Last verified heartbeat {shortTime(activeJob.last_heartbeat_at)}.</p>
+                      </div>
+                    )}
+
+                    {activeJob.status === 'working' && !activelyWorking && leaseExpired && (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+                        <p className="flex items-center gap-1.5 font-bold"><RefreshCw size={13} /> Worker disconnected; waiting for lease recovery</p>
+                        <p className="mt-1 text-[10px] leading-relaxed text-amber-800 dark:text-amber-300">The last lease expired after the heartbeat at {shortTime(activeJob.last_heartbeat_at)}. Omni will return this job to the queue; it is not currently reporting active work.</p>
+                      </div>
+                    )}
+
+                    {activeJob.status === 'working' && !activelyWorking && !leaseExpired && (
+                      <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100">
+                        <p className="flex items-center gap-1.5 font-bold"><Radio size={13} /> Job claimed; waiting for a verified heartbeat</p>
+                        <p className="mt-1 text-[10px] leading-relaxed text-sky-700 dark:text-sky-300">Omni has assigned the lease, but the live presence poll has not yet confirmed active execution.</p>
                       </div>
                     )}
 
@@ -503,8 +748,9 @@ export default function ViewPromptBar({
                         <div className="mt-1.5 space-y-1.5">
                           {activeJob.progress.slice(-5).map((event, index) => (
                             <div key={`${event.at}-${index}`} className="flex gap-2 rounded-lg bg-white px-2.5 py-2 text-[10px] text-slate-600 shadow-sm dark:bg-slate-900 dark:text-slate-300">
-                              <Check size={11} className="mt-0.5 shrink-0 text-violet-500" />
-                              <span>{event.message}</span>
+                              <Activity size={11} className="mt-0.5 shrink-0 text-violet-500" />
+                              <span className="min-w-0 flex-1">{event.message}</span>
+                              <time className="shrink-0 text-[9px] text-slate-400">{shortTime(event.at)}</time>
                             </div>
                           ))}
                         </div>
@@ -512,11 +758,13 @@ export default function ViewPromptBar({
                     )}
 
                     {activeJob.status === 'succeeded' && validatedCandidate && (
-                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/30">
-                        <p className="flex items-center gap-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-200"><Check size={13} /> Validated candidate ready</p>
-                        <p className="mt-1 text-[10px] leading-relaxed text-emerald-700 dark:text-emerald-300"><strong>{validatedCandidate.name}</strong> · {validatedCandidate.layout.length} widgets. Review is complete; nothing has been applied yet.</p>
-                        <Button className="mt-3" size="sm" icon={Upload} isLoading={apply.isPending} disabled={apply.isPending} onClick={() => apply.mutate()}>Apply harness result</Button>
-                      </div>
+                      <ProposalReview
+                        job={activeJob}
+                        candidate={validatedCandidate}
+                        isApplying={apply.isPending}
+                        onApply={() => apply.mutate()}
+                        onStartFresh={() => discardProposal.mutate()}
+                      />
                     )}
 
                     {(['failed', 'cancelled', 'expired'] as const).includes(activeJob.status as 'failed' | 'cancelled' | 'expired') && (
@@ -546,9 +794,7 @@ export default function ViewPromptBar({
                   className="w-full resize-y rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 font-mono text-[11px] leading-relaxed text-emerald-200 outline-none focus:border-violet-400"
                 />
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button variant="secondary" size="sm" icon={Braces} isLoading={validateCandidate.isPending} disabled={candidateText.trim().length < 2 || validateCandidate.isPending} onClick={() => validateCandidate.mutate()}>Validate imported ViewSpec</Button>
-                  {validatedCandidate && !activeJobId && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"><Check size={11} /> {validatedCandidate.layout.length} widgets valid</span>}
-                  <Button className="ml-auto" size="sm" icon={Upload} isLoading={apply.isPending} disabled={!validatedCandidate || Boolean(activeJobId) || apply.isPending} onClick={() => apply.mutate()}>Apply imported view</Button>
+                  <Button variant="secondary" size="sm" icon={Braces} isLoading={validateCandidate.isPending} disabled={candidateText.trim().length < 2 || validateCandidate.isPending || draftLocked || openProposalQ.isPending} onClick={() => validateCandidate.mutate()}>Review imported ViewSpec</Button>
                 </div>
               </div>
             </details>
