@@ -346,8 +346,12 @@ def _poll_once(args: argparse.Namespace, runner_id: UUID, *, silent_empty: bool)
             "jobId": claim["id"],
             "kind": claim["kind"],
             "attempt": claim["attempts"],
-            "briefFile": brief_path,
-            "claimFile": claim_path,
+            # str() these: the TOON encoder stringifies anything, but json.dumps
+            # refuses a Path, so emitting them raw crashed --format json on every
+            # SUCCESSFUL claim — after the lease was taken, stranding the job
+            # until its lease expired.
+            "briefFile": str(brief_path),
+            "claimFile": str(claim_path),
             "next": f"Read briefFile, then report progress and complete job {claim['id']}.",
         },
         args.format,

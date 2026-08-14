@@ -23,7 +23,6 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app.services import view_grounding  # noqa: E402
 
-
 C1 = UUID("a09140c2-6b68-4506-8640-1d23599d1606")
 C2 = UUID("29b16f55-840d-4323-b8cc-be37ab5061c9")
 CAPTURED = datetime(2026, 8, 13, 14, 30, tzinfo=UTC)
@@ -630,3 +629,97 @@ def test_verbose_cells_are_bounded_for_durable_agent_context():
     assert truncated is True
     assert len(bounded["body"]) == view_grounding.MAX_CELL_CHARS + 1
     assert bounded["body"].endswith("…")
+
+
+# ── false positives found by actually running a harness job (2026-08-14) ───────
+#
+# Both of these BLOCKED correct work, which is worse than a missed warning: the
+# gate refuses Apply, so an unsatisfiable rule stops the operator entirely.
+
+
+def test_campaign_alias_ignores_digits_that_are_not_a_campaign_number():
+    """"e2e" and "(v2)" are not campaign numbers.
+
+    Harvesting every digit in a campaign NAME minted a "campaign 2" alias for
+    "TEST e2e CLEAN — Johnsy→Navin" and for "…leaders <100 (v2)", so a widget
+    correctly titled "Campaign 2 — sent per day" was reported as visibly
+    referring to four unrelated campaigns. Its workflow_id scope could then
+    never match the demanded set, making the gate impossible to satisfy.
+    """
+    from app.services.view_grounding import _campaign_references
+
+    campaigns = {
+        "items": [
+            {"id": "c2-id", "name": "Trial Campaign 2"},
+            {"id": "e2e-id", "name": "TEST e2e CLEAN — Johnsy→Navin"},
+            {"id": "v2-id", "name": "LinkedIn Jobs -> India mktg leaders <100 (v2)"},
+        ],
+        "scope_items": [],
+    }
+    matched = {c["id"] for c in _campaign_references("Campaign 2 — sent per day", campaigns)}
+    assert matched == {"c2-id"}
+
+
+def test_full_campaign_name_still_matches():
+    from app.services.view_grounding import _campaign_references
+
+    campaigns = {"items": [{"id": "c1-id", "name": "Trial Campaign 1"}], "scope_items": []}
+    assert [c["id"] for c in _campaign_references("Trial Campaign 1 health", campaigns)] == ["c1-id"]
+
+
+def test_rows_table_does_not_make_a_sent_count_claim():
+    """A table listing individual outcomes with a status column states no total.
+
+    Demanding status='sent' on it blocked the honest "Recent Send Activity"
+    widget — and satisfying the demand would have hidden exactly the failed and
+    skipped rows an operator needs.
+    """
+    from app.services.view_grounding import _review_warnings
+
+    candidate = {
+        "layout": [{
+            "id": "recent_activity",
+            "type": "table",
+            "title": "Recent Send Activity",
+            "query": {
+                "entity": "send_outcomes",
+                "filters": [],
+                "select": ["occurred_at", "channel", "status"],
+                "group_by": [],
+                "metrics": [],
+            },
+        }],
+    }
+    verification = {
+        "widget_results": [{"widget_id": "recent_activity", "rows": [], "columns": [], "error": None}],
+        "campaigns": {"items": [], "scope_items": [], "total": 2, "observed_values": {}},
+    }
+    codes = {w["code"] for w in _review_warnings({}, candidate, verification, [])}
+    assert "send_metric_status_mismatch" not in codes
+
+
+def test_aggregate_sent_claim_is_still_enforced():
+    """The real guard must survive the fix: a COUNT labelled 'sent' still needs
+    status='sent', or a tile can quietly count failures as successes."""
+    from app.services.view_grounding import _review_warnings
+
+    candidate = {
+        "layout": [{
+            "id": "sent_total",
+            "type": "stat",
+            "title": "Messages sent",
+            "query": {
+                "entity": "send_outcomes",
+                "filters": [],
+                "select": [],
+                "group_by": [],
+                "metrics": [{"fn": "count", "field": "id", "alias": "n"}],
+            },
+        }],
+    }
+    verification = {
+        "widget_results": [{"widget_id": "sent_total", "rows": [], "columns": [], "error": None}],
+        "campaigns": {"items": [], "scope_items": [], "total": 2, "observed_values": {}},
+    }
+    codes = {w["code"] for w in _review_warnings({}, candidate, verification, [])}
+    assert "send_metric_status_mismatch" in codes

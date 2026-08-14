@@ -155,6 +155,34 @@ def test_harness_viewspec_schema_allows_chart_options():
     assert schema["$defs"]["widget"]["properties"]["options"] == {"$ref": "#/$defs/options"}
 
 
+def test_claim_envelope_is_json_serializable():
+    """--format json crashed on every SUCCESSFUL claim: the envelope carried
+    pathlib.Path values, which the TOON encoder stringifies but json.dumps
+    refuses. It failed AFTER the lease was taken, so the job sat 'working' behind
+    a dead process until the lease expired. Only running the client found it."""
+    import importlib.util
+    import json
+
+    spec = importlib.util.spec_from_file_location(
+        "omni_harness_json_envelope", REPO / "scripts/omni_harness.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    emitted: dict = {}
+    module._emit = lambda mapping, fmt: emitted.update(mapping)  # noqa: SLF001
+    envelope = {
+        "state": "working",
+        "briefFile": str(REPO / "brief.json"),
+        "claimFile": str(REPO / "claim.local.json"),
+    }
+    json.dumps(envelope)  # must not raise
+
+    source = (REPO / "scripts/omni_harness.py").read_text(encoding="utf-8")
+    assert '"briefFile": str(brief_path)' in source
+    assert '"claimFile": str(claim_path)' in source
+
+
 def test_harness_schema_does_not_expose_series_colour():
     source = (REPO / "scripts/omni_harness.py").read_text(encoding="utf-8")
     tree = ast.parse(source)

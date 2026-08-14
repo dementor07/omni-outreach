@@ -51,6 +51,9 @@ MAX_TARGETED_SCOPE_IDS = 2_400  # 12 widgets × 200 values per validated filter
 
 _CAMPAIGN_ENTITIES = frozenset({"leads", "send_outcomes"})
 _CAMPAIGN_WORD_RE = re.compile(r"\bcampaign(?:\s+|[-_])?(?:\d+|one|two)\b", re.IGNORECASE)
+# A campaign NAME only earns a short "campaign n" alias when it actually says so.
+# Matching any digit swept up "e2e" and "(v2)" and made the gate unsatisfiable.
+_CAMPAIGN_NUMBER_RE = re.compile(r"\bcampaign (\d+)\b")
 # On a send_outcomes widget, a bare Messages label is a sent-count claim too:
 # the table stores attempts/outcomes, not one row per successfully sent message.
 _SEND_WORD_RE = re.compile(r"\b(?:send|sends|sent|message|messages)\b", re.IGNORECASE)
@@ -486,7 +489,13 @@ def _campaign_references(text: str, campaigns: dict[str, Any]) -> list[dict[str,
     for campaign in by_id.values():
         name = _normalize_label(campaign.get("name"))
         aliases = {name}
-        for number in re.findall(r"\d+", name):
+        # Only a name that literally says "campaign <n>" earns the short
+        # "campaign n" / "cn" aliases. Harvesting EVERY digit in the name made
+        # the gate unsatisfiable: "TEST e2e CLEAN" yielded "campaign 2" from the
+        # 2 inside "e2e", and "…leaders <100 (v2)" yielded it too, so a widget
+        # correctly titled "Campaign 2 — sent per day" was reported as referring
+        # to four unrelated campaigns and could never be scoped to match.
+        for number in _CAMPAIGN_NUMBER_RE.findall(name):
             aliases.update({f"campaign {number}", f"c{number}"})
         if any(
             alias and f" {alias} " in padded
@@ -676,9 +685,13 @@ def _review_warnings(
                     ),
                 })
 
+            # Only an AGGREGATE claims a count. A rows table titled "Recent Send
+            # Activity" that selects a status column per row states no total, so
+            # demanding status='sent' there blocked an honest widget — and would
+            # have forced it to hide the failures an operator most needs to see.
             claimed_status = (
                 _claimed_send_status(candidate_title)
-                if entity == "send_outcomes"
+                if entity == "send_outcomes" and query.get("metrics")
                 else None
             )
             if claimed_status is not None:
