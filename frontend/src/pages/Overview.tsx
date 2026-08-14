@@ -1,22 +1,31 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Users, Contact as ContactIcon, KanbanSquare, Inbox as InboxIcon,
-  Megaphone, Sparkles, Plus, TrendingUp, Flame, Copy,
+  Megaphone, Sparkles, Plus, TrendingUp, Flame, Copy, Pencil, Trash2, AlertTriangle,
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { projections, inbox, canvas, ai, views, type Deal, type LeadScore } from '../api/v2'
+import { projections, inbox, canvas, ai, views, type Deal, type LeadScore, type ViewDef } from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import StatCard from '../components/StatCard'
 import Card, { CardHeader } from '../components/Card'
 import Badge from '../components/Badge'
 import Button from '../components/Button'
+import Modal from '../components/Modal'
 import EmptyState from '../components/EmptyState'
 import ComposableView from '../components/ComposableView'
 import { useToast } from '../components/Toast'
 
 const DEAL_STAGE_ORDER = ['lead', 'qualified', 'meeting', 'proposal', 'closed_won', 'closed_lost']
+
+/** Surface the API's own message (e.g. a 422 detail) instead of a generic one. */
+function viewError(error: unknown, fallback: string): string {
+  return (
+    (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+    (error instanceof Error ? error.message : fallback)
+  )
+}
 
 /**
  * DYNAMIC-002 step 1: the home page is a stored view (data), not this hardcoded
@@ -83,6 +92,66 @@ export default function Overview() {
     onError: () => toast.error('Could not duplicate this layout'),
   })
 
+  // A stored view is data, so renaming and deleting it are ordinary edits. The
+  // API has always supported both (PATCH/DELETE /views/{id}); only the UI was
+  // missing, which left every layout permanently named whatever created it.
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [draftName, setDraftName] = useState('')
+  const [draftDescription, setDraftDescription] = useState('')
+
+  const openRename = () => {
+    if (!view) return
+    setDraftName(view.name)
+    setDraftDescription(view.description ?? '')
+    setRenameOpen(true)
+  }
+
+  const cacheView = (updated: ViewDef) => {
+    qc.setQueryData(['view', updated.id], updated)
+    // The Overview may be the workspace default; keep that cache honest too, or
+    // the header reverts to the old name until the next refetch.
+    qc.setQueryData<ViewDef | undefined>(['default-view'], (current) =>
+      current?.id === updated.id ? updated : current,
+    )
+    qc.invalidateQueries({ queryKey: ['views'] })
+  }
+
+  const rename = useMutation({
+    mutationFn: () => {
+      if (!view) throw new Error('Wait for the current layout to load.')
+      const name = draftName.trim()
+      if (!name) throw new Error('A layout needs a name.')
+      return views.update(view.id, { name, description: draftDescription.trim() })
+    },
+    onSuccess: (updated) => {
+      cacheView(updated)
+      setRenameOpen(false)
+      toast.success(`Renamed to "${updated.name}"`)
+    },
+    onError: (error: unknown) => toast.error(viewError(error, 'Could not rename this layout')),
+  })
+
+  const remove = useMutation({
+    mutationFn: () => {
+      if (!view) throw new Error('Wait for the current layout to load.')
+      return views.remove(view.id).then(() => view)
+    },
+    onSuccess: (deleted) => {
+      setDeleteOpen(false)
+      // Drop the selection FIRST so the "layout no longer exists" effect below
+      // never fires for a deletion the user just asked for.
+      setSearchParams({}, { replace: true })
+      qc.removeQueries({ queryKey: ['view', deleted.id] })
+      qc.invalidateQueries({ queryKey: ['views'] })
+      // Deleting the default Overview is recoverable: /views/default re-seeds a
+      // fresh one on the next load, so this never leaves the page empty.
+      qc.invalidateQueries({ queryKey: ['default-view'] })
+      toast.success(`Layout "${deleted.name}" deleted`)
+    },
+    onError: (error: unknown) => toast.error(viewError(error, 'Could not delete this layout')),
+  })
+
   // While loading, show the static page (it has its own skeletons) so there's
   // never a blank flash. On success, render the stored view. On error, the
   // static page is the permanent fallback.
@@ -109,11 +178,28 @@ export default function Overview() {
                 {layouts.map((layout) => <option key={layout.id} value={layout.id}>{layout.name}</option>)}
               </select>
               <Button variant="secondary" size="md" icon={Copy} isLoading={duplicate.isPending} onClick={() => duplicate.mutate()}>Duplicate layout</Button>
+              <Button
+                variant="secondary"
+                size="md"
+                icon={Pencil}
+                onClick={openRename}
+                aria-label={`Rename layout ${view.name}`}
+                title="Rename this layout"
+              />
+              <Button
+                variant="danger"
+                size="md"
+                icon={Trash2}
+                onClick={() => setDeleteOpen(true)}
+                aria-label={`Delete layout ${view.name}`}
+                title="Delete this layout"
+              />
               <Button variant="primary" size="md" icon={Plus} onClick={() => navigate('/campaigns')}>New campaign</Button>
             </div>
           }
         />
         <ComposableView
+          key={view.id}
           view={view}
           label="Ask Overview"
           placeholder="Describe the mission-control view you need right now…"
@@ -124,6 +210,58 @@ export default function Overview() {
             'Focus on C1 and C2 operational state',
           ]}
         />
+
+        <Modal title="Rename layout" open={renameOpen} onClose={() => setRenameOpen(false)} width="sm">
+          <form
+            onSubmit={(event) => { event.preventDefault(); rename.mutate() }}
+            className="space-y-4"
+          >
+            <label className="block text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500">
+              Name
+              <input
+                autoFocus
+                value={draftName}
+                maxLength={80}
+                onChange={(event) => setDraftName(event.target.value)}
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal normal-case tracking-normal text-slate-800 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-brand-950"
+              />
+            </label>
+            <label className="block text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500">
+              Description
+              <input
+                value={draftDescription}
+                maxLength={200}
+                placeholder="Optional — shown under the title"
+                onChange={(event) => setDraftDescription(event.target.value)}
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal normal-case tracking-normal text-slate-800 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-brand-950"
+              />
+            </label>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" size="md" onClick={() => setRenameOpen(false)}>Cancel</Button>
+              <Button type="submit" variant="primary" size="md" isLoading={rename.isPending} disabled={!draftName.trim()}>Save</Button>
+            </div>
+          </form>
+        </Modal>
+
+        <Modal title="Delete layout" open={deleteOpen} onClose={() => setDeleteOpen(false)} width="sm">
+          <div className="space-y-4">
+            <div className="flex gap-2.5 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs leading-relaxed text-rose-900 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200">
+              <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+              <p>
+                Delete <strong>{view.name}</strong> and its {view.layout.length} widget{view.layout.length === 1 ? '' : 's'}? This cannot be undone.
+              </p>
+            </div>
+            <p className="text-[11px] leading-relaxed text-slate-500">
+              {layouts.length <= 1
+                ? 'This is your only layout. A fresh default Overview will be created the next time this page loads.'
+                : 'Only this layout is removed. Your campaigns, contacts, and sends are untouched.'}
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" size="md" onClick={() => setDeleteOpen(false)}>Cancel</Button>
+              <Button variant="danger" size="md" icon={Trash2} isLoading={remove.isPending} onClick={() => remove.mutate()}>Delete layout</Button>
+            </div>
+          </div>
+        </Modal>
       </div>
     )
   }
