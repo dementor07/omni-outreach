@@ -1,5 +1,41 @@
 # Codex Handover — OmniOutreach v2
 
+## 2026-08-14 release addendum — deployed `0ffde30`, alembic `057`
+
+Everything below this heading is verified live on the box, not intended.
+
+- **SEND-ONCE-002 — a real lead-stranding bug, found and fixed.** SEND-ONCE-001's
+  duplicate-send guard bare-returned, so a lead still parked ON the send node stayed
+  there permanently: every later re-fire hit the same guard and nothing advanced it.
+  **13 C1/C2 leads were stranded** — 8 invites and 5 DMs that had genuinely reached real
+  prospects. The 8 invite cases could never reach `event.invite_accepted`, so even if
+  those people accepted, no DM would ever have been sent.
+  `_resume_after_confirmed_send` now routes a stranded lead down the same `sent` edge a
+  real success takes (or terminalizes honestly at a leaf); a lead that already advanced
+  is still dropped. All 13 were recovered **through the deployed code path** by emitting
+  one `__retry__` each and letting the live worker do the work — each logged
+  `SEND-ONCE-002 … resumed on 'sent'`. Stranded count is now **0**.
+- **The Overview "Send Outcomes Activity" views were numerically wrong.** Both campaign
+  tiles read 315 (every send in the workspace, all ~100 campaigns) and "Delivered" filtered
+  a status that does not exist, so it was a permanent silent 0. Corrected to C1 = 26,
+  C2 = 258, plus `Skipped (gated)` = 9 and `Failed` = 13. Fixed in `omni_views` and
+  validated through `validate_layout()`.
+- **Grounding gate is live** (migration 057). Every authoring source now produces a durable
+  reviewed *proposal*; nothing auto-saves. It blocks exactly the defects above:
+  campaign-labelled widgets must filter that `workflow_id`, sent counts must filter
+  `status='sent'`, and `send_outcomes` may never be labelled delivered.
+- **Views can finally be renamed and deleted** from Overview. The API always supported it;
+  only the UI was missing.
+- **Deploy verification:** 711 audit tests pass *inside the deployed image*; tsc and ruff
+  clean; all 18 containers up; health reports `sha=0ffde30`; Flink RUNNING; the
+  `v2-transitions` consumer group is Stable at **lag 0** after the restart.
+- **Nothing was sent during any of this** — 0 provider-backed outcomes in the whole
+  deploy window. C1/C2 settings (window, cap, spacing, timezone) are byte-identical
+  before and after.
+
+**Known residue:** one limbo lead (`00000000-…`, `active`, no node, no campaign, last
+touched 2026-07-02) predates this work and is not in a live campaign.
+
 ## 2026-08-12 architecture reconciliation addendum
 
 - Production and `origin/phase-out-non-v2` are now reproducible. The deployed
@@ -70,7 +106,9 @@ work briefs, not production runtime inputs and are intentionally untracked.
 | Shared infra (`omni-outreach`) | `db-1` (Postgres), `redis-1`, `redpanda-1` (Kafka), `flink-jobmanager-1`, `flink-taskmanager-1` |
 | v2 app (`omni-v2`) | `backend`, `dispatcher`, `transitions`, `projector`, `objective`, `ai-jobs`, `webhooks-out`, `unipile-sync`, `muscle`, `orchestrator`, `frontend`, `camoufox`, `searxng` |
 
-**Alembic:** `055 (head)`.
+**Alembic:** `057 (head)`. **Deployed release:** `0ffde30` (confirm with
+`curl -sk https://13-140-169-62.sslip.io/api/health` — it reports the exact build SHA;
+if it reports `unknown`, someone built without `BUILD_SHA=$(git rev-parse HEAD)`).
 
 **Legacy note:** the EC2 box `3.7.155.4` is **STOPPED** (rolled back to Contabo on 2026-07-27).
 `193.203.161.15` is a different legacy app, not this stack.
@@ -114,8 +152,9 @@ standalone script needs `async with system_scope():`.
 | | Campaign 1 | Campaign 2 |
 |---|---|---|
 | ID | `a09140c2-6b68-4506-8640-1d23599d1606` | `29b16f55-840d-4323-b8cc-be37ab5061c9` |
-| Status | active (effectively finished) | **active — live sending** |
-| Leads | 10 (9 completed, 1 errored) | 111 (77 waiting, 25 cancelled, 3 completed, 3 ended, 3 errored) |
+| Status | active (drained — 0 live leads) | **active — live sending** |
+| Leads (2026-08-14) | 10 (9 completed, 1 errored) | 111 (47 waiting, 32 completed, 25 cancelled, 4 ended, 3 errored) |
+| Live leads parked at | — | `event.invite_accepted` 32, `flow.human_approval` 9, `flow.delay` 6 |
 | Timezone | Asia/Kolkata | Asia/Kolkata |
 | Send window | 09:00–20:00, days `[0,1,2,3,4,5]` (Mon–Sat) | same |
 | Daily cap | 20 | 40 |
@@ -199,6 +238,7 @@ These exist because each one was a real incident. `audit/tests/` locks them.
 | ID | Guarantee | Where |
 |---|---|---|
 | **SEND-ONCE-001** | At-most-once send per `(lead, node)`. Fixed a bug that fired 82 invites for 30 people. | `transition_worker.py::_already_sent_this_node`, called first in `_fire_node` |
+| **SEND-ONCE-002** | Dropping a duplicate dispatch must not STRAND the lead. If it is still parked ON the already-sent node, resume it down the `sent` edge; if it already advanced, drop as before. Stranded 13 real C1/C2 leads before this existed. | `transition_worker.py::_resume_after_confirmed_send` |
 | **DEDUP-SEND-001** | Cross-lead re-contact suppression. **Deliberately excludes the lead's own sends** (`lead_id <>`) so sequence follow-ups still send. Not a substitute for SEND-ONCE. | `transition_worker.py` dedupe guard |
 | **SEND-SPACE-001** | Per-campaign inter-send spacing so approving N drafts doesn't burst N DMs from one seat. Atomic reserve on `omni_workflows.next_send_at`; slot in `custom_fields._spacing_send_at`; reserve-once / release-on-retry. Fails **open**. | `send_policy.py::_spacing_hold`, migration 054 |
 | **Window gate** | Business-hours + days-of-week hold, re-fires via synthetic `__retry__`. | `send_policy.py::compute_window_hold_seconds` |
@@ -277,9 +317,17 @@ These exist because each one was a real incident. `audit/tests/` locks them.
 
 **Engineering**
 
-- [ ] **Reconcile the repo/prod drift in §0** — highest-value cleanup; prod is currently
-      unreproducible and two applied migrations exist only as untracked files.
-- [ ] Investigate the **25 cancelled C2 leads** — cause not yet established.
+- [x] ~~Reconcile the repo/prod drift~~ — done 2026-08-12; prod is a clean fast-forward.
+- [x] ~~Fix the wrong Overview widget numbers~~ — done 2026-08-14 (see the release addendum).
+- [x] ~~SEND-ONCE lead stranding~~ — fixed and all 13 leads recovered 2026-08-14.
+- [ ] **The 25 cancelled C2 leads**: narrowed but not solved. All 25 were cancelled inside one
+      hour on **2026-08-04** and nothing since, so it was a single event, not an ongoing leak.
+      No `cancel_reason` was recorded, so the cause is still unknown. Look at worker logs
+      around 2026-08-04 09:00–10:06 UTC.
+- [ ] Harden the harness runner loop: `_claim_once` sits OUTSIDE the try/except in
+      `_run_poll_loop`, so one transient network error (a 502 during a rebuild, any
+      `URLError`) kills a runner that is documented as polling continuously. Same in
+      `command_listen`.
 - [ ] Retry `linkedin_search` periodically to detect limit reset; open a Unipile ticket if not.
 - [ ] Scope the Unipile reply sweep to seats with active threads only (usage optimization).
 - [ ] Verify the duplicate "Hemanshu Shah" seat rows.
@@ -378,3 +426,16 @@ Full list: 42 `omni_*` tables. `omni_ai_usage` (migration 055) tracks AI spend �
 - **Any worker that fires nodes must call `noderegistry.discover()` at startup.**
 - **Deterministic contact ids** come from `uuid5(workspace + linkedin/email)`. `_CONTACT_NS` must
   never change — a caller-minted `uuid4()` + `ON CONFLICT (id)` silently duplicated people.
+- **A guard that refuses an action must still move the lead.** SEND-ONCE-001 correctly stopped
+  a duplicate send and silently parked 13 leads forever. When you add a "don't do it" branch to
+  `_fire_node`, decide what the lead does INSTEAD — a bare `return` is a stall.
+- **Driving a recovery through `_emit_synthetic_result` writes a send-outcome row.** The
+  synthetic envelope carries `status='skipped'`, and the worker records it as a real outcome.
+  Recovering 13 leads that way created 13 phantom `skipped` rows (`provider IS NULL`) that had
+  to be deleted. Prefer calling the recovery helper directly, or clean up after.
+- **`docker cp` into a container does not survive `up -d`.** A recreated container loses any
+  ad-hoc script; re-copy it after every deploy.
+- **`ruff` inside a read-only mount exits 2 with no findings** — it cannot write its cache.
+  Pass `HOME=/tmp RUFF_CACHE_DIR=/tmp/rc`, or `test_congruity` fails for a non-reason.
+- **Build with `BUILD_SHA=$(git rev-parse HEAD)`** or `/api/health` reports `sha: unknown` and
+  you lose the only runtime answer to "what commit is actually deployed?".
