@@ -951,6 +951,16 @@ export const inbox = {
     api.post<ReplySuggestion>(`/inbox/threads/${contactId}/suggest`).then((r) => r.data),
   reply: (contactId: UUID, body: { body: string; subject?: string; channel?: string }) =>
     api.post<ReplyAccepted>(`/inbox/threads/${contactId}/reply`, body).then((r) => r.data),
+  // MSG-EDIT-001 — corrects THIS workspace's record of a message. It cannot change
+  // what the recipient received; the original is kept and the bubble shows as edited.
+  editMessage: (contactId: UUID, messageId: UUID, body: { body: string; reason?: string }) =>
+    api.patch<{ message_id: UUID; edited: boolean; original_body: string }>(
+      `/inbox/threads/${contactId}/messages/${messageId}`, body,
+    ).then((r) => r.data),
+  revertMessage: (contactId: UUID, messageId: UUID) =>
+    api.delete<{ message_id: UUID; edited: boolean; body: string }>(
+      `/inbox/threads/${contactId}/messages/${messageId}`,
+    ).then((r) => r.data),
 }
 
 // ── Integrations (connections) ───────────────────────────────────────────────

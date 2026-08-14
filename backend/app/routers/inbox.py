@@ -305,8 +305,131 @@ async def get_thread(
             )
         )
 
+    # 4. MSG-EDIT-001: overlay operator corrections. Applied LAST so it covers
+    #    every source uniformly — live Unipile bubbles (whose bodies exist only
+    #    at the provider) and stored omni_messages rows alike. The original text
+    #    always rides along in metadata so the reader can see what was really
+    #    sent; an edit annotates the record, it never silently replaces it.
+    async with system_scope():
+        edits = await fetch_all(
+            "SELECT message_id, edited_body, original_body, reason, updated_at "
+            "FROM omni_message_edits WHERE workspace_id=$1 AND contact_id=$2",
+            workspace_id,
+            contact_id,
+        )
+    if edits:
+        by_id = {str(e["message_id"]): e for e in edits}
+        for message in out:
+            edit = by_id.get(str(message.id))
+            if not edit:
+                continue
+            message.body = edit["edited_body"]
+            message.metadata = {
+                **(message.metadata or {}),
+                "edited": True,
+                "original_body": edit["original_body"],
+                "edit_reason": edit["reason"],
+                "edited_at": edit["updated_at"].isoformat(),
+            }
+
     out.sort(key=lambda m: m.occurred_at)
     return out[-limit:] if len(out) > limit else out
+
+
+class MessageEditIn(BaseModel):
+    body: str = Field(min_length=1, max_length=20000, description="The corrected text")
+    reason: str | None = Field(None, max_length=200, description="Why the record was corrected")
+
+
+def _is_system_bubble(metadata: dict | None) -> bool:
+    """Invite / profile-view / bare-send bubbles are LABELS the inbox renders from
+    the send ledger ("Connection request sent"), not message text. Editing one
+    would invent a message that never existed."""
+    return bool((metadata or {}).get("system"))
+
+
+@router.patch(
+    "/threads/{contact_id}/messages/{message_id}",
+    status_code=200,
+    summary="Correct the recorded text of a message (MSG-EDIT-001)",
+    description=(
+        "Corrects what THIS workspace has on record for a message. It does not and "
+        "cannot change what the recipient received — a delivered LinkedIn DM or email "
+        "is already theirs. The original text is captured on the first edit and never "
+        "overwritten, the correction is attributed and timestamped, and the thread "
+        "renders the message as edited with the original still readable. "
+        "DELETE the same path to revert."
+    ),
+)
+async def edit_message(
+    contact_id: uuid.UUID,
+    message_id: uuid.UUID,
+    body: MessageEditIn,
+    ctx: AuthContext = Depends(get_current_workspace),
+) -> dict[str, Any]:
+    workspace_id = str(ctx.workspace_id)
+    thread = await get_thread(contact_id, ctx=ctx, limit=1000)
+    target = next((m for m in thread if str(m.id) == str(message_id)), None)
+    if target is None:
+        raise HTTPException(404, "message not found in this contact's thread")
+    if _is_system_bubble(target.metadata):
+        raise HTTPException(
+            422,
+            "that entry is a connection/send event rendered from the send ledger, "
+            "not message text, so it has no body to correct",
+        )
+    # The original is whatever the record said BEFORE any correction — so a second
+    # edit must not overwrite it with the first edit's text.
+    original = (target.metadata or {}).get("original_body") or target.body or ""
+    async with system_scope():
+        await db_execute(
+            """
+            INSERT INTO omni_message_edits
+                (workspace_id, message_id, contact_id, edited_body, original_body, reason, edited_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (workspace_id, message_id) DO UPDATE
+                SET edited_body = EXCLUDED.edited_body,
+                    reason      = EXCLUDED.reason,
+                    edited_by   = EXCLUDED.edited_by,
+                    updated_at  = NOW()
+            """,
+            workspace_id,
+            str(message_id),
+            str(contact_id),
+            body.body,
+            original,
+            body.reason,
+            ctx.user_id or None,
+        )
+    log.info(
+        "MSG-EDIT-001: message %s on contact %s corrected by %s",
+        message_id, contact_id, ctx.user_id,
+    )
+    return {"message_id": str(message_id), "edited": True, "original_body": original}
+
+
+@router.delete(
+    "/threads/{contact_id}/messages/{message_id}",
+    status_code=200,
+    summary="Revert a corrected message to its original text",
+    description="Drops the correction overlay; the original recorded text returns untouched.",
+)
+async def revert_message_edit(
+    contact_id: uuid.UUID,
+    message_id: uuid.UUID,
+    ctx: AuthContext = Depends(get_current_workspace),
+) -> dict[str, Any]:
+    async with system_scope():
+        row = await fetch_one(
+            "DELETE FROM omni_message_edits WHERE workspace_id=$1 AND message_id=$2 "
+            "AND contact_id=$3 RETURNING original_body",
+            str(ctx.workspace_id),
+            str(message_id),
+            str(contact_id),
+        )
+    if row is None:
+        raise HTTPException(404, "that message has no correction to revert")
+    return {"message_id": str(message_id), "edited": False, "body": row["original_body"]}
 
 
 @router.get(

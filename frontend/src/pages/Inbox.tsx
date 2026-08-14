@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { clsx } from 'clsx'
-import { Inbox as InboxIcon, MessageSquare, Dot, CheckCircle2, ChevronLeft, Sparkles, Send, UserPlus } from 'lucide-react'
+import { Inbox as InboxIcon, MessageSquare, Dot, CheckCircle2, ChevronLeft, Sparkles, Send, UserPlus, Pencil } from 'lucide-react'
 import { inbox, canvas, type InboxThread } from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
@@ -321,7 +321,7 @@ function ThreadPane({
         ) : messages.length === 0 ? (
           <EmptyState title="No messages" description="Nothing yet on this thread." />
         ) : (
-          messages.map((m) => <MessageBubble key={m.id} m={m} />)
+          messages.map((m) => <MessageBubble key={m.id} m={m} contactId={contactId} />)
         )}
       </div>
       <ReplyComposer contactId={contactId} channel={lastChannel} />
@@ -399,9 +399,39 @@ function ReplyComposer({ contactId, channel }: { contactId: string; channel: str
   )
 }
 
-function MessageBubble({ m }: { m: import('../api/v2').InboxMessage }) {
+/**
+ * MSG-EDIT-001 — correct this workspace's record of a message.
+ *
+ * The recipient already has the original; nothing here reaches them. So the
+ * bubble never silently swaps its text: an edited message is badged, and the
+ * text as actually sent stays one click away. Reverting restores it exactly.
+ */
+function MessageBubble({ m, contactId }: { m: import('../api/v2').InboxMessage; contactId: string }) {
   const outbound = m.direction === 'outbound'
-  const meta = m.metadata as { system?: boolean; kind?: string } | null | undefined
+  const meta = m.metadata as
+    | { system?: boolean; kind?: string; edited?: boolean; original_body?: string; edit_reason?: string | null; edited_at?: string }
+    | null
+    | undefined
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [editing, setEditing] = useState(false)
+  const [showOriginal, setShowOriginal] = useState(false)
+  const [text, setText] = useState(m.body ?? '')
+  const [reason, setReason] = useState('')
+
+  const refresh = () => qc.invalidateQueries({ queryKey: ['inbox-thread', contactId] })
+
+  const saveMut = useMutation({
+    mutationFn: () => inbox.editMessage(contactId, m.id, { body: text.trim(), reason: reason.trim() || undefined }),
+    onSuccess: () => { setEditing(false); setReason(''); refresh(); toast.success('Record corrected') },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not correct the record'),
+  })
+  const revertMut = useMutation({
+    mutationFn: () => inbox.revertMessage(contactId, m.id),
+    onSuccess: (r) => { setText(r.body); setShowOriginal(false); refresh(); toast.success('Reverted to the original') },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not revert'),
+  })
+
   if (meta?.system) {
     // A connection/invite event (not a chat message) — a distinct, centered pill.
     const isInvite = meta.kind === 'invite'
@@ -426,10 +456,91 @@ function MessageBubble({ m }: { m: import('../api/v2').InboxMessage }) {
         )}
       >
         {m.subject && <p className={clsx('mb-1 text-xs font-semibold', outbound ? 'opacity-90' : 'text-slate-500')}>{m.subject}</p>}
-        <p className="whitespace-pre-wrap">{m.body ?? ''}</p>
-        <p className={clsx('mt-1.5 text-[10px]', outbound ? 'opacity-70' : 'text-slate-400')}>
-          {m.channel} · {new Date(m.occurred_at).toLocaleString()}
-          {m.classification && <span className="ml-1">· {m.classification}</span>}
+
+        {editing ? (
+          <div className="space-y-2">
+            <textarea
+              autoFocus
+              rows={4}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              className="w-full resize-y rounded-lg border border-white/40 bg-white/95 px-2.5 py-2 text-sm text-slate-900 outline-none dark:bg-slate-950 dark:text-slate-100"
+            />
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Why is the record being corrected? (optional)"
+              className="w-full rounded-lg border border-white/40 bg-white/95 px-2.5 py-1.5 text-[11px] text-slate-700 outline-none dark:bg-slate-950 dark:text-slate-200"
+            />
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { setEditing(false); setText(m.body ?? '') }}
+                className={clsx('text-[11px] font-semibold', outbound ? 'text-white/80' : 'text-slate-500')}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={saveMut.isPending || !text.trim() || text.trim() === (m.body ?? '')}
+                onClick={() => saveMut.mutate()}
+                className="rounded-lg bg-white px-2.5 py-1 text-[11px] font-bold text-brand-700 disabled:opacity-40 dark:bg-slate-800 dark:text-brand-200"
+              >
+                {saveMut.isPending ? 'Saving…' : 'Save correction'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="whitespace-pre-wrap">{m.body ?? ''}</p>
+        )}
+
+        {meta?.edited && !editing && (
+          <div className={clsx('mt-1.5 rounded-lg px-2 py-1.5 text-[10px]', outbound ? 'bg-white/15' : 'bg-amber-50 dark:bg-amber-950/30')}>
+            <span className={clsx('font-bold uppercase tracking-wide', outbound ? 'text-white/90' : 'text-amber-700 dark:text-amber-300')}>
+              Record corrected
+            </span>
+            {meta.edit_reason && <span className={outbound ? 'text-white/80' : 'text-amber-700 dark:text-amber-300'}> · {meta.edit_reason}</span>}
+            <span className={clsx('ml-1', outbound ? 'text-white/70' : 'text-amber-600 dark:text-amber-400')}>
+              · the recipient received the original
+            </span>
+            <div className="mt-1 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowOriginal((v) => !v)}
+                className={clsx('font-semibold underline', outbound ? 'text-white/90' : 'text-amber-800 dark:text-amber-200')}
+              >
+                {showOriginal ? 'Hide original' : 'View original'}
+              </button>
+              <button
+                type="button"
+                disabled={revertMut.isPending}
+                onClick={() => revertMut.mutate()}
+                className={clsx('font-semibold underline disabled:opacity-40', outbound ? 'text-white/90' : 'text-amber-800 dark:text-amber-200')}
+              >
+                {revertMut.isPending ? 'Reverting…' : 'Revert'}
+              </button>
+            </div>
+            {showOriginal && (
+              <p className={clsx('mt-1.5 whitespace-pre-wrap border-t pt-1.5', outbound ? 'border-white/25 text-white/85' : 'border-amber-200 text-amber-900 dark:border-amber-900 dark:text-amber-100')}>
+                {meta.original_body}
+              </p>
+            )}
+          </div>
+        )}
+
+        <p className={clsx('mt-1.5 flex items-center gap-1.5 text-[10px]', outbound ? 'opacity-70' : 'text-slate-400')}>
+          <span>{m.channel} · {new Date(m.occurred_at).toLocaleString()}</span>
+          {m.classification && <span>· {m.classification}</span>}
+          {!editing && (
+            <button
+              type="button"
+              onClick={() => { setText(m.body ?? ''); setEditing(true) }}
+              className="ml-auto inline-flex items-center gap-1 font-semibold underline"
+              aria-label="Correct this message's recorded text"
+            >
+              <Pencil size={9} /> Edit record
+            </button>
+          )}
         </p>
       </div>
       {outbound && <ChannelIcon channel={m.channel} size="sm" />}
