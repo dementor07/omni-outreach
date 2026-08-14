@@ -103,6 +103,26 @@ VIEW_SPEC_SCHEMA: dict[str, Any] = {
                 "limit": {"type": "integer"},
             },
         },
+        # DYNAMIC-003: chart presentation. This schema is what the agent is
+        # CONSTRAINED to emit, so an empty options object here made colours,
+        # keys and axis captions unauthorable no matter what the brief said.
+        # Series colour stays absent on purpose — slots are assigned by position
+        # from one validated palette, and that order is the CVD-safety mechanism.
+        "options": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "legend": {"type": ["boolean", "null"]},
+                "stacked": {"type": "boolean"},
+                "value_labels": {"type": "boolean"},
+                "x_label": {"type": ["string", "null"]},
+                "y_label": {"type": ["string", "null"]},
+                "series_labels": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                },
+            },
+        },
         "widget": {
             "type": "object",
             "additionalProperties": False,
@@ -114,7 +134,7 @@ VIEW_SPEC_SCHEMA: dict[str, Any] = {
                 "query": {"$ref": "#/$defs/query"},
                 "width": {"type": "integer"},
                 "height": {"type": "integer"},
-                "options": {"type": "object", "additionalProperties": False, "properties": {}},
+                "options": {"$ref": "#/$defs/options"},
             },
         },
     },

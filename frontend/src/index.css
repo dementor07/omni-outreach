@@ -5,6 +5,48 @@
 @tailwind utilities;
 
 @layer base {
+  /* DYNAMIC-003 — data-visualisation tokens.
+     One validated categorical palette, assigned to series BY POSITION. The slot
+     ORDER is the colour-vision-deficiency safety mechanism, not decoration:
+     validated with the dataviz palette validator against this app's own
+     surfaces (#ffffff light / #020617 dark). Light: worst adjacent CVD dE 9.1,
+     normal-vision dE 22.9. Dark: worst adjacent CVD dE 8.4, normal-vision 19.8.
+     Both clear the >=8 CVD target and >=15 normal-vision floor.
+     Aqua and yellow sit under 3:1 on the light surface, so charts using them
+     ship visible direct labels + a legend (the documented relief rule).
+     Do not reorder or hand-pick these per chart. */
+  :root {
+    --viz-series-1: #2a78d6;
+    --viz-series-2: #eb6834;
+    --viz-series-3: #1baf7a;
+    --viz-series-4: #eda100;
+    --viz-series-5: #e87ba4;
+    --viz-series-6: #008300;
+    --viz-series-7: #4a3aa7;
+    --viz-series-8: #e34948;
+    --viz-surface: #ffffff;
+    --viz-grid: #e2e8f0;
+    --viz-axis: #cbd5e1;
+    --viz-ink-muted: #64748b;
+  }
+
+  /* Same eight hues re-stepped for the dark surface — a selected dark palette,
+     not an automatic flip. */
+  .dark {
+    --viz-series-1: #3987e5;
+    --viz-series-2: #d95926;
+    --viz-series-3: #199e70;
+    --viz-series-4: #c98500;
+    --viz-series-5: #d55181;
+    --viz-series-6: #008300;
+    --viz-series-7: #9085e9;
+    --viz-series-8: #e66767;
+    --viz-surface: #020617;
+    --viz-grid: #1e293b;
+    --viz-axis: #334155;
+    --viz-ink-muted: #94a3b8;
+  }
+
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;

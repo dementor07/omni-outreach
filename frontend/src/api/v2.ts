@@ -1329,6 +1329,22 @@ export interface ViewQuerySpec {
 
 export type WidgetType = 'stat' | 'table' | 'bar_chart' | 'line_chart' | 'list'
 
+/**
+ * DYNAMIC-003 — chart presentation options. Presentation only: these never
+ * change what a query returns, so a widget can't claim something its data
+ * doesn't support. Series COLOUR is deliberately absent — slots are assigned by
+ * position from one validated palette, and that ordering is what keeps adjacent
+ * series distinguishable under colour-vision deficiency.
+ */
+export interface WidgetOptions {
+  legend?: boolean | null
+  stacked?: boolean
+  value_labels?: boolean
+  x_label?: string | null
+  y_label?: string | null
+  series_labels?: Record<string, string>
+}
+
 export interface WidgetInstance {
   id: string
   type: WidgetType
@@ -1336,7 +1352,7 @@ export interface WidgetInstance {
   query: ViewQuerySpec
   width?: number
   height?: number
-  options?: Record<string, unknown>
+  options?: WidgetOptions
 }
 
 export interface ViewDef {
