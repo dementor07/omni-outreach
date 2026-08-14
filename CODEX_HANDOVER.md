@@ -36,6 +36,35 @@ Everything below this heading is verified live on the box, not intended.
 **Known residue:** one limbo lead (`00000000-…`, `active`, no node, no campaign, last
 touched 2026-07-02) predates this work and is not in a live campaign.
 
+### Later the same day — charts, and what running the harness found (`bfc7034`)
+
+- **Charts could not express colour, keys or axes at all.** Every widget type shipped
+  `options: {}`, and the renderers drew one series in one hue with no legend and no axis.
+  `bar_chart`/`line_chart` now take `legend`, `stacked`, `value_labels`, `x_label`,
+  `y_label`, `series_labels`; multi-series is simply several metrics in one query.
+  Series **colour is deliberately not authorable** — slots come from one palette validated
+  against this app's surfaces (light adjacent CVD ΔE 9.1 / normal 22.9; dark 8.4 / 19.8),
+  and the slot ORDER is the colour-vision-deficiency safety mechanism, so a prompt picking
+  hex would silently void it. Tokens live in `index.css` as `--viz-*`.
+- **Two query limits worth knowing before you promise a chart:** `send_outcomes` has no
+  campaign *name* field (only `workflow_id`), and filters are **query-wide — there are no
+  per-metric filters**. So "campaign A vs campaign B as two series on one chart" is not
+  expressible; the working form is small multiples, one chart per campaign.
+- **Building the harness was not testing it.** One real job through the broker found three
+  breaks, two of which *blocked correct work*:
+  1. the CLI crashed on every successful claim under `--format json` (Path values are not
+     JSON-serializable) — after taking the lease, so the job sat `working` behind a dead
+     process until the lease expired;
+  2. the campaign-identity gate minted a `campaign 2` alias from any digit in a campaign
+     name, so `TEST e2e CLEAN` and `…(v2)` collided with a correctly-titled Campaign 2
+     widget and no scope could satisfy it;
+  3. the sent-status gate fired on rows tables, so `Recent Send Activity` was blocked and
+     complying would have hidden the failed/skipped rows an operator most needs.
+- **Manual-relay sharp edge:** the lease is 90s. Authoring by hand without calling
+  `heartbeat` loses the claim (the job requeues safely — observed at attempt 3).
+- Verified live in a browser, light and dark: legends with colour keys, y-axis ticks,
+  gridlines, per-bar value labels, stacked and grouped bars, two named series per chart.
+
 ## 2026-08-12 architecture reconciliation addendum
 
 - Production and `origin/phase-out-non-v2` are now reproducible. The deployed
