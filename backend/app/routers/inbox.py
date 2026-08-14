@@ -225,6 +225,13 @@ async def get_thread(
             client = await UnipileClient.for_workspace(workspace_id)
             resp = await client.list_chat_messages(str(chat["chat_id"]), limit=min(limit, 100))
             items = resp.get("items") if isinstance(resp, dict) else resp
+            # The chat carries the sending account; individual messages may not.
+            account_id = ""
+            if isinstance(resp, dict):
+                account_id = str(resp.get("account_id") or "")
+            if not account_id:
+                chat_meta = await client.get_chat(str(chat["chat_id"]))
+                account_id = str((chat_meta or {}).get("account_id") or "")
             for msg in reversed(items or []):  # Unipile returns newest-first
                 if msg.get("is_event") or msg.get("deleted"):
                     continue
@@ -241,7 +248,17 @@ async def get_thread(
                         body=text,
                         classification=None,
                         confidence=None,
-                        metadata={"source": "unipile"},
+                        # MSG-EDIT-002: the PROVIDER id is what /messages/{id}/edit
+                        # needs. The InboxMessage id above is a derived uuid5 (a
+                        # stable React key), so without carrying this the real
+                        # message could never be addressed.
+                        metadata={
+                            "source": "unipile",
+                            "provider_message_id": str(msg.get("id") or ""),
+                            "account_id": str(msg.get("account_id") or account_id or ""),
+                            "is_sender": msg.get("is_sender") == 1,
+                            "provider_edited": bool(msg.get("edited")),
+                        },
                         occurred_at=_parse_ts(msg.get("timestamp")),
                     )
                 )
@@ -323,7 +340,9 @@ async def get_thread(
             edit = by_id.get(str(message.id))
             if not edit:
                 continue
-            message.body = edit["edited_body"]
+            # The body is NOT overridden: the provider is the source of truth and
+            # already returns the edited text. What we add is the provenance the
+            # provider does not keep — what it said before, who changed it, when.
             message.metadata = {
                 **(message.metadata or {}),
                 "edited": True,
@@ -351,14 +370,14 @@ def _is_system_bubble(metadata: dict | None) -> bool:
 @router.patch(
     "/threads/{contact_id}/messages/{message_id}",
     status_code=200,
-    summary="Correct the recorded text of a message (MSG-EDIT-001)",
+    summary="Edit a sent message at the provider (MSG-EDIT-002)",
     description=(
-        "Corrects what THIS workspace has on record for a message. It does not and "
-        "cannot change what the recipient received — a delivered LinkedIn DM or email "
-        "is already theirs. The original text is captured on the first edit and never "
-        "overwritten, the correction is attributed and timestamped, and the thread "
-        "renders the message as edited with the original still readable. "
-        "DELETE the same path to revert."
+        "Really edits the message on LinkedIn via Unipile — the recipient sees the "
+        "new text, marked edited. LinkedIn only allows this for a limited period "
+        "after sending; once that window closes the provider refuses and its reason "
+        "is returned verbatim. Only your OWN outbound messages can be edited. "
+        "The provider keeps no history, so the text before the edit is recorded "
+        "locally with its author and timestamp; DELETE the same path edits it back."
     ),
 )
 async def edit_message(
@@ -372,15 +391,41 @@ async def edit_message(
     target = next((m for m in thread if str(m.id) == str(message_id)), None)
     if target is None:
         raise HTTPException(404, "message not found in this contact's thread")
-    if _is_system_bubble(target.metadata):
+    meta = target.metadata or {}
+    if _is_system_bubble(meta):
         raise HTTPException(
             422,
             "that entry is a connection/send event rendered from the send ledger, "
-            "not message text, so it has no body to correct",
+            "not a message, so there is nothing to edit",
         )
-    # The original is whatever the record said BEFORE any correction — so a second
+    if target.direction != "outbound":
+        raise HTTPException(422, "only your own outbound messages can be edited")
+    provider_message_id = str(meta.get("provider_message_id") or "")
+    account_id = str(meta.get("account_id") or "")
+    if not provider_message_id or not account_id:
+        raise HTTPException(
+            422,
+            "this message has no live provider handle (its body is not held at the "
+            "provider), so it cannot be edited there",
+        )
+
+    # Edit at the provider FIRST. If LinkedIn's window has closed it refuses, and
+    # recording a local 'edit' for a message the recipient still sees unchanged
+    # would be a lie about what they are looking at.
+    try:
+        client = await UnipileClient.for_workspace(workspace_id)
+        await client.edit_message(provider_message_id, body.body, account_id=account_id)
+    except Exception as exc:  # noqa: BLE001 — surface the provider's own reason
+        log.warning("MSG-EDIT-002: provider refused edit of %s: %s", provider_message_id, exc)
+        raise HTTPException(
+            422,
+            f"LinkedIn refused the edit — the edit window for this message has most "
+            f"likely closed. Provider said: {str(exc)[:200]}",
+        ) from exc
+
+    # The original is whatever the record said BEFORE any edit — so a second
     # edit must not overwrite it with the first edit's text.
-    original = (target.metadata or {}).get("original_body") or target.body or ""
+    original = meta.get("original_body") or target.body or ""
     async with system_scope():
         await db_execute(
             """
@@ -402,8 +447,8 @@ async def edit_message(
             ctx.user_id or None,
         )
     log.info(
-        "MSG-EDIT-001: message %s on contact %s corrected by %s",
-        message_id, contact_id, ctx.user_id,
+        "MSG-EDIT-002: message %s (provider %s) on contact %s edited by %s",
+        message_id, provider_message_id, contact_id, ctx.user_id,
     )
     return {"message_id": str(message_id), "edited": True, "original_body": original}
 
@@ -411,24 +456,52 @@ async def edit_message(
 @router.delete(
     "/threads/{contact_id}/messages/{message_id}",
     status_code=200,
-    summary="Revert a corrected message to its original text",
-    description="Drops the correction overlay; the original recorded text returns untouched.",
+    summary="Put a message back to its original text",
+    description=(
+        "Edits the message at the provider back to the text it had before, then drops "
+        "the local edit record. Subject to the same LinkedIn edit window as any other "
+        "edit — this is a real edit back, not an undo."
+    ),
 )
 async def revert_message_edit(
     contact_id: uuid.UUID,
     message_id: uuid.UUID,
     ctx: AuthContext = Depends(get_current_workspace),
 ) -> dict[str, Any]:
+    workspace_id = str(ctx.workspace_id)
     async with system_scope():
         row = await fetch_one(
-            "DELETE FROM omni_message_edits WHERE workspace_id=$1 AND message_id=$2 "
-            "AND contact_id=$3 RETURNING original_body",
-            str(ctx.workspace_id),
-            str(message_id),
-            str(contact_id),
+            "SELECT original_body FROM omni_message_edits "
+            "WHERE workspace_id=$1 AND message_id=$2 AND contact_id=$3",
+            workspace_id, str(message_id), str(contact_id),
         )
     if row is None:
-        raise HTTPException(404, "that message has no correction to revert")
+        raise HTTPException(404, "that message has no recorded edit to undo")
+
+    thread = await get_thread(contact_id, ctx=ctx, limit=1000)
+    target = next((m for m in thread if str(m.id) == str(message_id)), None)
+    meta = (target.metadata if target else None) or {}
+    provider_message_id = str(meta.get("provider_message_id") or "")
+    account_id = str(meta.get("account_id") or "")
+    if not provider_message_id or not account_id:
+        raise HTTPException(422, "this message has no live provider handle to edit back")
+
+    try:
+        client = await UnipileClient.for_workspace(workspace_id)
+        await client.edit_message(provider_message_id, row["original_body"], account_id=account_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            422,
+            f"LinkedIn refused the edit back — the window has most likely closed, so "
+            f"the recipient keeps the edited text. Provider said: {str(exc)[:200]}",
+        ) from exc
+
+    async with system_scope():
+        await db_execute(
+            "DELETE FROM omni_message_edits WHERE workspace_id=$1 AND message_id=$2 "
+            "AND contact_id=$3",
+            workspace_id, str(message_id), str(contact_id),
+        )
     return {"message_id": str(message_id), "edited": False, "body": row["original_body"]}
 
 

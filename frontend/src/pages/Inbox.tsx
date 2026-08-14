@@ -400,18 +400,26 @@ function ReplyComposer({ contactId, channel }: { contactId: string; channel: str
 }
 
 /**
- * MSG-EDIT-001 — correct this workspace's record of a message.
+ * MSG-EDIT-002 — really edit a sent message on LinkedIn.
  *
- * The recipient already has the original; nothing here reaches them. So the
- * bubble never silently swaps its text: an edited message is badged, and the
- * text as actually sent stays one click away. Reverting restores it exactly.
+ * This is a live outbound action: the recipient sees the new text. LinkedIn only
+ * allows it for a limited period after sending, and refuses afterwards — the
+ * provider's reason is surfaced verbatim rather than a generic failure. The text
+ * before the edit is kept locally (LinkedIn keeps no history) so the thread can
+ * still show what was originally sent.
  */
 function MessageBubble({ m, contactId }: { m: import('../api/v2').InboxMessage; contactId: string }) {
   const outbound = m.direction === 'outbound'
   const meta = m.metadata as
-    | { system?: boolean; kind?: string; edited?: boolean; original_body?: string; edit_reason?: string | null; edited_at?: string }
+    | {
+        system?: boolean; kind?: string; edited?: boolean; original_body?: string
+        edit_reason?: string | null; edited_at?: string
+        provider_message_id?: string; account_id?: string
+      }
     | null
     | undefined
+  // Only your own message, and only one the provider can still address, is editable.
+  const canEdit = outbound && Boolean(meta?.provider_message_id && meta?.account_id)
   const qc = useQueryClient()
   const toast = useToast()
   const [editing, setEditing] = useState(false)
@@ -423,13 +431,15 @@ function MessageBubble({ m, contactId }: { m: import('../api/v2').InboxMessage; 
 
   const saveMut = useMutation({
     mutationFn: () => inbox.editMessage(contactId, m.id, { body: text.trim(), reason: reason.trim() || undefined }),
-    onSuccess: () => { setEditing(false); setReason(''); refresh(); toast.success('Record corrected') },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not correct the record'),
+    onSuccess: () => { setEditing(false); setReason(''); refresh(); toast.success('Edited on LinkedIn') },
+    // The provider's own reason (usually "the edit window has closed") is the
+    // useful part — show it instead of a generic failure.
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'LinkedIn refused the edit'),
   })
   const revertMut = useMutation({
     mutationFn: () => inbox.revertMessage(contactId, m.id),
-    onSuccess: (r) => { setText(r.body); setShowOriginal(false); refresh(); toast.success('Reverted to the original') },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not revert'),
+    onSuccess: (r) => { setText(r.body); setShowOriginal(false); refresh(); toast.success('Put back to the original') },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'LinkedIn refused the edit'),
   })
 
   if (meta?.system) {
@@ -469,9 +479,13 @@ function MessageBubble({ m, contactId }: { m: import('../api/v2').InboxMessage; 
             <input
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="Why is the record being corrected? (optional)"
+              placeholder="Note for your records (optional)"
               className="w-full rounded-lg border border-white/40 bg-white/95 px-2.5 py-1.5 text-[11px] text-slate-700 outline-none dark:bg-slate-950 dark:text-slate-200"
             />
+            <p className={clsx('text-[10px] leading-snug', outbound ? 'text-white/75' : 'text-slate-500')}>
+              This edits the message on LinkedIn — they'll see the new text, marked edited.
+              Only possible for a short window after sending.
+            </p>
             <div className="flex items-center justify-end gap-2">
               <button
                 type="button"
@@ -486,7 +500,7 @@ function MessageBubble({ m, contactId }: { m: import('../api/v2').InboxMessage; 
                 onClick={() => saveMut.mutate()}
                 className="rounded-lg bg-white px-2.5 py-1 text-[11px] font-bold text-brand-700 disabled:opacity-40 dark:bg-slate-800 dark:text-brand-200"
               >
-                {saveMut.isPending ? 'Saving…' : 'Save correction'}
+                {saveMut.isPending ? 'Editing…' : 'Edit on LinkedIn'}
               </button>
             </div>
           </div>
@@ -497,19 +511,21 @@ function MessageBubble({ m, contactId }: { m: import('../api/v2').InboxMessage; 
         {meta?.edited && !editing && (
           <div className={clsx('mt-1.5 rounded-lg px-2 py-1.5 text-[10px]', outbound ? 'bg-white/15' : 'bg-amber-50 dark:bg-amber-950/30')}>
             <span className={clsx('font-bold uppercase tracking-wide', outbound ? 'text-white/90' : 'text-amber-700 dark:text-amber-300')}>
-              Record corrected
+              Edited
             </span>
             {meta.edit_reason && <span className={outbound ? 'text-white/80' : 'text-amber-700 dark:text-amber-300'}> · {meta.edit_reason}</span>}
-            <span className={clsx('ml-1', outbound ? 'text-white/70' : 'text-amber-600 dark:text-amber-400')}>
-              · the recipient received the original
-            </span>
+            {meta.edited_at && (
+              <span className={clsx('ml-1', outbound ? 'text-white/70' : 'text-amber-600 dark:text-amber-400')}>
+                · {new Date(meta.edited_at).toLocaleString()}
+              </span>
+            )}
             <div className="mt-1 flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => setShowOriginal((v) => !v)}
                 className={clsx('font-semibold underline', outbound ? 'text-white/90' : 'text-amber-800 dark:text-amber-200')}
               >
-                {showOriginal ? 'Hide original' : 'View original'}
+                {showOriginal ? 'Hide what was sent' : 'What was originally sent'}
               </button>
               <button
                 type="button"
@@ -517,7 +533,7 @@ function MessageBubble({ m, contactId }: { m: import('../api/v2').InboxMessage; 
                 onClick={() => revertMut.mutate()}
                 className={clsx('font-semibold underline disabled:opacity-40', outbound ? 'text-white/90' : 'text-amber-800 dark:text-amber-200')}
               >
-                {revertMut.isPending ? 'Reverting…' : 'Revert'}
+                {revertMut.isPending ? 'Putting back…' : 'Put back'}
               </button>
             </div>
             {showOriginal && (
@@ -531,14 +547,15 @@ function MessageBubble({ m, contactId }: { m: import('../api/v2').InboxMessage; 
         <p className={clsx('mt-1.5 flex items-center gap-1.5 text-[10px]', outbound ? 'opacity-70' : 'text-slate-400')}>
           <span>{m.channel} · {new Date(m.occurred_at).toLocaleString()}</span>
           {m.classification && <span>· {m.classification}</span>}
-          {!editing && (
+          {!editing && canEdit && (
             <button
               type="button"
               onClick={() => { setText(m.body ?? ''); setEditing(true) }}
               className="ml-auto inline-flex items-center gap-1 font-semibold underline"
-              aria-label="Correct this message's recorded text"
+              aria-label="Edit this message on LinkedIn"
+              title="Edit on LinkedIn — only possible for a short window after sending"
             >
-              <Pencil size={9} /> Edit record
+              <Pencil size={9} /> Edit
             </button>
           )}
         </p>

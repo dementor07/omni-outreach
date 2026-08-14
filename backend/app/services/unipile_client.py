@@ -91,15 +91,33 @@ class UnipileClient:
         return f"{self._base}/api/v1/{path.lstrip('/')}"
 
     async def _request(
-        self, method: str, path: str, *, params: dict | None = None, json_body: dict | None = None
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict | None = None,
+        json_body: dict | None = None,
+        form_body: dict | None = None,
     ) -> Any:
+        """``form_body`` sends multipart/form-data instead of JSON — the shape
+        Unipile's chat-write endpoints expect (the muscle's send builds the same
+        multipart form: account_id / attendee_id / text)."""
         headers = {"X-API-KEY": self._api_key, "Accept": "application/json"}
         url = self._url(path)
         last_err: str | None = None
         for attempt in range(len(_BACKOFF) + 1):
             try:
+                # httpx builds multipart when `files` is present; the (None, value)
+                # tuples keep the parts as plain form fields. Only pass the kwarg
+                # when there IS a form body — every existing caller (and their
+                # test doubles) still sees the original json-only signature.
+                extra: dict[str, Any] = {}
+                if form_body:
+                    extra["files"] = {k: (None, str(v)) for k, v in form_body.items()}
                 async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                    resp = await client.request(method, url, params=params, json=json_body, headers=headers)
+                    resp = await client.request(
+                        method, url, params=params, json=json_body, headers=headers, **extra
+                    )
             except httpx.HTTPError as e:
                 last_err = f"network error: {e}"
                 if attempt < len(_BACKOFF):
@@ -198,6 +216,24 @@ class UnipileClient:
         if cursor:
             params["cursor"] = cursor
         return await self._get(f"chats/{chat_id}/messages", params=params)
+
+    async def edit_message(self, message_id: str, text: str, *, account_id: str) -> Any:
+        """MSG-EDIT-002 — really edit a message already delivered on LinkedIn.
+
+        LinkedIn allows a sender to edit a sent message for a limited period; past
+        that window the provider refuses and the recipient keeps what they got.
+        Unipile surfaces that as ``POST /messages/{id}/edit``. Multipart, matching
+        the send path (``POST /chats/{id}/messages``) rather than JSON — the
+        chat-write endpoints take form fields.
+
+        Raises UnipileError carrying the provider's own message, so an expired
+        window reaches the operator as the reason instead of a generic failure.
+        """
+        return await self._request(
+            "POST",
+            f"messages/{message_id}/edit",
+            form_body={"account_id": account_id, "text": text},
+        )
 
     async def list_chat_attendees(self, chat_id: str) -> Any:
         return await self._get(f"chats/{chat_id}/attendees")
