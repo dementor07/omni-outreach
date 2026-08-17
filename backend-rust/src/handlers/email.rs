@@ -1,9 +1,18 @@
-//! SMTP email handler. Payload carries the rendered subject + body + sender
-//! identity. The SMTP password is redeemed via the credential ref so it
-//! never lives in the Kafka message.
+//! Email handler with two send providers, chosen by the payload's `provider`
+//! field (default "smtp"):
+//!
+//!   * "smtp"    — a lettre SMTP relay (the original path). Bounce is only the
+//!                 synchronous permanent send-failure (EMAIL_SMTP_PERMANENT).
+//!   * "mailgun" — Mailgun's HTTP API (POST /v{3}/{domain}/messages). This adds
+//!                 real async delivery/bounce/open/click via Mailgun webhooks
+//!                 (routers/webhooks_in handles those and resumes parked leads).
+//!
+//! Secrets (smtp_password / mailgun api_key) are redeemed via the credential ref
+//! so they never live in the Kafka message.
 
 use crate::credentials;
 use crate::handlers::common;
+use crate::http::OUTBOUND;
 use crate::models::{ActionCommand, ExecutionResult};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{Message, SmtpTransport, Transport};
@@ -11,6 +20,113 @@ use serde_json::json;
 use tracing::{error, info};
 
 pub async fn handle_email(command: &ActionCommand) -> ExecutionResult {
+    match common::s(command, "provider").as_str() {
+        "mailgun" => send_mailgun(command).await,
+        // Empty or "smtp" -> the SMTP path (backward compatible default).
+        _ => send_smtp(command).await,
+    }
+}
+
+/// Mailgun HTTP send. Uses the account API key (basic auth user "api") redeemed
+/// from the credential ref, POSTs the rendered message to
+/// `https://api{.eu}.mailgun.net/v3/{domain}/messages`, and turns on Mailgun
+/// open/click tracking so the webhook events fire. Tags the message with the
+/// lead id (v:lead_id) so the inbound webhook can map an event back to the lead.
+async fn send_mailgun(command: &ActionCommand) -> ExecutionResult {
+    let domain = common::s(command, "mailgun_domain");
+    let region = common::s(command, "mailgun_region"); // "eu" or "" (US)
+    let from = common::s(command, "from");
+    let to = command.lead.email.clone().unwrap_or_default();
+    let subject = common::s(command, "subject");
+    let body = common::s(command, "body");
+
+    if domain.is_empty() || from.is_empty() || to.is_empty() {
+        return common::fail(command, "email command missing mailgun_domain/from/to fields", false);
+    }
+    if body.is_empty() {
+        return common::fail(command, "email body is empty", false);
+    }
+
+    let cred_ref = match command.credential_ref.as_ref() {
+        Some(r) => r.clone(),
+        None => return common::fail(command, "EMAIL_MISSING_CREDENTIAL_REF", false),
+    };
+    let api_key = match credentials::redeem_field(&cred_ref, "api_key").await {
+        Ok(Some(k)) => k,
+        Ok(None) => {
+            credentials::release(&cred_ref).await;
+            return common::fail(command, "EMAIL_CREDENTIAL_BUNDLE_INCOMPLETE", false);
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "mailgun credential redeem failed");
+            credentials::release(&cred_ref).await;
+            return common::fail(command, "EMAIL_CREDENTIAL_REDEEM_FAILED", true);
+        }
+    };
+
+    // Normalize region so "EU"/" eu " route to the EU endpoint (review LOW).
+    let region = region.trim().to_lowercase();
+    let base = if region == "eu" { "https://api.eu.mailgun.net" } else { "https://api.mailgun.net" };
+    let url = format!("{base}/v3/{domain}/messages");
+    let form: Vec<(&str, String)> = vec![
+        ("from", from.clone()),
+        ("to", to.clone()),
+        ("subject", subject),
+        ("html", body),
+        ("o:tracking", "yes".to_string()),
+        ("o:tracking-opens", "yes".to_string()),
+        ("o:tracking-clicks", "yes".to_string()),
+        // Map events back to the lead on the webhook side (the webhook resolves
+        // the workspace from the lead row). Mailgun echoes v:* custom variables
+        // back in every webhook's event-data.user-variables.
+        ("v:lead_id", command.lead.id.to_string()),
+    ];
+    // Tag which connection sent this, so the webhook verifies the signature
+    // against THIS connection's signing key (review HIGH #1).
+    let mg_conn_id = common::s(command, "mailgun_connection_id");
+    let form = {
+        let mut f = form;
+        if !mg_conn_id.is_empty() {
+            f.push(("v:mg_connection_id", mg_conn_id));
+        }
+        f
+    };
+
+    let resp = OUTBOUND
+        .post(&url)
+        .basic_auth("api", Some(&api_key))
+        .form(&form)
+        .send()
+        .await;
+    credentials::release(&cred_ref).await;
+
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            let to_for_log = to.clone();
+            info!("[email/mailgun] queued to {} for lead {}", to_for_log, command.lead.id);
+            common::ok(
+                command,
+                json!({"provider": "mailgun", "domain": domain, "to": to_for_log}),
+                Some("email_sent"),
+                json!({}),
+            )
+        }
+        Ok(r) => {
+            let status = r.status().as_u16();
+            error!(status, lead_id = %command.lead.id, "mailgun send rejected");
+            // 400/401/402 are permanent config/recipient problems; 429/5xx retriable.
+            let retriable = status == 429 || status >= 500;
+            let code = if retriable { "EMAIL_MAILGUN_TRANSIENT" } else { "EMAIL_MAILGUN_PERMANENT" };
+            common::fail(command, code, retriable)
+        }
+        Err(e) => {
+            error!(error = %e, lead_id = %command.lead.id, "mailgun request failed");
+            common::fail(command, "EMAIL_MAILGUN_REQUEST_FAILED", true)
+        }
+    }
+}
+
+async fn send_smtp(command: &ActionCommand) -> ExecutionResult {
     let smtp_host = common::s(command, "smtp_host");
     let smtp_port = command.payload["smtp_port"].as_u64().unwrap_or(587) as u16;
     let smtp_username = common::s(command, "smtp_username");

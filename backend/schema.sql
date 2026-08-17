@@ -14,6 +14,28 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
     expires_at      TIMESTAMPTZ NOT NULL
 );
 
+-- ── Multi-tenancy (migration 019) ─────────────────────────────────────────────
+-- CI seeds from this hand-maintained dump; these must mirror 019_workspaces.py
+-- or the auth flow (get_current_workspace -> workspace_members) 500s in CI.
+CREATE TABLE IF NOT EXISTS workspaces (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name          TEXT NOT NULL,
+    slug          TEXT NOT NULL UNIQUE,
+    owner_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_workspaces_owner ON workspaces(owner_user_id);
+
+CREATE TABLE IF NOT EXISTS workspace_members (
+    workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role         TEXT NOT NULL CHECK (role IN ('owner','admin','member')) DEFAULT 'member',
+    invited_at   TIMESTAMPTZ,
+    joined_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (workspace_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_workspace_members_user ON workspace_members(user_id);
+
 -- ── Sender accounts ───────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS linkedin_accounts (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),

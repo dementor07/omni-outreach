@@ -1,13 +1,13 @@
-"""Per-company Serper LinkedIn profile search — interior fan-out enabler.
+"""Serper people discovery — paid Google API LinkedIn profile search.
 
-Searches Google (via Serper) for LinkedIn profiles matching decision-maker
-titles at one company. Emits a list under ``custom_fields[people_key]`` that
-the downstream ``flow.for_each`` iterates one person at a time.
+Searches Google (via the paid Serper API) for LinkedIn profiles matching
+decision-maker titles at one company, and writes the deduped list under
+``custom_fields[people_key]`` for the downstream ``flow.for_each`` to iterate.
+Needs a Serper connection (api_key). For the free, keyless equivalent use
+``source.searxng_people``.
 
-This is *not* a single HTTP call — it runs 2 query patterns per role, dedupes
-URLs across patterns, and stops at ``max_per_company``. Multi-call orchestration
-that does not fit ``http_node``. Worker side: a bespoke handler (or follow-up
-generic "http_call with per-pattern loop").
+Not a single HTTP call — it runs 2 query patterns per role, dedupes URLs, and
+caps at ``max_per_company`` (handlers/serper_people.rs).
 
 Ported from scraper/serper_client.py:58-151.
 """
@@ -30,7 +30,7 @@ from app.nodes import (
 
 
 class SerperPeopleSourceConfig(BaseModel):
-    connection_name: str = Field(description="Serper connection (Settings -> Integrations)")
+    connection_name: str = Field(description="Serper connection (Settings → Integrations)")
     company_field: str = Field(
         "item",
         description="custom_fields key holding the company dict whose name we search for "
@@ -50,16 +50,18 @@ class SerperPeopleSourceConfig(BaseModel):
 MANIFEST = NodeManifest(
     type="source.serper_people",
     category=NodeCategory.SOURCE,
-    summary="Find LinkedIn profiles at a company via Serper (for downstream for_each)",
+    summary="Find LinkedIn profiles at a company via the paid Serper API (needs api_key)",
     config_schema=SerperPeopleSourceConfig,
     output_handles=(
         NodeHandle("default", "1+ profiles found; list lands in custom_fields[people_key]"),
         NodeHandle("empty", "No profiles matched"),
-        NodeHandle("on_error", "Serper call failed"),
+        NodeHandle("on_error", "Search call failed"),
     ),
     capabilities=("connection:serper",),
     side_effect=SideEffect.NETWORK,
     icon="users",
+    primary_fields=("connection_name",),
+    advanced_fields=("company_field", "titles", "max_per_company", "people_key"),
 )
 
 
@@ -73,6 +75,7 @@ async def execute(ctx: NodeContext) -> NodeResult:
             "entity_type": "lead",
             "entity_id": ctx.lead.get("id"),
             "payload": {
+                "provider": "serper",
                 "connection_name": cfg.connection_name,
                 "company_name": company.get("company_name"),
                 "industry": company.get("sector") or company.get("industry"),
@@ -83,7 +86,7 @@ async def execute(ctx: NodeContext) -> NodeResult:
             },
         }
     ]
-    return NodeResult(handle="default", events=events, telemetry={"correlation_id": correlation_id})
+    return NodeResult(handle="default", events=events, telemetry={"correlation_id": correlation_id, "provider": "serper"})
 
 
 register(MANIFEST, execute)

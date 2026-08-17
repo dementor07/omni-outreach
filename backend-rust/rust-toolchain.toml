@@ -1,0 +1,12 @@
+# Pin the toolchain so builds are reproducible (RUST-001). The Dockerfile
+# previously used `nightly`, which let transitive deps float forward to versions
+# requiring unstable/edition features and broke clean rebuilds. A pinned STABLE
+# channel + a committed Cargo.lock (built with `cargo build --locked`) makes
+# every build deterministic.
+#
+# 1.89 (stable) is chosen because the committed lock resolves a few transitive
+# crates that need edition2024 / rustc >= 1.85 (e.g. hashbrown 0.17, base64ct
+# 1.8). The muscle's own crate is edition-2021 and needs nothing from nightly.
+[toolchain]
+channel = "1.89.0"
+components = ["clippy", "rustfmt"]

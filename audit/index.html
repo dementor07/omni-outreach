@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Omni Outreach — Codebase Audit</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#e6edf3; --muted:#8b949e;
+    --crit:#f85149; --high:#ff7b29; --med:#d29922; --low:#58a6ff; --drift:#a371f7; --good:#3fb950;
+    --verified:#3fb950; --suspected:#d29922; --fixed:#58a6ff; --dismissed:#6e7681;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
+  header{padding:20px 28px;border-bottom:1px solid var(--border);background:var(--panel)}
+  h1{margin:0 0 4px;font-size:20px}
+  .sub{color:var(--muted);font-size:12px}
+  .meta{display:flex;gap:18px;margin-top:10px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+  .layout{display:flex;min-height:calc(100vh - 92px)}
+  .side{width:230px;border-right:1px solid var(--border);padding:18px;flex-shrink:0}
+  .side h3{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:18px 0 8px}
+  .side h3:first-child{margin-top:0}
+  .filter{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text);padding:5px 8px;border-radius:6px;cursor:pointer;font-size:13px;display:flex;justify-content:space-between;align-items:center}
+  .filter:hover{background:#21262d}
+  .filter.active{background:#1f6feb33;color:#58a6ff}
+  .count{font-size:11px;color:var(--muted);background:#21262d;border-radius:10px;padding:1px 7px}
+  .main{flex:1;padding:18px 24px;overflow:auto}
+  .summary{display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap}
+  .stat{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px 14px;min-width:90px}
+  .stat .n{font-size:22px;font-weight:600}
+  .stat .l{font-size:11px;color:var(--muted)}
+  .finding{background:var(--panel);border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden}
+  .fhead{padding:12px 16px;cursor:pointer;display:flex;align-items:center;gap:10px}
+  .fhead:hover{background:#1c2128}
+  .pill{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:20px;white-space:nowrap}
+  .id{font-family:ui-monospace,monospace;font-size:11px;color:var(--muted);min-width:74px}
+  .ftitle{flex:1;font-weight:500}
+  .farea{font-size:11px;color:var(--muted)}
+  .fbody{padding:0 16px 14px 16px;border-top:1px solid var(--border);display:none}
+  .finding.open .fbody{display:block}
+  .fbody dt{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-top:12px}
+  .fbody dd{margin:3px 0 0;}
+  .file{font-family:ui-monospace,monospace;font-size:12px;color:#79c0ff;background:#0d1117;padding:2px 6px;border-radius:4px}
+  .sev-CRITICAL{background:var(--crit)22;color:var(--crit)} .dot-CRITICAL{background:var(--crit)}
+  .sev-HIGH{background:#ff7b2922;color:var(--high)} .dot-HIGH{background:var(--high)}
+  .sev-MEDIUM{background:#d2992222;color:var(--med)} .dot-MEDIUM{background:var(--med)}
+  .sev-LOW{background:#58a6ff22;color:var(--low)} .dot-LOW{background:var(--low)}
+  .sev-DRIFT{background:#a371f722;color:var(--drift)} .dot-DRIFT{background:var(--drift)}
+  .sev-GOOD{background:#3fb95022;color:var(--good)} .dot-GOOD{background:var(--good)}
+  .st-VERIFIED{background:#3fb95022;color:var(--verified)}
+  .st-SUSPECTED{background:#d2992222;color:var(--suspected)}
+  .st-FIXED{background:#58a6ff22;color:var(--fixed)}
+  .st-DISMISSED{background:#6e768122;color:var(--dismissed)}
+  .err{padding:40px;text-align:center;color:var(--muted)}
+  code{font-family:ui-monospace,monospace;font-size:12px;background:#0d1117;padding:1px 5px;border-radius:4px}
+  /* control plane */
+  #healthPanel{margin-top:14px;border-top:1px solid var(--border);padding-top:12px}
+  #healthPanel .hrow{font-size:12px;padding:2px 0;color:var(--text);display:flex;align-items:center;gap:6px}
+  #healthPanel .hts{color:var(--muted);font-size:11px}
+  #healthPanel .up{color:var(--good)} #healthPanel .down{color:var(--crit)}
+  .hdot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
+  .hdot.up{background:var(--good)} .hdot.down{background:var(--crit)}
+  .lr-PASS{background:#3fb95022;color:var(--good)} .lr-FAIL{background:#f8514922;color:var(--crit)}
+  .lr-NONE{background:#6e768122;color:var(--dismissed)}
+  .artifact{color:inherit;text-decoration:underline;opacity:.85}
+  .runbtn{background:#1f6feb22;color:#58a6ff;border:1px solid #1f6feb55;border-radius:6px;font-size:11px;padding:2px 8px;cursor:pointer;margin-left:4px}
+  .runbtn:hover{background:#1f6feb44} .runbtn:disabled{opacity:.5;cursor:default}
+  .statusctl{margin-top:14px;font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+  .stbtn{background:#21262d;color:var(--text);border:1px solid var(--border);border-radius:5px;font-size:10px;padding:2px 7px;cursor:pointer}
+  .stbtn:hover{background:#30363d} .stbtn.cur{background:#1f6feb33;color:#58a6ff;border-color:#1f6feb55}
+  .hist{font-size:11px;color:var(--muted);font-family:ui-monospace,monospace}
+  #modeBadge{font-size:11px;padding:2px 8px;border-radius:20px;margin-left:8px}
+  #modeBadge.live{background:#3fb95022;color:var(--good)} #modeBadge.ro{background:#6e768122;color:var(--dismissed)}
+  /* system view */
+  .viewnav{margin-top:12px;display:flex;gap:6px}
+  .viewbtn{background:none;border:1px solid var(--border);color:var(--muted);padding:5px 14px;border-radius:7px;cursor:pointer;font-size:13px}
+  .viewbtn.active{background:#1f6feb22;color:#58a6ff;border-color:#1f6feb55}
+  .sysgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px;min-height:120px}
+  .panel h2{margin:0 0 10px;font-size:14px;display:flex;align-items:baseline;gap:8px}
+  .panel .phint{font-size:11px;color:var(--muted);font-weight:400}
+  #panel-process{grid-column:1 / -1}
+  .vizbox{font-size:12px}
+  .vizunavail{color:var(--med);font-size:12px;padding:8px;background:#d2992211;border-radius:6px}
+  /* db panel */
+  .dbtable{display:grid;grid-template-columns:1fr auto;gap:2px 12px}
+  .dbtable .tname{font-family:ui-monospace,monospace;color:#79c0ff}
+  .dbtable .tcount{text-align:right;font-variant-numeric:tabular-nums}
+  .dbtable .tcount.nonzero{color:var(--good);font-weight:600}
+  /* topics */
+  .topicrow{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #21262d}
+  .topicrow .tn{font-family:ui-monospace,monospace}
+  .topicrow.missing .tn{color:var(--muted);opacity:.6}
+  .lagpill{font-size:11px;padding:1px 7px;border-radius:10px;background:#21262d}
+  .lagpill.lag{background:#d2992222;color:var(--med)}
+  /* process flow graph (SVG) */
+  #processSvg{width:100%;height:auto;background:#0d1117;border-radius:8px}
+  .pg-node rect{stroke-width:1.5}
+  .pg-node text{font:11px ui-monospace,monospace;fill:var(--text)}
+  .pg-edge{stroke:#30363d;stroke-width:1.5;fill:none;marker-end:url(#arrow)}
+  .pg-warn{fill:var(--crit)}
+  .pg-overlay{font-size:10px}
+  .tracebox{max-height:340px;overflow:auto}
+  .traceev{display:grid;grid-template-columns:auto 1fr auto;gap:10px;padding:3px 0;border-bottom:1px solid #21262d;font-size:12px}
+  .traceev .tt{color:var(--muted);font-family:ui-monospace,monospace}
+  .traceev .te{font-family:ui-monospace,monospace;color:#79c0ff}
+  .tracepick{margin-bottom:10px;display:flex;gap:6px;flex-wrap:wrap}
+  .cidbtn{background:#21262d;border:1px solid var(--border);color:var(--text);font-size:11px;font-family:ui-monospace,monospace;padding:2px 7px;border-radius:5px;cursor:pointer}
+  .cidbtn:hover{background:#30363d}
+  .cidbtn.active{background:#1f6feb33;color:#58a6ff;border-color:#1f6feb55}
+</style>
+</head>
+<body>
+<header>
+  <h1><span id="title">Codebase Audit</span> <span id="modeBadge" class="ro">○ read-only</span></h1>
+  <div class="sub" id="method"></div>
+  <div class="meta" id="meta"></div>
+  <nav class="viewnav" id="viewnav">
+    <button class="viewbtn active" data-view="findings" onclick="showView('findings')">Findings</button>
+    <button class="viewbtn" data-view="system" onclick="showView('system')">System &amp; pipeline</button>
+  </nav>
+</header>
+<div class="layout">
+  <aside class="side">
+    <h3>Severity</h3><div id="sevFilters"></div>
+    <h3>Status</h3><div id="statusFilters"></div>
+    <h3>Audit plane</h3><div id="planeFilters"></div>
+    <h3>Area</h3><div id="areaFilters"></div>
+    <h3>System health</h3><div id="healthPanel"><div class="hrow hts">read-only mode — start <code>python audit/server.py</code> for live health + tests</div></div>
+  </aside>
+  <main class="main">
+    <div id="view-findings">
+      <div class="summary" id="summary"></div>
+      <div id="list"></div>
+    </div>
+    <div id="view-system" style="display:none">
+      <div class="sysgrid">
+        <section class="panel" id="panel-process"><h2>Process pipeline <span class="phint">live throughput + finding stall-points</span></h2><div id="processViz" class="vizbox">…</div></section>
+        <section class="panel" id="panel-db"><h2>DB projections <span class="phint">omni_* row counts</span></h2><div id="dbViz" class="vizbox">…</div></section>
+        <section class="panel" id="panel-topics"><h2>Redpanda topics <span class="phint">partitions + consumer-group lag</span></h2><div id="topicsViz" class="vizbox">…</div></section>
+        <section class="panel" id="panel-trace"><h2>Run trace <span class="phint">timeline by correlation_id</span></h2><div id="traceViz" class="vizbox">…</div></section>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+const SEV_ORDER = {CRITICAL:0,HIGH:1,MEDIUM:2,LOW:3,DRIFT:4,GOOD:5};
+// Which audit plane each finding's area belongs to. The file-by-file pass and
+// the 5 cross-plane connection passes map onto these buckets.
+const AREA_PLANE = {
+  'event-contract':'event-contract', 'data-flow':'data-flow',
+  'deployment':'deployment', 'schema':'schema', 'supply-chain':'supply-chain',
+  // everything else came from the original file-by-file read
+  'flink':'file-by-file','migrations':'file-by-file','frontend':'file-by-file',
+  'rust-muscle':'file-by-file','services':'file-by-file','routers':'file-by-file',
+  'nodes':'file-by-file','projector':'file-by-file','config':'file-by-file',
+  'execution-core':'file-by-file','python-backend':'file-by-file','cross-cutting':'file-by-file'
+};
+function planeOf(f){return AREA_PLANE[f.area]||'file-by-file';}
+let DATA=null, active={severity:null,status:null,area:null,plane:null};
+
+async function load(){
+  try{
+    const res = await fetch('findings.json?t='+Date.now());
+    DATA = await res.json();
+    render();
+  }catch(e){
+    document.getElementById('list').innerHTML =
+      '<div class="err">Could not load findings.json — serve this folder (e.g. <code>python -m http.server</code>) rather than opening the file directly.<br><br>'+e+'</div>';
+  }
+}
+function uniq(arr){return [...new Set(arr)]}
+function matches(f){
+  return (!active.severity||f.severity===active.severity)
+      && (!active.status||f.status===active.status)
+      && (!active.area||f.area===active.area)
+      && (!active.plane||planeOf(f)===active.plane);
+}
+function render(){
+  document.getElementById('title').textContent = DATA.meta.title;
+  document.getElementById('method').textContent = DATA.meta.method;
+  const m=DATA.meta;
+  const planes=(m.planes||[]).map(p=>`<span title="${esc(p)}">${esc(p.split(' (')[0])}</span>`).join('');
+  document.getElementById('meta').innerHTML =
+    `<span>Generated ${m.generated}</span><span>${m.codebase.files} files</span>`+
+    `<span>${m.codebase.python_loc} Py</span><span>${m.codebase.rust_loc} Rust</span><span>${m.codebase.frontend_loc} TS</span>`+
+    `<span>${DATA.findings.length} findings</span>`+
+    (planes?`<span style="opacity:.6">|</span>${planes}`:'');
+  buildFilters('sevFilters','severity',DATA.meta.severities);
+  buildFilters('statusFilters','status',DATA.meta.statuses);
+  buildPlaneFilters();
+  buildFilters('areaFilters','area',uniq(DATA.findings.map(f=>f.area)).sort());
+  renderSummary();
+  renderList();
+}
+function buildFilters(elId,key,vals){
+  const el=document.getElementById(elId); el.innerHTML='';
+  const all=document.createElement('button');
+  all.className='filter'+(active[key]===null?' active':'');
+  all.innerHTML=`<span>All</span><span class="count">${DATA.findings.filter(f=>{const s={...active};s[key]=null;return Object.entries(s).every(([k,v])=>!v||f[k]===v)}).length}</span>`;
+  all.onclick=()=>{active[key]=null;syncActive(el,all);renderSummary();renderList()};
+  el.appendChild(all);
+  vals.forEach(v=>{
+    const n=DATA.findings.filter(f=>f[key]===v).length;
+    if(n===0&&key==='severity'&&!['CRITICAL','HIGH','MEDIUM'].includes(v)) {} // still show
+    const b=document.createElement('button');
+    b.className='filter'+(active[key]===v?' active':'');
+    b.innerHTML=`<span>${v}</span><span class="count">${n}</span>`;
+    b.onclick=()=>{active[key]=active[key]===v?null:v;render()};
+    el.appendChild(b);
+  });
+}
+function buildPlaneFilters(){
+  const el=document.getElementById('planeFilters'); el.innerHTML='';
+  const planes=uniq(DATA.findings.map(planeOf)).sort();
+  const all=document.createElement('button');
+  all.className='filter'+(active.plane===null?' active':'');
+  all.innerHTML=`<span>All</span><span class="count">${DATA.findings.length}</span>`;
+  all.onclick=()=>{active.plane=null;render()};
+  el.appendChild(all);
+  planes.forEach(v=>{
+    const n=DATA.findings.filter(f=>planeOf(f)===v).length;
+    const b=document.createElement('button');
+    b.className='filter'+(active.plane===v?' active':'');
+    b.innerHTML=`<span>${v}</span><span class="count">${n}</span>`;
+    b.onclick=()=>{active.plane=active.plane===v?null:v;render()};
+    el.appendChild(b);
+  });
+}
+function syncActive(){render()}
+function renderSummary(){
+  // Severity counts reflect the current plane/area/status drill-down (ignore
+  // the severity filter itself so all bars stay visible).
+  const scope=DATA.findings.filter(f=>
+    (!active.status||f.status===active.status)
+    && (!active.area||f.area===active.area)
+    && (!active.plane||planeOf(f)===active.plane));
+  const counts={};DATA.meta.severities.forEach(s=>counts[s]=0);
+  scope.forEach(f=>counts[f.severity]=(counts[f.severity]||0)+1);
+  document.getElementById('summary').innerHTML = DATA.meta.severities.map(s=>
+    `<div class="stat"><div class="n" style="color:var(--${s.toLowerCase()})">${counts[s]||0}</div><div class="l">${s}</div></div>`
+  ).join('');
+}
+function renderList(){
+  const fs=DATA.findings.filter(matches).sort((a,b)=>SEV_ORDER[a.severity]-SEV_ORDER[b.severity]||a.id.localeCompare(b.id));
+  const list=document.getElementById('list');
+  if(!fs.length){list.innerHTML='<div class="err">No findings match the current filters.</div>';return}
+  list.innerHTML=fs.map(f=>`
+    <div class="finding" id="f-${f.id}">
+      <div class="fhead" onclick="document.getElementById('f-${f.id}').classList.toggle('open')">
+        <span class="id">${f.id}</span>
+        <span class="pill sev-${f.severity}">${f.severity}</span>
+        <span class="pill st-${f.status}">${f.status}</span>
+        <span class="ftitle">${esc(f.title)}</span>
+        <span class="farea">${f.area}</span>
+      </div>
+      <div class="fbody">
+        <dt>Location</dt><dd><span class="file">${esc(f.file)}${f.line?':'+f.line:''}</span></dd>
+        <dt>Evidence</dt><dd>${esc(f.evidence)}</dd>
+        <dt>Recommendation</dt><dd>${esc(f.recommendation)}</dd>
+      </div>
+    </div>`).join('');
+}
+function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+// load() + renderList() are overridden by control.js (loaded next), which then
+// calls load() itself. Surface the live/read-only mode in the header.
+function _markMode(){
+  const b=document.getElementById('modeBadge'); if(!b) return;
+  const live=window.CONTROL&&window.CONTROL.server;
+  b.textContent=live?'● live control':'○ read-only';
+  b.className=live?'live':'ro';
+}
+function showView(v){
+  document.getElementById('view-findings').style.display = v==='findings'?'':'none';
+  document.getElementById('view-system').style.display = v==='system'?'':'none';
+  document.querySelectorAll('.viewbtn').forEach(b=>b.classList.toggle('active', b.dataset.view===v));
+  if(v==='system' && window.SYSTEM) window.SYSTEM.refresh();
+}
+</script>
+<script src="control.js?v=3"></script>
+<script src="system.js?v=3"></script>
+<script>
+  // control.js defined load(); run it, then reflect the resolved mode.
+  load().then(_markMode);
+</script>
+</body>
+</html>

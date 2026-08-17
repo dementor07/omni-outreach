@@ -1,9 +1,13 @@
 # v2 frontend — multi-stage: build the React/Vite app, serve via nginx.
-# The runtime nginx vhost is mounted from frontend/nginx.v2.conf via the
-# compose file at /etc/nginx/nginx.conf, and proxies /api/* to backend-v2:8000.
+# DEPLOY-008: the nginx vhost (frontend/nginx.v2.conf) is BAKED into the image
+# at build time (see the COPY in stage 2), not mounted at runtime. Changing it
+# therefore requires a rebuild, not just a container restart. It proxies /api/*
+# to backend-v2:8000.
 
 # ── Stage 1: build ───────────────────────────────────────────────────────────
 FROM node:20-alpine AS build
+ARG BUILD_SHA=unknown
+ENV VITE_BUILD_SHA="${BUILD_SHA}"
 WORKDIR /app
 
 # Install deps first so npm cache layer is reused
@@ -18,6 +22,8 @@ RUN npm run build
 
 # ── Stage 2: serve ───────────────────────────────────────────────────────────
 FROM nginx:1.27-alpine
+ARG BUILD_SHA=unknown
+LABEL org.opencontainers.image.revision="${BUILD_SHA}"
 COPY nginx.v2.conf /etc/nginx/nginx.conf
 COPY --from=build /app/dist/ /usr/share/nginx/html/
 EXPOSE 80 443

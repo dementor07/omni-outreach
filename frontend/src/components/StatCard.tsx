@@ -3,12 +3,12 @@ import type { ReactNode } from 'react'
 import Card from './Card'
 
 const accentToken = {
-  brand:   { text: 'text-brand-600',   bg: 'bg-brand-50',   ring: 'ring-brand-100' },
-  emerald: { text: 'text-emerald-600', bg: 'bg-emerald-50', ring: 'ring-emerald-100' },
-  amber:   { text: 'text-amber-600',   bg: 'bg-amber-50',   ring: 'ring-amber-100' },
-  rose:    { text: 'text-rose-600',    bg: 'bg-rose-50',    ring: 'ring-rose-100' },
-  violet:  { text: 'text-violet-600',  bg: 'bg-violet-50',  ring: 'ring-violet-100' },
-  slate:   { text: 'text-slate-600',   bg: 'bg-slate-100',  ring: 'ring-slate-200' },
+  brand:   { text: 'text-brand-600',   bg: 'bg-brand-50',   ring: 'ring-brand-100',   glow: 'bg-brand-500/10' },
+  emerald: { text: 'text-emerald-600', bg: 'bg-emerald-50', ring: 'ring-emerald-100', glow: 'bg-emerald-500/10' },
+  amber:   { text: 'text-amber-600',   bg: 'bg-amber-50',   ring: 'ring-amber-100',   glow: 'bg-amber-500/10' },
+  rose:    { text: 'text-rose-600',    bg: 'bg-rose-50',    ring: 'ring-rose-100',    glow: 'bg-rose-500/10' },
+  violet:  { text: 'text-violet-600',  bg: 'bg-violet-50',  ring: 'ring-violet-100',  glow: 'bg-violet-500/10' },
+  slate:   { text: 'text-slate-600',   bg: 'bg-slate-100',  ring: 'ring-slate-200',   glow: 'bg-slate-400/10' },
 } as const
 
 export type StatAccent = keyof typeof accentToken
@@ -31,19 +31,20 @@ interface StatCardProps {
 export default function StatCard({ label, value, icon: IconComp, trend, accent = 'brand', spark, hint }: StatCardProps) {
   const a = accentToken[accent]
   return (
-    <Card padding="md" className="relative overflow-hidden">
+    <Card padding="md" className="group relative overflow-hidden">
+      <span className={clsx('pointer-events-none absolute -right-6 -top-8 h-24 w-24 rounded-full blur-2xl', a.glow)} />
       <div className="flex items-start justify-between gap-3">
         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
           {label}
         </p>
         {IconComp && (
-          <span className={clsx('inline-flex h-7 w-7 items-center justify-center rounded-lg', a.bg, a.text)}>
-            <IconComp size={14} />
+          <span className={clsx('inline-flex h-8 w-8 items-center justify-center rounded-lg', a.bg, a.text)}>
+            <IconComp size={15} />
           </span>
         )}
       </div>
-      <div className="mt-3 flex items-baseline gap-2">
-        <span className="text-[26px] font-semibold tabular-nums tracking-tight text-slate-900 dark:text-white">
+      <div className="relative mt-3 flex items-baseline gap-2">
+        <span className="text-[30px] font-bold tabular-nums tracking-[-0.035em] text-slate-950 dark:text-white">
           {typeof value === 'number' ? value.toLocaleString() : value}
         </span>
         {trend != null && (

@@ -50,11 +50,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+    // Consumer group is env-overrideable so the v2 muscle can be partitioned
+    // away from a legacy execution-engine still running on the same topic
+    // (otherwise they share the topic and the wrong worker can swallow a
+    // command meant for the other).
+    let group_id = std::env::var("MUSCLE_CONSUMER_GROUP")
+        .unwrap_or_else(|_| "execution-engine-v2".to_string());
     let consumer: StreamConsumer = ClientConfig::new()
-        .set("group.id", "execution-engine-v2")
+        .set("group.id", &group_id)
         .set("bootstrap.servers", &brokers)
         .set("enable.partition.eof", "false")
         .set("session.timeout.ms", "6000")
+        // Long-running handlers (Apify multi-step poll can take 20+ min) block
+        // the consumer for the full duration. Default 5min poll interval
+        // kicks us out of the group with MAXPOLL. Set to 60 min so the worst
+        // observed handler runtime is well within the window.
+        .set("max.poll.interval.ms", "3600000")
+        // First start with a fresh group: replay from the start so commands
+        // published before the consumer joined are not lost.
+        .set("auto.offset.reset", "earliest")
         .set("enable.auto.commit", "false")
         .create()?;
     consumer.subscribe(&["outreach.commands"])?;

@@ -98,45 +98,73 @@ pub fn opt_s(command: &ActionCommand, key: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-/// SSRF guard. Block hosts that target cloud metadata, loopback, link-local,
-/// or RFC-1918 private ranges. Defence-in-depth; not a complete SSRF defence
-/// (no DNS-rebinding protection, no full IP parse), but covers the obvious
-/// attack vectors. Shared by every handler that fetches an operator-supplied
-/// URL (webhook, http_call). For a stricter posture, resolve the host to an IP
-/// and reject any in the non-public ranges.
-pub fn is_blocked_host(host: &str) -> bool {
-    let h = host.to_ascii_lowercase();
-    h == "localhost"
-        || h == "0.0.0.0"
-        || h == "::"
-        || h == "::1"
-        || h == "169.254.169.254" // AWS / GCP / Azure IMDS
-        || h.starts_with("127.")
-        || h.starts_with("10.")
-        || h.starts_with("192.168.")
-        || h.starts_with("172.16.")
-        || h.starts_with("172.17.")
-        || h.starts_with("172.18.")
-        || h.starts_with("172.19.")
-        || h.starts_with("172.2") // 172.20.–172.29.
-        || h.starts_with("172.30.")
-        || h.starts_with("172.31.")
-        || h.starts_with("fd") // IPv6 ULA fc00::/7
-        || h.starts_with("fc")
-        || h.starts_with("fe80:") // IPv6 link-local
+use std::net::IpAddr;
+
+/// SSRF-001: classify a resolved IP as non-public (must be blocked). String
+/// prefix matching on the host was bypassable (octal/hex/decimal-encoded IPs,
+/// IPv4-mapped IPv6, trailing-dot hosts, `0` → 0.0.0.0). We now resolve the
+/// host to actual IPs and classify each with the std library, which canonicalises
+/// the address regardless of how it was written.
+pub fn is_blocked_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || v4.is_unspecified()
+                || v4.octets()[0] == 0
+                // 100.64.0.0/10 carrier-grade NAT (shared address space)
+                || (v4.octets()[0] == 100 && (64..=127).contains(&v4.octets()[1]))
+                // 169.254.169.254 IMDS is already covered by is_link_local()
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                // unique-local fc00::/7
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                // link-local fe80::/10
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+                // map IPv4-mapped/compatible back to v4 and re-check
+                || v6.to_ipv4().map(|m| is_blocked_ip(&IpAddr::V4(m))).unwrap_or(false)
+        }
+    }
 }
 
-/// Validate an operator-supplied URL: must be http/https and not target a
-/// blocked host. Returns the parsed URL or a stable error code.
-pub fn validate_outbound_url(url: &str) -> Result<reqwest::Url, &'static str> {
+/// Validate an operator-supplied URL: must be http/https and, after DNS
+/// resolution, must not point at any non-public IP. Async because it resolves
+/// the host; resolving and checking the *actual* destination IPs (not the host
+/// string) closes the rebinding / encoding bypasses (SSRF-001).
+pub async fn validate_outbound_url(url: &str) -> Result<reqwest::Url, &'static str> {
     let parsed = url.parse::<reqwest::Url>().map_err(|_| "INVALID_URL")?;
     match parsed.scheme() {
         "http" | "https" => {}
         _ => return Err("INVALID_SCHEME"),
     }
-    match parsed.host_str() {
-        None => Err("MISSING_HOST"),
-        Some(h) if is_blocked_host(h) => Err("PRIVATE_URL_BLOCKED"),
-        Some(_) => Ok(parsed),
+    let host = parsed.host_str().ok_or("MISSING_HOST")?;
+
+    // If the host is an IP literal, classify it directly. Url already parsed it
+    // into a canonical form, so encoding tricks are normalised away.
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return if is_blocked_ip(&ip) { Err("PRIVATE_URL_BLOCKED") } else { Ok(parsed) };
     }
+
+    // Otherwise resolve the hostname and reject if ANY resolved IP is non-public.
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    let lookup = format!("{host}:{port}");
+    let addrs = tokio::net::lookup_host(lookup)
+        .await
+        .map_err(|_| "DNS_RESOLUTION_FAILED")?;
+    let mut saw_any = false;
+    for addr in addrs {
+        saw_any = true;
+        if is_blocked_ip(&addr.ip()) {
+            return Err("PRIVATE_URL_BLOCKED");
+        }
+    }
+    if !saw_any {
+        return Err("DNS_RESOLUTION_FAILED");
+    }
+    Ok(parsed)
 }

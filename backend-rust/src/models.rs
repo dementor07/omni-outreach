@@ -48,10 +48,6 @@ pub enum ChannelType {
     DataTransform,
     #[serde(rename = "ai_compose")]
     AiCompose,
-    #[serde(rename = "lead_gen_pull")]
-    LeadGenPull,
-    #[serde(rename = "csv_import")]
-    CsvImport,
     /// Config-driven HTTP integration. The node declares the request
     /// (method/url/headers/auth/body + response->handle mapping) in `payload`;
     /// one shared handler executes it. Lets Python-only authors add REST
@@ -63,17 +59,124 @@ pub enum ChannelType {
     /// by `source.linkedin_jobs` and any other Apify-driven source.
     #[serde(rename = "apify")]
     Apify,
+    /// Free LinkedIn jobs source — the guest-API drop-in for `apify`. Scrapes
+    /// the public jobs-guest endpoint + each company's public page for
+    /// `numberOfEmployees`, emitting the identical `custom_fields[companies_key]`
+    /// shape (incl. `employee_count`) so the downstream graph is unchanged. No
+    /// credential. Used by `source.linkedin_jobs_guest`.
+    #[serde(rename = "linkedin_jobs_guest")]
+    LinkedinJobsGuest,
     /// Anthropic Claude structured-classification call returning ACCEPT/REJECT.
     /// Used by `ai.screen_company` and `ai.screen_person`. The node's payload
     /// carries `on_error_handle` so the asymmetric fail-open / fail-closed
     /// policies live in the node config, not in the worker.
     #[serde(rename = "ai_screen")]
     AiScreen,
+    /// Anthropic Claude reply-intent classification (B2). One bounded call ->
+    /// {positive|question|objection|unsubscribe|neutral}, fail-open to a keyword
+    /// heuristic, opt-out always caught. Used by the inbound-reply path.
+    #[serde(rename = "ai_classify")]
+    AiClassify,
     /// Per-company Serper multi-pattern LinkedIn profile search. Loops 2
     /// patterns × N roles, dedupes URLs, caps at max_per_company. Used by
     /// `source.serper_people`.
     #[serde(rename = "serper_people")]
     SerperPeople,
+    /// LinkFinder AI fan-out source. One API call returns many people/profiles
+    /// and writes them under custom_fields[people_key].
+    #[serde(rename = "leads.finder")]
+    LeadsFinder,
+    /// Camoufox-driven Naukri.com job scrape. Calls the internal Camoufox
+    /// microservice (anti-detect headless browser) to scrape one role keyword,
+    /// dedupes by company, writes the company list to
+    /// `lead_mutations.custom_fields[companies_key]`. Used by `source.naukri`.
+    #[serde(rename = "naukri")]
+    Naukri,
+    /// Apify-driven Indeed.com job scrape (`curious_coder/indeed-scraper`
+    /// actor). Same protocol as `apify`/`naukri` — dedupes by company, writes
+    /// the company list to `lead_mutations.custom_fields[companies_key]`. Used
+    /// by `source.indeed`.
+    #[serde(rename = "indeed")]
+    Indeed,
+    // Company-discovery sources. Each is a distinct product (own setup/credential),
+    // so each is its own channel — NOT a `provider` toggle on one node. All four
+    // write the company-row list to `lead_mutations.custom_fields[companies_key]`
+    // via the shared handlers::discovery module.
+    /// Free self-hosted SearXNG meta-search dorks (no credential). source.searxng.
+    #[serde(rename = "searxng")]
+    Searxng,
+    /// Serper paid Google API dorks (api_key). source.serper_search.
+    #[serde(rename = "serper_search")]
+    SerperSearch,
+    /// Apollo organization-search API (api_key, optional). source.apollo.
+    #[serde(rename = "apollo")]
+    Apollo,
+    /// Clutch directory scrape via Camoufox (no credential). source.clutch.
+    #[serde(rename = "clutch")]
+    Clutch,
+    /// Free SearXNG per-company people search (no credential). source.searxng_people.
+    #[serde(rename = "searxng_people")]
+    SearxngPeople,
+    /// ATS job-board harvest. ONE channel shared by 12 first-class source nodes
+    /// (source.greenhouse … source.rippling): each node sets `platform` in its
+    /// payload, and the shared handlers::ats module fetches that platform's
+    /// company slugs (from the global omni_ats_slugs table via the internal API)
+    /// + hits its public job API, writing companies to
+    /// `lead_mutations.custom_fields[companies_key]`. All keyless — same setup for
+    /// every platform — so platform is a parameter, not a credential; one
+    /// ChannelType is correct (mirrors how serper_people/searxng_people share a
+    /// handler). The 12 nodes stay distinct so each shows as a real named product.
+    #[serde(rename = "ats")]
+    Ats,
+    // ── Apollo data layer (APOLLO-DATA) ────────────────────────────────────────
+    /// Apollo native people search (fan-out lead-gen). POSTs
+    /// /api/v1/mixed_people/api_search, writes custom_fields[people_key].
+    /// source.apollo_people.
+    #[serde(rename = "apollo_people")]
+    ApolloPeople,
+    /// Renidly job-changes fan-out lead source. GETs
+    /// /api/data/v1/job-changes/search, writes custom_fields[people_key].
+    /// source.renidly_job_changes (RENIDLY-002).
+    #[serde(rename = "renidly_job_changes")]
+    RenidlyJobChanges,
+    /// Apollo organization enrichment by domain. GETs
+    /// /api/v1/organizations/enrich?domain=, writes company fields onto the lead.
+    /// enrich.apollo_company.
+    #[serde(rename = "apollo_company_enrich")]
+    ApolloCompanyEnrich,
+    /// Apollo org job postings (hiring signal). GETs
+    /// /api/v1/organizations/{id}/job_postings. source.apollo_jobs.
+    #[serde(rename = "apollo_jobs")]
+    ApolloJobs,
+    // ── Unipile full surface (UNIPILE-FULL) ────────────────────────────────────
+    /// Native Unipile LinkedIn people search (fan-out lead-gen). Writes the
+    /// deduped people list to custom_fields[people_key]. source.linkedin_search.
+    #[serde(rename = "linkedin_search")]
+    LinkedinSearch,
+    /// GET /linkedin/company/{id} — company profile enrichment onto the lead.
+    #[serde(rename = "linkedin_company_profile")]
+    LinkedinCompanyProfile,
+    /// GET /users/{id}/profile — member profile enrichment onto the lead.
+    #[serde(rename = "linkedin_member_profile")]
+    LinkedinMemberProfile,
+    /// POST /posts/{id}/reactions — react/like a post (per-lead campaign action).
+    #[serde(rename = "linkedin_react_post")]
+    LinkedinReactPost,
+    /// POST /posts/{id}/comments — comment on a post (per-lead campaign action).
+    #[serde(rename = "linkedin_comment_post")]
+    LinkedinCommentPost,
+    /// POST /linkedin/members/{id}/endorse — endorse a skill (per-lead action).
+    #[serde(rename = "linkedin_endorse")]
+    LinkedinEndorse,
+    /// POST /users/follow — follow a member (per-lead campaign action).
+    #[serde(rename = "linkedin_follow")]
+    LinkedinFollow,
+    /// POST /messages/{id}/reaction — react to a message (per-lead action).
+    #[serde(rename = "message_react")]
+    MessageReact,
+    /// POST /users/invitations/{id}/cancel — cancel a pending invite.
+    #[serde(rename = "invite_cancel")]
+    InviteCancel,
     /// Any channel value the worker doesn't recognise. Deserializes here
     /// instead of failing the whole command at parse time, so dispatch can
     /// return a clean, debuggable error.
@@ -102,12 +205,34 @@ impl ChannelType {
             ChannelType::HotLeadAlert => "hot_lead_alert",
             ChannelType::DataTransform => "data_transform",
             ChannelType::AiCompose => "ai_compose",
-            ChannelType::LeadGenPull => "lead_gen_pull",
-            ChannelType::CsvImport => "csv_import",
             ChannelType::HttpCall => "http_call",
             ChannelType::Apify => "apify",
+            ChannelType::LinkedinJobsGuest => "linkedin_jobs_guest",
             ChannelType::AiScreen => "ai_screen",
+            ChannelType::AiClassify => "ai_classify",
             ChannelType::SerperPeople => "serper_people",
+            ChannelType::LeadsFinder => "leads.finder",
+            ChannelType::Naukri => "naukri",
+            ChannelType::Indeed => "indeed",
+            ChannelType::Searxng => "searxng",
+            ChannelType::SerperSearch => "serper_search",
+            ChannelType::Apollo => "apollo",
+            ChannelType::Clutch => "clutch",
+            ChannelType::SearxngPeople => "searxng_people",
+            ChannelType::Ats => "ats",
+            ChannelType::ApolloPeople => "apollo_people",
+            ChannelType::RenidlyJobChanges => "renidly_job_changes",
+            ChannelType::ApolloCompanyEnrich => "apollo_company_enrich",
+            ChannelType::ApolloJobs => "apollo_jobs",
+            ChannelType::LinkedinSearch => "linkedin_search",
+            ChannelType::LinkedinCompanyProfile => "linkedin_company_profile",
+            ChannelType::LinkedinMemberProfile => "linkedin_member_profile",
+            ChannelType::LinkedinReactPost => "linkedin_react_post",
+            ChannelType::LinkedinCommentPost => "linkedin_comment_post",
+            ChannelType::LinkedinEndorse => "linkedin_endorse",
+            ChannelType::LinkedinFollow => "linkedin_follow",
+            ChannelType::MessageReact => "message_react",
+            ChannelType::InviteCancel => "invite_cancel",
             ChannelType::Unknown => "unknown",
         }
     }

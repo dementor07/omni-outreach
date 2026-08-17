@@ -19,9 +19,12 @@ target_metadata = None
 def get_url() -> str:
     """Build sync DSN from env vars (Alembic needs sync driver)."""
     db_password = os.environ.get("DB_PASSWORD", "")
+    alembic_database_url = os.environ.get("ALEMBIC_DATABASE_URL", "")
     database_url = os.environ.get("DATABASE_URL", "")
-    if database_url:
-        url = database_url.replace("postgresql+asyncpg://", "postgresql://")
+
+    url_to_use = alembic_database_url or database_url
+    if url_to_use:
+        url = url_to_use.replace("postgresql+asyncpg://", "postgresql://")
         return url
     return f"postgresql://outreach:{db_password}@db/outreach"
 

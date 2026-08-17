@@ -3,10 +3,10 @@ import {
   LayoutDashboard, Megaphone, Inbox, ListTodo, UserCheck,
   Users, Building2, KanbanSquare, Contact,
   BarChart3, Activity, Sparkles,
-  Plug, Database, FileText, ShieldOff, Settings, LogOut, Zap,
-  ChevronRight,
+  Plug, Database, FileText, ShieldOff, ShieldCheck, Settings, LogOut,
 } from 'lucide-react'
 import { clsx } from 'clsx'
+import Logo, { LogoMark } from './Logo'
 
 type NavItem = { to: string; label: string; icon: React.ElementType }
 type NavGroup = { label: string | null; items: NavItem[] }
@@ -51,7 +51,9 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/integrations', label: 'Integrations', icon: Plug },
       { to: '/lead-sources', label: 'Lead Sources', icon: Database },
       { to: '/templates', label: 'Templates', icon: FileText },
+      { to: '/tones', label: 'Tones', icon: Sparkles },
       { to: '/blacklist', label: 'Blacklist', icon: ShieldOff },
+      { to: '/deliverability', label: 'Deliverability', icon: ShieldCheck },
     ],
   },
 ]
@@ -71,25 +73,17 @@ export default function Sidebar({ collapsed = false }: SidebarProps) {
   return (
     <aside
       className={clsx(
-        'flex h-screen flex-col border-r border-slate-200 bg-white transition-[width] duration-200 dark:border-slate-800 dark:bg-slate-950',
-        collapsed ? 'w-16' : 'w-60',
+        'flex h-screen flex-col border-r border-slate-200/80 bg-white/90 shadow-[1px_0_0_rgb(255_255_255/0.7)] backdrop-blur-xl transition-[width] duration-200 dark:border-slate-800/80 dark:bg-slate-950/90 dark:shadow-none',
+        collapsed ? 'w-16' : 'w-64',
       )}
     >
       {/* Logo lockup */}
-      <div className={clsx('flex items-center gap-2.5 border-b border-slate-100 px-4 py-4 dark:border-slate-800', collapsed && 'justify-center px-0')}>
-        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-brand-500 text-white shadow-sm shadow-brand-500/30">
-          <Zap size={15} fill="currentColor" />
-        </div>
-        {!collapsed && (
-          <div className="min-w-0">
-            <div className="text-sm font-bold tracking-tight text-slate-900 dark:text-white">Omni</div>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">Control plane</div>
-          </div>
-        )}
+      <div className={clsx('flex items-center border-b border-slate-100 px-4 py-4 dark:border-slate-800', collapsed && 'justify-center px-0')}>
+        {collapsed ? <LogoMark size={30} /> : <Logo size={32} />}
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 space-y-4 overflow-y-auto px-2 py-3">
+      <nav className="flex-1 space-y-4 overflow-y-auto px-2.5 py-3">
         {NAV_GROUPS.map((group, gi) => (
           <div key={gi}>
             {group.label && !collapsed && (
@@ -105,20 +99,23 @@ export default function Sidebar({ collapsed = false }: SidebarProps) {
                   end={to === '/'}
                   className={({ isActive }) =>
                     clsx(
-                      'group relative flex w-full items-center rounded-lg text-sm font-medium transition-colors',
+                      'group relative flex w-full items-center rounded-lg text-sm font-medium transition-colors duration-150',
                       collapsed ? 'h-9 justify-center px-0' : 'gap-2.5 px-2.5 py-1.5',
                       isActive
-                        ? 'bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300'
-                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white',
+                        ? 'bg-brand-50/90 text-slate-950 shadow-[inset_0_0_0_1px_rgb(254_205_211/0.45)] dark:bg-brand-950/35 dark:text-white dark:shadow-[inset_0_0_0_1px_rgb(136_19_55/0.4)]'
+                        : 'text-slate-500 hover:bg-slate-100/70 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-white',
                     )
                   }
                   title={collapsed ? label : undefined}
                 >
                   {({ isActive }) => (
                     <>
-                      <Icon size={16} />
+                      {/* One quiet brand cue: a thin accent rail on the active item. */}
+                      {isActive && !collapsed && (
+                        <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-brand-500" />
+                      )}
+                      <Icon size={16} className={clsx('shrink-0', isActive ? 'text-brand-600 dark:text-brand-400' : '')} />
                       {!collapsed && <span className="flex-1 truncate text-left">{label}</span>}
-                      {isActive && !collapsed && <ChevronRight size={12} className="text-brand-400" />}
                     </>
                   )}
                 </NavLink>
@@ -134,11 +131,11 @@ export default function Sidebar({ collapsed = false }: SidebarProps) {
           to="/settings"
           className={({ isActive }) =>
             clsx(
-              'flex w-full items-center rounded-lg text-sm font-medium transition-colors',
+              'flex w-full items-center rounded-lg text-sm font-medium transition-colors duration-150',
               collapsed ? 'h-9 justify-center px-0' : 'gap-2.5 px-2.5 py-1.5',
               isActive
-                ? 'bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white',
+                ? 'bg-slate-100 text-slate-900 dark:bg-slate-800/80 dark:text-white'
+                : 'text-slate-500 hover:bg-slate-100/70 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-white',
             )
           }
           title="Settings"

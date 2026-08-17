@@ -1,7 +1,8 @@
 import { useCallback, useState } from 'react'
-import { Upload, FileText, ArrowRight, Check, X, AlertTriangle } from 'lucide-react'
+import { Upload, ArrowRight, Check, AlertTriangle } from 'lucide-react'
 import { useImportLeads } from '../hooks/useLeads'
 import { useToast } from './Toast'
+import Select from './Select'
 
 const LEAD_FIELDS = [
   { key: 'linkedin_url', label: 'LinkedIn URL', required: true },
@@ -101,7 +102,7 @@ export default function CsvImport({ campaignId, onComplete, onCancel }: CsvImpor
     const leads = getMappedLeads()
     if (!leads.length) { toast.error('No valid leads to import'); return }
     try {
-      const res = await importLeads.mutateAsync({ campaignId, leads: leads as any })
+      const res = await importLeads.mutateAsync({ campaignId, leads })
       setResult(res)
       setStep('done')
     } catch {
@@ -159,16 +160,14 @@ export default function CsvImport({ campaignId, onComplete, onCancel }: CsvImpor
                   {'required' in field && field.required && <span className="text-rose-500">*</span>}
                 </span>
                 <ArrowRight size={12} className="text-slate-300" />
-                <select
+                <Select
+                  className="flex-1"
+                  ariaLabel={`Map ${field.label}`}
+                  placeholder="— skip —"
                   value={mapping[field.key] || ''}
-                  onChange={(e) => setMapping({ ...mapping, [field.key]: e.target.value })}
-                  className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
-                >
-                  <option value="">— skip —</option>
-                  {headers.map((h) => (
-                    <option key={h} value={h}>{h}</option>
-                  ))}
-                </select>
+                  onChange={(v) => setMapping({ ...mapping, [field.key]: v })}
+                  options={[{ value: '', label: '— skip —' }, ...headers.map((h) => ({ value: h, label: h }))]}
+                />
                 {mapping[field.key] && <Check size={14} className="text-emerald-500" />}
               </div>
             ))}
@@ -211,7 +210,7 @@ export default function CsvImport({ campaignId, onComplete, onCancel }: CsvImpor
                 {getMappedLeads().slice(0, 5).map((lead, i) => (
                   <tr key={i} className="border-b border-slate-100">
                     {LEAD_FIELDS.filter((f) => mapping[f.key]).map((f) => (
-                      <td key={f.key} className="px-3 py-2 text-slate-700 truncate max-w-[200px]">{(lead as any)[f.key] || '—'}</td>
+                      <td key={f.key} className="px-3 py-2 text-slate-700 truncate max-w-[200px]">{lead[f.key as keyof typeof lead] || '—'}</td>
                     ))}
                   </tr>
                 ))}

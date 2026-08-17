@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Sparkles, Gauge, PenLine, Database, Tag, Play } from 'lucide-react'
+import { Sparkles, Gauge, PenLine, Database, Tag, Play, ShieldCheck } from 'lucide-react'
 import { clsx } from 'clsx'
 import { ai, type AiJob, type AiJobKind } from '../api/v2'
 import PageHeader from '../components/PageHeader'
@@ -9,32 +9,91 @@ import Card, { CardHeader } from '../components/Card'
 import Button from '../components/Button'
 import Badge from '../components/Badge'
 import EmptyState from '../components/EmptyState'
+import { useToast } from '../components/Toast'
 import { timeAgo } from '../lib/format'
+
+// A just-launched job we show instantly (optimistic) until the poll returns the
+// real row — so clicking a launcher visibly does something right away.
+interface PendingJob {
+  id: string
+  kind: AiJobKind
+  created_at: string
+}
 
 const KIND_META: Record<AiJobKind, { label: string; icon: React.ElementType; desc: string }> = {
   score: { label: 'Lead scoring', icon: Gauge, desc: 'Rank leads 0–100 against your ICP' },
-  compose: { label: 'AI compose', icon: PenLine, desc: 'Draft personalised outreach copy' },
-  enrich: { label: 'Enrichment', icon: Database, desc: 'Fill missing contact/company fields' },
+  compose: { label: 'AI compose', icon: PenLine, desc: 'Drafts per-lead copy from an ai.compose node in a sequence' },
+  enrich: { label: 'Enrichment', icon: Database, desc: 'Fills missing fields from an ai.enrich node in a sequence' },
   classify: { label: 'Classify', icon: Tag, desc: 'Label inbound replies by intent' },
+  // Screening runs inside a workflow (ai.screen_company / ai.screen_person), not
+  // as an ad-hoc job — so it appears in the run log but not the launcher tiles.
+  screen: { label: 'ICP screen', icon: ShieldCheck, desc: 'Claude ACCEPT/REJECT against your ICP (runs in-workflow)' },
 }
+
+// score scores the active leads and classify labels a pasted reply — both run
+// ad-hoc here. compose/enrich/screen run per-lead inside a campaign (they need a
+// specific lead's context + a channel), so they are shown as workflow-only —
+// not fake ad-hoc launchers.
+const WORKFLOW_ONLY_KINDS: AiJobKind[] = ['compose', 'enrich']
 
 export default function AiStudio() {
   const qc = useQueryClient()
+  const toast = useToast()
   const { data: jobs = [], isLoading } = useQuery({
     queryKey: ['ai-jobs'],
     queryFn: () => ai.jobs({ limit: 100 }),
     refetchInterval: 5000,
   })
 
+  // Optimistic "just launched" rows — shown immediately, dropped once the real
+  // job (same correlation id) shows up in the polled list.
+  const [pending, setPending] = useState<PendingJob[]>([])
+  const refetchNow = () => qc.invalidateQueries({ queryKey: ['ai-jobs'] })
+  const addPending = (kind: AiJobKind, id: string) =>
+    setPending((p) => [{ id, kind, created_at: new Date().toISOString() }, ...p])
+
   const [icp, setIcp] = useState('B2B SaaS, VP Sales or RevOps, 50–500 employees, US/EU')
   const runScore = useMutation({
-    mutationFn: () =>
-      ai.runJob({ kind: 'score', entity_type: 'lead', config: { icp_description: icp } }),
-    onSuccess: () => setTimeout(() => qc.invalidateQueries({ queryKey: ['ai-jobs'] }), 600),
+    mutationFn: () => ai.runJob({ kind: 'score', entity_type: 'lead', config: { icp_description: icp } }),
+    onSuccess: (r) => {
+      addPending('score', r.job_id)
+      toast.success('Scoring queued — ranking your active leads. Results land in the run log.')
+      refetchNow()
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Could not start scoring'),
   })
 
+  const [replyText, setReplyText] = useState('')
+  const runClassify = useMutation({
+    mutationFn: () => ai.runJob({ kind: 'classify', entity_type: 'reply', config: { body: replyText } }),
+    onSuccess: (r) => {
+      addPending('classify', r.job_id)
+      toast.success('Reply queued for classification.')
+      setReplyText('')
+      refetchNow()
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Could not classify reply'),
+  })
+
+  // Real jobs from the server; show optimistic rows only until the real row
+  // (same job_id) arrives via the poll, then drop them.
+  const realIds = useMemo(() => new Set(jobs.map((j) => j.id)), [jobs])
+  const visiblePending = useMemo(() => pending.filter((p) => !realIds.has(p.id)), [pending, realIds])
+  useEffect(() => {
+    setPending((p) => {
+      const next = p.filter((x) => !realIds.has(x.id))
+      return next.length === p.length ? p : next
+    })
+  }, [realIds])
+
   const done = jobs.filter((j) => j.status === 'done').length
-  const running = jobs.filter((j) => j.status === 'queued' || j.status === 'running').length
+  // A job still 'queued' an hour later isn't in flight — it stalled (e.g. an
+  // in-workflow screen job recorded before its lifecycle closed). Don't inflate
+  // the "in flight" stat with corpses.
+  const STALE_MS = 60 * 60 * 1000
+  const isStale = (j: AiJob) =>
+    j.status === 'queued' && Date.now() - new Date(j.created_at).getTime() > STALE_MS
+  const running = jobs.filter((j) => (j.status === 'queued' || j.status === 'running') && !isStale(j)).length
 
   return (
     <div className="space-y-6">
@@ -42,7 +101,7 @@ export default function AiStudio() {
         screenLabel="AI Studio"
         eyebrow="Intelligence"
         title="AI Studio"
-        description="Run scoring, compose, enrichment, and classification jobs. Every run is auditable."
+        description="Run scoring and classification jobs against your data. Every run is logged with its model and cost."
         actions={<Badge label="AI" variant="violet" dot />}
       />
 
@@ -52,41 +111,68 @@ export default function AiStudio() {
         <StatCard label="In flight" value={isLoading ? '—' : running} icon={Play} accent="amber" />
       </section>
 
-      {/* Job launchers */}
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {(Object.keys(KIND_META) as AiJobKind[]).map((kind) => {
-          const m = KIND_META[kind]
-          const Icon = m.icon
-          return (
-            <Card key={kind} padding="md">
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-50 text-violet-600 dark:bg-violet-900/30">
-                <Icon size={16} />
-              </span>
-              <p className="mt-3 text-sm font-semibold text-slate-900 dark:text-white">{m.label}</p>
-              <p className="mt-0.5 text-xs text-slate-500">{m.desc}</p>
-            </Card>
-          )
-        })}
+      {/* Launchers — score + classify run ad-hoc; the rest are workflow-only. */}
+      <section className="grid gap-4 lg:grid-cols-2">
+        <Card padding="lg">
+          <CardHeader title="Lead scoring" description="Score your active leads 0–100 against an ICP rubric. Scores show as badges on Leads and Contacts." />
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">ICP description</span>
+            <textarea
+              rows={3}
+              value={icp}
+              onChange={(e) => setIcp(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-800"
+            />
+          </label>
+          <div className="mt-3 flex justify-end">
+            <Button variant="primary" icon={Play} onClick={() => runScore.mutate()} isLoading={runScore.isPending} disabled={!icp.trim()}>
+              Score leads
+            </Button>
+          </div>
+        </Card>
+
+        <Card padding="lg">
+          <CardHeader title="Classify a reply" description="Paste an inbound reply to label its intent (positive / question / objection / unsubscribe / neutral)." />
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Reply text</span>
+            <textarea
+              rows={3}
+              value={replyText}
+              onChange={(e) => setReplyText(e.target.value)}
+              placeholder="Paste the reply you want to classify…"
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-800"
+            />
+          </label>
+          <div className="mt-3 flex justify-end">
+            <Button variant="primary" icon={Tag} onClick={() => runClassify.mutate()} isLoading={runClassify.isPending} disabled={!replyText.trim()}>
+              Classify
+            </Button>
+          </div>
+        </Card>
       </section>
 
-      {/* Score launcher */}
-      <Card padding="lg">
-        <CardHeader title="Run lead scoring" description="Score all active leads against an ICP rubric using your connected AI provider." />
-        <label className="block">
-          <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">ICP description</span>
-          <textarea
-            rows={3}
-            value={icp}
-            onChange={(e) => setIcp(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-800"
-          />
-        </label>
-        <div className="mt-3 flex justify-end">
-          <Button variant="primary" icon={Play} onClick={() => runScore.mutate()} isLoading={runScore.isPending} disabled={!icp.trim()}>
-            Run scoring
-          </Button>
+      {/* Workflow-only capabilities — honest about where they run. */}
+      <section>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Runs inside a campaign</p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {[...WORKFLOW_ONLY_KINDS, 'screen' as AiJobKind].map((kind) => {
+            const m = KIND_META[kind]
+            const Icon = m.icon
+            return (
+              <Card key={kind} padding="md">
+                <div className="flex items-start justify-between">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                    <Icon size={16} />
+                  </span>
+                  <Badge label="in-workflow" variant="neutral" size="xs" />
+                </div>
+                <p className="mt-3 text-sm font-semibold text-slate-900 dark:text-white">{m.label}</p>
+                <p className="mt-0.5 text-xs text-slate-500">{m.desc}</p>
+              </Card>
+            )
+          })}
         </div>
-      </Card>
+      </section>
 
       {/* Run log */}
       <Card padding="none">
@@ -95,7 +181,7 @@ export default function AiStudio() {
         </div>
         {isLoading ? (
           <div className="space-y-2 p-4">{[0, 1, 2].map((i) => <div key={i} className="h-10 skeleton rounded-lg" />)}</div>
-        ) : jobs.length === 0 ? (
+        ) : jobs.length === 0 && visiblePending.length === 0 ? (
           <EmptyState icon={Sparkles} title="No AI runs yet" description="Kick a job above — it'll show here with status, model, and cost." />
         ) : (
           <div className="overflow-x-auto">
@@ -110,6 +196,7 @@ export default function AiStudio() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {visiblePending.map((p) => <PendingRow key={p.id} job={p} />)}
                 {jobs.map((j) => <JobRow key={j.id} job={j} />)}
               </tbody>
             </table>
@@ -121,8 +208,10 @@ export default function AiStudio() {
 }
 
 function JobRow({ job }: { job: AiJob }) {
+  const stalled = job.status === 'queued' && Date.now() - new Date(job.created_at).getTime() > 60 * 60 * 1000
   const statusTone =
-    job.status === 'done' ? 'success' : job.status === 'failed' ? 'danger' : job.status === 'running' ? 'info' : 'warning'
+    job.status === 'done' ? 'success' : job.status === 'failed' ? 'danger' : job.status === 'running' ? 'info' : stalled ? 'neutral' : 'warning'
+  const statusLabel = stalled ? 'stalled' : job.status
   const Icon = KIND_META[job.kind].icon
   return (
     <tr className="hover:bg-slate-50 dark:hover:bg-slate-900/50">
@@ -132,12 +221,32 @@ function JobRow({ job }: { job: AiJob }) {
           <span className="font-medium text-slate-900 dark:text-white">{KIND_META[job.kind].label}</span>
         </div>
       </td>
-      <td className="px-5 py-2.5"><Badge label={job.status} variant={statusTone} size="xs" dot /></td>
+      <td className="px-5 py-2.5"><Badge label={statusLabel} variant={statusTone} size="xs" dot /></td>
       <td className="px-5 py-2.5 text-slate-500">{job.model ?? '—'}</td>
       <td className={clsx('px-5 py-2.5 tabular-nums', job.cost_usd ? 'text-slate-700 dark:text-slate-300' : 'text-slate-300')}>
         {job.cost_usd ? `$${Number(job.cost_usd).toFixed(4)}` : '—'}
       </td>
       <td className="px-5 py-2.5 text-slate-400">{timeAgo(job.created_at)}</td>
+    </tr>
+  )
+}
+
+// Optimistic row shown the instant a launcher is clicked, before the poll
+// returns the real job — so the action visibly does something immediately.
+function PendingRow({ job }: { job: PendingJob }) {
+  const Icon = KIND_META[job.kind].icon
+  return (
+    <tr className="animate-pulse bg-violet-50/40 dark:bg-violet-950/10">
+      <td className="px-5 py-2.5">
+        <div className="flex items-center gap-2">
+          <Icon size={14} className="text-violet-500" />
+          <span className="font-medium text-slate-900 dark:text-white">{KIND_META[job.kind].label}</span>
+        </div>
+      </td>
+      <td className="px-5 py-2.5"><Badge label="queued" variant="warning" size="xs" dot /></td>
+      <td className="px-5 py-2.5 text-slate-400">—</td>
+      <td className="px-5 py-2.5 text-slate-300">—</td>
+      <td className="px-5 py-2.5 text-slate-400">just now</td>
     </tr>
   )
 }

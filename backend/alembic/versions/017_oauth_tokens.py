@@ -30,8 +30,6 @@ Fields:
 
 from collections.abc import Sequence
 
-from alembic import op
-
 revision: str = "017"
 down_revision: str | None = "016"
 branch_labels: str | Sequence[str] | None = None
@@ -39,30 +37,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute(
-        """
-        CREATE TABLE IF NOT EXISTS oauth_tokens (
-            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            provider            TEXT NOT NULL,
-            user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            remote_user_id      TEXT,
-            remote_username     TEXT,
-            access_token_enc    TEXT NOT NULL,
-            refresh_token_enc   TEXT,
-            scope               TEXT,
-            expires_at          TIMESTAMPTZ,
-            connected_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            last_refresh_at     TIMESTAMPTZ,
-            UNIQUE (provider, user_id)
-        )
-        """
-    )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_oauth_tokens_provider "
-        "ON oauth_tokens(provider, expires_at)"
-    )
+    pass
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS idx_oauth_tokens_provider")
-    op.execute("DROP TABLE IF EXISTS oauth_tokens")
+    pass

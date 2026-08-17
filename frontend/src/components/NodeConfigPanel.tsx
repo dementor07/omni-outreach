@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { X, Trash2, Save } from 'lucide-react'
+import { ChevronDown, ChevronUp, Plus, Save, Trash2, X } from 'lucide-react'
 import { clsx } from 'clsx'
-import type { NodeManifest } from '../api/v2'
+import type { Connection, NodeManifest } from '../api/v2'
+import { categoryLabel, handleLabel, nodeLabel } from '../utils/nodeLabel'
+import { fieldLabel, fieldHelp } from '../utils/fieldLabel'
 import Button from './Button'
+import Select from './Select'
 
 /** A single field derived from a JSON-Schema property. */
 interface SchemaField {
@@ -33,6 +36,50 @@ interface JsonSchema {
   required?: string[]
 }
 
+interface ConditionRuleValue {
+  field: string
+  operator: string
+  value?: unknown
+}
+
+const CONDITION_OPERATORS = [
+  { value: 'equals', label: 'equals' },
+  { value: 'not_equals', label: 'does not equal' },
+  { value: 'contains', label: 'contains' },
+  { value: 'not_contains', label: 'does not contain' },
+  { value: 'starts_with', label: 'starts with' },
+  { value: 'ends_with', label: 'ends with' },
+  { value: 'gt', label: 'is greater than' },
+  { value: 'gte', label: 'is at least' },
+  { value: 'lt', label: 'is less than' },
+  { value: 'lte', label: 'is at most' },
+  { value: 'one_of', label: 'is one of' },
+  { value: 'not_one_of', label: 'is not one of' },
+  { value: 'is_set', label: 'is set' },
+  { value: 'is_not_set', label: 'is not set' },
+  { value: 'is_true', label: 'is true' },
+  { value: 'is_false', label: 'is false' },
+  { value: 'regex', label: 'matches regular expression' },
+]
+
+const VALUELESS_OPERATORS = new Set(['is_set', 'is_not_set', 'is_true', 'is_false'])
+
+const COMMON_FIELDS = [
+  'email',
+  'first_name',
+  'last_name',
+  'company',
+  'headline',
+  'phone',
+  'linkedin_url',
+  'custom_fields.title',
+  'custom_fields.location',
+  'custom_fields.industry',
+  'custom_fields.employee_count',
+  'custom_fields.icp_score',
+  'custom_fields.verification_status',
+]
+
 /** Long-text heuristic: templates/prompts/descriptions render as textareas. */
 const LONG_FIELD_HINTS = ['template', 'body', 'prompt', 'description', 'instruction', 'message', 'inputs_json', 'blocks_json']
 
@@ -53,8 +100,10 @@ function fieldsFromSchema(schema: JsonSchema): SchemaField[] {
       (LONG_FIELD_HINTS.some((h) => name.toLowerCase().includes(h)) || (prop.maxLength ?? 0) > 200)
     return {
       name,
-      title: prop.title ?? name,
-      description: prop.description,
+      // Human label + plain-English help (overrides the raw snake_case name and
+      // the often-terse schema description) — see utils/fieldLabel.
+      title: fieldLabel(name, prop.title),
+      description: fieldHelp(name) ?? prop.description,
       type,
       format: variant.format,
       enumValues,
@@ -70,8 +119,15 @@ interface NodeConfigPanelProps {
   nodeId: string
   initialConfig: Record<string, unknown>
   saving: boolean
-  onSave: (config: Record<string, unknown>) => void
-  onDelete: () => void
+  connections?: Connection[]
+  wiredOutputHandles?: string[]
+  sameTypeCount?: number
+  onSave: (
+    config: Record<string, unknown>,
+    applyChangedFieldsToSameType?: boolean,
+    changedFields?: string[],
+  ) => void
+  onDelete?: () => void
   onClose: () => void
 }
 
@@ -80,25 +136,68 @@ export default function NodeConfigPanel({
   nodeId,
   initialConfig,
   saving,
+  connections = [],
+  wiredOutputHandles = [],
+  sameTypeCount = 1,
   onSave,
   onDelete,
   onClose,
 }: NodeConfigPanelProps) {
   const fields = useMemo(() => fieldsFromSchema(manifest.config_schema as JsonSchema), [manifest])
   const [values, setValues] = useState<Record<string, unknown>>(initialConfig)
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [applyToSameType, setApplyToSameType] = useState(false)
 
   // Reset the form when switching to a different node.
   useEffect(() => {
     setValues(initialConfig)
-  }, [nodeId, initialConfig])
+    setShowAdvanced(
+      (manifest.advanced_fields ?? []).some((name) => !isEmpty(initialConfig[name])),
+    )
+    setApplyToSameType(false)
+  }, [nodeId, initialConfig, manifest.advanced_fields])
 
   function setField(name: string, value: unknown) {
     setValues((v) => ({ ...v, [name]: value }))
   }
 
-  const missingRequired = fields.filter((f) => f.required && isEmpty(values[f.name])).map((f) => f.title)
+  const preferred = new Set(manifest.primary_fields ?? [])
+  const explicitAdvanced = new Set(manifest.advanced_fields ?? [])
+  let primaryFields = fields.filter((field) => field.required || preferred.has(field.name))
+  if (primaryFields.length === 0 && fields.length > 0) {
+    primaryFields = fields.slice(0, Math.min(2, fields.length))
+  }
+  const primaryNames = new Set(primaryFields.map((field) => field.name))
+  const advancedFields = fields.filter(
+    (field) => explicitAdvanced.has(field.name) || !primaryNames.has(field.name),
+  )
+  const wiredOutputHandleSet = new Set(wiredOutputHandles)
+  const rules = Array.isArray(values.rules) ? values.rules as ConditionRuleValue[] : []
+  const rulesReady = rules.length > 0 && rules.every(
+    (rule) => rule.field?.trim()
+      && rule.operator
+      && (VALUELESS_OPERATORS.has(rule.operator) || !isEmpty(rule.value)),
+  )
+  const missingRequired = manifest.type === 'condition.rules'
+    ? (rulesReady ? [] : ['At least one complete rule'])
+    : fields.filter((f) => f.required && isEmpty(values[f.name])).map((f) => f.title)
 
   function handleSave() {
+    if (manifest.type === 'condition.rules') {
+      const clean = {
+        match: values.match === 'any' ? 'any' : 'all',
+        rules: rules.map((rule) => ({
+          field: rule.field.trim(),
+          operator: rule.operator,
+          ...(!VALUELESS_OPERATORS.has(rule.operator) ? { value: rule.value } : {}),
+        })),
+      }
+      const changed = ['match', 'rules'].filter(
+        (name) => JSON.stringify(clean[name as keyof typeof clean]) !== JSON.stringify(initialConfig[name]),
+      )
+      onSave(clean, applyToSameType, changed)
+      return
+    }
     // Drop empty strings so optional fields don't persist as ""
     const clean: Record<string, unknown> = {}
     for (const f of fields) {
@@ -106,7 +205,11 @@ export default function NodeConfigPanel({
       if (isEmpty(v)) continue
       clean[f.name] = f.type === 'integer' || f.type === 'number' ? Number(v) : v
     }
-    onSave(clean)
+    const changed = new Set<string>()
+    for (const name of new Set([...Object.keys(initialConfig), ...Object.keys(clean)])) {
+      if (JSON.stringify(initialConfig[name]) !== JSON.stringify(clean[name])) changed.add(name)
+    }
+    onSave(clean, applyToSameType, [...changed])
   }
 
   return (
@@ -114,8 +217,8 @@ export default function NodeConfigPanel({
       {/* Header */}
       <div className="flex items-start justify-between gap-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
         <div className="min-w-0">
-          <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-brand-500">{manifest.category}</p>
-          <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{manifest.type}</p>
+          <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-brand-500">{categoryLabel(manifest.category)}</p>
+          <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{manifest.display_name || nodeLabel(manifest.type)}</p>
           <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-500">{manifest.summary}</p>
         </div>
         <button
@@ -131,23 +234,89 @@ export default function NodeConfigPanel({
 
       {/* Fields */}
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
-        {fields.length === 0 ? (
+        {manifest.type === 'condition.rules' ? (
+          <RulesEditor
+            nodeId={nodeId}
+            match={values.match === 'any' ? 'any' : 'all'}
+            rules={rules}
+            onMatchChange={(match) => setField('match', match)}
+            onRulesChange={(next) => setField('rules', next)}
+          />
+        ) : fields.length === 0 ? (
           <p className="text-xs text-slate-500">This node has no configurable fields.</p>
         ) : (
-          fields.map((f) => <Field key={f.name} field={f} value={values[f.name]} onChange={(v) => setField(f.name, v)} />)
+          <>
+            {manifest.type === 'ai.enrich' && (
+              <EnrichmentStageFields
+                provider={String(values.enrich_source ?? '')}
+                connectionName={String(values.connection_name ?? '')}
+                connections={connections}
+                onChange={(provider, connectionName) => {
+                  setField('enrich_source', provider)
+                  setField('connection_name', connectionName)
+                }}
+              />
+            )}
+            {primaryFields.filter((f) => (
+              manifest.type !== 'ai.enrich' || !['enrich_source', 'connection_name'].includes(f.name)
+            )).map((f) => (
+              <Field key={f.name} field={f} value={values[f.name]} onChange={(v) => setField(f.name, v)} />
+            ))}
+            {advancedFields.length > 0 && (
+              <div className="rounded-xl border border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvanced((visible) => !visible)}
+                  className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
+                >
+                  <span>
+                    <span className="block text-xs font-semibold text-slate-700 dark:text-slate-200">Advanced settings</span>
+                    <span className="block text-[11px] text-slate-400">
+                      {advancedFields.length} optional {advancedFields.length === 1 ? 'setting' : 'settings'} · defaults are usually best
+                    </span>
+                  </span>
+                  {showAdvanced ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                </button>
+                {showAdvanced && (
+                  <div className="space-y-4 border-t border-slate-100 px-3 py-3 dark:border-slate-800">
+                    {advancedFields.map((f) => (
+                      <Field key={f.name} field={f} value={values[f.name]} onChange={(v) => setField(f.name, v)} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         )}
 
         {/* Output handles reference */}
         {manifest.output_handles.length > 0 && (
           <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/50">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Outputs</p>
-            <ul className="mt-1.5 space-y-1">
-              {manifest.output_handles.map((h) => (
-                <li key={h.name} className="flex items-baseline gap-2 text-[11px]">
-                  <span className={clsx('font-mono font-semibold', h.name === 'on_error' ? 'text-rose-500' : 'text-emerald-600')}>{h.name}</span>
-                  <span className="text-slate-500">{h.description}</span>
-                </li>
-              ))}
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Routes</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+              Each output is an explicit branch. Unconnected routes intentionally end the sequence.
+            </p>
+            <ul className="mt-2 space-y-1.5">
+              {manifest.output_handles.map((h) => {
+                const wired = wiredOutputHandleSet.has(h.name)
+                const danger = isFailureRoute(h.name)
+                return (
+                  <li key={h.name} className="rounded-lg border border-white/70 bg-white px-2.5 py-2 text-[11px] dark:border-slate-700 dark:bg-slate-900/50">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={clsx('font-bold uppercase tracking-wide', danger ? 'text-rose-500' : 'text-emerald-600')}>{handleLabel(h.name)}</span>
+                      <span className={clsx(
+                        'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+                        wired
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
+                          : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300',
+                      )}>
+                        {wired ? 'Connected' : 'Ends here'}
+                      </span>
+                    </div>
+                    <p className="mt-1 leading-relaxed text-slate-500">{h.description || routeFallback(h.name)}</p>
+                  </li>
+                )
+              })}
             </ul>
           </div>
         )}
@@ -155,13 +324,29 @@ export default function NodeConfigPanel({
 
       {/* Footer */}
       <div className="space-y-2 border-t border-slate-100 px-4 py-3 dark:border-slate-800">
+        {sameTypeCount > 1 && (
+          <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-violet-100 bg-violet-50/60 px-2.5 py-2 text-[11px] text-violet-800 dark:border-violet-900/40 dark:bg-violet-950/20 dark:text-violet-200">
+            <input
+              type="checkbox"
+              checked={applyToSameType}
+              onChange={(event) => setApplyToSameType(event.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="block font-semibold">Apply changed fields to all {sameTypeCount} {nodeLabel(manifest.type)} steps</span>
+              <span className="block opacity-75">Only fields changed in this form are copied; stage-specific settings remain intact.</span>
+            </span>
+          </label>
+        )}
         {missingRequired.length > 0 && (
           <p className="rounded-md bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
             Required: {missingRequired.join(', ')}
           </p>
         )}
         <div className="flex items-center justify-between gap-2">
-          <Button variant="danger" size="sm" icon={Trash2} onClick={onDelete}>Delete</Button>
+          {onDelete ? (
+            <Button variant="danger" size="sm" icon={Trash2} onClick={onDelete}>Delete</Button>
+          ) : <span />}
           <Button variant="primary" size="sm" icon={Save} onClick={handleSave} isLoading={saving} disabled={missingRequired.length > 0}>
             Save
           </Button>
@@ -171,8 +356,87 @@ export default function NodeConfigPanel({
   )
 }
 
+const ENRICHMENT_PROVIDER_NAMES: Record<string, string> = {
+  apollo: 'Apollo',
+  proxycurl: 'Proxycurl',
+  hunter: 'Hunter',
+}
+
+function isFailureRoute(handle: string): boolean {
+  return ['on_error', 'rejected', 'timeout', 'empty', 'false'].includes(handle)
+}
+
+function routeFallback(handle: string): string {
+  return handle === 'default'
+    ? 'Continue to the next step.'
+    : `Follow the ${handleLabel(handle)} branch.`
+}
+
+function EnrichmentStageFields({
+  provider,
+  connectionName,
+  connections,
+  onChange,
+}: {
+  provider: string
+  connectionName: string
+  connections: Connection[]
+  onChange: (provider: string, connectionName: string) => void
+}) {
+  const availableProviders = ['apollo', 'proxycurl', 'hunter'].filter(
+    (candidate) => connections.some((connection) => connection.provider === candidate)
+      || candidate === provider,
+  )
+  const providerConnections = connections.filter((connection) => connection.provider === provider)
+
+  return (
+    <div className="space-y-3 rounded-xl border border-brand-100 bg-brand-50/40 p-3 dark:border-brand-900/50 dark:bg-brand-950/20">
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-300">Provider</p>
+        <Select
+          className="mt-1"
+          size="sm"
+          ariaLabel="Enrichment provider"
+          value={provider}
+          onChange={(nextProvider) => {
+            const nextConnection = connections.find((connection) => connection.provider === nextProvider)
+            onChange(nextProvider, nextConnection?.name ?? '')
+          }}
+          options={availableProviders.map((candidate) => ({
+            value: candidate,
+            label: ENRICHMENT_PROVIDER_NAMES[candidate] ?? candidate,
+          }))}
+        />
+      </div>
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-300">Connected account</p>
+        {providerConnections.length > 0 ? (
+          <Select
+            className="mt-1"
+            size="sm"
+            ariaLabel="Enrichment connection"
+            value={connectionName}
+            onChange={(nextConnection) => onChange(provider, nextConnection)}
+            options={providerConnections.map((connection) => ({
+              value: connection.name,
+              label: connection.name,
+            }))}
+          />
+        ) : (
+          <p className="mt-1 rounded-md bg-amber-50 px-2.5 py-2 text-[11px] text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
+            This provider is not connected. Add it in Integrations before running the campaign.
+          </p>
+        )}
+      </div>
+      <p className="text-[11px] leading-relaxed text-slate-500">
+        This stage uses one credential only. Provider failures follow the visible On error edge.
+      </p>
+    </div>
+  )
+}
+
 function isEmpty(v: unknown): boolean {
-  return v === undefined || v === null || v === ''
+  return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)
 }
 
 const inputCls =
@@ -207,10 +471,14 @@ function Field({ field, value, onChange }: { field: SchemaField; value: unknown;
       </span>
       {field.description && <p className="mb-1 mt-0.5 text-[11px] leading-tight text-slate-400">{field.description}</p>}
       {field.type === 'enum' ? (
-        <select value={String(value ?? field.default ?? '')} onChange={(e) => onChange(e.target.value)} className={clsx(inputCls, 'mt-0.5')}>
-          <option value="" disabled>Select…</option>
-          {field.enumValues?.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
-        </select>
+        <Select
+          className="mt-0.5"
+          size="sm"
+          ariaLabel={field.name}
+          value={String(value ?? field.default ?? '')}
+          onChange={(v) => onChange(v)}
+          options={(field.enumValues ?? []).map((opt) => ({ value: opt, label: opt }))}
+        />
       ) : field.isLong ? (
         <textarea
           rows={4}
@@ -229,5 +497,108 @@ function Field({ field, value, onChange }: { field: SchemaField; value: unknown;
         />
       )}
     </label>
+  )
+}
+
+function RulesEditor({
+  nodeId,
+  match,
+  rules,
+  onMatchChange,
+  onRulesChange,
+}: {
+  nodeId: string
+  match: 'all' | 'any'
+  rules: ConditionRuleValue[]
+  onMatchChange: (value: 'all' | 'any') => void
+  onRulesChange: (rules: ConditionRuleValue[]) => void
+}) {
+  const visibleRules = rules.length > 0 ? rules : [{ field: '', operator: 'equals', value: '' }]
+  const updateRule = (index: number, patch: Partial<ConditionRuleValue>) => {
+    const next = visibleRules.map((rule, i) => i === index ? { ...rule, ...patch } : rule)
+    onRulesChange(next)
+  }
+  const removeRule = (index: number) => {
+    onRulesChange(visibleRules.filter((_rule, i) => i !== index))
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl bg-brand-50/60 p-3 dark:bg-brand-950/20">
+        <p className="text-xs font-semibold text-brand-800 dark:text-brand-200">Continue down “Matched” when</p>
+        <div className="mt-2 flex gap-2">
+          {(['all', 'any'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => onMatchChange(mode)}
+              className={clsx(
+                'rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors',
+                match === mode
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white text-slate-600 hover:bg-brand-100 dark:bg-slate-900 dark:text-slate-300',
+              )}
+            >
+              {mode === 'all' ? 'All rules match' : 'Any rule matches'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <datalist id={`condition-fields-${nodeId}`}>
+        {COMMON_FIELDS.map((field) => <option key={field} value={field} />)}
+      </datalist>
+
+      {visibleRules.map((rule, index) => (
+        <div key={index} className="space-y-2 rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Rule {index + 1}</span>
+            <button
+              type="button"
+              onClick={() => removeRule(index)}
+              aria-label={`Remove rule ${index + 1}`}
+              className="rounded-md p-1 text-slate-300 hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-950/30"
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+          <input
+            value={rule.field}
+            onChange={(e) => updateRule(index, { field: e.target.value })}
+            list={`condition-fields-${nodeId}`}
+            placeholder="Choose a field, e.g. company"
+            className={inputCls}
+          />
+          <Select
+            size="sm"
+            ariaLabel={`Operator for rule ${index + 1}`}
+            value={rule.operator}
+            onChange={(operator) => updateRule(index, { operator })}
+            options={CONDITION_OPERATORS}
+          />
+          {!VALUELESS_OPERATORS.has(rule.operator) && (
+            <input
+              value={String(rule.value ?? '')}
+              onChange={(e) => updateRule(index, { value: e.target.value })}
+              placeholder={rule.operator.includes('one_of') ? 'Value one, value two' : 'Comparison value'}
+              className={inputCls}
+            />
+          )}
+          <p className="text-[10px] leading-4 text-slate-400">
+            Text comparisons are case-insensitive. Numeric operators require numeric values.
+          </p>
+        </div>
+      ))}
+
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        icon={Plus}
+        onClick={() => onRulesChange(visibleRules.concat({ field: '', operator: 'equals', value: '' }))}
+      >
+        Add rule
+      </Button>
+    </div>
   )
 }

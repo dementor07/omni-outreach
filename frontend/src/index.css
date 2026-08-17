@@ -5,24 +5,128 @@
 @tailwind utilities;
 
 @layer base {
+  /* DYNAMIC-003 — data-visualisation tokens.
+     One validated categorical palette, assigned to series BY POSITION. The slot
+     ORDER is the colour-vision-deficiency safety mechanism, not decoration:
+     validated with the dataviz palette validator against this app's own
+     surfaces (#ffffff light / #020617 dark). Light: worst adjacent CVD dE 9.1,
+     normal-vision dE 22.9. Dark: worst adjacent CVD dE 8.4, normal-vision 19.8.
+     Both clear the >=8 CVD target and >=15 normal-vision floor.
+     Aqua and yellow sit under 3:1 on the light surface, so charts using them
+     ship visible direct labels + a legend (the documented relief rule).
+     Do not reorder or hand-pick these per chart. */
+  :root {
+    --viz-series-1: #2a78d6;
+    --viz-series-2: #eb6834;
+    --viz-series-3: #1baf7a;
+    --viz-series-4: #eda100;
+    --viz-series-5: #e87ba4;
+    --viz-series-6: #008300;
+    --viz-series-7: #4a3aa7;
+    --viz-series-8: #e34948;
+    --viz-surface: #ffffff;
+    --viz-grid: #e2e8f0;
+    --viz-axis: #cbd5e1;
+    --viz-ink-muted: #64748b;
+  }
+
+  /* Same eight hues re-stepped for the dark surface — a selected dark palette,
+     not an automatic flip. */
+  .dark {
+    --viz-series-1: #3987e5;
+    --viz-series-2: #d95926;
+    --viz-series-3: #199e70;
+    --viz-series-4: #c98500;
+    --viz-series-5: #d55181;
+    --viz-series-6: #008300;
+    --viz-series-7: #9085e9;
+    --viz-series-8: #e66767;
+    --viz-surface: #020617;
+    --viz-grid: #1e293b;
+    --viz-axis: #334155;
+    --viz-ink-muted: #94a3b8;
+  }
+
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    min-width: 320px;
+    background: #f8fafc;
   }
 
   body {
-    @apply bg-slate-50 text-slate-900 font-sans;
+    @apply min-h-screen font-sans text-slate-900;
+    /* A barely-there warm tint in one corner — enough to keep the page from
+       reading as flat clinical white, not enough to notice as "a gradient".
+       Restraint over spectacle. */
+    background-color: #f8fafc;
+    background-image:
+      radial-gradient(58rem 42rem at 104% -8%, rgb(244 63 94 / 0.055), transparent 56%),
+      radial-gradient(46rem 34rem at -12% 108%, rgb(14 165 233 / 0.035), transparent 62%);
+    background-attachment: fixed;
   }
 
   .dark body,
   body.dark {
-    @apply bg-[rgb(2,6,23)] text-slate-100;
+    @apply text-slate-100;
+    background-color: rgb(2 6 23);
+    background-image:
+      radial-gradient(58rem 42rem at 104% -8%, rgb(244 63 94 / 0.075), transparent 56%),
+      radial-gradient(46rem 34rem at -12% 108%, rgb(14 165 233 / 0.05), transparent 62%);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background: rgb(254 205 211 / 0.75);
+    color: rgb(136 19 55);
+  }
+
+  :where(a, button, [role='button']):focus-visible {
+    outline: 2px solid rgb(244 63 94 / 0.72);
+    outline-offset: 2px;
   }
 }
 
 @layer components {
   .btn-tactile {
     @apply inline-flex items-center justify-center rounded-lg font-semibold transition-all active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  /* Glass surface — translucent + blurred, for floating chrome (topbar,
+     sidebar). A touch frostier than a plain panel; legibility preserved by the
+     high-ish base opacity. */
+  .glass {
+    @apply bg-white/80 backdrop-blur-xl backdrop-saturate-150 dark:bg-slate-950/80;
+  }
+
+  /* Stronger glass for floating overlays (popovers, menus, modals, the canvas
+     toolbar) — they sit OVER content, so the frost + a faint inner highlight
+     actually read as glass. More blur, a hairline white top edge. */
+  .glass-panel {
+    @apply backdrop-blur-2xl backdrop-saturate-150;
+    background-color: rgb(255 255 255 / 0.72);
+    box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.6), 0 8px 28px -6px rgb(15 23 42 / 0.18);
+  }
+  .dark .glass-panel {
+    background-color: rgb(15 23 42 / 0.72);
+    box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.08), 0 8px 28px -6px rgb(0 0 0 / 0.5);
+  }
+
+  /* Hover-lift — a card that gently rises + deepens its shadow on hover. The
+     workhorse interaction for clickable cards across the app. The shadow is a
+     raw value (not @apply shadow-elevated) so PostCSS resolves it regardless of
+     theme-extension ordering. */
+  .lift {
+    @apply transition-all duration-200 ease-out;
+  }
+  .lift:hover {
+    @apply -translate-y-0.5;
+    box-shadow: 0 4px 10px -3px rgb(15 23 42 / 0.07), 0 10px 24px -8px rgb(15 23 42 / 0.10);
+  }
+
+  /* Consistent quiet inset surface for filters, evidence and secondary panels. */
+  .inset-surface {
+    @apply rounded-xl border border-slate-200/80 bg-slate-50/80 dark:border-slate-800 dark:bg-slate-950/35;
   }
 
   /* React Flow EdgeLabelRenderer — position + transform driven by --elx/--ely CSS vars
@@ -35,13 +139,43 @@
 }
 
 @layer utilities {
+  /* Shimmer skeleton — a moving sheen reads more "loading premium app" than a
+     flat pulse. Falls back gracefully (the base bg is still visible). */
   .skeleton {
-    @apply animate-pulse rounded-lg;
+    @apply relative overflow-hidden rounded-lg;
     background: rgb(241 245 249);
   }
-
+  .skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.55), transparent);
+    animation: shimmer 1.6s infinite;
+  }
   .dark .skeleton {
     background: rgb(30 41 59);
+  }
+  .dark .skeleton::after {
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.06), transparent);
+  }
+
+  /* Page-enter: a soft staggered rise. Apply to a page root; children can add
+     animation-delay inline for a cascade. */
+  .page-enter {
+    animation: fade-in-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton::after { animation: none; }
+    .page-enter { animation: none; }
   }
 }
 
@@ -106,4 +240,19 @@
 
 .blink {
   animation: blink 1.6s ease-in-out infinite;
+}
+
+/* Canvas edge flow — marches the dashed overlay from source to target so the
+   campaign graph reads as a live pipeline. dasharray is "6 9" (15 total), so
+   animating dashoffset by -15 makes one seamless cycle. */
+@keyframes omni-edge-flow {
+  to {
+    stroke-dashoffset: -15;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .react-flow__edge path[style*="omni-edge-flow"] {
+    animation: none !important;
+  }
 }

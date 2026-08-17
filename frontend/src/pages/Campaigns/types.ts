@@ -1,5 +1,3 @@
-import { NodeType } from '../../hooks/useSequenceSteps'
-
 export type CampaignTab = 'leads' | 'queue' | 'sequence' | 'sources' | 'settings'
 
 export interface RetellPrompt {

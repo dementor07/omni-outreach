@@ -9,6 +9,7 @@ import Card from '../components/Card'
 import Button from '../components/Button'
 import EmptyState from '../components/EmptyState'
 import Modal from '../components/Modal'
+import Select from '../components/Select'
 
 // Pipeline stages (HubSpot-style). closed_won/closed_lost are terminal.
 const STAGES: { key: string; label: string }[] = [
@@ -254,15 +255,12 @@ export default function Deals() {
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-500">Stage</label>
-                <select
+                <Select
+                  ariaLabel="Stage"
                   value={selectedDeal.stage}
-                  onChange={(e) => setSelectedDeal({ ...selectedDeal, stage: e.target.value })}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                >
-                  {STAGES.map((s) => (
-                    <option key={s.key} value={s.key}>{s.label}</option>
-                  ))}
-                </select>
+                  onChange={(v) => setSelectedDeal({ ...selectedDeal, stage: v })}
+                  options={STAGES.map((s) => ({ value: s.key, label: s.label }))}
+                />
               </div>
             </div>
             
@@ -324,29 +322,27 @@ export default function Deals() {
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-500">Currency</label>
-                <select
+                <Select
+                  ariaLabel="Currency"
                   value={newDeal.currency}
-                  onChange={(e) => setNewDeal({ ...newDeal, currency: e.target.value })}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                >
-                  <option value="USD">USD</option>
-                  <option value="EUR">EUR</option>
-                  <option value="GBP">GBP</option>
-                  <option value="INR">INR</option>
-                </select>
+                  onChange={(v) => setNewDeal({ ...newDeal, currency: v })}
+                  options={[
+                    { value: 'USD', label: 'USD' },
+                    { value: 'EUR', label: 'EUR' },
+                    { value: 'GBP', label: 'GBP' },
+                    { value: 'INR', label: 'INR' },
+                  ]}
+                />
               </div>
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-500">Stage</label>
-              <select
+              <Select
+                ariaLabel="Stage"
                 value={newDeal.stage}
-                onChange={(e) => setNewDeal({ ...newDeal, stage: e.target.value })}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-              >
-                {STAGES.map((s) => (
-                  <option key={s.key} value={s.key}>{s.label}</option>
-                ))}
-              </select>
+                onChange={(v) => setNewDeal({ ...newDeal, stage: v })}
+                options={STAGES.map((s) => ({ value: s.key, label: s.label }))}
+              />
             </div>
             <div className="flex justify-end gap-2 pt-4 border-t border-slate-100 dark:border-slate-800">
               <Button variant="secondary" onClick={() => setShowCreate(false)}>Cancel</Button>

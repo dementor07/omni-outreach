@@ -33,10 +33,23 @@ class AiComposeConfig(BaseModel):
     instruction: str = Field(description="What to write, in plain language")
     channel: Literal["email", "linkedin", "sms", "whatsapp"] = Field("email", description="Channel the draft will be sent on")
     tone: Literal["professional", "casual", "warm", "direct"] = Field("professional")
+    # TONE-PRESET-001: pick one of the structured tone presets (the team's tone
+    # library, omni_message_tones). When set it OVERRIDES the flat `tone` above —
+    # the dispatcher resolves the preset's full instructions (voice, word-count
+    # rules, opening styles, avoid lists) into the compose prompt. Left None, the
+    # legacy flat tone is used (backward-compatible).
+    tone_id: int | None = Field(None, description="Tone preset id (see GET /tones); overrides `tone` when set")
     max_words: int = Field(120, ge=20, le=600)
     target_variable: str = Field("ai_draft", description="Where to store the draft on the lead context")
     provider: Literal["anthropic", "openai", "gemini", "mindstudio"] = Field(
         "anthropic", description="Which connected AI provider to use"
+    )
+    model: str | None = Field(
+        None,
+        description=(
+            "Anthropic model id override for this step. Empty = Haiku (cheap). Set a stronger "
+            "model like 'claude-sonnet-4-6' for higher-quality customer-facing copy."
+        ),
     )
 
 
@@ -67,6 +80,7 @@ async def execute(ctx: NodeContext) -> NodeResult:
                 "provider": cfg.provider,
                 "channel": cfg.channel,
                 "tone": cfg.tone,
+                "tone_id": cfg.tone_id,
                 "max_words": cfg.max_words,
                 "target_variable": cfg.target_variable,
                 "correlation_id": correlation_id,

@@ -1,8 +1,21 @@
-from datetime import datetime
-from enum import StrEnum
-from typing import Any
+"""Event-plane vocabulary.
 
-from pydantic import UUID4, BaseModel, Field
+Only the enums here are live code: ``ChannelType`` is imported by the
+dispatcher/commands to route a node to a muscle handler, and ``TaskStatus`` /
+``EventType`` document the wire vocabulary shared with the Rust muscle and the
+Flink orchestrator.
+
+EXEC-006: the former ``ActionCommand`` / ``ExecutionResult`` / ``LeadContext`` /
+``StateTransition`` Pydantic models were removed. They were never imported or
+instantiated — the command/result/transition envelopes are built and consumed
+as plain dicts in ``execution/commands.py`` and ``execution/transition_worker.py``
+and on the Rust side — and the stale models had drifted from the real wire shape
+(missing task_id/lead_id/metadata/event_type/lead_mutations), so keeping them
+only misled readers. The canonical wire shape is the dict assembled in
+``commands.build_command`` and ``transition_worker._emit_synthetic_result``.
+"""
+
+from enum import StrEnum
 
 
 class TaskStatus(StrEnum):
@@ -34,12 +47,38 @@ class ChannelType(StrEnum):
     HOT_LEAD_ALERT = "hot_lead_alert"
     DATA_TRANSFORM = "data_transform"
     AI_COMPOSE = "ai_compose"
-    LEAD_GEN_PULL = "lead_gen_pull"
-    CSV_IMPORT = "csv_import"
     HTTP_CALL = "http_call"  # config-driven REST integration (generic handler)
     APIFY = "apify"  # Apify actor run + poll + dataset fetch (source.linkedin_jobs)
+    LINKEDIN_JOBS_GUEST = "linkedin_jobs_guest"  # free guest-API LinkedIn jobs (source.linkedin_jobs_guest)
     AI_SCREEN = "ai_screen"  # Claude ACCEPT/REJECT classifier (ai.screen_company / ai.screen_person)
     SERPER_PEOPLE = "serper_people"  # Multi-pattern per-company Serper LinkedIn search
+    LEADS_FINDER = "leads.finder"  # LinkFinder AI fan-out people discovery
+    NAUKRI = "naukri"  # Camoufox-driven Naukri.com job scrape (source.naukri)
+    INDEED = "indeed"  # Apify-driven Indeed.com job scrape (source.indeed)
+    # Company-discovery sources — each a distinct product, its own channel.
+    SEARXNG = "searxng"  # Free SearXNG meta-search dorks (source.searxng)
+    SERPER_SEARCH = "serper_search"  # Serper paid Google API dorks (source.serper_search)
+    APOLLO = "apollo"  # Apollo organization-search API (source.apollo)
+    CLUTCH = "clutch"  # Clutch directory scrape via Camoufox (source.clutch)
+    SEARXNG_PEOPLE = "searxng_people"  # Free SearXNG per-company people search (source.searxng_people)
+    ATS = "ats"  # ATS job-board harvest, 12 source nodes share it (source.greenhouse … source.rippling)
+    # APOLLO-DATA — native Apollo data layer. Each value MUST equal the Rust
+    # #[serde(rename = "...")] on models.rs::ChannelType or the muscle sees Unknown.
+    APOLLO_PEOPLE = "apollo_people"  # native people search (fan-out lead-gen)
+    RENIDLY_JOB_CHANGES = "renidly_job_changes"  # job-change fan-out lead source (RENIDLY-002)
+    APOLLO_COMPANY_ENRICH = "apollo_company_enrich"  # org enrichment by domain
+    APOLLO_JOBS = "apollo_jobs"  # org job postings (hiring signal)
+    # UNIPILE-FULL — native LinkedIn surface. Each value MUST equal the Rust
+    # #[serde(rename = "...")] on models.rs::ChannelType or the muscle sees Unknown.
+    LINKEDIN_SEARCH = "linkedin_search"  # native people search (fan-out lead-gen)
+    LINKEDIN_COMPANY_PROFILE = "linkedin_company_profile"  # company profile enrichment
+    LINKEDIN_MEMBER_PROFILE = "linkedin_member_profile"  # member profile enrichment
+    LINKEDIN_REACT_POST = "linkedin_react_post"  # react/like a post
+    LINKEDIN_COMMENT_POST = "linkedin_comment_post"  # comment on a post
+    LINKEDIN_ENDORSE = "linkedin_endorse"  # endorse a skill
+    LINKEDIN_FOLLOW = "linkedin_follow"  # follow a member
+    MESSAGE_REACT = "message_react"  # react to a message
+    INVITE_CANCEL = "invite_cancel"  # cancel a pending invitation
 
 
 class EventType(StrEnum):
@@ -47,55 +86,3 @@ class EventType(StrEnum):
     RESULT_TASK = "result_task"  # Execution -> Bus -> Orchestration (Flink/Python)
     STATE_TRANSITION = "state_transition"  # Orchestration -> Bus -> Telemetry/UI
     TELEMETRY_SIGNAL = "telemetry_signal"  # Real-time metrics
-
-
-class LeadContext(BaseModel):
-    id: UUID4
-    campaign_id: UUID4
-    email: str | None = None
-    linkedin_url: str | None = None
-    first_name: str | None = None
-    last_name: str | None = None
-    company: str | None = None
-    chat_id: str | None = None
-    extra_data: dict[str, Any] = Field(default_factory=dict)
-
-
-class ActionCommand(BaseModel):
-    """The 'Work Order' for the Execution Plane (Rust/Python)"""
-
-    command_id: UUID4
-    task_id: UUID4  # Legacy queue ID for now
-    channel: ChannelType
-    lead: LeadContext
-    payload: dict[str, Any] = Field(default_factory=dict)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    occurred_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class ExecutionResult(BaseModel):
-    """The 'Receipt' from the Execution Plane"""
-
-    command_id: UUID4
-    status: TaskStatus
-    error: str | None = None
-    is_retriable: bool = True
-    telemetry: dict[str, Any] = Field(default_factory=dict)
-    occurred_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class StateTransition(BaseModel):
-    """The signal that a Lead has moved in the DAG.
-
-    Wire shape matches the ``transition_worker`` consumer (Flink emits this
-    envelope directly): ``source_node_id`` is the node the lead just left
-    and ``handle`` is the outgoing edge label.
-    """
-
-    lead_id: UUID4
-    campaign_id: UUID4
-    source_node_id: UUID4
-    handle: str = "default"
-    event_type: str = "transition"
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    occurred_at: datetime = Field(default_factory=datetime.utcnow)

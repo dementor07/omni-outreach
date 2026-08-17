@@ -35,9 +35,12 @@ async def execute(ctx: NodeContext) -> NodeResult:
     contact_id = ctx.lead.get("contact_id") or ctx.lead.get("id")
     if not contact_id:
         return NodeResult(handle="default", error="TAG_MISSING_CONTACT")
+    # CONTRACT-002: emit the .queued intent so the dispatcher routes it to the
+    # REMOVE_TAG muscle channel (Rust returns lead_mutations.remove_tag, applied
+    # to custom_fields.tags by the transition worker — CONTRACT-003).
     events = [
         {
-            "event_type": "contact.tag_removed",
+            "event_type": "crm.remove_tag.queued",
             "entity_type": "contact",
             "entity_id": str(contact_id),
             "payload": {"tag": cfg.tag},

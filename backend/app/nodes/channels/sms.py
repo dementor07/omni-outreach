@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from app.nodes import (
     NodeCategory,
@@ -15,10 +16,13 @@ from app.nodes import (
     SideEffect,
     register,
 )
+from app.nodes.channels.dedupe import SendDedupeConfig
 
 
-class SmsChannelConfig(BaseModel):
-    connection_name: str = Field(description="Twilio connection name (Settings → Integrations)")
+class SmsChannelConfig(SendDedupeConfig):
+    connection_name: str | None = Field(None, description="Twilio connection name (Settings → Integrations)")
+    sending_account_id: str | None = None
+    account_pool: Literal["campaign", "round_robin", "single"] | None = None
     body_template: str = Field(min_length=1, max_length=1600, description="Message body; supports {{contact.first_name}}-style variables")
 
 
@@ -30,10 +34,13 @@ MANIFEST = NodeManifest(
     output_handles=(
         NodeHandle("sent", "Twilio accepted the message"),
         NodeHandle("on_error", "Permanent failure (invalid number, no credit, …)"),
+        # DEDUP-SEND-001: contact already messaged on this channel — skipped, continue here.
+        NodeHandle("already_messaged", "Skipped — this contact was already messaged"),
     ),
     capabilities=("connection:twilio",),
     side_effect=SideEffect.NETWORK,
     icon="message-square",
+    can_be_entry=True,  # OUTBOUND-FIRST-001: can start a campaign against an audience
 )
 
 

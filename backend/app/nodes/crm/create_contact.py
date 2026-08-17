@@ -1,4 +1,20 @@
-"""Create a contact projection by emitting contact.created."""
+"""Create a contact projection by emitting contact.created.
+
+Two modes, in priority order:
+
+  1. Dynamic (the people-discovery chain): when the lead carries a discovered +
+     screened person under ``custom_fields[person_field]`` (default 'item',
+     what flow.for_each writes per child), the contact's identity is taken from
+     that person row. This is how a Naukri/LinkedIn company -> Serper people ->
+     screen -> contact chain produces a *real named contact*. Explicit config
+     fields (below) override the person row field-for-field when set.
+  2. Static (manual / single-contact flows): when there's no person row, every
+     field comes from config.
+
+Node config is NOT interpolated by the runtime (transition_worker passes the
+stored config verbatim), so reading the person here is the ONLY way a fanned-out
+person becomes a contact — without it the chain creates nothing.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +22,7 @@ import uuid
 
 from pydantic import BaseModel, EmailStr, Field, HttpUrl
 
+from app.db import acquire, fetch_one, system_scope
 from app.nodes import (
     NodeCategory,
     NodeContext,
@@ -26,6 +43,12 @@ class CreateContactConfig(BaseModel):
     headline: str | None = None
     phone: str | None = None
     source: str = Field("workflow", description="Where this contact came from (workflow, manual, integration_name, …)")
+    person_field: str = Field(
+        "item",
+        description="custom_fields key holding the discovered/screened person to "
+        "turn into a contact (default 'item' — what flow.for_each writes). Config "
+        "fields above override the person row when set.",
+    )
 
 
 MANIFEST = NodeManifest(
@@ -33,35 +56,207 @@ MANIFEST = NodeManifest(
     category=NodeCategory.CRM,
     summary="Create a contact in the CRM (emits contact.created; projection picks up)",
     config_schema=CreateContactConfig,
-    output_handles=(NodeHandle("default", "Contact event emitted"),),
+    output_handles=(
+        NodeHandle("default", "Contact event emitted"),
+        NodeHandle("goal_capped", "Campaign contact target already reached — lead ended without creating a contact"),
+    ),
     side_effect=SideEffect.MUTATE,
     icon="user-plus",
+    primary_fields=("person_field",),
+    advanced_fields=("source", "email", "linkedin_url", "first_name", "last_name", "company", "headline", "phone"),
 )
 
 
+async def _is_contact_cap_reached(workspace_id: str, workflow_id: str) -> bool:
+    """CONTACT-CAP-002: has this campaign already attached its target number of
+    distinct contacts? Enforced HERE (before contact.created is emitted) so a
+    capped run never mints an orphan contact — the projector cap could only end
+    the lead AFTER the contact row already existed.
+
+    Wrapped in a per-(workspace, workflow) advisory lock + counted in the SAME
+    committed transaction so concurrent fan-out branches serialize on the count
+    instead of all reading "under target" at once and overshooting. This is the
+    same lock key the projector used; with the projector cap removed this is the
+    single enforcement point.
+
+    CONTACT-CAP-SCOPE-001: run under system_scope(). create_contact fires from
+    the transition worker's background context (a fanned-out child lead advancing
+    on the enrich 'default' handle), where no request workspace is armed — so a
+    bare acquire() raised 'no workspace context' and crashed the node BEFORE it
+    could emit contact.created. This read is workspace-filtered in SQL, so system
+    scope is safe."""
+    async with system_scope(), acquire() as conn:
+        objective = await conn.fetchrow(
+            """
+            SELECT target
+            FROM omni_campaign_objectives
+            WHERE workspace_id = $1 AND workflow_id = $2 AND metric = 'contacts'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            workspace_id,
+            workflow_id,
+        )
+        if not objective or int(objective["target"] or 0) <= 0:
+            return False
+        # Serialize the read against parallel branches creating contacts at once.
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtext($1))",
+            f"lead-contact-cap:{workspace_id}:{workflow_id}",
+        )
+        attached = await conn.fetchval(
+            """
+            SELECT count(DISTINCT contact_id)
+            FROM omni_leads
+            WHERE workspace_id = $1 AND workflow_id = $2 AND contact_id IS NOT NULL
+            """,
+            workspace_id,
+            workflow_id,
+        )
+    return int(attached or 0) >= int(objective["target"] or 0)
+
+
 async def execute(ctx: NodeContext) -> NodeResult:
+    if ctx.workflow_id and await _is_contact_cap_reached(ctx.workspace_id, ctx.workflow_id):
+        # Goal already met — do NOT emit contact.created (no orphan contact).
+        # Signal the worker to TERMINALIZE this lead via _terminalize_lead (which
+        # accounts it at any fan-out parent's barrier — a bare lead.sequence_ended
+        # event would strand the parent). The worker reads telemetry.goal_capped.
+        return NodeResult(
+            handle="goal_capped",
+            telemetry={"goal_capped": True, "reason": "contact_target_reached"},
+        )
+
     cfg = CreateContactConfig(**ctx.config)
-    if not cfg.email and not cfg.linkedin_url:
+    person = (ctx.lead.get("custom_fields") or {}).get(cfg.person_field) or {}
+    identity = _merge_identity(cfg, person)
+
+    # ENRICH-CONTACT-001: an enrichment stage (e.g. ai.enrich Apollo) writes the
+    # revealed email/linkedin onto the LEAD (top-level column + custom_fields),
+    # NOT back into the per-person `item` dict the for_each produced. So when the
+    # discovered person had no email but enrichment since revealed one, fall back
+    # to the lead's own fields before deciding there's no usable identity.
+    lead_cf = ctx.lead.get("custom_fields") or {}
+    if not identity["email"]:
+        identity["email"] = ctx.lead.get("email") or lead_cf.get("email") or None
+    if not identity["linkedin_url"]:
+        identity["linkedin_url"] = ctx.lead.get("linkedin_url") or lead_cf.get("linkedin_url") or None
+    # Backfill name/company/headline from the lead too, so the enriched contact
+    # isn't just an email with no name.
+    for fld in ("first_name", "last_name", "company", "headline"):
+        if not identity.get(fld):
+            identity[fld] = ctx.lead.get(fld) or lead_cf.get(fld) or identity.get(fld)
+
+    if not identity["email"] and not identity["linkedin_url"]:
+        # No usable identity from config OR the discovered person — fail-closed
+        # so we never emit a nameless, contactless ghost.
         return NodeResult(handle="default", error="CONTACT_REQUIRES_EMAIL_OR_LINKEDIN")
-    contact_id = str(uuid.uuid4())
-    events = [
+    # DEDUP-001: the contact id is DETERMINISTIC — a UUIDv5 of (workspace, natural
+    # key) — so the same person discovered again (re-run, or several leads under
+    # one company) upserts the SAME row instead of duplicating. The projector's
+    # ON CONFLICT (id) upsert then merges fields. Previously this was a fresh
+    # uuid4() per fire, so one person became N rows (Benjamin Kaplan x9).
+    contact_id = _contact_id(ctx.workspace_id, identity["linkedin_url"], identity["email"])
+
+    # CONTACT-DEDUP-LEAD: one person = one ACTIVE journey across the whole
+    # workspace. The contact id is deterministic (same person → same id), so if
+    # ANY other active lead already owns this contact — whether a duplicate in
+    # this campaign (a re-seed / two searches surfacing them) OR the same person
+    # being pursued by a DIFFERENT campaign — don't spawn a second outreach path.
+    # Two campaigns must never message the same person. Terminalize this lead via
+    # the goal_capped seam (the worker ends it + accounts it at any fan-out
+    # barrier, so the parent isn't left hanging). A contact whose prior journey
+    # already ENDED (terminal status) is free to be pursued again.
+    async with system_scope():
+        dup = await fetch_one(
+            "SELECT id, workflow_id FROM omni_leads WHERE workspace_id=$1 "
+            "AND contact_id=$2 AND id::text <> $3 "
+            "AND status NOT IN ('cancelled','errored','suppressed','completed','ended') "
+            "LIMIT 1",
+            ctx.workspace_id, contact_id,
+            str(ctx.lead.get("id") or "00000000-0000-0000-0000-000000000000"),
+        )
+    if dup:
+        return NodeResult(
+            handle="goal_capped",
+            telemetry={"goal_capped": True, "reason": "contact_active_in_another_journey"},
+        )
+
+    events: list[dict] = [
         {
             "event_type": "contact.created",
             "entity_type": "contact",
             "entity_id": contact_id,
-            "payload": {
-                "email": cfg.email,
-                "linkedin_url": str(cfg.linkedin_url) if cfg.linkedin_url else None,
-                "first_name": cfg.first_name,
-                "last_name": cfg.last_name,
-                "company": cfg.company,
-                "headline": cfg.headline,
-                "phone": cfg.phone,
-                "source": cfg.source,
-            },
+            "payload": {**identity, "phone": cfg.phone, "source": cfg.source},
         }
     ]
+    # Bind the new contact to the lead this node ran on, so the discovered +
+    # screened person actually becomes a person-stage lead (contact_id set)
+    # instead of leaving a contact orphaned from the pipeline. _project_lead's
+    # COALESCE upsert keys on the existing lead id and fills in contact_id.
+    # Without this the Naukri company->person chain creates contacts but never a
+    # person lead, and the Leads view can't show identity for them.
+    lead_id = ctx.lead.get("id")
+    if lead_id:
+        events.append(
+            {
+                "event_type": "lead.contact_attached",
+                "entity_type": "lead",
+                "entity_id": str(lead_id),
+                "payload": {"contact_id": contact_id, "status": "active"},
+            }
+        )
     return NodeResult(handle="default", events=events, telemetry={"contact_id": contact_id})
+
+
+# Fixed namespace for deterministic contact ids (DEDUP-001). Must never change —
+# changing it would re-mint every contact id and re-duplicate everyone.
+_CONTACT_NS = uuid.UUID("a6f0e3c2-7b1d-4e8a-9c5f-1d2e3f4a5b6c")
+
+
+def _normalize_key(value: str) -> str:
+    """Normalise a natural key so trivial variants collapse to one contact.
+    LinkedIn urls differ by scheme/host (in./au./www.) + trailing slash for the
+    SAME profile, so key on the path's final handle segment."""
+    v = value.strip().lower().rstrip("/")
+    if "linkedin.com/in/" in v:
+        return "li:" + v.rsplit("/in/", 1)[-1]
+    return v
+
+
+def _contact_id(workspace_id: str, linkedin_url: str | None, email: str | None) -> str:
+    """Deterministic contact id from (workspace, natural key). LinkedIn wins over
+    email (it's the stronger identity for discovered people)."""
+    key = None
+    if linkedin_url:
+        key = _normalize_key(str(linkedin_url))
+    elif email:
+        key = "em:" + email.strip().lower()
+    # key is guaranteed non-None: the caller already rejected no-email-no-linkedin.
+    return str(uuid.uuid5(_CONTACT_NS, f"{workspace_id}|{key}"))
+
+
+def _merge_identity(cfg: CreateContactConfig, person: dict) -> dict:
+    """Build the contact identity from the discovered person, letting any
+    explicitly-set config field win. Tolerates the person row carrying either
+    split first/last names or a single 'name', and the 'company_name' alias the
+    serper/screen nodes use."""
+    first = person.get("first_name")
+    last = person.get("last_name")
+    if not first and not last and person.get("name"):
+        parts = str(person["name"]).split(None, 1)
+        first = parts[0]
+        last = parts[1] if len(parts) > 1 else None
+
+    person_linkedin = person.get("linkedin_url")
+    return {
+        "email": cfg.email or person.get("email"),
+        "linkedin_url": str(cfg.linkedin_url) if cfg.linkedin_url else (person_linkedin or None),
+        "first_name": cfg.first_name or first,
+        "last_name": cfg.last_name or last,
+        "company": cfg.company or person.get("company_name") or person.get("company"),
+        "headline": cfg.headline or person.get("headline") or person.get("title"),
+    }
 
 
 register(MANIFEST, execute)

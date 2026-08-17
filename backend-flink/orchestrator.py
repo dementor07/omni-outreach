@@ -13,9 +13,12 @@ Routing rules per status:
       advances down the right edge.
 
   failed (is_retriable=true)
-    → register a 5 minute retry timer. No transition emitted; the muscle
-      will redrive the command itself. (Flink is the time keeper, not the
-      retry executor — we just hold the timer slot.)
+    → register a 5 minute retry timer holding a pending "__retry__" transition.
+      On timer fire we emit it; the transition worker re-fires the SAME source
+      node (it does not advance an edge on the __retry__ handle). Retries are
+      bounded by _MAX_RETRIES per (lead,node) via keyed state — once exhausted
+      the lead is routed to "on_error" so it can't loop forever. (FLINK-001:
+      the timer used to fire into empty state and nothing redrove the work.)
 
   failed (is_retriable=false)
     → emit transition with handle "on_error" so the sequencer can branch
@@ -61,6 +64,10 @@ _MAX_DELAY_MS = 30 * 24 * 60 * 60 * 1000
 # dispatcher's RETRY_DELAY_SECONDS so behavior is consistent across modes.
 _RETRY_DELAY_MS = 5 * 60 * 1000
 
+# Bounded retries per (lead, node). After this many retriable failures the lead
+# is routed to "on_error" instead of retrying forever (FLINK-001).
+_MAX_RETRIES = 3
+
 
 def _safe_get(d, *keys, default=None):
     cur = d
@@ -77,10 +84,17 @@ class JourneyProcessFunction(KeyedProcessFunction):
 
     def __init__(self):
         self.pending_state = None
+        self.retry_count = None
 
     def open(self, runtime_context: RuntimeContext):
         descriptor = ValueStateDescriptor("pending_transition", Types.STRING())
         self.pending_state = runtime_context.get_state(descriptor)
+        # Per-(lead,node) retriable-failure counter (FLINK-001). Keyed by lead;
+        # the node id is carried in the pending transition, so a single counter
+        # per lead is sufficient for the linear journey model.
+        self.retry_count = runtime_context.get_state(
+            ValueStateDescriptor("retry_count", Types.INT())
+        )
 
     def _build_transition(self, data, handle):
         return {
@@ -95,6 +109,7 @@ class JourneyProcessFunction(KeyedProcessFunction):
                 "channel": data.get("channel"),
                 "status": data.get("status"),
                 "error": data.get("error"),
+                "is_retriable": data.get("is_retriable"),
                 "telemetry": data.get("telemetry") or {},
                 # Forward any column mutations the muscle wants applied (e.g. a
                 # source handler writing custom_fields[companies]). The
@@ -102,6 +117,16 @@ class JourneyProcessFunction(KeyedProcessFunction):
                 # it applies these before firing the next node.
                 "lead_mutations": data.get("lead_mutations") or {},
                 "workspace_id": _safe_get(data, "metadata", "workspace_id"),
+                # Forward correlation_id so a run keeps one identity across
+                # every muscle round-trip. Without this, each hop past the
+                # first loses the correlation and the run fragments into many
+                # ids — making end-to-end tracing impossible. (See trace tool.)
+                "correlation_id": _safe_get(data, "metadata", "correlation_id"),
+                # Forward the resolved sending account (stamped by build_command)
+                # so the transition worker can increment THAT account's rate
+                # counter on a confirmed send. None for sends with no per-seat
+                # account (legacy connection_name path) — no counter to bump.
+                "sending_account_id": _safe_get(data, "metadata", "sending_account_id"),
             },
         }
 
@@ -128,6 +153,11 @@ class JourneyProcessFunction(KeyedProcessFunction):
             log.debug("result without metadata.node_id; skipping")
             return
 
+        # A successful or terminal-non-retriable result clears the retry
+        # counter so a future retriable failure on this lead starts fresh.
+        if status != "failed":
+            self.retry_count.clear()
+
         # ── Branch on status ─────────────────────────────────────────────
         if status in ("sent", "simulated"):
             handle = _safe_get(data, "metadata", "next_handle", default="default")
@@ -151,12 +181,31 @@ class JourneyProcessFunction(KeyedProcessFunction):
         if status == "failed":
             is_retriable = bool(data.get("is_retriable", True))
             if is_retriable:
-                # Muscle will redrive; we just park a timer slot to suppress
-                # immediate re-eval if a duplicate result arrives.
+                attempts = (self.retry_count.value() or 0) + 1
+                if attempts > _MAX_RETRIES:
+                    # Retries exhausted → give up and route to on_error so the
+                    # operator's fallback path runs instead of looping forever.
+                    log.warning(
+                        "lead %s node %s exhausted %d retries; routing to on_error",
+                        data.get("lead_id"),
+                        source_node_id,
+                        _MAX_RETRIES,
+                    )
+                    self.retry_count.clear()
+                    yield json.dumps(self._build_transition(data, "on_error"))
+                    return
+                # FLINK-001: park a real "__retry__" transition and a timer.
+                # on_timer emits it; the transition worker re-fires the SAME
+                # source node (it does not advance an edge on __retry__).
+                self.retry_count.update(attempts)
+                retry_transition = self._build_transition(data, "__retry__")
+                retry_transition["metadata"]["retry_attempt"] = attempts
+                self.pending_state.update(json.dumps(retry_transition))
                 self._register_timer(ctx, _RETRY_DELAY_MS)
                 return
             # Non-retriable failure → route via on_error so the sequencer
             # can branch to the operator's fallback path.
+            self.retry_count.clear()
             transition = self._build_transition(data, "on_error")
             yield json.dumps(transition)
             return
@@ -217,6 +266,18 @@ def run_orchestrator():
         .build()
     )
 
+    # RACE-7 (adjudicated): this sink writes outreach.transitions UNKEYED —
+    # transitions for one lead round-robin across partitions, and AT_LEAST_ONCE
+    # re-emits duplicates after checkpoint recovery. PyFlink's
+    # KafkaRecordSerializationSchema cannot derive a Kafka key from the record
+    # (set_key_serialization_schema serializes the SAME string as the key — it
+    # can't extract lead_id) without a custom Java serializer, so per-lead
+    # partition ordering is NOT enforced here. The safety property is instead
+    # owned by the consumer: transition_worker's terminal-state guard,
+    # positional advance claim, and claim-gated fan-out/race/join/retry paths
+    # make duplicated and re-ordered transitions no-ops. If a Java key
+    # serializer is ever added, key by lead_id — but the consumer contract must
+    # stay regardless (Kafka is at-least-once end to end).
     sink = (
         KafkaSink.builder()
         .set_bootstrap_servers(brokers)
@@ -224,7 +285,6 @@ def run_orchestrator():
             KafkaRecordSerializationSchema.builder()
             .set_topic("outreach.transitions")
             .set_value_serialization_schema(SimpleStringSchema())
-            .set_validation_mode(KafkaRecordSerializationSchema.ValidationMode.STRICT)
             .build()
         )
         .set_delivery_guarantee(DeliveryGuarantee.AT_LEAST_ONCE)

@@ -25,6 +25,7 @@ policy treats that as a superuser bypass.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator
@@ -59,11 +60,6 @@ def set_request_workspace(workspace_id: str) -> None:
     Called by ``app.auth.get_current_workspace``. Routers don't call this
     directly — the auth dependency does it for them."""
     _current_workspace.set(workspace_id)
-
-
-def get_request_workspace() -> str | None:
-    """Read the current request's workspace (None if unset)."""
-    return _current_workspace.get()
 
 
 @asynccontextmanager
@@ -112,11 +108,78 @@ async def _setup_connection(conn: asyncpg.Connection) -> None:
     )
 
 
-async def init_pool(dsn: str) -> None:
+async def init_pool(dsn: str, *, retries: int = 30, backoff_s: float = 2.0) -> None:
+    """Create the asyncpg pool, retrying while Postgres comes up.
+
+    DEPLOY-004: db/redpanda live in the master compose project, so v2 workers
+    can't `depends_on` them. On a cold boot the worker starts before Postgres is
+    accepting connections; without this it would raise, exit, and crash-loop
+    (restart: unless-stopped) churning the host. Retry-with-backoff lets the
+    worker wait for infra instead. Bounded so a genuinely-misconfigured DSN
+    still fails loudly rather than retrying forever."""
     global _pool
-    _pool = await asyncpg.create_pool(
-        dsn, min_size=2, max_size=10, ssl=False, init=_setup_connection
-    )
+    last_err: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            _pool = await asyncpg.create_pool(
+                dsn, min_size=2, max_size=10, ssl=False, init=_setup_connection
+            )
+            if attempt > 1:
+                log.info("[db] pool established on attempt %d", attempt)
+            return
+        except (asyncpg.InvalidPasswordError, asyncpg.InvalidCatalogNameError, asyncpg.InvalidAuthorizationSpecificationError):
+            # Deterministic config errors — wrong password / missing database /
+            # bad role. Retrying can't fix these; fail fast and loud.
+            raise
+        except (OSError, ConnectionError, asyncpg.CannotConnectNowError) as e:
+            # Transient "infra not up yet" on cold boot — Postgres still starting,
+            # network not ready. These are what the retry loop is for (DEPLOY-004).
+            last_err = e
+            log.warning(
+                "[db] pool init attempt %d/%d failed (%s); retrying in %.1fs",
+                attempt,
+                retries,
+                type(e).__name__,
+                backoff_s,
+            )
+            await asyncio.sleep(backoff_s)
+    raise RuntimeError(f"could not establish DB pool after {retries} attempts") from last_err
+
+
+async def assert_rls_enforcing_role() -> None:
+    """Fail loud if the app connected as a role that BYPASSES RLS.
+
+    The entire tenant boundary (this module's docstring) rests on RLS being
+    enforced against the connecting role. Postgres exempts a **superuser** and
+    any **BYPASSRLS** role from row-level security unconditionally — and even
+    ``FORCE ROW LEVEL SECURITY`` does not bind a superuser. So if the app
+    connects as the DB owner/superuser ``outreach`` (the config default when
+    ``DATABASE_URL`` is unset, config.py:get_asyncpg_dsn), RLS is silently void
+    and every workspace can read every other workspace's rows — a critical
+    multi-tenant breach that no test or query would surface.
+
+    Production wires ``DATABASE_URL`` to the non-owner ``omni_app_role``
+    (rolsuper=f, rolbypassrls=f) so RLS applies. This startup probe makes the
+    safe state mandatory instead of incidental: a misconfigured deploy that
+    falls back to the superuser DSN crashes on boot with a clear message rather
+    than running wide-open. Uses acquire_raw (no tenant context needed)."""
+    async with acquire_raw() as conn:
+        row = await conn.fetchrow(
+            "SELECT current_user AS role, "
+            "rolsuper, rolbypassrls "
+            "FROM pg_roles WHERE rolname = current_user"
+        )
+    if not row:
+        raise RuntimeError("RLS guard: could not resolve current_user role")
+    if row["rolsuper"] or row["rolbypassrls"]:
+        raise RuntimeError(
+            f"RLS guard: app connected as role {row['role']!r} which is "
+            f"superuser={row['rolsuper']} bypassrls={row['rolbypassrls']} — "
+            "this BYPASSES row-level security and voids tenant isolation. "
+            "Set DATABASE_URL to a non-owner, non-superuser role "
+            "(e.g. omni_app_role). Refusing to start wide-open."
+        )
+    log.info("[db] RLS guard ok: connected as %r (non-superuser, non-bypassrls)", row["role"])
 
 
 async def init_redis(url: str = "redis://redis:6379") -> None:

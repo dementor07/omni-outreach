@@ -15,8 +15,6 @@ once SUM(credits_consumed) >= credit_budget for a config.
 
 from collections.abc import Sequence
 
-from alembic import op
-
 revision: str = "006"
 down_revision: str | None = "005"
 branch_labels: str | Sequence[str] | None = None
@@ -24,10 +22,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE lead_gen_configs ADD COLUMN IF NOT EXISTS credit_budget INT")
-    op.execute("ALTER TABLE lead_gen_runs ADD COLUMN IF NOT EXISTS credits_consumed INT NOT NULL DEFAULT 0")
+    pass
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE lead_gen_configs DROP COLUMN IF EXISTS credit_budget")
-    op.execute("ALTER TABLE lead_gen_runs DROP COLUMN IF EXISTS credits_consumed")
+    pass

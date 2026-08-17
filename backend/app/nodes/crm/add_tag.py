@@ -35,9 +35,14 @@ async def execute(ctx: NodeContext) -> NodeResult:
     contact_id = ctx.lead.get("contact_id") or ctx.lead.get("id")
     if not contact_id:
         return NodeResult(handle="default", error="TAG_MISSING_CONTACT")
+    # CONTRACT-002: emit the .queued intent so the dispatcher routes it to the
+    # ADD_TAG muscle channel (the Rust handler returns lead_mutations.add_tag,
+    # which the transition worker applies to the lead's custom_fields.tags —
+    # CONTRACT-003). The old 'contact.tag_added' failed _is_intent and was never
+    # dispatched, so tags were never persisted.
     events = [
         {
-            "event_type": "contact.tag_added",
+            "event_type": "crm.add_tag.queued",
             "entity_type": "contact",
             "entity_id": str(contact_id),
             "payload": {"tag": cfg.tag},

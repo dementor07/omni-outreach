@@ -1,0 +1,102 @@
+---
+title: v1 Release Completion Plan — MUST + SHOULD Execution
+category: decisions
+tags: [v1-release, completion, execution-plan, ship-ready]
+sources: [ship-ready-completion-ledger, current-code-verification]
+updated: 2026-06-16
+---
+
+# v1 Release Completion Plan
+
+**Mandate (2026-06-16):** completeness + feature integration + perfection across the
+board for the first complete version release. Scope decided: **MUST + SHOULD** from
+[[ship-ready-completion-ledger]]. Execution: build the whole cut, then one review.
+
+## Architectural decisions made this turn
+- **Scheduling (B6) → Flink timer.** Use the existing orchestrator's timer service to fire
+  schedule transitions, not a DB-polled worker or external cron. Correct for the
+  event-sourced spine; the orchestrator already owns keyed timers for delay/wait_until.
+- **Scope = MUST + SHOULD.** MUST: W1–W5 wiring, T1 DNC-at-send, T2 analytics endpoint,
+  B2 reply classification, B3 inbox reply, B1 AI draft-review, B4 activity log, B7
+  conversion alert. SHOULD: T3 email open/click tracking, B5 template library, B6
+  scheduling. DEFER to v1.1: P1–P7, Latka.
+
+## Verified-current state (2026-06-16, not trusting the 06-11 ledger)
+- W1 CsvImport: still NOT mounted in router. OPEN.
+- W3 undo/redo: logic + toolbar buttons exist; NO keydown listener. OPEN.
+- W5 notifications: NO backend endpoint/table in v2. OPEN (build, not wire).
+- T2 analytics: NO router exposes pipeline/flink metrics. OPEN.
+- B4 activity log: NO omni_activity_log table, NO log_activity(). OPEN (build).
+- T1 DNC: filter_company only on naukri/enrichment path (transition_worker ~929). OPEN at send.
+- B1 approvals: resolve = approve/reject only, no draft field/PATCH. OPEN.
+
+## CORRECTION (2026-06-16 verification) — the ledger over-counted breakage
+A live-vs-dead audit (frontend API calls cross-checked against registered routers +
+probed against the live box) found:
+- **The running app has ZERO broken endpoints.** Every endpoint the *mounted* pages call
+  (`projections.*`, `inbox.*`, `ai.*`, `canvas.*`, `nodes`, `integrations`, `approvals`)
+  returns 200 live. `/sources/naukri/preview` 405s GET correctly (POST-only).
+- **9+ "missing backends" are dead legacy hooks**, imported by NO mounted page:
+  `useOverview`, `useQueue`, `useBlacklist`, `useTemplateLibrary`, `useSequenceSteps`,
+  `useLeads` (only CsvImport, itself unmounted), + `Dashboard.tsx`. They call `/overview/*`,
+  `/queue/*`, `/notifications`, `/leads`, `/template-library` — all 404, but nothing live
+  hits them. These are landmines + signal-pollution → **DELETE, don't build backends for.**
+- So W5 "notifications backend" etc. are NOT live breakage; the notification bell in the
+  live Topbar must be re-checked separately (it may use a different path or be absent).
+
+**Revised v1 surface = (a) delete the dead legacy frontend, (b) build the genuine
+ledger features still open: T1, T2, B1, B2, B3, B4, B7, T3, B5, B6.**
+
+## B1/B2/B3 design decisions (2026-06-16, after research)
+- **B2 reply classifier — single bounded LLM call + keyword fallback, NOT LangGraph.**
+  Researched the industry-pro pattern (LangChain agents-from-scratch, Vadim's production
+  write-up): the consensus for production reply-intent is a single schema-constrained LLM
+  call embedded in the existing dataflow, fail-open to a keyword heuristic, with provenance
+  (`source=llm|keyword_fallback`). Multi-agent/LangGraph orchestration is the thing the pros
+  warn AGAINST for one classification step — and we already own the orchestration spine. So:
+  one Anthropic call → `{intent: positive|question|objection|unsubscribe|neutral,
+  confidence, reason}`; deterministic keyword fallback (unsubscribe/stop always caught) when
+  no Anthropic connection or on error; classify in the projector's `message.received` path,
+  write the existing `classification`/`confidence` columns, then EMIT a transition so a
+  waiting lead reacts (also closes SM-8 reply→wake-up). Unsubscribe intent auto-writes the
+  suppression list (source='unsubscribe') — ties B2 to T1.
+- **B1 AI draft-review — extend the approvals queue.** human_approval already parks the lead
+  with the rendered message; add an editable `draft` field + PATCH /approvals/{id}/draft so
+  the operator edits copy in place, approve sends the edited version. Reuses park/resume.
+- **B3 inbox reply — send on the thread's channel + AI-suggested draft.** ThreadPane compose
+  box dispatches a real outbound via the muscle send path (DNC re-checked), plus a "suggest"
+  button that pre-fills an AI draft (depends on B1/Anthropic compose).
+
+## Dependency-ordered phases
+1. **Phase 1 — CLASS A wiring** (W1, W3, W2 clickable leads, W4 pagination): pure frontend glue.
+2. **Phase 2 — read endpoints** (T2 analytics router, W5 notifications backend+table): backend + UI surface.
+3. **Phase 3 — compliance + observability** (T1 DNC-at-send, B4 activity log + instrumentation, B7 conversion alert).
+4. **Phase 4 — the AI/inbox core** (B2 reply classifier, B3 inbox reply compose, B1 AI draft-review).
+5. **Phase 5 — SHOULD** (T3 email tracking, B5 template library, B6 Flink-timer scheduling).
+6. **Phase 6 — regression + visual sweep + ship + verify live.**
+
+Each item lands as its own green commit (ruff + tsc + eslint + audit suite). New backend
+behavior gets a regression test in audit/tests/. New tables get an alembic migration.
+
+## SHIPPED — full MUST+SHOULD cut deployed + verified live (2026-06-17)
+
+The entire cut is built, tested, deployed to the Contabo box (13.140.169.62), and
+verified past the network boundary. Commits on `phase-out-non-v2`:
+- **T1** DNC-at-send (bcddc37) — suppression re-checked at the outbound seam; `suppressed` terminal status.
+- **T2** analytics rollup (3ec6c0f) — `/projections/analytics` lead-gen efficiency + cost.
+- **B2** reply ingestion + classify + wake-up (452a8fa) — single Haiku call, keyword fail-open, auto-suppress unsubscribe, closes SM-8.
+- **B7** conversion alert + human-readable activity feed (c5ff8ff) — `lead.converted` on the flow.goal claim; ActivityPage EVENT_META labels.
+- **B3** inbox reply compose + AI-suggested draft (c2511f6) — `/inbox/threads/{id}/suggest` + `/reply`; rides the muscle spine, DNC re-checked (409 on suppressed).
+- **B1** AI draft-review in approvals (7e28c61) — `omni_approvals.draft` (migration 032), PATCH `/approvals/{id}/draft` (event-sourced, frozen once resolved), human_approval surfaces upstream ai_draft. Also fixed a congruity bug: the Approvals page bypassed the resolve endpoint (published `approval.resolved` via raw events API) so approving never un-parked the lead — rebuilt on the real client.
+- **B5** template library (838b3bc) — `omni_templates` (migration 033, RLS), full CRUD router + card-grid/modal page replacing the stub.
+- **T3** email open/click tracking (4d33118) — pure HMAC-signed token + `inject_tracking` (pixel + link rewrite at render time), public `/track/open|click` endpoints (open-redirect-safe), `omni_email_tracking` (migration 034), engagement in Analytics.
+- **B6** campaign send window via the Flink timer (7052fcb) — `omni_workflows.start_at/end_at` (migration 035); gate in `_fire_node` before DNC: after end_at the lead ENDS, before start_at it's HELD via a delayed `__retry__` synthetic that re-fires the channel node once the start passes. Settings UI "Send window".
+
+**Verification:** 100/100 audit tests green; ruff + tsc + eslint + vite build all clean;
+migration chain linear single-head (030→035); app boots with all routes. CI (lint→test→
+build→deploy) green, box accepted the deploy webhook. Live probes: `/api/health` ok
+(api/db/redis/nodes); new routes present in the live OpenAPI; `/api/track/open/x.gif`→200
+GIF; `/api/track/click/badtoken?u=<b64>`→302 to the decoded URL; `/api/templates`→401
+(mounted + auth-gated, was 404); frontend served a fresh hashed bundle. **v1 feature-complete.**
+
+DEFERRED to v1.1 (unchanged): P1–P7, Latka, W1 CsvImport mount, W5 notifications backend.

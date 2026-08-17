@@ -4,6 +4,32 @@ Append-only. Format: `## [YYYY-MM-DD] operation | description`
 
 ---
 
+## [2026-06-01] v2-pipeline-watch | Apify source fan-out restored on VPS
+
+Caught up from Claude's v2 work on `/home/omni-v2`:
+- v2 stack is running under `docker compose -p omni-v2 -f docker-compose.v2.yml`.
+- `muscle-v2` is the Rust v0.2 consumer group for `outreach.commands`.
+- `muscle-v2` fixes already present: `MAX_POLL_INTERVAL` raised to 60m, group isolated as `muscle-v2`, Apify poll cap raised to 45m, `auto.offset.reset=earliest`, and Postgres `processed_commands` ledger dedupe.
+
+Live pipeline state observed:
+- Fresh lead `ef904d21-a797-4d71-857e-8f94c180bf2e` fired `source.linkedin_jobs`.
+- Rust command `8526a9be-ed04-44fb-b5c0-a6624f86f9be` ran Apify actor `TRqkOdSRBLMin2jH1`.
+- Apify completed successfully: `jobs_returned=100`, `companies_extracted=78`.
+- Initial transition was missing `lead_mutations`, so `flow.for_each` saw empty `companies` and walked to `flow.end`.
+
+Fix applied:
+- Rebuilt and redeployed `orchestrator-v2` with the DAG-aware Flink orchestrator that forwards `metadata.workspace_id` and `metadata.lead_mutations`.
+- Removed the PyFlink-incompatible `KafkaRecordSerializationSchemaBuilder.set_validation_mode(...)` call.
+- Canceled stale Flink job `36080ae67f4b99cc4ae04b3d13757054`.
+- New Flink job `90fc862392af5c3119a33794e4ea41ef` is running.
+- Replayed the corrected transition for command `8526a9be...` into `outreach.transitions`.
+
+Result after replay:
+- Parent lead now has 78 companies in `custom_fields.companies`.
+- `flow.for_each` spawned the configured cap of 50 children.
+- Company filter / `ai.screen_company` / `source.serper_people` branches are actively flowing through `muscle-v2`.
+- Contacts are not yet created at the tracking moment; the pipeline is still draining through screening and people search.
+
 ## [2026-05-17] sota-backend | Brain/Muscle/Spine/Lungs stack deployed on VPS
 
 Deployed the agreed SOTA backend stack to `srv1575227.hstgr.cloud`: FastAPI control plane, Rust execution engine, Redpanda event spine, Flink journey orchestrator, DragonflyDB memory layer, Postgres sink, nginx edge.
@@ -1291,3 +1317,65 @@ read context and pick a handle.
 Adding a new integration (ZenRows, Clay, RB2B, anything) is exactly
 **one file** in the appropriate category. No router edits, no schema
 migrations, no architectural decisions.
+
+## [2026-06-08] frontend-index | Full frontend read + code-graph MCP + canvas-contract wiki
+
+Installed **codebase-memory-mcp v0.7.0** (DeusData) — local tree-sitter
+code-graph MCP, indexed the repo (5057 nodes / 9875 edges) for
+symbol/caller/route queries instead of grep. Project name uses uppercase
+drive letter (`C:/...`) — lowercase self-deletes the index db.
+
+Read the entire frontend (~8k LOC) line-by-line. Findings written to four
+new architecture pages: [[frontend-map]] (per-file index), [[canvas-contract]]
+(manifest → card/form/columns/run; the 5 leaks that force per-integration
+frontend edits), [[leads-pipeline]] (token-walks-DAG model + the 2026-06-08
+leads-view fix, commit 77669cf), [[frontend-seams]] (cleanup backlog).
+
+Key facts captured: one axios instance (not two clients) but two endpoint
+families (v2 event-sourced vs legacy REST); 6 of 10 legacy hooks are DEAD
+(no importer) → mostly deletable; `manifest.icon` is dead on the frontend
+(hardcoded NODE_TYPE_ICON map); NodeConfigPanel can't render list[str]
+fields; no connection:<provider> UX loop. These five canvas-contract leaks
+are the "smooth as butter" uniformity work for future integrations.
+
+## [2026-06-08] backend-read | Full backend line-by-line read + backend-map
+
+Read the ENTIRE backend: all 41 nodes + http_node factory, all 14 routers,
+the execution layer (dispatcher/commands/transition_worker/lead_columns),
+services + core (db RLS model, bus consume_forever, encryption HKDF/legacy
+Fernet, company_kg incl the cache_person stub, people_scoring, config,
+core/events ChannelType), the Rust muscle spine (main/models/dispatch/
+credentials/common/http_call + every handler's behavior), and the Flink
+orchestrator. Captured in [[backend-map]].
+
+Findings that matter for the manifest-uniformity refactor: TWO manifest
+construction patterns (direct NodeManifest vs http_node factory — both must
+support output_fields); ChannelType has #[serde(other)] Unknown so a new
+channel deserializes safe; a new muscle channel is a 5-edit coupling
+(Python enum + NODE_CHANNEL + Rust enum + dispatch arm + handler); array
+config fields confirmed on 7 nodes (list[str]) + 2 (list[int]); the
+serper.py uncommitted diff is whitespace-only (not a real anomaly).
+
+## 2026-06-12 — Contabo box live: lean v2-only deploy pipeline verified e2e
+
+- Hostinger VPS replaced by Contabo 13.140.169.62 (13-140-169-62.sslip.io), provisioned from scratch.
+- Deploy surface analyzed file-by-file and retargeted (commit cdb5d05): v2-only (15 services, legacy plane dropped), 127.0.0.1-bound infra ports (Docker-bypasses-UFW fix), persistent redpanda volume, nginx /deploy block, single-dir webhook.
+- Full chain verified: CI deploy job → webhook (5 steps, 37s) → health green, Flink job self-resubmitted, LE cert + renewal hook live.
+- Updated [[deploy-pipeline]].
+
+## 2026-06-12 — CONTRACT-2 closed: channel payload-rendering layer built. Ledger at 0 OPEN
+
+- app/execution/render.py renders templates + bundle config + attendee identity + chat-session reuse into every channel command payload (the Python→Rust contract that starved all sends).
+- 10 functional regression tests; audit suite 46/46. findings.json: 115 findings, 0 OPEN.
+- Updated [[logic-integrity-ledger]].
+
+## 2026-06-17 — v1 feature-complete: full MUST+SHOULD cut shipped + verified live
+
+- Built, tested, deployed, and live-verified the entire v1 completion cut on `phase-out-non-v2`:
+  T1 (DNC-at-send), T2 (analytics rollup), T3 (email open/click tracking), B1 (AI draft-review
+  in approvals), B2 (reply ingestion+classify+wake-up), B3 (inbox reply compose+AI suggest),
+  B5 (template library), B6 (Flink-timer campaign send window), B7 (conversion alert + activity feed).
+- 5 new migrations (031–035, linear single-head). 100/100 audit tests; ruff+tsc+eslint+build clean.
+- CI green, box accepted deploy; live probes confirm new routes + T3 redirect end-to-end + fresh frontend bundle.
+- Also fixed a congruity bug: Approvals page bypassed the resolve endpoint (never un-parked the lead) — rebuilt on the real client.
+- See [[v1-release-completion-plan]] for the per-feature shipped record. DEFERRED to v1.1: P1–P7, Latka, W1 mount, W5 notifications.

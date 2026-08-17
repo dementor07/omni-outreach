@@ -1,8 +1,8 @@
 import { FormEvent, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Zap } from 'lucide-react'
 import { auth } from '../api/v2'
 import Button from '../components/Button'
+import { LogoMark } from '../components/Logo'
 
 interface LocationState {
   from?: string
@@ -37,12 +37,10 @@ export default function Login() {
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 dark:bg-slate-950">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-500 text-white shadow-lg shadow-brand-500/30">
-            <Zap size={20} fill="currentColor" />
-          </div>
+          <LogoMark size={44} className="shadow-lg" />
           <div className="text-center">
             <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Sign in to Omni</h1>
-            <p className="mt-1 text-sm text-slate-500">Streaming-native B2B outreach</p>
+            <p className="mt-1 text-sm text-slate-500">Multi-channel outreach engine</p>
           </div>
         </div>
 

@@ -1,7 +1,8 @@
-import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, Outlet, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import ErrorBoundary from './components/ErrorBoundary'
 import Layout from './components/Layout'
 import Login from './pages/Login'
+import InviteAccept from './pages/InviteAccept'
 
 // WORKSPACE
 import Overview from './pages/Overview'
@@ -25,12 +26,14 @@ import AiStudio from './pages/AiStudio'
 import Integrations from './pages/Integrations'
 import LeadSources from './pages/LeadSources'
 import Templates from './pages/Templates'
+import Tones from './pages/Tones'
 import Blacklist from './pages/Blacklist'
+import Deliverability from './pages/Deliverability'
 import Settings from './pages/Settings'
 
 function RequireAuth() {
   const location = useLocation()
-  const token = localStorage.getItem('token') || 'dummy'
+  const token = localStorage.getItem('token')
   if (!token) return <Navigate to="/login" replace state={{ from: location.pathname }} />
   return (
     <Layout>
@@ -41,10 +44,16 @@ function RequireAuth() {
   )
 }
 
+function LegacyViewRedirect() {
+  const { id } = useParams()
+  return <Navigate to={id ? `/?view=${encodeURIComponent(id)}` : '/'} replace />
+}
+
 export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/invite" element={<InviteAccept />} />
       <Route element={<RequireAuth />}>
         <Route path="/" element={<Overview />} />
 
@@ -67,12 +76,17 @@ export default function App() {
         <Route path="/analytics" element={<Analytics />} />
         <Route path="/activity" element={<ActivityPage />} />
         <Route path="/ai-studio" element={<AiStudio />} />
+        {/* Saved layouts now live inside Overview; old bookmarks remain valid. */}
+        <Route path="/views" element={<LegacyViewRedirect />} />
+        <Route path="/views/:id" element={<LegacyViewRedirect />} />
 
         {/* Setup */}
         <Route path="/integrations" element={<Integrations />} />
         <Route path="/lead-sources" element={<LeadSources />} />
         <Route path="/templates" element={<Templates />} />
+        <Route path="/tones" element={<Tones />} />
         <Route path="/blacklist" element={<Blacklist />} />
+        <Route path="/deliverability" element={<Deliverability />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" />} />

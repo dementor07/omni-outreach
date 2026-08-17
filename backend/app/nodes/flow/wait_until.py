@@ -1,7 +1,9 @@
 """Hold a lead until a business-hours / day-of-week window opens.
 
-The orchestrator computes the next matching wall-clock time in the workflow's
-timezone and registers a timer. This node just declares the window contract.
+The transition worker computes the seconds until the next matching wall-clock
+moment in the workflow's timezone and emits a delayed synthetic result; the
+orchestrator's timer holds the lead (status='waiting') until then. This node
+just declares the window contract.
 """
 
 from __future__ import annotations

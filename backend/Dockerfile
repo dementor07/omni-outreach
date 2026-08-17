@@ -1,5 +1,9 @@
 FROM python:3.12-slim
 
+ARG BUILD_SHA=unknown
+LABEL org.opencontainers.image.revision="${BUILD_SHA}"
+ENV BUILD_SHA="${BUILD_SHA}"
+
 # System deps + Chromium for stealth scrapers (Naukri/PH fallback paths).
 # chromium-driver is the matching driver; undetected-chromedriver will use
 # the system one when available, otherwise auto-downloads. The fonts/libs
@@ -46,9 +50,14 @@ RUN addgroup --system app && \
 
 WORKDIR /app
 
-# Deps layer (cached unless requirements change)
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Deps layer (cached unless the lockfile changes).
+# DEP-001: install from the fully-pinned requirements.lock (uv pip compile of
+# requirements.txt) so the image is reproducible — a fresh build can't silently
+# resolve a different, possibly-vulnerable transitive tree. requirements.txt is
+# the human-edited input; regenerate the lock with:
+#   uv pip compile backend/requirements.txt -o backend/requirements.lock
+COPY backend/requirements.txt backend/requirements.lock ./
+RUN pip install --no-cache-dir -r requirements.lock
 
 # App code
 COPY backend/alembic.ini .

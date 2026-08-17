@@ -25,7 +25,8 @@ from aiokafka import AIOKafkaConsumer
 from aiokafka.structs import ConsumerRecord
 
 from app.config import settings
-from app.db import close_pool, execute, fetch_one, init_pool, system_scope
+from app.db import assert_rls_enforcing_role, close_pool, execute, fetch_one, init_pool, system_scope
+from app.services import bus
 from app.services.bus import EVENTS_TOPIC
 
 log = logging.getLogger(__name__)
@@ -154,18 +155,285 @@ async def _project_deal(env: dict[str, Any]) -> None:
     )
 
 
-async def _project_lead(env: dict[str, Any]) -> None:
+async def _project_task(env: dict[str, Any]) -> None:
+    """CONTRACT-004: persist crm.create_task's ``task.created`` into omni_tasks.
+
+    The node carries a title *template*; we store the rendered title when the
+    payload already has a concrete ``title``, else fall back to the template
+    string verbatim (rendering happens upstream in the node context). due_date is
+    an ISO date string."""
     p = env.get("payload") or {}
+    due_date = p.get("due_date")
+    await execute(
+        """
+        INSERT INTO omni_tasks (id, workspace_id, contact_id, title, due_date,
+                           assign_to_user_id, priority, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'open')
+        ON CONFLICT (id) DO NOTHING
+        """,
+        env["entity_id"],
+        env["workspace_id"],
+        p.get("contact_id"),
+        p.get("title") or p.get("title_template") or "Task",
+        datetime.fromisoformat(due_date).date() if due_date else None,
+        p.get("assign_to_user_id"),
+        p.get("priority") or "normal",
+    )
+
+
+async def _project_task_status(env: dict[str, Any]) -> None:
+    """``task.completed`` / ``task.reopened`` flip a task's status. Keyed by the
+    task id (entity_id)."""
+    status = "done" if env["event_type"] == "task.completed" else "open"
+    await execute(
+        "UPDATE omni_tasks SET status = $1 WHERE id = $2",
+        status,
+        env["entity_id"],
+    )
+
+
+async def _project_approval(env: dict[str, Any]) -> None:
+    """CONTRACT-005: track the approvals queue.
+
+    ``approval.requested`` inserts a pending row (keyed by lead_id so a node only
+    has one open approval per lead). ``approval.resolved`` flips it to the
+    operator's outcome. Both keyed on lead_id via the unique-ish (id) PK derived
+    from entity_id (the lead id), so resolution updates the same row."""
+    p = env.get("payload") or {}
+    et = env["event_type"]
+    if et == "approval.requested":
+        await execute(
+            """
+            INSERT INTO omni_approvals (id, workspace_id, lead_id, node_id, prompt,
+                               draft, status, correlation_id)
+            VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)
+            ON CONFLICT (id) DO NOTHING
+            """,
+            env["entity_id"],
+            env["workspace_id"],
+            p.get("lead_id") or env["entity_id"],
+            p.get("node_id"),
+            p.get("prompt") or "",
+            p.get("draft"),
+            env.get("correlation_id"),
+        )
+    elif et == "approval.draft_updated":
+        # B1: operator edited the AI draft before approving. Only a still-pending
+        # approval's draft is mutable; a resolved one is frozen.
+        await execute(
+            """
+            UPDATE omni_approvals
+               SET draft = $1
+             WHERE id = $2 AND workspace_id = $3 AND status = 'pending'
+            """,
+            p.get("draft") or "",
+            env["entity_id"],
+            env["workspace_id"],
+        )
+    elif et == "approval.resolved":
+        await execute(
+            """
+            UPDATE omni_approvals
+               SET status = $1, resolved_handle = $1, resolved_by = $2,
+                   resolved_at = NOW()
+             WHERE id = $3 AND workspace_id = $4 AND status = 'pending'
+            """,
+            p.get("handle") or "approved",
+            p.get("resolved_by"),
+            env["entity_id"],
+            env["workspace_id"],
+        )
+
+
+async def _project_pipeline_metric(env: dict[str, Any]) -> None:
+    """Per-run pipeline cost/usage metrics. Each ``pipeline.metric`` event carries
+    deltas that ACCUMULATE into the run row (the event-sourced fan-out emits one
+    per company/person/lead). entity_id = run_id; payload.kind 'start'|'delta'|'end'."""
+    p = env.get("payload") or {}
+    kind = p.get("kind", "delta")
+    if kind == "start":
+        await execute(
+            """
+            INSERT INTO omni_pipeline_metrics (run_id, workspace_id, collector_source, correlation_id, metadata)
+            VALUES ($1, $2, $3, $4, $5::jsonb)
+            ON CONFLICT (run_id) DO NOTHING
+            """,
+            env["entity_id"],
+            env["workspace_id"],
+            p.get("collector_source"),
+            env.get("correlation_id"),
+            p.get("metadata") or {},
+        )
+        return
+    # delta / end: accumulate counters; 'end' also stamps completed_at.
+    await execute(
+        """
+        INSERT INTO omni_pipeline_metrics (
+            run_id, workspace_id, collector_source,
+            companies_collected, companies_qualified, companies_rejected,
+            people_found, people_verified, leads_created,
+            serper_calls, claude_calls, claude_input_tokens, claude_output_tokens, total_cost,
+            completed_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        ON CONFLICT (run_id) DO UPDATE SET
+            companies_collected  = omni_pipeline_metrics.companies_collected  + EXCLUDED.companies_collected,
+            companies_qualified  = omni_pipeline_metrics.companies_qualified  + EXCLUDED.companies_qualified,
+            companies_rejected   = omni_pipeline_metrics.companies_rejected   + EXCLUDED.companies_rejected,
+            people_found         = omni_pipeline_metrics.people_found         + EXCLUDED.people_found,
+            people_verified      = omni_pipeline_metrics.people_verified      + EXCLUDED.people_verified,
+            leads_created        = omni_pipeline_metrics.leads_created        + EXCLUDED.leads_created,
+            serper_calls         = omni_pipeline_metrics.serper_calls         + EXCLUDED.serper_calls,
+            claude_calls         = omni_pipeline_metrics.claude_calls         + EXCLUDED.claude_calls,
+            claude_input_tokens  = omni_pipeline_metrics.claude_input_tokens  + EXCLUDED.claude_input_tokens,
+            claude_output_tokens = omni_pipeline_metrics.claude_output_tokens + EXCLUDED.claude_output_tokens,
+            total_cost           = omni_pipeline_metrics.total_cost           + EXCLUDED.total_cost,
+            completed_at         = COALESCE(EXCLUDED.completed_at, omni_pipeline_metrics.completed_at)
+        """,
+        env["entity_id"],
+        env["workspace_id"],
+        p.get("collector_source"),
+        int(p.get("companies_collected") or 0),
+        int(p.get("companies_qualified") or 0),
+        int(p.get("companies_rejected") or 0),
+        int(p.get("people_found") or 0),
+        int(p.get("people_verified") or 0),
+        int(p.get("leads_created") or 0),
+        int(p.get("serper_calls") or 0),
+        int(p.get("claude_calls") or 0),
+        int(p.get("claude_input_tokens") or 0),
+        int(p.get("claude_output_tokens") or 0),
+        float(p.get("total_cost") or 0),
+        datetime.fromisoformat(env["occurred_at"]) if kind == "end" else None,
+    )
+
+
+async def _project_send_outcome(env: dict[str, Any]) -> None:
+    """OBSERVABILITY-001: persist one outbound send attempt to the durable,
+    cross-queryable ledger. Idempotent on (workspace_id, command_id, attempt) so
+    a Kafka redelivery of the result doesn't double-record. entity_id = lead_id."""
+    p = env.get("payload") or {}
+    await execute(
+        """
+        INSERT INTO omni_send_outcomes (
+            workspace_id, lead_id, contact_id, workflow_id, node_id, channel, mode,
+            sending_account_id, command_id, attempt, status, provider,
+            provider_status_code, error_code, error_detail, provider_ids,
+            retriable, occurred_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17,$18)
+        ON CONFLICT (workspace_id, command_id, attempt) DO UPDATE SET
+            lead_id = COALESCE(EXCLUDED.lead_id, omni_send_outcomes.lead_id),
+            contact_id = COALESCE(EXCLUDED.contact_id, omni_send_outcomes.contact_id),
+            workflow_id = COALESCE(EXCLUDED.workflow_id, omni_send_outcomes.workflow_id),
+            node_id = COALESCE(EXCLUDED.node_id, omni_send_outcomes.node_id),
+            channel = EXCLUDED.channel,
+            mode = COALESCE(EXCLUDED.mode, omni_send_outcomes.mode),
+            sending_account_id = COALESCE(
+                EXCLUDED.sending_account_id, omni_send_outcomes.sending_account_id
+            ),
+            status = EXCLUDED.status,
+            provider = COALESCE(EXCLUDED.provider, omni_send_outcomes.provider),
+            provider_status_code = COALESCE(
+                EXCLUDED.provider_status_code, omni_send_outcomes.provider_status_code
+            ),
+            error_code = EXCLUDED.error_code,
+            error_detail = EXCLUDED.error_detail,
+            provider_ids = EXCLUDED.provider_ids,
+            retriable = EXCLUDED.retriable,
+            occurred_at = EXCLUDED.occurred_at
+        """,
+        env["workspace_id"],
+        p.get("lead_id") or (env.get("entity_id") if env.get("entity_type") == "lead" else None),
+        p.get("contact_id"),
+        p.get("workflow_id"),
+        p.get("node_id"),
+        p.get("channel") or "",
+        p.get("mode"),
+        p.get("sending_account_id"),
+        p.get("command_id") or "",
+        int(p.get("attempt") or 0),
+        p.get("status") or "failed",
+        p.get("provider"),
+        p.get("provider_status_code"),
+        p.get("error_code"),
+        p.get("error_detail"),
+        json.dumps(p.get("provider_ids") or {}),
+        bool(p.get("retriable")),
+        datetime.fromisoformat(env["occurred_at"]),
+    )
+
+
+async def _project_sender_delivery_result(env: dict[str, Any]) -> None:
+    """Persist a deduplicated transport outcome for sender-health rollups."""
+    payload = env.get("payload") or {}
+    await execute(
+        """
+        INSERT INTO omni_sender_delivery_results (
+            workspace_id, result_key, sending_account_id, command_id,
+            status, error_code, retriable, occurred_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        ON CONFLICT (workspace_id, result_key) DO NOTHING
+        """,
+        env["workspace_id"],
+        payload.get("result_key"),
+        env["entity_id"],
+        payload.get("command_id") or "",
+        payload.get("status") or "failed",
+        payload.get("error_code"),
+        bool(payload.get("retriable")),
+        datetime.fromisoformat(env["occurred_at"]),
+    )
+
+
+# SPINE-TERM-001: a terminal lead must never be resurrected by a generic lead
+# projection. The transition worker owns terminalization (it writes errored/ended/
+# completed/cancelled/converted directly); side-channel lead.* events
+# (lead.contact_attached, lead.custom_fields_updated, redeliveries) carry NO status
+# and used to default to 'active', which the status-COALESCE then wrote OVER the
+# terminal status the worker had just set — the lead flipped back to active with
+# only updated_at moving (the exact reported symptom). Two guards close it:
+#   1. an event without a status passes NULL (not a fabricated 'active'), so the
+#      COALESCE keeps the existing status untouched;
+#   2. even WITH an incoming status, the conflict update is terminal-sticky — once
+#      a lead is terminal, no projection downgrades it back to a live status.
+# New rows still default to 'active' on the INSERT side (COALESCE($6,'active')).
+_TERMINAL_LEAD_STATUSES = (
+    "completed",
+    "errored",
+    "cancelled",
+    "converted",
+    "ended",
+    "suppressed",
+    "invalid",
+)
+
+
+async def _project_lead(env: dict[str, Any]) -> None:
+    # CONTACT-CAP-002: the contact goal-cap is NOT enforced here anymore. It used
+    # to live in this projector as a second writer (read objective + count, then
+    # null the contact_id and force status='ended'), which (a) terminalized the
+    # lead WITHOUT going through the worker's _terminalize_lead, so a capped
+    # fan-out child never decremented its parent's barrier (stranding the parent),
+    # and (b) ran only AFTER crm.create_contact had already emitted contact.created
+    # (orphan contact). The cap now lives in crm.create_contact (before the event
+    # is emitted) and ends the lead via _terminalize_lead (barrier-accounted). This
+    # projector is back to a pure terminal-sticky upsert.
+    p = dict(env.get("payload") or {})
     await execute(
         """
         INSERT INTO omni_leads (id, workspace_id, contact_id, workflow_id,
                            current_node_id, status, custom_fields)
-        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+        VALUES ($1, $2, $3, $4, $5, COALESCE($6, 'active'), $7::jsonb)
         ON CONFLICT (id) DO UPDATE SET
           contact_id      = COALESCE(EXCLUDED.contact_id,      omni_leads.contact_id),
           workflow_id     = COALESCE(EXCLUDED.workflow_id,     omni_leads.workflow_id),
-          current_node_id = COALESCE(EXCLUDED.current_node_id, omni_leads.current_node_id),
-          status          = COALESCE(EXCLUDED.status,          omni_leads.status),
+          -- a terminal lead has no current node; don't let a late event re-pin one
+          current_node_id = CASE WHEN omni_leads.status = ANY($8::text[]) THEN omni_leads.current_node_id
+                                 ELSE COALESCE(EXCLUDED.current_node_id, omni_leads.current_node_id) END,
+          -- terminal-sticky: once terminal, never downgrade back to a live status
+          status          = CASE WHEN omni_leads.status = ANY($8::text[]) THEN omni_leads.status
+                                 ELSE COALESCE($6, omni_leads.status) END,
           custom_fields   = omni_leads.custom_fields || EXCLUDED.custom_fields,
           updated_at      = NOW()
         """,
@@ -174,12 +442,19 @@ async def _project_lead(env: dict[str, Any]) -> None:
         p.get("contact_id"),
         p.get("workflow_id"),
         p.get("current_node_id"),
-        p.get("status") or "active",
+        p.get("status"),  # NULL when the event carries none — COALESCE keeps existing
         p.get("custom_fields") or {},
+        list(_TERMINAL_LEAD_STATUSES),
     )
 
 
 async def _project_message(env: dict[str, Any]) -> None:
+    # PROJ-002: messages are an append-only log, so this projector keys on the
+    # EVENT id (env["id"]) rather than an entity_id like the upsert projectors
+    # (_project_contact/company/lead). Two message events never share an id, so
+    # ON CONFLICT (id) DO NOTHING is pure idempotency for redelivery — there is
+    # deliberately no message "correction"/update path. If message editing is
+    # ever needed, switch to an entity_id key + an UPDATE branch.
     p = env.get("payload") or {}
     direction = "inbound" if env["event_type"] == "message.received" else "outbound"
     await execute(
@@ -199,6 +474,27 @@ async def _project_message(env: dict[str, Any]) -> None:
         p.get("classification"),
         p.get("confidence"),
         p.get("metadata") or {},
+        datetime.fromisoformat(env["occurred_at"]),
+    )
+
+
+async def _project_email_tracking(env: dict[str, Any]) -> None:
+    """T3: append-only open/click log. Keyed on the EVENT id (like messages) so
+    redelivery is idempotent — every hit is its own row."""
+    p = env.get("payload") or {}
+    await execute(
+        """
+        INSERT INTO omni_email_tracking (id, workspace_id, lead_id, contact_id,
+                                         event_type, url, occurred_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (id) DO NOTHING
+        """,
+        env["id"],
+        env["workspace_id"],
+        p.get("lead_id"),
+        p.get("contact_id"),
+        p.get("kind") or ("click" if env["event_type"] == "email.clicked" else "open"),
+        p.get("url"),
         datetime.fromisoformat(env["occurred_at"]),
     )
 
@@ -260,7 +556,14 @@ async def _project_ai_job(env: dict[str, Any]) -> None:
     if len(parts) != 3 or parts[0] != "ai":
         return
     _, kind, phase = parts
-    if kind not in ("score", "compose", "enrich", "classify"):
+    # Screen nodes emit ai.screen_company.* / ai.screen_person.*; the muscle
+    # result envelope uses ai.screen.completed. Collapse all screen variants to
+    # the single audit kind 'screen' so the run log records them regardless of
+    # which naming scheme produced the event. (omni_ai_jobs.kind allows 'screen'
+    # as of migration 024.)
+    if kind.startswith("screen"):
+        kind = "screen"
+    if kind not in ("score", "compose", "enrich", "classify", "screen"):
         return
     status = _AI_JOB_LIFECYCLE.get(phase)
     if status is None:
@@ -316,14 +619,97 @@ _PROJECTORS = {
     "company": _project_company,
     "deal": _project_deal,
     "lead": _project_lead,
+    "task": _project_task,  # CONTRACT-004
 }
+
+
+async def _project_lead_outcome(env: dict[str, Any]) -> None:
+    """H1: record a lead's terminal outcome from flow.goal / flow.end.
+
+    flow.goal emits ``lead.goal_reached`` {goal_name, value}; flow.end emits
+    ``lead.sequence_ended`` {reason}. The transition worker already set the lead's
+    status (converted / ended); here we persist the outcome detail into
+    custom_fields so Analytics can attribute conversions (goal_name + value) and
+    explain dead-ends (reason). Keyed by entity_id (the lead)."""
+    p = env.get("payload") or {}
+    et = env["event_type"]
+    if et == "lead.goal_reached":
+        outcome = {
+            "kind": "converted",
+            "goal_name": p.get("goal_name"),
+            "value": p.get("value"),
+            "at": env.get("occurred_at"),
+        }
+        status = "converted"
+    else:  # lead.sequence_ended
+        outcome = {"kind": "ended", "reason": p.get("reason"), "at": env.get("occurred_at")}
+        status = "ended"
+    await execute(
+        """
+        UPDATE omni_leads
+           SET custom_fields = COALESCE(custom_fields, '{}'::jsonb) || jsonb_build_object('outcome', $1::jsonb),
+               status = $2,
+               updated_at = NOW()
+         WHERE id = $3 AND workspace_id = $4
+        """,
+        json.dumps(outcome),
+        status,
+        env["entity_id"],
+        env["workspace_id"],
+    )
+
+
+# Entity deletion: a `<entity>.deleted` event removes the projection row. This
+# keeps the read side write-free (mutation = event) while giving the CRM a real
+# delete. The event stays in events_archive (audit), only the projection drops.
+# Companies cascade their KG side-tables (aliases + cached people) so a re-run
+# rediscovers them cleanly instead of hitting a stale `known` cache.
+_DELETE_TABLE = {
+    "contact": ("omni_contacts",),
+    "company": ("omni_companies", "omni_company_aliases", "omni_people_cache"),
+    "deal": ("omni_deals",),
+    "lead": ("omni_leads",),
+}
+
+
+async def _project_delete(env: dict[str, Any]) -> None:
+    entity = env["entity_type"]
+    tables = _DELETE_TABLE.get(entity)
+    if not tables or not env.get("entity_id"):
+        return
+    primary, *cascades = tables
+    # cascade side-tables first (FK-free, keyed by company_id), then the row.
+    for tbl in cascades:
+        col = "company_id" if entity == "company" else "id"
+        await execute(
+            f"DELETE FROM {tbl} WHERE {col} = $1 AND workspace_id = $2",
+            env["entity_id"],
+            env["workspace_id"],
+        )
+    await execute(
+        f"DELETE FROM {primary} WHERE id = $1 AND workspace_id = $2",
+        env["entity_id"],
+        env["workspace_id"],
+    )
 
 
 async def _apply_projection(env: dict[str, Any]) -> None:
     et = env["event_type"]
     entity = env["entity_type"]
+    if et.endswith(".deleted") and env.get("entity_id"):
+        await _project_delete(env)
+        return
     if et in ("message.received", "message.sent"):
         await _project_message(env)
+        return
+    # T3: email engagement (open/click) — append-only tracking log.
+    if et in ("email.opened", "email.clicked"):
+        await _project_email_tracking(env)
+        return
+    # H1: terminal lead outcomes (conversion vs dead-end) carry detail the
+    # generic lead projector would drop. Handle before the entity dispatch.
+    if et in ("lead.goal_reached", "lead.sequence_ended") and env.get("entity_id"):
+        await _project_lead_outcome(env)
         return
     # AI lifecycle events feed two projections: the job log (always) and,
     # for completed scores, the per-lead score table.
@@ -331,6 +717,26 @@ async def _apply_projection(env: dict[str, Any]) -> None:
         await _project_ai_job(env)
         if et == "ai.score.completed" and env.get("entity_id"):
             await _project_lead_score(env)
+        return
+    # CONTRACT-005: approvals queue (request -> draft-edit -> resolved), keyed
+    # by lead id. B1 adds approval.draft_updated for AI draft-review.
+    if et in ("approval.requested", "approval.draft_updated", "approval.resolved") and env.get("entity_id"):
+        await _project_approval(env)
+        return
+    # Pipeline cost/usage metrics (per source run). entity_id = run_id.
+    if et == "pipeline.metric" and env.get("entity_id"):
+        await _project_pipeline_metric(env)
+        return
+    if et == "sender.delivery_result" and env.get("entity_id"):
+        await _project_sender_delivery_result(env)
+        return
+    # OBSERVABILITY-001: the durable per-lead send-outcome ledger (all channels).
+    if et == "send.outcome" and env.get("entity_id"):
+        await _project_send_outcome(env)
+        return
+    # Task status flips (entity_type 'task' but NOT the create path).
+    if et in ("task.completed", "task.reopened") and env.get("entity_id"):
+        await _project_task_status(env)
         return
     if entity in _PROJECTORS and env.get("entity_id"):
         await _PROJECTORS[entity](env)
@@ -361,25 +767,50 @@ async def run() -> None:
     )
     await consumer.start()
     log.info("[projector] consuming %s", EVENTS_TOPIC)
+
+    async def _handle(rec) -> None:
+        # The projector needs the record itself (offset bookkeeping), so it
+        # takes the raw record rather than just the value. consume_forever
+        # passes rec.value to handler; we pass a thin wrapper via on_record
+        # instead so we keep offset access.
+        env = rec.value
+        async with system_scope():
+            # PROJ-001: apply the projection BEFORE archiving, so a transient
+            # projection failure leaves the offset uncommitted and the record is
+            # redelivered with the projection re-attempted. All projections are
+            # idempotent upserts (ON CONFLICT), so re-applying on redelivery is
+            # safe. Gating projection on the archive's first-insert (the old
+            # `if inserted`) meant a post-archive projection failure would, on
+            # redelivery, hit ON CONFLICT DO NOTHING and silently skip the
+            # projection forever. Archive is now the durable commit-point that
+            # marks "projected".
+            await _apply_projection(env)
+            await _archive_event(env, rec)
+            await _record_offset(rec)
+        await consumer.commit()
+
     try:
-        async for rec in consumer:
-            env = rec.value
-            try:
-                async with system_scope():
-                    inserted = await _archive_event(env, rec)
-                    if inserted:
-                        await _apply_projection(env)
-                    await _record_offset(rec)
-                await consumer.commit()
-            except Exception as e:  # noqa: BLE001 — never kill the loop
-                log.exception("[projector] failed to process offset=%s: %s", rec.offset, e)
+        # handler is a no-op; all work (incl. manual commit) happens in
+        # on_record where we still have the record + offset. This keeps the
+        # codec-skip / crash-tolerance guarantees of consume_forever.
+        await bus.consume_forever(
+            consumer,
+            lambda _value: _noop(),
+            name="projector",
+            on_record=_handle,
+        )
     finally:
         await consumer.stop()
+
+
+async def _noop() -> None:
+    return None
 
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     await init_pool(settings.get_asyncpg_dsn())
+    await assert_rls_enforcing_role()
     try:
         await run()
     finally:

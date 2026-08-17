@@ -11,8 +11,14 @@ services:
       - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
       - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
       - --memory 1G
+    # The event log is the durable source of truth — without a volume it
+    # evaporated on every container recreate.
+    volumes:
+      - redpandadata:/var/lib/redpanda/data
+    # 127.0.0.1 binding: published Docker ports bypass UFW (iptables DOCKER
+    # chain runs before ufw rules) — 0.0.0.0 here means internet-exposed.
     ports:
-      - "19092:19092"
+      - "127.0.0.1:19092:19092"
 
   # --- The Memory (State & Cache) ---
   redis:
@@ -21,7 +27,7 @@ services:
     volumes:
       - redisdata:/data
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
 
   db:
     image: postgres:16-alpine
@@ -32,7 +38,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
 
   # --- The Muscle (Rust Execution) ---
   execution-engine:
@@ -40,7 +46,7 @@ services:
       context: ./backend-rust
     environment:
       KAFKA_BROKERS: redpanda:9092
-      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
+      DATABASE_URL: postgresql://omni_app_role:omni_app_password@db:5432/outreach
       CONTROL_PLANE_URL: http://backend:8000
       MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
       RUST_LOG: execution_engine=info
@@ -54,7 +60,7 @@ services:
     build:
       context: ./backend-flink
     ports:
-      - "8081:8081"
+      - "127.0.0.1:8081:8081"
     command: jobmanager
     environment:
       - |
@@ -123,7 +129,8 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
+      DATABASE_URL: postgresql://omni_app_role:omni_app_password@db:5432/outreach
+      ALEMBIC_DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
       REDIS_URL: redis://:d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17@redis:6379
       REDIS_PASSWORD: d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17
       KAFKA_BROKERS: redpanda:9092
@@ -152,7 +159,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
+      DATABASE_URL: postgresql://omni_app_role:omni_app_password@db:5432/outreach
       KAFKA_BROKERS: redpanda:9092
       DB_PASSWORD: OmniOutreach2026
       SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
@@ -182,3 +189,6 @@ volumes:
   redisdata:
     external: true
     name: omni-outreach_redisdata
+  redpandadata:
+    external: true
+    name: omni-outreach_redpandadata

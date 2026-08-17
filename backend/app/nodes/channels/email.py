@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import EmailStr, Field
 
 from app.nodes import (
     NodeCategory,
@@ -27,15 +28,28 @@ from app.nodes import (
     SideEffect,
     register,
 )
+from app.nodes.channels.dedupe import SendDedupeConfig
 
 log = logging.getLogger(__name__)
 
 
-class EmailChannelConfig(BaseModel):
-    connection_name: str = Field(description="Name of the email connection (configured on Settings → Integrations)")
+class EmailChannelConfig(SendDedupeConfig):
+    connection_name: str | None = Field(None, description="Name of the email connection (configured on Settings → Integrations)")
+    sending_account_id: str | None = None
+    account_pool: Literal["campaign", "round_robin", "single"] | None = None
     subject_template: str = Field(description="Subject with {{contact.first_name}}-style variables")
     body_template: str = Field(description="HTML body with {{contact.first_name}}-style variables")
     from_address: EmailStr | None = Field(None, description="Override the connection's default From address")
+    verification_policy: Literal[
+        "off", "block_invalid", "require_safe", "require_verified"
+    ] = Field(
+        "block_invalid",
+        description=(
+            "off: skip verification; block_invalid: stop known-invalid addresses; "
+            "require_safe: require syntax+MX with no risk flags; require_verified: "
+            "require mailbox-level verification from a trusted provider"
+        ),
+    )
 
 
 MANIFEST = NodeManifest(
@@ -46,10 +60,18 @@ MANIFEST = NodeManifest(
     output_handles=(
         NodeHandle("sent", "Message accepted by the SMTP server"),
         NodeHandle("on_error", "Permanent send failure (invalid recipient, auth, etc.)"),
+        # DEDUP-SEND-001: this contact was already emailed (per the node's
+        # dedupe_action/scope) — the send was skipped, continue here.
+        NodeHandle("already_messaged", "Skipped — this contact was already messaged"),
     ),
     capabilities=("connection:smtp",),
     side_effect=SideEffect.NETWORK,
     icon="mail",
+    display_name="Send email",
+    primary_fields=("subject_template", "body_template", "verification_policy"),
+    advanced_fields=("connection_name", "sending_account_id", "account_pool", "from_address"),
+    # OUTBOUND-FIRST-001: email can START a campaign against an attached audience.
+    can_be_entry=True,
 )
 
 
@@ -57,9 +79,10 @@ async def execute(ctx: NodeContext) -> NodeResult:
     cfg = EmailChannelConfig(**ctx.config)
     correlation_id = ctx.correlation_id or str(uuid.uuid4())
 
-    # The actual Kafka publish lives in the bus client (added in a follow-up
-    # commit when bus.py is rewritten for v2). For now this node returns a
-    # stub event that records the intent — the bus wiring slots in here.
+    # Emit the channel.email.queued intent. The transition worker publishes it
+    # to omni.events; the dispatcher routes channel.email -> ChannelType.EMAIL ->
+    # the Rust muscle's handle_email (SMTP send). The node stays a pure shim —
+    # it renders config + reports intent; the muscle owns the network call.
     events = [
         {
             "event_type": "channel.email.queued",
@@ -68,6 +91,7 @@ async def execute(ctx: NodeContext) -> NodeResult:
             "payload": {
                 "connection_name": cfg.connection_name,
                 "subject_template": cfg.subject_template,
+                "body_template": cfg.body_template,
                 "correlation_id": correlation_id,
             },
         }

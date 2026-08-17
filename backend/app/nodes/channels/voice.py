@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from app.nodes import (
     NodeCategory,
@@ -16,10 +16,13 @@ from app.nodes import (
     SideEffect,
     register,
 )
+from app.nodes.channels.dedupe import SendDedupeConfig
 
 
-class VoiceChannelConfig(BaseModel):
-    connection_name: str = Field(description="Retell connection name (Settings → Integrations)")
+class VoiceChannelConfig(SendDedupeConfig):
+    connection_name: str | None = Field(None, description="Retell connection name (Settings → Integrations)")
+    sending_account_id: str | None = None
+    account_pool: Literal["campaign", "round_robin", "single"] | None = None
     retell_agent_id: str = Field(min_length=1, description="The Retell agent that will run the call")
     conversation_flow_id: str | None = Field(None, description="Optional — for Nested Flow agents")
     from_number: str | None = Field(None, description="Override the connection's default outbound number")
@@ -34,10 +37,13 @@ MANIFEST = NodeManifest(
     output_handles=(
         NodeHandle("placed", "Retell accepted the create-call request"),
         NodeHandle("on_error", "Permanent failure (invalid phone, no credit, agent missing)"),
+        # DEDUP-SEND-001: contact already called on this channel — skipped, continue here.
+        NodeHandle("already_messaged", "Skipped — this contact was already messaged"),
     ),
     capabilities=("connection:retell",),
     side_effect=SideEffect.NETWORK,
     icon="phone",
+    can_be_entry=True,  # OUTBOUND-FIRST-001: can start a campaign against an audience
 )
 
 

@@ -6,6 +6,7 @@ Everything else is a projection over the event log. See
 omni-vault/wiki/architecture/0001-v2-nuke.md for the ADR.
 """
 
+import asyncio
 import uuid
 from contextlib import asynccontextmanager
 
@@ -17,22 +18,38 @@ from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
-from app.db import close_pool, close_redis, init_pool, init_redis
+from app.db import assert_rls_enforcing_role, close_pool, close_redis, init_pool, init_redis
 from app.logging_config import get_logger, setup_logging
 from app.nodes import discover as discover_nodes
 from app.routers import (
+    agent_harness,
     ai_studio,
+    api_keys,
+    approvals,
     auth,
     auth_google,
     canvas,
+    deliverability,
     events,
     inbox,
     integrations,
     internal,
+    n8n_callback,
     nodes,
     oauth,
     oauth_producthunt,
+    objectives,
     projections,
+    public,
+    sources,
+    suppression,
+    templates,
+    tones,
+    tracking,
+    unipile,
+    views,
+    webhooks_in,
+    webhooks_out,
     workspaces,
 )
 from app.services.bus import close_producer, init_producer
@@ -54,16 +71,42 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         return response
 
 
+async def _credential_sweep_loop(interval_seconds: int = 3600) -> None:
+    """CMP2: periodically hard-delete released/expired credential_refs so the
+    table doesn't grow unbounded. Runs on the backend (it holds the DB pool);
+    the muscle only mints + redeems. Tolerant of transient failures — logs and
+    retries on the next tick."""
+    from app.routers.internal import sweep_expired_credentials
+
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+            deleted = await sweep_expired_credentials()
+            if deleted:
+                logger.info("[credential-sweep] removed %d expired/released refs", deleted)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            logger.exception("[credential-sweep] tick failed; will retry next interval")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Omni v2 backend")
     await init_pool(settings.get_asyncpg_dsn())
+    await assert_rls_enforcing_role()  # refuse to run if connected as a superuser (RLS void)
     await init_redis(settings.get_redis_url())
     await init_producer()
     discover_nodes()
-    logger.info("Database, Redis, bus, and node registry initialised")
+    sweep_task = asyncio.create_task(_credential_sweep_loop())
+    logger.info("Database, Redis, bus, node registry, and credential sweep initialised")
     yield
     logger.info("Shutting down — closing connections")
+    sweep_task.cancel()
+    try:
+        await sweep_task
+    except asyncio.CancelledError:
+        pass
     await close_producer()
     await close_pool()
     await close_redis()
@@ -105,10 +148,41 @@ app.include_router(internal.router, prefix="/internal", tags=["internal"])
 app.include_router(events.router, prefix="/events", tags=["events"])
 app.include_router(projections.router, prefix="/projections", tags=["projections"])
 app.include_router(nodes.router, prefix="/nodes", tags=["nodes"])
+app.include_router(sources.router, prefix="/sources", tags=["sources"])
 app.include_router(canvas.router, prefix="/canvas", tags=["canvas"])
 app.include_router(integrations.router, prefix="/integrations", tags=["integrations"])
 app.include_router(inbox.router, prefix="/inbox", tags=["inbox"])
 app.include_router(ai_studio.router, prefix="/ai", tags=["ai"])
+app.include_router(approvals.router, prefix="/approvals", tags=["approvals"])
+app.include_router(suppression.router, prefix="/suppression", tags=["suppression"])
+app.include_router(deliverability.router, prefix="/deliverability", tags=["deliverability"])
+app.include_router(templates.router, prefix="/templates", tags=["templates"])
+app.include_router(tones.router, prefix="/tones", tags=["tones"])
+app.include_router(views.router, prefix="/views", tags=["views"])
+app.include_router(objectives.router, prefix="/objectives", tags=["objectives"])
+app.include_router(agent_harness.router, prefix="/agent-harness", tags=["agent-harness"])
+
+# Unipile control plane (UNIPILE-FULL group C/D): account health, inbox reads,
+# inmail-balance, native webhook CRUD — synchronous Unipile API reads (not muscle).
+app.include_router(unipile.router, prefix="/unipile", tags=["unipile"])
+
+# Developer / public API surface (N8N-001). API-key CRUD is JWT-authed; the
+# public action API + webhook subscriptions accept an API key OR a JWT.
+app.include_router(api_keys.router, prefix="/api-keys", tags=["api-keys"])
+app.include_router(public.router, prefix="/public/v1", tags=["public"])
+app.include_router(webhooks_out.router, prefix="/webhook-subscriptions", tags=["webhooks"])
+
+# n8n callback resume — a parked channel.n8n lead is woken when n8n calls back.
+# Token-authed (the signed token in the path IS the credential), so no JWT dep.
+app.include_router(n8n_callback.router, prefix="/n8n", tags=["n8n"])
+
+# Inbound webhooks (source.webhook_in runtime). UNAUTHENTICATED by design —
+# external systems POST here; trust comes from the opaque ids + optional HMAC.
+app.include_router(webhooks_in.router, prefix="/webhooks", tags=["webhooks"])
+
+# Email open/click tracking (T3). UNAUTHENTICATED — a recipient's mail client
+# fetches these; trust comes from the HMAC-signed token, not a session.
+app.include_router(tracking.router, prefix="/track", tags=["tracking"])
 
 
 @app.get("/health")
@@ -132,5 +206,21 @@ async def health():
     except Exception as e:
         logger.warning("Health check Redis failed: %s", e)
         checks["redis"] = "error"
+
+    # PY-001: surface any node that failed to import during discovery. A broken
+    # node is silently missing from the palette otherwise; here it flips /health
+    # to degraded and names the offending module(s).
+    import app.nodes as noderegistry
+
+    node_failures = noderegistry.import_failures()
+    checks["nodes"] = "ok" if not node_failures else "error"
+
     status = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
-    return {"status": status, "checks": checks}
+    body: dict[str, object] = {
+        "status": status,
+        "checks": checks,
+        "build": {"sha": settings.build_sha},
+    }
+    if node_failures:
+        body["node_import_failures"] = node_failures
+    return body

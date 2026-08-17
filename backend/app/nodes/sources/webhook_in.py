@@ -1,9 +1,10 @@
 """Inbound webhook source — exposes a stable URL that creates a contact per POST.
 
-The actual HTTP listener lives at ``POST /webhooks/in/{workflow_id}/{node_id}``
-(added in a follow-up commit). This node is the canvas-side declaration:
-operators configure expected payload shape, and the webhook handler emits
-contact events keyed to this node's id.
+The HTTP listener lives at ``POST /webhooks/in/{workflow_id}/{node_id}``
+(app/routers/webhooks_in.py). This node is the canvas-side declaration:
+operators configure the expected payload shape (field_map + HMAC), and the
+webhook handler maps each inbound POST to a contact, seeds a lead at this node,
+and advances it down the workflow.
 """
 
 from __future__ import annotations

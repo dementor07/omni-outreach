@@ -15,9 +15,14 @@ omni-vault/.obsidian/
 # Claude Code — local MCP config (contains API keys)
 .mcp.json
 .claude/settings.local.json
+.claude/skills/
 
 # Gemini CLI — local MCP config (contains API keys)
 .gemini/settings.json
+
+# CodeGraph — local code-index (rebuilt per clone via `codegraph init`)
+.codegraph/
+GEMINI.md
 
 # Local-only vault notes (credentials, machine-specific scratch) — never push
 omni-vault/credentials.local.md
@@ -26,6 +31,13 @@ omni-vault/**/*.local.md
 
 # One-off personal scripts that operate outside the repo
 /clean_badges.py
+/list_tables.py
+
+# One-off browser/shell scratch generated during local verification
+/apify-signin.png
+/contacts_modal.yml
+/*.stackdump
+omni-vault/*.base
 
 # Dead multi-LLM bridge/conference harness output (removed 2026-05-25)
 .bridge_logs/
@@ -41,6 +53,10 @@ frontend/screenshots/
 frontend/*.png
 screenshots/
 
+# Runtime TLS material copied into the production checkout by certbot hooks.
+# Certificates are machine state, never source.
+/certs/*.pem
+
 # One-off UI test scratch
 frontend/test-*.cjs
 
@@ -53,3 +69,9 @@ frontend/src/pages/_legacy/
 /plugin_architecture_*
 /sota_grid_structure.md
 /python_tutorial/
+
+# PMB local memory workspace marker (per-machine, never committed)
+.pmb/
+
+# Local agent-harness lease files (contain short-lived plaintext lease tokens)
+.omni-harness/

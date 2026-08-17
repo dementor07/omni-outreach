@@ -7,60 +7,120 @@
 #
 # Prod master continues running under the default project (-p omni-outreach)
 # on the same host. Nothing here recreates a prod container.
+#
+# DEPLOY-006: secrets are NOT inlined here anymore — they come from the
+# gitignored .env via ${VAR} interpolation (compose auto-loads .env). See
+# .env for the variable list. Rotate any value that was ever committed.
+
+x-secret-env: &secret-env
+  DATABASE_URL: ${DATABASE_URL}
+  ALEMBIC_DATABASE_URL: ${ALEMBIC_DATABASE_URL}
+  KAFKA_BROKERS: ${KAFKA_BROKERS}
+  DB_PASSWORD: ${DB_PASSWORD}
+  SECRET_KEY: ${SECRET_KEY}
+
+x-build-args: &build-args
+  BUILD_SHA: ${BUILD_SHA:-unknown}
 
 services:
+  # DEPLOY-003: pre-create the topics with intentional partition counts instead
+  # of relying on Redpanda implicit auto-create (which lands every topic at 1
+  # partition — an accidental capacity cap). Runs once and exits; other services
+  # don't hard-depend on it (topics also auto-create) but running it makes the
+  # partitioning a deliberate decision. Idempotent: `create` is a no-op if the
+  # topic exists.
+  topics-init:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: omni-v2-topics-init
+    entrypoint: ["/bin/sh", "-lc"]
+    command: >
+      'until rpk cluster info --brokers redpanda:9092 >/dev/null 2>&1; do echo waiting for redpanda; sleep 2; done &&
+       rpk topic create omni.events         -p 6 -r 1 --brokers redpanda:9092 || true &&
+       rpk topic create outreach.commands    -p 6 -r 1 --brokers redpanda:9092 || true &&
+       rpk topic create outreach.results     -p 6 -r 1 --brokers redpanda:9092 || true &&
+       rpk topic create outreach.transitions -p 6 -r 1 --brokers redpanda:9092 || true &&
+       rpk topic create outreach.dead_letter -p 1 -r 1 --brokers redpanda:9092 || true &&
+       echo topics-init done'
+    networks:
+      - omni-outreach_default
+    restart: "no"
+
   backend-v2:
     build:
       context: .
       dockerfile: ./backend/Dockerfile
+      args: *build-args
     container_name: omni-v2-backend
     env_file:
       - .env
     environment:
+      <<: *secret-env
       # Shared infra (joins the master compose network via external network below)
-      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
-      REDIS_URL: redis://:d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17@redis:6379
-      REDIS_PASSWORD: d02ab4ba5a242eb8ae8fea88c7aec39a087655ee0b98ee17
-      KAFKA_BROKERS: redpanda:9092
-      DB_PASSWORD: OmniOutreach2026
-      SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
+      REDIS_URL: ${REDIS_URL}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
-      FRONTEND_URL: https://145-223-21-222.sslip.io:8443
+      FRONTEND_URL: ${FRONTEND_URL}
     networks:
       - omni-outreach_default
     ports:
-      - "8001:8000"
+      # Host-side debug access only — nginx reaches backend-v2 in-network.
+      # Never publish on 0.0.0.0: Docker's iptables rules bypass UFW.
+      - "127.0.0.1:8001:8000"
     restart: unless-stopped
 
   projector-v2:
     build:
       context: .
       dockerfile: ./backend/Dockerfile
+      args: *build-args
     container_name: omni-v2-projector
     command: python -m app.projector.main
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
-      KAFKA_BROKERS: redpanda:9092
-      DB_PASSWORD: OmniOutreach2026
-      SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
+      <<: *secret-env
     networks:
       - omni-outreach_default
+    # Background worker — the image's HEALTHCHECK curls :8000 which only the
+    # FastAPI backend serves. Disable so docker doesn't mark this unhealthy.
+    healthcheck:
+      disable: true
     restart: unless-stopped
 
   # The execution worker (Rust). Consumes outreach.commands, performs the
   # real I/O per channel handler, emits outreach.results. CONTROL_PLANE_URL
   # points at the v2 backend so credential refs resolve against v2 connections.
+  # Camoufox anti-detect headless-browser microservice. The muscle calls it to
+  # scrape Naukri (source.naukri) and render JS-heavy company team pages. Isolated
+  # in its own container so the Playwright dep stays out of the Rust/Python images.
+  camoufox-v2:
+    build:
+      context: ./services/camoufox
+      args: *build-args
+    container_name: omni-v2-camoufox
+    environment:
+      CAMOUFOX_SHARED_SECRET: ${CAMOUFOX_SHARED_SECRET:-dev-camoufox-secret-rotate-me}
+    networks:
+      - omni-outreach_default
+    restart: unless-stopped
+
   muscle-v2:
     build:
       context: ./backend-rust
+      args: *build-args
     container_name: omni-v2-muscle
     environment:
-      KAFKA_BROKERS: redpanda:9092
-      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      DATABASE_URL: ${DATABASE_URL}
       CONTROL_PLANE_URL: http://backend-v2:8000
       MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
+      # Camoufox microservice (source.naukri + team crawl).
+      CAMOUFOX_BASE_URL: http://camoufox-v2:8100
+      CAMOUFOX_SHARED_SECRET: ${CAMOUFOX_SHARED_SECRET:-dev-camoufox-secret-rotate-me}
+      # Don't share the consumer group with the legacy execution engine —
+      # otherwise the older muscle eats v2 commands and dies on unknown
+      # channel variants. See main.rs for the override hook.
+      MUSCLE_CONSUMER_GROUP: muscle-v2
       RUST_LOG: execution_engine=info,info
     networks:
       - omni-outreach_default
@@ -74,18 +134,18 @@ services:
     build:
       context: .
       dockerfile: ./backend/Dockerfile
+      args: *build-args
     container_name: omni-v2-dispatcher
     command: python -m app.execution.dispatcher
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
-      KAFKA_BROKERS: redpanda:9092
-      DB_PASSWORD: OmniOutreach2026
-      SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
+      <<: *secret-env
       MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
     networks:
       - omni-outreach_default
+    healthcheck:
+      disable: true
     restart: unless-stopped
 
   # Transition worker: consumes outreach.transitions (emitted by the Flink
@@ -95,28 +155,131 @@ services:
     build:
       context: .
       dockerfile: ./backend/Dockerfile
+      args: *build-args
     container_name: omni-v2-transitions
     command: python -m app.execution.transition_worker
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://outreach:OmniOutreach2026@db:5432/outreach
-      KAFKA_BROKERS: redpanda:9092
-      DB_PASSWORD: OmniOutreach2026
-      SECRET_KEY: 28004f81bdcfcb293be3e782b714b421c7e9e0d6235c346a4252ef7a18b041bb
+      <<: *secret-env
+      # DEPLOY-005: this worker can mint credential refs (via the dispatcher
+      # path it shares), so it must carry the same shared secret as the others.
+      MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
     networks:
       - omni-outreach_default
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  # Objective worker: the goal-pursuit control loop. Consumes
+  # campaign.run.completed (emitted by the transition worker when a campaign's
+  # root run-lead terminalizes), measures the workflow's lineage-scoped progress,
+  # decides reached/widen/exhausted, and re-seeds the workflow via the shared
+  # run path on a widen. Off the transition worker's safety-critical hot path.
+  objective-v2:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+      args: *build-args
+    container_name: omni-v2-objective
+    command: python -m app.execution.objective_worker
+    env_file:
+      - .env
+    environment:
+      <<: *secret-env
+      # Re-seed publishes source intents that the dispatcher turns into muscle
+      # commands, so it shares the muscle secret like the other workers.
+      MUSCLE_SHARED_SECRET: ${MUSCLE_SHARED_SECRET:-dev-muscle-secret-rotate-me}
+    networks:
+      - omni-outreach_default
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  # AI jobs worker: executes ad-hoc AI Studio jobs. Consumes node-less
+  # ai.<kind>.queued (score/compose/classify) that POST /ai/jobs publishes, runs
+  # the model directly (app.services.ai_jobs, same operator-triggered-AI boundary
+  # as reply_drafter), and publishes ai.<kind>.completed/.failed — which the
+  # projector turns into the run log + per-lead scores. NOT the muscle hot path:
+  # ad-hoc jobs have no workflow node, so the dispatcher correctly ignores them.
+  ai-jobs-v2:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+      args: *build-args
+    container_name: omni-v2-ai-jobs
+    command: python -m app.execution.ai_jobs_worker
+    env_file:
+      - .env
+    environment:
+      <<: *secret-env
+    networks:
+      - omni-outreach_default
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  # Unipile inbound-sync worker (reply detection). Unipile push webhooks proved
+  # unreliable for LinkedIn (a real reply fired the webhook but carried no
+  # resolvable sender, so no lead woke). This polls every in-flight thread
+  # (leads waiting with a custom_fields.chat_id) and halts the sequence when the
+  # newest message is inbound (is_sender==0) — the reliable reply-stop path.
+  # Time-driven, no Kafka consumer; publishes message.received + the 'replied'
+  # transition via the shared inbound_reply path.
+  unipile-sync-v2:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+      args: *build-args
+    container_name: omni-v2-unipile-sync
+    command: python -m app.execution.unipile_sync_worker
+    env_file:
+      - .env
+    environment:
+      <<: *secret-env
+    networks:
+      - omni-outreach_default
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  # Outbound webhook fan-out worker (N8N-001). Consumes omni.events, filters to
+  # the customer-facing allow-list (webhook_events.ALLOWED_EVENTS), and delivers
+  # HMAC-signed, SSRF-guarded envelopes to each workspace's webhook subscriptions
+  # (omni_webhook_subscriptions). Retried with backoff; never blocks the spine.
+  webhooks-out-v2:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+      args: *build-args
+    container_name: omni-v2-webhooks-out
+    command: python -m app.execution.webhook_dispatch_worker
+    env_file:
+      - .env
+    environment:
+      <<: *secret-env
+    networks:
+      - omni-outreach_default
+    healthcheck:
+      disable: true
     restart: unless-stopped
 
   # Submits the pyflink orchestrator job (outreach.results -> outreach.transitions)
-  # to the shared Flink jobmanager from the master stack. Idempotent enough:
-  # if the job is already registered a duplicate submit fails and we tail; the
-  # registered job survives. Restart re-submits if the cluster was wiped.
+  # to the shared Flink jobmanager from the master stack. IDEMPOTENT SUBMIT:
+  # Flink does NOT reject a same-named duplicate `flink run`, so every restart of
+  # this container used to add ANOTHER copy of the job — 4 accumulated once and
+  # oversubscribed the task slots, making result->transition routing and
+  # flow.delay timers run minutes late. Guard it: if a job is already RUNNING on
+  # the cluster (this cluster only ever runs the orchestrator), skip the submit
+  # and just tail. Only a genuinely empty/wiped cluster re-submits. `grep`
+  # matches "status":"RUNNING" via `.` for the quote chars so the command needs
+  # no nested double-quotes (compose scalar friendly).
   orchestrator-v2:
     build:
       context: ./backend-flink
+      args: *build-args
     container_name: omni-v2-orchestrator
-    command: sh -lc "until curl -fsS http://flink-jobmanager:8081/overview >/dev/null 2>&1; do echo waiting for jobmanager; sleep 3; done && (flink run -d -m flink-jobmanager:8081 -py /opt/flink/usrlib/orchestrator.py || echo 'submit failed (job may already be running)') && tail -f /dev/null"
+    command: sh -lc "until curl -fsS http://flink-jobmanager:8081/overview >/dev/null 2>&1; do echo waiting for jobmanager; sleep 3; done && if curl -fsS http://flink-jobmanager:8081/jobs 2>/dev/null | grep -qE 'status.:.RUNNING'; then echo orchestrator already RUNNING - skipping submit; else echo submitting orchestrator; flink run -d -m flink-jobmanager:8081 -py /opt/flink/usrlib/orchestrator.py || echo submit failed; fi && tail -f /dev/null"
     environment:
       - KAFKA_BROKERS=redpanda:9092
     networks:
@@ -127,16 +290,32 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile.v2
+      args: *build-args
     container_name: omni-v2-frontend
     networks:
       - omni-outreach_default
+    # v2 is the only stack on the Contabo box — it owns 80/443 directly
+    # (the 8080/8443 offsets existed to coexist with the legacy frontend).
     ports:
-      - "8080:80"
-      - "8443:443"
+      - "80:80"
+      - "443:443"
+    # Lets nginx proxy /deploy to the deploy-webhook daemon on the host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./certs:/etc/nginx/certs:ro
       - ./acme:/var/www/certbot
     restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: omni-v2-searxng
+    volumes:
+      - ./searxng:/etc/searxng:ro
+    networks:
+      - omni-outreach_default
+    restart: unless-stopped
+
 
 # Join master's docker-compose network so we can talk to db, redpanda, redis
 # by their service names without exposing them.

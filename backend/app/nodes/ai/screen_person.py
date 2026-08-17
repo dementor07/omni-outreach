@@ -52,13 +52,40 @@ MANIFEST = NodeManifest(
     capabilities=("connection:anthropic",),
     side_effect=SideEffect.NETWORK,
     icon="user-check",
+    # Entry-capable so it can root an AUDIENCE campaign: screen an existing
+    # contacts list against the ICP as a cleanup pass (one lead per attached
+    # contact via seed_and_run_audience), not only inside a discovery fan-out.
+    can_be_entry=True,
 )
 
 
 async def execute(ctx: NodeContext) -> NodeResult:
     cfg = ScreenPersonConfig(**ctx.config)
     correlation_id = ctx.correlation_id or str(uuid.uuid4())
-    profile = (ctx.lead.get("custom_fields") or {}).get(cfg.person_field) or {}
+    # In a discovery fan-out the person sits nested under custom_fields[person_field]
+    # ('item'). An AUDIENCE lead (an existing contact seeded by seed_and_run_audience)
+    # instead carries its identity FLAT in custom_fields (and on the lead row itself).
+    # Prefer the nested person, then fall back to the flat fields so the same screen
+    # works as a cleanup pass over an existing contacts list. Map company -> company_name.
+    cf = ctx.lead.get("custom_fields") or {}
+    person = cf.get(cfg.person_field) or {}
+
+    def pick(*keys: str):
+        for src in (person, cf, ctx.lead):
+            for key in keys:
+                val = src.get(key)
+                if val:
+                    return val
+        return None
+
+    profile = {
+        "first_name": pick("first_name"),
+        "last_name": pick("last_name"),
+        "headline": pick("headline", "title"),
+        "linkedin_url": pick("linkedin_url"),
+        "company_name": pick("company_name", "company"),
+        "industry": pick("industry"),
+    }
     events = [
         {
             "event_type": "ai.screen_person.queued",
@@ -68,14 +95,7 @@ async def execute(ctx: NodeContext) -> NodeResult:
                 "connection_name": cfg.connection_name,
                 "model": cfg.model,
                 "screening_prompt": cfg.screening_prompt,
-                "profile": {
-                    "first_name": profile.get("first_name"),
-                    "last_name": profile.get("last_name"),
-                    "headline": profile.get("headline"),
-                    "linkedin_url": profile.get("linkedin_url"),
-                    "company_name": profile.get("company_name"),
-                    "industry": profile.get("industry"),
-                },
+                "profile": profile,
                 "on_error_handle": "reject",  # fail-closed
                 "correlation_id": correlation_id,
             },

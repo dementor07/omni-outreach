@@ -8,12 +8,20 @@
 pub mod ai_screen;
 pub mod alert;
 pub mod apify;
+pub mod apollo_data;
+pub mod ats;
 pub mod common;
+pub mod discovery;
 pub mod email;
 pub mod enrich;
 pub mod http_call;
-pub mod leadgen;
+pub mod indeed;
+pub mod leads_finder;
 pub mod linkedin; // re-export shim, see file
+pub mod linkedin_jobs_guest;
+pub mod linkedin_search;
+pub mod naukri;
+pub mod renidly;
 pub mod serper_people;
 pub mod sms;
 pub mod tag;
@@ -43,12 +51,45 @@ pub async fn dispatch(command: &ActionCommand) -> ExecutionResult {
         ChannelType::HotLeadAlert => alert::handle_hot_lead_alert(command).await,
         ChannelType::DataTransform => transform::handle_data_transform(command).await,
         ChannelType::AiCompose => transform::handle_ai_compose(command).await,
-        ChannelType::LeadGenPull => leadgen::handle_lead_gen_pull(command).await,
-        ChannelType::CsvImport => leadgen::handle_csv_import(command).await,
         ChannelType::HttpCall => http_call::handle_http_call(command).await,
         ChannelType::Apify => apify::handle_apify(command).await,
+        ChannelType::LinkedinJobsGuest => {
+            linkedin_jobs_guest::handle_linkedin_jobs_guest(command).await
+        }
         ChannelType::AiScreen => ai_screen::handle_ai_screen(command).await,
+        ChannelType::AiClassify => transform::handle_ai_classify(command).await,
+        // People discovery: two distinct nodes (serper paid / searxng free), one
+        // shared multi-pattern handler that reads the provider the node emits.
         ChannelType::SerperPeople => serper_people::handle_serper_people(command).await,
+        ChannelType::LeadsFinder => leads_finder::handle_leads_finder(command).await,
+        ChannelType::SearxngPeople => serper_people::handle_serper_people(command).await,
+        ChannelType::Naukri => naukri::handle_naukri(command).await,
+        ChannelType::Indeed => indeed::handle_indeed(command).await,
+        // Company discovery: four distinct source channels, shared handler module.
+        ChannelType::Searxng => discovery::handle_searxng(command).await,
+        ChannelType::SerperSearch => discovery::handle_serper_search(command).await,
+        ChannelType::Apollo => discovery::handle_apollo(command).await,
+        ChannelType::Clutch => discovery::handle_clutch(command).await,
+        // ATS harvest: 12 distinct source nodes, one handler keyed by `platform`.
+        ChannelType::Ats => ats::handle_ats(command).await,
+        // APOLLO-DATA: native Apollo data layer — people search (fan-out lead-gen),
+        // org enrichment by domain, and org job postings (hiring signal).
+        ChannelType::ApolloPeople => apollo_data::handle_apollo_people(command).await,
+        ChannelType::RenidlyJobChanges => renidly::handle_renidly_job_changes(command).await,
+        ChannelType::ApolloCompanyEnrich => apollo_data::handle_apollo_company(command).await,
+        ChannelType::ApolloJobs => apollo_data::handle_apollo_jobs(command).await,
+        // UNIPILE-FULL: native LinkedIn search (fan-out lead-gen) + enrichment
+        // reads + per-lead social actions. All redeem the Unipile credential
+        // bundle via unipile_creds and reuse ProxyManager.
+        ChannelType::LinkedinSearch => linkedin_search::handle_linkedin_search(command).await,
+        ChannelType::LinkedinCompanyProfile => unipile::handle_linkedin_company_profile(command).await,
+        ChannelType::LinkedinMemberProfile => unipile::handle_linkedin_member_profile(command).await,
+        ChannelType::LinkedinReactPost => unipile::handle_linkedin_react_post(command).await,
+        ChannelType::LinkedinCommentPost => unipile::handle_linkedin_comment_post(command).await,
+        ChannelType::LinkedinEndorse => unipile::handle_linkedin_endorse(command).await,
+        ChannelType::LinkedinFollow => unipile::handle_linkedin_follow(command).await,
+        ChannelType::MessageReact => unipile::handle_message_react(command).await,
+        ChannelType::InviteCancel => unipile::handle_invite_cancel(command).await,
         ChannelType::Unknown => {
             common::fail(command, format!("UNKNOWN_CHANNEL_{}", command.channel.as_str()), false)
         }

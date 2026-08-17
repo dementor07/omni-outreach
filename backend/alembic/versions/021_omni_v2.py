@@ -116,6 +116,12 @@ def upgrade() -> None:
             credentials_encrypted   TEXT NOT NULL,
             metadata                JSONB NOT NULL DEFAULT '{}'::jsonb,
             connected_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            -- SCHEMA-001: reserved for connection-freshness tracking. OAuth
+            -- token refresh currently lives in the separate oauth_tokens /
+            -- google_oauth_tokens tables, so this column is read (surfaced in
+            -- the integrations response) but never written today. Wire it from
+            -- the OAuth refresh path when per-connection freshness is wanted,
+            -- or drop it in a future migration.
             last_refreshed_at       TIMESTAMPTZ,
             UNIQUE (workspace_id, provider, name)
         )

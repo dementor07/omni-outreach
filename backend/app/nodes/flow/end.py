@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 from app.nodes import (
     NodeCategory,
     NodeContext,
-    NodeHandle,
     NodeManifest,
     NodeResult,
     SideEffect,

@@ -29,10 +29,10 @@ export default function Modal({ title, open, onClose, children, width = 'md' }: 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div
-        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+        className="absolute inset-0 bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-200"
         onClick={onClose}
       />
-      <div className={`relative w-full max-h-[90vh] overflow-y-auto rounded-xl bg-white shadow-lg dark:bg-slate-900 dark:border dark:border-slate-800 ${widthClasses[width]}`}>
+      <div className={`relative w-full max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-200/80 bg-white shadow-elevated animate-in fade-in zoom-in-95 duration-200 dark:bg-slate-900 dark:border-slate-800 ${widthClasses[width]}`}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
           <h2 className="text-base font-semibold text-slate-900 dark:text-white">{title}</h2>
           <button

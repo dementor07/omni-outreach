@@ -26,8 +26,12 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 const APIFY_BASE: &str = "https://api.apify.com/v2";
-const POLL_INTERVAL_SECONDS: u64 = 5;
-const MAX_POLL_ATTEMPTS: u32 = 120; // 10 minutes
+const POLL_INTERVAL_SECONDS: u64 = 10;
+// LinkedIn-jobs actor empirically takes ~20 min on a broad query (past-week,
+// 5 keywords). The 10-min cap from the standalone scraper port was too tight
+// and caused Flink to retry-loop on real-world runs. 45 minutes is well past
+// observed worst case while still bounded.
+const MAX_POLL_ATTEMPTS: u32 = 270;
 const DATE_PARAM: &str = "f_TPR";
 
 pub async fn handle_apify(command: &ActionCommand) -> ExecutionResult {
