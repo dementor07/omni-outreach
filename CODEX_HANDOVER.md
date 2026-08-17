@@ -36,7 +36,32 @@ Everything below this heading is verified live on the box, not intended.
 **Known residue:** one limbo lead (`00000000-…`, `active`, no node, no campaign, last
 touched 2026-07-02) predates this work and is not in a live campaign.
 
-### Later the same day — charts, and what running the harness found (`bfc7034`)
+### 2026-08-14 — inbox message editing (`8b9b051`, alembic `058`)
+
+`PATCH /inbox/threads/{contact}/messages/{id}` really edits a delivered LinkedIn
+message via Unipile `POST /messages/{id}/edit`. LinkedIn only allows this for a
+short window after sending; past it the provider refuses and its reason is
+surfaced verbatim. Only your own outbound messages are editable; connection and
+profile-view bubbles are labels from the send ledger and are refused.
+
+⚠️ **UNVERIFIED against the live Unipile API.** The request is multipart
+(`account_id` + `text`), inferred from the muscle's send path
+(`POST /chats/{id}/messages`) — no successful round-trip has been observed.
+Everything else is tested (740 audit tests, guards, error path, local record).
+If the first real attempt returns a *bad field / missing parameter / 400*, the
+payload shape is wrong; if it returns a *window/permission* error, the shape is
+right and the message was simply too old. The `InboxMessage.id` is a derived
+`uuid5` for React keys, so `metadata.provider_message_id` + `metadata.account_id`
+are what actually address the message at the provider.
+
+**Related gotcha, cost me a wrong call twice:** LinkedIn message bodies are NOT
+in `omni_messages`. Querying it for inbound replies gives a false picture — the
+real thread lives at Unipile and is fetched only when a thread is opened. I
+reported a warm lead as "10 days unanswered" when he had been answered in 26
+minutes. Open the thread, or query Unipile; never conclude from `omni_messages`
+alone for LinkedIn.
+
+### Later on 2026-08-13/14 — charts, and what running the harness found (`bfc7034`)
 
 - **Charts could not express colour, keys or axes at all.** Every widget type shipped
   `options: {}`, and the renderers drew one series in one hue with no legend and no axis.
