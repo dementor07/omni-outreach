@@ -1535,6 +1535,60 @@ export const views = {
   widgetCatalog: () => api.get<Record<string, unknown>>('/views/widgets').then((r) => r.data),
 }
 
+// ── Agent threads (AGENT-THREAD-001) ─────────────────────────────────────────
+// One persistent conversation per view or campaign. A question is answered in
+// the thread and can never produce a change; only an instruction can carry a
+// proposal, and a proposal still needs a human to apply it.
+
+export type ThreadTargetType = 'view' | 'workflow'
+export type ThreadTurnIntent = 'question' | 'instruction' | 'answer' | 'note'
+export type ThreadTurnStatus = 'queued' | 'answered' | 'proposed' | 'dropped'
+
+export interface ThreadAnchor {
+  ref: string
+  note: string
+}
+
+export interface AgentThreadTurn {
+  id: UUID
+  thread_id: UUID
+  seq: number
+  role: 'human' | 'agent'
+  intent: ThreadTurnIntent
+  body: string
+  anchors: ThreadAnchor[]
+  status: ThreadTurnStatus
+  job_id: UUID | null
+  harness_id: string | null
+  delivered_at: string | null
+  created_at: string
+}
+
+export interface AgentThread {
+  id: UUID
+  target_type: ThreadTargetType
+  target_id: UUID
+  target_label: string | null
+  status: 'open' | 'ended'
+  ended_by: 'human' | 'agent' | null
+  last_turn_at: string | null
+  created_at: string
+  turns: AgentThreadTurn[]
+  open_proposal: AgentHarnessJob | null
+}
+
+export const agentThreads = {
+  open: (target_type: ThreadTargetType, target_id: UUID, reopen = false) =>
+    api.post<AgentThread>('/agent-threads/open', { target_type, target_id, reopen }).then((r) => r.data),
+  get: (id: UUID, afterSeq?: number) =>
+    api
+      .get<AgentThread>(`/agent-threads/${id}`, { params: afterSeq == null ? {} : { after_seq: afterSeq } })
+      .then((r) => r.data),
+  postTurn: (id: UUID, body: { intent: 'question' | 'instruction'; body: string; anchors: ThreadAnchor[] }) =>
+    api.post<AgentThreadTurn>(`/agent-threads/${id}/turns`, body).then((r) => r.data),
+  end: (id: UUID) => api.post<AgentThread>(`/agent-threads/${id}/end`, null, { params: { ended_by: 'human' } }).then((r) => r.data),
+}
+
 export const agentHarness = {
   workerStatus: () => api.get<{ available: boolean; workers: AgentHarnessWorker[] }>('/agent-harness/workers/status').then((r) => r.data),
   workers: () => api.get<AgentHarnessWorker[]>('/agent-harness/workers').then((r) => r.data),

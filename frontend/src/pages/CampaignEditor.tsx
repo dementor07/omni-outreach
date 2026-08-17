@@ -14,7 +14,7 @@ import { clsx } from 'clsx'
 import {
   ArrowLeft, Search, GitBranch, Save, Undo2, Redo2, Maximize2, Minimize2, Plus,
   Users, Settings as SettingsIcon, Trash2, Play, Target, Layers3, ArrowUp, ArrowDown, X,
-  AlertTriangle, CheckCircle2, UserPlus, MessageSquareText,
+  AlertTriangle, CheckCircle2, UserPlus, MessageSquareText, MessageSquare,
 } from 'lucide-react'
 import {
   canvas,
@@ -40,6 +40,8 @@ import Badge from '../components/Badge'
 import Button from '../components/Button'
 import { useToast } from '../components/Toast'
 import NodeConfigPanel from '../components/NodeConfigPanel'
+import AgentThreadPanel from '../components/AgentThreadPanel'
+import type { ThreadAnchor } from '../api/v2'
 import { useCanvasHistory } from '../hooks/useCanvasHistory'
 import Tabs from '../components/Tabs'
 import DataTable from '../components/DataTable'
@@ -241,6 +243,11 @@ export default function CampaignEditor() {
   const [rfNodes, setRfNodes, onNodesChangeRaw] = useNodesState<OmniRfNode>([])
   const [rfEdges, setRfEdges, onEdgesChangeRaw] = useEdgesState<Edge>([])
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  // AGENT-THREAD-001: the conversation about THIS campaign. Anchors are staged
+  // here rather than in the panel so selecting a node on the canvas and pinning
+  // it are the same gesture.
+  const [threadOpen, setThreadOpen] = useState(false)
+  const [pendingAnchors, setPendingAnchors] = useState<ThreadAnchor[]>([])
   const [fullscreen, setFullscreen] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [viewMode, setViewMode] = useState<'canvas' | 'linear'>('canvas')
@@ -530,6 +537,11 @@ export default function CampaignEditor() {
   if (!id) return null
   const wf = detailQuery.data?.workflow
   const selectedNode = rfNodes.find((n) => n.id === selectedNodeId) ?? null
+  // A pin should read as the step's name, never as a bare UUID.
+  const anchorLabels = useMemo(
+    () => Object.fromEntries(rfNodes.map((n) => [n.id, nodeLabel(n.data.manifest.type)])),
+    [rfNodes],
+  )
   const selectedWiredOutputHandles = selectedNodeId
     ? rfEdges
         .filter((edge) => edge.source === selectedNodeId)
@@ -603,6 +615,13 @@ export default function CampaignEditor() {
               <span className="mx-0.5 h-4 w-px bg-slate-200 dark:bg-slate-700" />
               <ToolbarBtn title="Undo" onClick={doUndo} disabled={!canUndo}><Undo2 size={14} /></ToolbarBtn>
               <ToolbarBtn title="Redo" onClick={doRedo} disabled={!canRedo}><Redo2 size={14} /></ToolbarBtn>
+              <span className="mx-0.5 h-4 w-px bg-slate-200 dark:bg-slate-700" />
+              <ToolbarBtn
+                title={threadOpen ? 'Close the agent conversation' : 'Ask about or annotate this campaign'}
+                onClick={() => setThreadOpen((open) => !open)}
+              >
+                <MessageSquare size={14} className={threadOpen ? 'text-brand-600' : undefined} />
+              </ToolbarBtn>
             </div>
             <Button size="sm" variant="primary" icon={Save} onClick={() => saveMut.mutate()} isLoading={saveMut.isPending} disabled={!dirty}>
               {dirty ? 'Save' : 'Saved'}
@@ -640,7 +659,30 @@ export default function CampaignEditor() {
         </ReactFlow>
       </div>
 
-      {selectedNode && (
+      {threadOpen && (
+        <div className="z-20 w-[26rem] flex-shrink-0 shadow-xl">
+          <AgentThreadPanel
+            targetType="workflow"
+            targetId={id!}
+            anchorLabels={anchorLabels}
+            pendingAnchors={pendingAnchors}
+            selectedRef={selectedNodeId}
+            onStageAnchor={(anchor) =>
+              setPendingAnchors((current) =>
+                current.some((existing) => existing.ref === anchor.ref) ? current : current.concat(anchor),
+              )
+            }
+            onRemoveAnchor={(ref) =>
+              setPendingAnchors((current) => current.filter((anchor) => anchor.ref !== ref))
+            }
+            onClearAnchors={() => setPendingAnchors([])}
+            onSent={() => setSelectedNodeId(null)}
+            onClose={() => setThreadOpen(false)}
+          />
+        </div>
+      )}
+
+      {selectedNode && !threadOpen && (
         <div className="z-20 w-96 flex-shrink-0 border-l border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
           <NodeConfigPanel
             manifest={selectedNode.data.manifest}

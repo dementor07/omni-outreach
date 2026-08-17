@@ -773,6 +773,16 @@ def validate_result(kind: str, result: dict[str, Any]) -> dict[str, Any]:
             return validate_candidate_view(result)
         except ViewLayoutError as exc:
             raise AgentHarnessError(str(exc)) from exc
+    if kind == "campaign.author":
+        from app.services.campaign_candidate import (
+            CampaignCandidateError,
+            validate_candidate_graph,
+        )
+
+        try:
+            return validate_candidate_graph(result)
+        except CampaignCandidateError as exc:
+            raise AgentHarnessError(str(exc)) from exc
     raise AgentHarnessError(f"unsupported agent job kind: {kind}")
 
 
@@ -786,6 +796,10 @@ async def review_result(
         from app.services.view_grounding import review_view_candidate
 
         return await review_view_candidate(payload, result)
+    if kind == "campaign.author":
+        from app.services.campaign_grounding import review_campaign_candidate
+
+        return await review_campaign_candidate(payload, result)
     raise AgentHarnessError(f"unsupported agent job kind: {kind}")
 
 
@@ -813,6 +827,14 @@ async def complete_job(
     review = await review_result(str(owned["kind"]), owned.get("payload") or {}, validated)
     if not review.get("all_queries_valid", False):
         raise AgentHarnessError("the candidate contains a query that could not be executed")
+    # Kind-agnostic refusal channel. A view candidate fails by being
+    # unexecutable; a campaign candidate can execute perfectly and still be
+    # unsafe — stranding live leads, or opening a send path nobody approves.
+    # Such a proposal is refused at completion rather than stored for a human to
+    # discover behind an Apply button.
+    blocked = review.get("blocked_reason")
+    if blocked:
+        raise AgentHarnessError(str(blocked))
     row = await fetch_one(
         """
         UPDATE omni_agent_jobs

@@ -948,6 +948,105 @@ def _lease_body(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     }, path
 
 
+# ── Conversations (AGENT-THREAD-001) ──────────────────────────────────────────
+#
+# Threads are deliberately NOT jobs: there is no lease and no claim, because a
+# question does not mutate anything and two harnesses answering the same
+# question is a duplicated sentence rather than a duplicated send. Polling is
+# non-destructive, so a harness that dies mid-answer re-reads the same turns.
+
+
+def command_ask(args: argparse.Namespace) -> None:
+    """Long-poll for outstanding human turns across every conversation."""
+    harness_id = _harness_name(args.name)
+    print(
+        f"[omni-harness] listening for turns as {harness_id!r}; held poll up to {args.wait}s",
+        file=sys.stderr,
+        flush=True,
+    )
+    status, turns = _request(
+        "POST",
+        "/agent-threads/poll",
+        {"harness_id": harness_id, "wait_seconds": args.wait, "limit": args.limit},
+        timeout=args.wait + 15,
+    )
+    if status >= 300:
+        raise CliError("poll_failed", str(turns), "Check OMNI_API_URL and OMNI_API_KEY.", 2)
+    rows = turns or []
+    _emit(
+        {
+            "state": "turns" if rows else "listening",
+            "count": len(rows),
+            "turns": [
+                {
+                    "id": turn["id"],
+                    "threadId": turn["thread_id"],
+                    "target": f"{turn.get('target_type')}:{turn.get('target_id')}",
+                    "intent": turn["intent"],
+                    "body": turn["body"],
+                    "anchors": turn["anchors"],
+                }
+                for turn in rows
+            ],
+            "next": (
+                "Answer questions with 'reply --thread <id> --body <text> --replies-to <turn ids>'; "
+                "turn instructions into a proposal with 'propose --thread <id> --turns <ids>'."
+                if rows
+                else "Run ask again."
+            ),
+        },
+        args.format,
+    )
+
+
+def command_reply(args: argparse.Namespace) -> None:
+    """Post the agent's answer into the conversation the human is looking at."""
+    status, turn = _request(
+        "POST",
+        f"/agent-threads/{args.thread}/reply",
+        {
+            "body": args.body,
+            "intent": args.intent,
+            "replies_to": args.replies_to or [],
+            "harness_id": _harness_name(args.name),
+        },
+    )
+    if status >= 300:
+        raise CliError(
+            "reply_rejected",
+            str(turn),
+            "An instruction is retired by proposing against it, not by answering it.",
+            2,
+        )
+    _emit({"state": "replied", "turnId": turn["id"], "seq": turn["seq"]}, args.format)
+
+
+def command_propose(args: argparse.Namespace) -> None:
+    """Build one grounded proposal from queued instruction turns."""
+    status, job = _request(
+        "POST",
+        f"/agent-threads/{args.thread}/propose",
+        {"turn_ids": args.turns, "harness_id": _harness_name(args.name)},
+    )
+    if status >= 300:
+        raise CliError(
+            "propose_rejected",
+            str(job),
+            "Only queued instruction turns can produce a proposal, and one target "
+            "holds at most one unapplied proposal at a time.",
+            2,
+        )
+    _emit(
+        {
+            "state": "queued",
+            "jobId": job["id"],
+            "kind": job["kind"],
+            "next": "Claim it with poll, then complete it like any other job.",
+        },
+        args.format,
+    )
+
+
 def command_heartbeat(args: argparse.Namespace) -> None:
     body, _ = _lease_body(args)
     _, result = _request("POST", f"/agent-harness/jobs/{args.job}/heartbeat", body)
@@ -1017,6 +1116,23 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--codex-command", default=os.environ.get("OMNI_CODEX_COMMAND", "npx -y @openai/codex@0.147.0"), help="Codex argv prefix (default: tested Codex CLI 0.147.0)")
     run.add_argument("--command", help="External argv template; supports {brief}, {schema}, {result}, {job_dir}")
     run.set_defaults(handler=command_run)
+
+    ask = sub.add_parser("ask", parents=[common], help="long-poll for outstanding human turns (questions and instructions)")
+    ask.add_argument("--wait", type=int, choices=range(1, 26), default=25, metavar="1..25")
+    ask.add_argument("--limit", type=int, choices=range(1, 101), default=25, metavar="1..100")
+    ask.set_defaults(handler=command_ask)
+
+    reply = sub.add_parser("reply", parents=[common], help="answer questions in a conversation")
+    reply.add_argument("--thread", required=True, help="Thread UUID from ask")
+    reply.add_argument("--body", required=True, help="The answer (max 4000 chars)")
+    reply.add_argument("--intent", choices=("answer", "note"), default="answer")
+    reply.add_argument("--replies-to", nargs="*", default=[], help="Turn UUIDs this answers")
+    reply.set_defaults(handler=command_reply)
+
+    propose = sub.add_parser("propose", parents=[common], help="turn queued instruction turns into one grounded proposal")
+    propose.add_argument("--thread", required=True, help="Thread UUID from ask")
+    propose.add_argument("--turns", nargs="+", required=True, help="Instruction turn UUIDs")
+    propose.set_defaults(handler=command_propose)
 
     for name, help_text, handler in (
         ("heartbeat", "renew a claimed job lease", command_heartbeat),

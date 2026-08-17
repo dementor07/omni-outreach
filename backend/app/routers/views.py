@@ -28,6 +28,7 @@ from app.db import acquire, fetch_all, fetch_one
 from app.routers.agent_harness import AgentJobOut
 from app.services import agent_harness
 from app.services.ai_authoring import list_authoring_connections
+from app.services.authoring_briefs import build_view_brief
 from app.services.default_view import DEFAULT_LAYOUT, DEFAULT_VIEW_NAME
 from app.services.view_architect import (
     ViewArchitectError,
@@ -411,38 +412,15 @@ async def _create_view_proposal(
         ).encode("utf-8")
     ).hexdigest()
     grounding = await capture_view_grounding(current_payload)
-    payload = {
-        "task": (
-            "Return one complete revised ViewSpec JSON object. Preserve everything "
-            "that was not requested, including stable widget IDs."
-        ),
-        "current_view": current_payload,
-        "whole_view_instruction": body.instruction.strip(),
-        "widget_annotations": annotations,
-        "grounding": grounding,
-        "grounding_contract": [
-            "Treat captured campaign IDs and widget query results as authoritative for this workspace.",
-            "A campaign-labelled leads/send-outcomes widget must filter workflow_id to that exact campaign.",
-            "A sent-message count must also filter send_outcomes.status to exactly 'sent'.",
-            "Never label send_outcomes as delivered; this projection does not contain delivery receipts.",
-            "Do not evade a requested correction by renaming a campaign widget to a global metric.",
-            "Preserve unrequested widget semantics and stable widget IDs.",
-        ],
-        "widget_catalog": {"widgets": widget_manifests(), **entity_catalog()},
-        "output_contract": {
-            "name": "1-80 characters",
-            "description": "0-200 characters",
-            "icon": "a catalogued icon or layout-dashboard",
-            "layout": "1-12 validated widget objects with stable IDs where preserved",
-        },
-        "safety": [
-            "Return data only; do not call campaign, send, or integration endpoints.",
-            "Do not request or include credentials.",
-            "Omni will validate the candidate and require a human to apply it.",
-        ],
-        "authoring_origin": body.source,
-        "request_fingerprint": request_fingerprint,
-    }
+    payload = build_view_brief(
+        current_payload,
+        instruction=body.instruction,
+        annotations=annotations,
+        grounding=grounding,
+        widget_catalog={"widgets": widget_manifests(), **entity_catalog()},
+        origin=body.source,
+        request_fingerprint=request_fingerprint,
+    )
     try:
         if body.source == "harness":
             if not body.harness_id:
