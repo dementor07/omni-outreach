@@ -95,6 +95,10 @@ class TurnOut(BaseModel):
     created_at: datetime
     target_type: str | None = None
     target_id: UUID | None = None
+    # Which human turns this agent turn retired. The service computes it; without
+    # it declared here the response model silently drops it, leaving the agent
+    # unable to tell what its own answer resolved.
+    answered_turn_ids: list[UUID] = Field(default_factory=list)
 
 
 class ThreadOut(BaseModel):

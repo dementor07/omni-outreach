@@ -56,6 +56,12 @@ INFO = "info"
 # protect running campaigns would only be friction there.
 MUTABLE_STATUSES = ("draft",)
 
+# The changes that leave a parked lead pointing at a node that is gone, mapped
+# to how the finding reads. Spelled out rather than derived from the past tense:
+# "removed"[:-1] + "ing" is "removeing", and this text is read by an operator
+# deciding whether to trust a refusal.
+_STRANDING_CHANGES = {"removed": "removing", "retyped": "retyping"}
+
 
 def _loads(value: Any) -> Any:
     if isinstance(value, str):
@@ -347,14 +353,15 @@ async def review_campaign_candidate(
 
     radius = _blast_radius(before_nodes, after_nodes, parked)
     for row in radius:
-        if row["change"] in ("removed", "retyped") and row["live_leads"] > 0:
+        if row["change"] in _STRANDING_CHANGES and row["live_leads"] > 0:
             findings.append(
                 _finding(
                     BLOCKING if protected else WARNING,
                     "STRANDS_LIVE_LEADS",
                     f"{row['live_leads']} live lead(s) are parked on this "
-                    f"{row['node_type']}; {row['change'][:-1]}ing it leaves them pointing at "
-                    "a node that no longer exists, and they will stop advancing silently",
+                    f"{row['node_type']}; {_STRANDING_CHANGES[row['change']]} it leaves them "
+                    "pointing at a node that no longer exists, and they will stop advancing "
+                    "silently",
                     node_id=row["node_id"],
                     live_leads=row["live_leads"],
                     change=row["change"],

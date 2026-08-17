@@ -308,6 +308,10 @@ async def test_removing_a_node_with_live_leads_is_refused_on_a_running_campaign(
     )
     assert review["ready_to_apply"] is False
     assert "21 live lead" in review["blocked_reason"]
+    # An operator reads this text to decide whether to trust the refusal, so the
+    # verb has to be a real word — deriving it as change[:-1] + "ing" spells
+    # "removeing".
+    assert "removing it leaves them" in review["blocked_reason"]
     codes = {finding["code"] for finding in review["findings"]}
     assert "STRANDS_LIVE_LEADS" in codes
     radius = {row["node_id"]: row for row in review["blast_radius"]}
