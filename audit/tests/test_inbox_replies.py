@@ -148,3 +148,24 @@ def test_an_unchanged_chat_still_advances_its_watermark():
     fn = WORKER_SRC.split("async def _process_reply_for_lead")[1].split("\nasync def ")[0]
     assert "if not unseen:" in fn
     assert fn.count('"chat_seen_ts"') >= 2
+
+
+# ── INBOX-TIME-001: a reply is ordered by when THEY sent it ──────────────────
+
+
+def test_recorded_reply_uses_the_provider_timestamp():
+    """Stamping ingestion time made a five-day-old reply sort to the top of the
+    inbox as if it had just arrived, which is exactly the wrong signal for a
+    queue an operator works top-down."""
+    src = (ROOT / "backend/app/services/inbound_reply.py").read_text(encoding="utf-8")
+    assert "occurred_at: str | None = None" in src
+    assert 'occurred_at or datetime.now(UTC).isoformat()' in src
+    fn = WORKER_SRC.split("async def _process_reply_for_lead")[1].split("\nasync def ")[0]
+    assert 'occurred_at=str(msg.get("timestamp") or "") or None' in fn
+
+
+def test_the_transition_still_uses_wall_clock():
+    """Waking a lead is something happening NOW, even when the reply is old."""
+    src = (ROOT / "backend/app/services/inbound_reply.py").read_text(encoding="utf-8")
+    transition = src.split('"handle": "replied"')[1][:400]
+    assert '"occurred_at": datetime.now(UTC).isoformat()' in transition

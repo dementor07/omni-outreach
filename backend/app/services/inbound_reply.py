@@ -52,6 +52,7 @@ async def process_reply(
     channel: str = "linkedin",
     source_message_id: str | None = None,
     correlation_id: str | None = None,
+    occurred_at: str | None = None,
 ) -> dict:
     """Classify + record + suppress + wake for one inbound reply from ``contact_id``.
 
@@ -88,7 +89,10 @@ async def process_reply(
                 },
                 "actor_user_id": None,
                 "correlation_id": correlation_id,
-                "occurred_at": datetime.now(UTC).isoformat(),
+                # INBOX-TIME-001: when the provider tells us when they actually
+                # replied, use it. Stamping ingestion time made a five-day-old
+                # reply sort to the top of the inbox as if it had just arrived.
+                "occurred_at": occurred_at or datetime.now(UTC).isoformat(),
             }
         ]
     )

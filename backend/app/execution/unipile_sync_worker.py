@@ -148,6 +148,7 @@ async def _process_reply_for_lead(client: UnipileClient, ws: str, lead: dict) ->
             msg.get("text") or "",
             channel="linkedin",
             source_message_id=str(msg.get("id") or ""),
+            occurred_at=str(msg.get("timestamp") or "") or None,
         )
         woke += int(res.get("woke_leads") or 0)
         ts = str(msg.get("timestamp") or "")
