@@ -1997,6 +1997,15 @@ async def _emit_synthetic_result(
         "node_id": node_id,
         "next_handle": handle,
         "accumulated_delay_seconds": delay_seconds,
+        # LEDGER-TRUTH-001: this result did not come from the muscle. A DELAYED
+        # synthetic has to claim status='sent' because the orchestrator only
+        # applies its timer to 'sent' results, but nothing was actually sent.
+        # Without this marker _emit_send_outcome recorded a phantom 'sent' row
+        # in omni_send_outcomes for a hold, which (a) inflated every "messages
+        # sent" number and (b) poisoned the SEND-ONCE-001 guard, whose query is
+        # `status='sent' AND node_id=...` — the mechanism behind the 13 stranded
+        # leads of SEND-ONCE-002.
+        "synthetic": True,
         # DATAFLOW-001: carry the run identity forward. Without this the
         # orchestrator emits the next transition with correlation_id=None and
         # the downstream node mints a fresh id (`ctx.correlation_id or uuid4`),
@@ -2409,6 +2418,12 @@ async def _emit_send_outcome(
     transport-health rollup the existing projector/Analytics consume) so that
     surface is unchanged."""
     if node_type not in _OUTBOUND_SEND_CHANNELS:
+        return
+    # LEDGER-TRUTH-001: only a real provider attempt belongs in the send ledger.
+    # A synthetic result is the spine talking to itself (a hold, a delay, a
+    # re-fire); recording it as a send makes the ledger claim messages that were
+    # never attempted.
+    if meta.get("synthetic"):
         return
     status = str(meta.get("status") or "").lower()
     if status not in {"sent", "failed", "skipped"}:
