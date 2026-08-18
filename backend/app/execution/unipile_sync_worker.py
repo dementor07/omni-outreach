@@ -102,7 +102,14 @@ async def _process_reply_for_lead(client: UnipileClient, ws: str, lead: dict) ->
         await execute(
             "UPDATE omni_leads SET custom_fields = COALESCE(custom_fields, '{}'::jsonb) || $1::jsonb, "
             "updated_at = NOW() WHERE id = $2 AND workspace_id = $3",
-            json.dumps({"reply_seen_msg_id": str(msg_id)}), str(lead["id"]), ws,
+            json.dumps(
+                {
+                    "reply_seen_msg_id": str(msg_id),
+                    **({"chat_seen_ts": lead["_chat_ts"]} if lead.get("_chat_ts") else {}),
+                }
+            ),
+            str(lead["id"]),
+            ws,
         )
     res = await inbound_reply.process_reply(
         ws, str(lead["contact_id"]), newest.get("text") or "",
@@ -115,17 +122,61 @@ async def _process_reply_for_lead(client: UnipileClient, ws: str, lead: dict) ->
     return int(res.get("woke_leads") or 0)
 
 
+async def _link_chat_to_lead(ws: str, chat: dict) -> int:
+    """INBOX-DISCOVER-001: attach an unlinked Unipile chat to the lead it belongs to.
+
+    ``chat_id`` was only ever written when OUR outbound DM opened a chat, so a
+    prospect who replied after accepting an invite had a real conversation that
+    the inbox could not see: 249 chats existed across the seats, 85 of them
+    carried an inbound message, and only 14 were linked.
+
+    The chat list response already includes ``attendee_provider_id``, which is
+    the same LinkedIn member id contacts store as ``custom_fields.provider_id``,
+    so the match needs no extra API call and no profile view.
+    """
+    attendee = str(chat.get("attendee_provider_id") or "")
+    chat_id = str(chat.get("id") or "")
+    if not attendee or not chat_id:
+        return 0
+    async with system_scope():
+        rows = await fetch_all(
+            """
+            UPDATE omni_leads l
+               SET custom_fields = COALESCE(l.custom_fields, '{}'::jsonb)
+                                   || jsonb_build_object('chat_id', $3::text),
+                   updated_at = NOW()
+              FROM omni_contacts c
+             WHERE c.id = l.contact_id
+               AND l.workspace_id = $1
+               AND c.custom_fields->>'provider_id' = $2
+               AND COALESCE(l.custom_fields->>'chat_id', '') = ''
+            RETURNING l.id
+            """,
+            ws,
+            attendee,
+            chat_id,
+        )
+    return len(rows)
+
+
 async def run_reply_sweep() -> None:
     async with system_scope():
         leads = await fetch_all(
             """
-            SELECT l.id, l.workspace_id, l.contact_id,
+            SELECT DISTINCT ON (l.custom_fields->>'chat_id')
+                   l.id, l.workspace_id, l.contact_id,
                    l.custom_fields->>'chat_id'           AS chat_id,
-                   l.custom_fields->>'reply_seen_msg_id' AS reply_seen
+                   l.custom_fields->>'reply_seen_msg_id' AS reply_seen,
+                   l.custom_fields->>'chat_seen_ts'      AS chat_seen_ts
             FROM omni_leads l
-            WHERE l.status = 'waiting'
-              AND l.contact_id IS NOT NULL
+            WHERE l.contact_id IS NOT NULL
               AND COALESCE(l.custom_fields->>'chat_id', '') <> ''
+            -- INBOX-REPLY-001: NOT restricted to status='waiting'. A lead whose
+            -- sequence already completed can still be replied to, and that reply
+            -- has to reach the inbox. process_reply is idempotent (uuid5 on the
+            -- provider message id) and only wakes leads that are actually parked
+            -- on a reply gate, so a finished lead is recorded, never resurrected.
+            ORDER BY l.custom_fields->>'chat_id', l.updated_at DESC
             """
         )
     if not leads:
@@ -146,6 +197,7 @@ async def run_reply_sweep() -> None:
             continue
         care = set(chat_map)
         hits: list[dict] = []
+        discovered = 0
         for seat in seats:
             try:
                 chats = await client.list_chats(seat, limit=_CHATS_PER_SEAT)
@@ -154,8 +206,20 @@ async def run_reply_sweep() -> None:
                 continue
             for chat in (chats.get("items") if isinstance(chats, dict) else None) or []:
                 cid = str(chat.get("id") or "")
-                if cid in care and int(chat.get("unread_count") or 0) > 0:
-                    hits.append(chat_map[cid])
+                if cid not in care:
+                    # INBOX-DISCOVER-001: a chat we have never linked to a lead.
+                    # The chat list already carries attendee_provider_id, so the
+                    # match costs no extra API call.
+                    discovered += await _link_chat_to_lead(ws, chat)
+                    continue
+                lead = chat_map[cid]
+                stamp = str(chat.get("timestamp") or "")
+                moved = bool(stamp) and stamp != (lead.get("chat_seen_ts") or "")
+                if int(chat.get("unread_count") or 0) > 0 or moved:
+                    lead["_chat_ts"] = stamp
+                    hits.append(lead)
+        if discovered:
+            log.info("[unipile_sync] linked %d previously untracked chat(s)", discovered)
         for lead in hits:
             total_woken += await _process_reply_for_lead(client, ws, lead)
     if total_woken:

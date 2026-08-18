@@ -153,11 +153,27 @@ async def list_threads(
             FROM omni_messages
             WHERE contact_id IS NOT NULL
             UNION ALL
+            -- A contact gets ONE connection request; extra 'sent' rows are the
+            -- re-fire artifact. The thread detail already collapses them, so the
+            -- list has to as well or the two disagree about how many messages a
+            -- conversation holds.
+            SELECT contact_id, occurred_at, channel,
+                   'outbound'::text AS direction,
+                   NULL AS snippet, NULL AS classification
+            FROM (
+                SELECT DISTINCT ON (contact_id, channel) contact_id, occurred_at, channel
+                FROM omni_send_outcomes
+                WHERE contact_id IS NOT NULL AND status = 'sent'
+                  AND (channel LIKE '%invite%' OR channel LIKE '%profile_view%')
+                ORDER BY contact_id, channel, occurred_at
+            ) collapsed_invites
+            UNION ALL
             SELECT contact_id, occurred_at, channel,
                    'outbound'::text AS direction,
                    NULL AS snippet, NULL AS classification
             FROM omni_send_outcomes
             WHERE contact_id IS NOT NULL AND status = 'sent'
+              AND channel NOT LIKE '%invite%' AND channel NOT LIKE '%profile_view%'
         )
         SELECT
             e.contact_id,
