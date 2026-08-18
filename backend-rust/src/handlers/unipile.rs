@@ -434,24 +434,38 @@ async fn send_chat(command: &ActionCommand, event_type: &str, chat_id_col: &str)
             } else {
                 json!({ "custom_fields": Value::Object(cf) })
             };
-            // NOCHAT-001: we OPENED a new chat and the API said success, but
-            // returned no chat_id — a soft failure. The message may have gone,
-            // but we cannot thread any follow-up onto this conversation. Record
-            // the send (status stays sent, so the outcome ledger captures it)
-            // but route to a `no_thread` degraded handle so a follow-up sequence
-            // doesn't blindly assume a healthy thread. An existing-chat send
-            // (opened_chat_id is None) already has its thread, so it's exempt.
-            let mut result = common::ok(
+            // NOCHAT-002: we asked Unipile to OPEN a new chat, it answered 2xx,
+            // and it returned no chat_id.
+            //
+            // NOCHAT-001 previously assumed "the message may have gone" and
+            // recorded status=sent. Measured against the provider on 2026-08-18
+            // that assumption was wrong every single time: 11 Campaign 2 contacts
+            // had 15 DMs marked sent, and an exhaustive walk of all 11,840 chats
+            // across every seat found no conversation with any of them. The
+            // sequence then composed follow-ups referring to a first message the
+            // prospect never received.
+            //
+            // So a missing chat_id is now treated as what the evidence says it is:
+            // nothing was delivered. Skipped rather than failed, because it is
+            // deliberately NOT retriable — if a message ever did leave on this
+            // path, an automatic retry would double-send to a real person. The
+            // lead still routes on the `no_thread` handle it already used, so
+            // existing graphs need no change; only the ledger stops lying.
+            if opened_chat_id.is_some() && new_chat_id.is_empty() && chat_id_col == "chat_id" {
+                warn!(
+                    "[unipile] new chat for lead {} returned no chat_id — NOT delivered (no_thread)",
+                    command.lead.id
+                );
+                let mut degraded = common::skipped(command, "no_chat_id_returned");
+                degraded.metadata.insert("next_handle".to_string(), json!("no_thread"));
+                return degraded;
+            }
+            common::ok(
                 command,
                 json!({"provider": "unipile", "event": event_type, "chat_id": new_chat_id}),
                 Some(event_type),
                 mutations,
-            );
-            if opened_chat_id.is_some() && new_chat_id.is_empty() && chat_id_col == "chat_id" {
-                warn!("[unipile] new chat opened for lead {} but no chat_id returned — degraded (no_thread)", command.lead.id);
-                result.metadata.insert("next_handle".to_string(), json!("no_thread"));
-            }
-            result
+            )
         }
         Ok(r) => {
             let status = r.status();
