@@ -34,7 +34,14 @@ from aiokafka import AIOKafkaConsumer
 
 from app.config import settings
 from app.core.events import ChannelType
-from app.db import assert_rls_enforcing_role, close_pool, fetch_one, init_pool, system_scope
+from app.db import (
+    assert_rls_enforcing_role,
+    close_pool,
+    fetch_all,
+    fetch_one,
+    init_pool,
+    system_scope,
+)
 from app.execution import commands
 from app.services import bus
 
@@ -86,6 +93,66 @@ async def _resolve_tone_into_payload(workspace_id: str, command_payload: dict) -
         command_payload["max_words"] = maximum
     except Exception:  # noqa: BLE001 — never wedge a compose over a tone lookup
         log.exception("failed resolving tone_id=%s; compose falls back to flat tone", tone_id)
+
+
+# SENDER-NAME-001: the seat that will actually send is knowable at compose time.
+# A LinkedIn DM is pinned to whichever seat sent the invite (commands.py reads
+# custom_fields.invite_account_id for exactly that), so the draft can be signed
+# by the right person instead of a name hardcoded into the instruction.
+_SENDER_TOKENS = ("{{sender_first_name}}", "{{sender_name}}")
+
+
+async def _resolve_sender_into_payload(
+    workspace_id: str, command_payload: dict, lead: dict | None
+) -> None:
+    """Substitute the real sender's name into an ai.compose instruction.
+
+    The Rust muscle uses ``instruction`` verbatim, so the substitution happens
+    here where the seat roster is reachable. Leaving the token unresolved is a
+    safe failure: strip_signature drops any line still containing ``{{``, so the
+    worst case is a signature without a first name rather than someone else's.
+    """
+    instruction = command_payload.get("instruction")
+    if not isinstance(instruction, str) or not any(t in instruction for t in _SENDER_TOKENS):
+        return
+    try:
+        custom_fields = (lead or {}).get("custom_fields") or {}
+        if isinstance(custom_fields, str):
+            custom_fields = json.loads(custom_fields)
+        external_id = custom_fields.get("invite_account_id")
+        row = None
+        async with system_scope():
+            if external_id:
+                row = await fetch_one(
+                    "SELECT display_name FROM omni_sending_accounts "
+                    "WHERE workspace_id=$1 AND external_identity::text=$2",
+                    workspace_id,
+                    str(external_id),
+                )
+            if row is None and (lead or {}).get("workflow_id"):
+                # No pinned invite seat (a campaign that opens on a DM, or a lead
+                # seeded straight onto a message node). One seat on the campaign
+                # is unambiguous; more than one is not, so do not guess.
+                seats = await fetch_all(
+                    "SELECT sa.display_name FROM omni_campaign_sending_accounts p "
+                    "JOIN omni_sending_accounts sa ON sa.id = p.sending_account_id "
+                    "WHERE p.workflow_id=$1",
+                    str(lead["workflow_id"]),
+                )
+                if len(seats) == 1:
+                    row = seats[0]
+        if row is None:
+            log.warning(
+                "ai.compose wanted a sender name but no seat resolved (invite_account_id=%s)",
+                external_id,
+            )
+            return
+        full = str(row["display_name"] or "").strip()
+        command_payload["instruction"] = instruction.replace(
+            "{{sender_first_name}}", full.split()[0] if full else ""
+        ).replace("{{sender_name}}", full)
+    except Exception:  # noqa: BLE001 - never wedge a compose over a name lookup
+        log.exception("failed resolving the sender name; compose keeps the raw instruction")
 
 
 async def _resolve_node(workspace_id: str, node_id: str) -> dict | None:
@@ -203,6 +270,8 @@ async def handle_event(env: dict) -> None:
     # tone_id → unchanged (backward-compatible).
     if channel == ChannelType.AI_COMPOSE and command_payload.get("tone_id"):
         await _resolve_tone_into_payload(workspace_id, command_payload)
+    if channel == ChannelType.AI_COMPOSE:
+        await _resolve_sender_into_payload(workspace_id, command_payload, lead)
 
     command = await commands.build_command(
         workspace_id=workspace_id,

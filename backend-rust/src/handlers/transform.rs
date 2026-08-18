@@ -67,7 +67,7 @@ pub async fn handle_data_transform(command: &ActionCommand) -> ExecutionResult {
     let result = anthropic_text(
         &api_key,
         DEFAULT_MODEL,
-        "Respond concisely. Output the answer only — no preamble, no quotes, no explanation.",
+        "Respond concisely. Output the answer only. No preamble, no quotes, no explanation.",
         &format!("Extract: {prompt}"),
         200,
     )
@@ -139,8 +139,8 @@ pub async fn handle_ai_compose(command: &ActionCommand) -> ExecutionResult {
         ),
         None => format!(
             "You write {tone} outbound {channel} messages for B2B outreach. \
-             Output is the message body only — no subject lines, no signatures, no preamble. \
-             Keep it under {max_words} words. Reference the lead's facts only if they are present and relevant."
+             Output is the message body only. No subject lines and no preamble. Follow the operator instructions on whether to include a signature. \
+             Keep it under {max_words} words. Never use em dashes or en dashes anywhere in the output, use periods and commas instead. Reference the lead's facts only if they are present and relevant."
         ),
     };
 
