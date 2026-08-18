@@ -50,6 +50,9 @@ REPLY_INTERVAL_S = int(os.getenv("REPLY_POLL_INTERVAL_S", "180"))
 ACCEPT_INTERVAL_S = int(os.getenv("ACCEPT_POLL_INTERVAL_S", "1800"))
 _JITTER_PCT = 0.25  # ±25% so the cadence isn't clockwork
 _CHATS_PER_SEAT = int(os.getenv("REPLY_CHATS_PER_SEAT", "40"))
+# Bounded per-chat read. Deep enough to pick up a reply we already answered,
+# shallow enough that a reopened chat stays one cheap call.
+_MSGS_PER_CHAT = int(os.getenv("REPLY_MSGS_PER_CHAT", "20"))
 _RELATIONS_PER_SEAT = int(os.getenv("ACCEPT_RELATIONS_PER_SEAT", "50"))
 _INVITE_NODE = "event.invite_accepted"
 
@@ -81,45 +84,95 @@ def _seat_ids(accounts) -> list[str]:
 
 
 async def _process_reply_for_lead(client: UnipileClient, ws: str, lead: dict) -> int:
-    """Confirm the lead's thread newest is inbound and halt. Only called for a
-    lead whose chat already showed unread — so this is a tiny, bounded read."""
+    """Ingest every unseen inbound message in the lead's chat.
+
+    INBOX-INGEST-001: this used to look only at ``items[0]`` and give up unless
+    the very newest message was inbound. Any reply that we then answered, or that
+    arrived before another of our sends, was invisible to the inbox forever.
+    Akshay's "thanks for reaching out, I will go through your website" sat
+    unrecorded for exactly that reason while his lead was cancelled.
+
+    Ingestion and waking are separate concerns. Every unseen inbound message is
+    recorded (``process_reply`` is idempotent on the provider message id, so a
+    re-poll is free), which is what the inbox reads. Campaign flow still only
+    reacts to what the reply gate cares about.
+    """
     chat_id = lead["chat_id"]
     try:
-        resp = await client.list_chat_messages(str(chat_id), limit=2)
+        resp = await client.list_chat_messages(str(chat_id), limit=_MSGS_PER_CHAT)
     except UnipileError as e:
         log.warning("[unipile_sync] chat %s read failed: %s", chat_id, e)
         return 0
-    items = resp.get("items") if isinstance(resp, dict) else None
+    items = (resp.get("items") if isinstance(resp, dict) else resp) or []
     if not items:
         return 0
-    newest = items[0]
-    if newest.get("is_sender") != 0:  # 1=our send, 0=inbound; explicit only
+
+    # Unipile returns newest-first; ingest oldest-first so the LAST intent seen
+    # is the most recent one, which is what suppression should act on.
+    ordered = list(reversed(items))
+    since = str(lead.get("reply_ingested_until") or "")
+    def _is_unseen(m: dict) -> bool:
+        if m.get("is_sender") != 0 or m.get("is_event"):
+            return False
+        if not (m.get("text") or "").strip():
+            return False
+        ts = str(m.get("timestamp") or "")
+        if ts:
+            return ts > since
+        # No timestamp: fall back to the id watermark rather than dropping the
+        # message. Skipping it would lose a real reply permanently; re-firing an
+        # already-recorded one would re-run classification and suppression, so
+        # neither default is free and the id check keeps both honest.
+        return str(m.get("id") or "") != str(lead.get("reply_seen") or "")
+
+    unseen = [m for m in ordered if _is_unseen(m)]
+    if not unseen:
+        # Still move the chat watermark so an unchanged chat is not reopened.
+        if lead.get("_chat_ts"):
+            async with system_scope():
+                await execute(
+                    "UPDATE omni_leads SET custom_fields = COALESCE(custom_fields, '{}'::jsonb) "
+                    "|| $1::jsonb, updated_at = NOW() WHERE id = $2 AND workspace_id = $3",
+                    json.dumps({"chat_seen_ts": lead["_chat_ts"]}),
+                    str(lead["id"]),
+                    ws,
+                )
         return 0
-    msg_id = newest.get("id")
-    if not msg_id or str(msg_id) == (lead.get("reply_seen") or ""):
-        return 0
+
+    woke = 0
+    newest_ts = since
+    for msg in unseen:
+        res = await inbound_reply.process_reply(
+            ws,
+            str(lead["contact_id"]),
+            msg.get("text") or "",
+            channel="linkedin",
+            source_message_id=str(msg.get("id") or ""),
+        )
+        woke += int(res.get("woke_leads") or 0)
+        ts = str(msg.get("timestamp") or "")
+        if ts > newest_ts:
+            newest_ts = ts
+        log.info(
+            "[unipile_sync] ingested inbound lead=%s intent=%s woke=%s",
+            lead["id"], res.get("intent"), res.get("woke_leads"),
+        )
+
     async with system_scope():
         await execute(
             "UPDATE omni_leads SET custom_fields = COALESCE(custom_fields, '{}'::jsonb) || $1::jsonb, "
             "updated_at = NOW() WHERE id = $2 AND workspace_id = $3",
             json.dumps(
                 {
-                    "reply_seen_msg_id": str(msg_id),
+                    "reply_seen_msg_id": str(unseen[-1].get("id") or ""),
+                    "reply_ingested_until": newest_ts,
                     **({"chat_seen_ts": lead["_chat_ts"]} if lead.get("_chat_ts") else {}),
                 }
             ),
             str(lead["id"]),
             ws,
         )
-    res = await inbound_reply.process_reply(
-        ws, str(lead["contact_id"]), newest.get("text") or "",
-        channel="linkedin", source_message_id=str(msg_id),
-    )
-    log.info(
-        "[unipile_sync] reply detected lead=%s intent=%s woke=%s",
-        lead["id"], res.get("intent"), res.get("woke_leads"),
-    )
-    return int(res.get("woke_leads") or 0)
+    return woke
 
 
 async def _link_chat_to_lead(ws: str, chat: dict) -> int:
@@ -167,7 +220,8 @@ async def run_reply_sweep() -> None:
                    l.id, l.workspace_id, l.contact_id,
                    l.custom_fields->>'chat_id'           AS chat_id,
                    l.custom_fields->>'reply_seen_msg_id' AS reply_seen,
-                   l.custom_fields->>'chat_seen_ts'      AS chat_seen_ts
+                   l.custom_fields->>'chat_seen_ts'      AS chat_seen_ts,
+                   l.custom_fields->>'reply_ingested_until' AS reply_ingested_until
             FROM omni_leads l
             WHERE l.contact_id IS NOT NULL
               AND COALESCE(l.custom_fields->>'chat_id', '') <> ''

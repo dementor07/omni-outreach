@@ -112,3 +112,39 @@ def test_discovery_never_views_a_profile():
     linker = WORKER_SRC.split("async def _link_chat_to_lead")[1].split("async def ")[0]
     for banned in ("member_profile", "get_profile", "profile_view"):
         assert banned not in linker
+
+
+# ── INBOX-INGEST-001: a reply we already answered still belongs in the inbox ──
+
+
+def test_ingestion_no_longer_looks_only_at_the_newest_message():
+    """The old code read items[0] and gave up unless it was inbound, so any reply
+    followed by one of our sends was invisible forever. Akshay's "thanks for
+    reaching out" sat unrecorded for exactly that reason."""
+    fn = WORKER_SRC.split("async def _process_reply_for_lead")[1].split("\nasync def ")[0]
+    assert "newest = items[0]" not in fn
+    assert 'm.get("is_sender") != 0' in fn  # the helper rejects our own sends
+    assert "for msg in unseen:" in fn
+
+
+def test_ingestion_is_oldest_first_so_the_latest_intent_wins():
+    """Suppression must act on the most recent thing they said, not the first."""
+    fn = WORKER_SRC.split("async def _process_reply_for_lead")[1].split("\nasync def ")[0]
+    assert "ordered = list(reversed(items))" in fn
+
+
+def test_ingestion_is_watermarked_and_bounded():
+    fn = WORKER_SRC.split("async def _process_reply_for_lead")[1].split("\nasync def ")[0]
+    assert "return ts > since" in fn
+    # A message with no timestamp falls back to the id watermark instead of
+    # being dropped or blindly re-fired.
+    assert 'str(m.get("id") or "") != str(lead.get("reply_seen") or "")' in fn
+    assert "_MSGS_PER_CHAT" in fn
+    assert '"reply_ingested_until": newest_ts' in fn
+
+
+def test_an_unchanged_chat_still_advances_its_watermark():
+    """Otherwise a chat with no new inbound is reopened on every single sweep."""
+    fn = WORKER_SRC.split("async def _process_reply_for_lead")[1].split("\nasync def ")[0]
+    assert "if not unseen:" in fn
+    assert fn.count('"chat_seen_ts"') >= 2
