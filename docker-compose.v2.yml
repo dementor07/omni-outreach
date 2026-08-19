@@ -121,6 +121,11 @@ services:
       # otherwise the older muscle eats v2 commands and dies on unknown
       # channel variants. See main.rs for the override hook.
       MUSCLE_CONSUMER_GROUP: muscle-v2
+      # MSG-QA-001: the ai.qa_message reviewer. Not a per-workspace sending
+      # identity, so it comes from the environment rather than a connection
+      # bundle. Absent, the node reports KIMI_KEY_MISSING and routes on
+      # `on_error` (fail-open by default) instead of silently approving.
+      KIMI_API_KEY: ${KIMI_API_KEY:-}
       RUST_LOG: execution_engine=info,info
     networks:
       - omni-outreach_default

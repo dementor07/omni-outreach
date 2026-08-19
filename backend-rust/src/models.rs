@@ -72,6 +72,12 @@ pub enum ChannelType {
     /// policies live in the node config, not in the worker.
     #[serde(rename = "ai_screen")]
     AiScreen,
+    /// MSG-QA-001 — independent pre-send review of a composed message. Its own
+    /// channel because the reviewer runs a DIFFERENT provider from the writer
+    /// it is grading (Kimi by default; the writer is Claude). Used by
+    /// `ai.qa_message`; routes on `pass` / `rewrite` / `reject`.
+    #[serde(rename = "ai_qa")]
+    AiQa,
     /// Anthropic Claude reply-intent classification (B2). One bounded call ->
     /// {positive|question|objection|unsubscribe|neutral}, fail-open to a keyword
     /// heuristic, opt-out always caught. Used by the inbound-reply path.
@@ -209,6 +215,7 @@ impl ChannelType {
             ChannelType::Apify => "apify",
             ChannelType::LinkedinJobsGuest => "linkedin_jobs_guest",
             ChannelType::AiScreen => "ai_screen",
+            ChannelType::AiQa => "ai_qa",
             ChannelType::AiClassify => "ai_classify",
             ChannelType::SerperPeople => "serper_people",
             ChannelType::LeadsFinder => "leads.finder",

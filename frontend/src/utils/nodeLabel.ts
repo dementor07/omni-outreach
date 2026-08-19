@@ -61,6 +61,7 @@ const NODE_LABELS: Record<string, string> = {
 
   // AI
   'ai.compose': 'AI compose message',
+  'ai.qa_message': 'AI review message',
   'ai.screen_company': 'AI screen company',
   'ai.screen_person': 'AI screen person',
   // TAXONOMY-001: one provider = one node (ex ai.enrich mode toggle).

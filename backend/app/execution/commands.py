@@ -80,6 +80,9 @@ NODE_CHANNEL: dict[str, ChannelType] = {
     "renidly.person_profile": ChannelType.ENRICH,
     "renidly.company_profile": ChannelType.ENRICH,
     "ai.compose": ChannelType.AI_COMPOSE,
+    # MSG-QA-001: the reviewer is its own channel so it can run a different
+    # provider from the writer it is grading.
+    "ai.qa_message": ChannelType.AI_QA,
     # Claude classifier handler — both screen variants share it. The asymmetric
     # error policy lives in the node's payload (on_error_handle), not here.
     "ai.screen_company": ChannelType.AI_SCREEN,

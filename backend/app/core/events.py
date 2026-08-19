@@ -51,6 +51,7 @@ class ChannelType(StrEnum):
     APIFY = "apify"  # Apify actor run + poll + dataset fetch (source.linkedin_jobs)
     LINKEDIN_JOBS_GUEST = "linkedin_jobs_guest"  # free guest-API LinkedIn jobs (source.linkedin_jobs_guest)
     AI_SCREEN = "ai_screen"  # Claude ACCEPT/REJECT classifier (ai.screen_company / ai.screen_person)
+    AI_QA = "ai_qa"  # MSG-QA-001: independent reviewer for a composed message (ai.qa_message)
     SERPER_PEOPLE = "serper_people"  # Multi-pattern per-company Serper LinkedIn search
     LEADS_FINDER = "leads.finder"  # LinkFinder AI fan-out people discovery
     NAUKRI = "naukri"  # Camoufox-driven Naukri.com job scrape (source.naukri)

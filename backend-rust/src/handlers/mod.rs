@@ -5,6 +5,7 @@
 //! deployed ahead of the worker) and returns a clean error instead of
 //! silently dropping the command.
 
+pub mod ai_qa;
 pub mod ai_screen;
 pub mod alert;
 pub mod apify;
@@ -57,6 +58,7 @@ pub async fn dispatch(command: &ActionCommand) -> ExecutionResult {
             linkedin_jobs_guest::handle_linkedin_jobs_guest(command).await
         }
         ChannelType::AiScreen => ai_screen::handle_ai_screen(command).await,
+        ChannelType::AiQa => ai_qa::handle_ai_qa(command).await,
         ChannelType::AiClassify => transform::handle_ai_classify(command).await,
         // People discovery: two distinct nodes (serper paid / searxng free), one
         // shared multi-pattern handler that reads the provider the node emits.
