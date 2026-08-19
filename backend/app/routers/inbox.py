@@ -151,7 +151,11 @@ async def list_threads(
                    'inbound'::text AS direction,
                    LEFT(body, 200) AS snippet, classification
             FROM omni_messages
-            WHERE contact_id IS NOT NULL
+            -- THREAD-MEMORY-001: omni_messages now holds OUTBOUND rows too. This
+            -- branch hardcodes the direction label and the outbound side of the
+            -- list comes from omni_send_outcomes below, so an unfiltered read
+            -- would label our own sends as replies and double-count them.
+            WHERE direction = 'inbound' AND contact_id IS NOT NULL
             UNION ALL
             -- A contact gets ONE connection request; extra 'sent' rows are the
             -- re-fire artifact. The thread detail already collapses them, so the

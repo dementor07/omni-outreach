@@ -2215,12 +2215,85 @@ async def _apply_enrichment_mutation(
                 )
 
 
-async def _apply_lead_mutations(workspace_id: str, lead_id: str, mutations: dict) -> None:
+# THREAD-MEMORY-001. Deterministic namespace for an OUTBOUND omni_messages row
+# derived from the command that sent it, mirroring how inbound replies key off
+# the provider's message id. Redelivery collapses onto the same row instead of
+# writing the message twice.
+_SENT_MSG_NS = uuid.UUID("2b9c7f41-6a3d-4e58-9f10-7c8d5e2a4b60")
+
+
+async def _record_sent_message(
+    workspace_id: str,
+    lead_id: str,
+    sent: Any,
+    command_id: str | None,
+) -> None:
+    """Persist a message we actually delivered into ``omni_messages``.
+
+    THREAD-MEMORY-001. The table has carried ``direction IN ('inbound','outbound')``
+    since migration 021 but only ever held inbound rows, so nothing in the system
+    could answer "what have we already said to this person". ai.compose was
+    therefore writing every follow-up blind, and the sent copy survived only in
+    LinkedIn itself.
+
+    Only a CONFIRMED delivery reaches here: the muscle emits this alongside the
+    chat id, after the NOCHAT-002 guard has already turned a 2xx-with-no-chat-id
+    into a skip. A message that never left does not get logged as one.
+
+    The row id is derived from the command id, so a redelivered transition
+    collapses onto the same row (there is no command dedupe in front of this)."""
+    if not isinstance(sent, dict) or not command_id:
+        return
+    body = str(sent.get("body") or "").strip()
+    if not body:
+        return
+    async with system_scope():
+        lead = await fetch_one(
+            "SELECT contact_id, workflow_id FROM omni_leads WHERE id=$1 AND workspace_id=$2",
+            lead_id,
+            workspace_id,
+        )
+        if not lead or not lead.get("contact_id"):
+            # A discovered person with no contact row yet has nothing to thread
+            # the message onto. Nothing to record, and nothing to fail over.
+            return
+        await execute(
+            """
+            INSERT INTO omni_messages
+                (id, workspace_id, contact_id, channel, direction, body, metadata, occurred_at)
+            VALUES ($1, $2, $3, $4, 'outbound', $5, $6::jsonb, NOW())
+            ON CONFLICT (id) DO NOTHING
+            """,
+            str(uuid.uuid5(_SENT_MSG_NS, str(command_id))),
+            workspace_id,
+            str(lead["contact_id"]),
+            str(sent.get("channel") or "linkedin"),
+            body,
+            json.dumps({
+                "lead_id": str(lead_id),
+                "workflow_id": str(lead["workflow_id"]) if lead.get("workflow_id") else None,
+                "command_id": str(command_id),
+                "chat_id": sent.get("chat_id") or None,
+            }),
+        )
+
+
+async def _apply_lead_mutations(
+    workspace_id: str,
+    lead_id: str,
+    mutations: dict,
+    command_id: str | None = None,
+) -> None:
     """Merge typed muscle-supplied mutations into lead/contact state.
 
     ``custom_fields`` remains the generic lead-data channel. Enrichment is a
     separate typed envelope because it may update whitelisted contact columns;
-    arbitrary muscle-supplied column names are never interpolated."""
+    arbitrary muscle-supplied column names are never interpolated.
+
+    ``command_id`` is only needed by mutations that must be idempotent under
+    redelivery. This function runs on EVERY delivered transition — there is no
+    command-level dedupe in front of it, and Kafka at-least-once redelivery is
+    routine — so anything that appends rather than overwrites has to key off it."""
     if not mutations:
         return
     cf = mutations.get("custom_fields")
@@ -2235,6 +2308,7 @@ async def _apply_lead_mutations(workspace_id: str, lead_id: str, mutations: dict
             )
 
     await _apply_enrichment_mutation(workspace_id, lead_id, mutations.get("enrichment"))
+    await _record_sent_message(workspace_id, lead_id, mutations.get("sent_message"), command_id)
 
     # CONTRACT-003: persist tag mutations into custom_fields.tags (a JSONB string
     # array). condition.has_tag reads the same location. The ADD_TAG/REMOVE_TAG
@@ -2728,7 +2802,9 @@ async def handle_transition(t: dict) -> None:
     # writing custom_fields[companies]) before deciding where to go next, so a
     # for_each or downstream node sees the freshly merged data.
     if lead_mutations:
-        await _apply_lead_mutations(workspace_id, lead_id, lead_mutations)
+        await _apply_lead_mutations(
+            workspace_id, lead_id, lead_mutations, command_id=meta.get("command_id")
+        )
 
     # PIPELINE-METRICS-001: a source node's result feeds the lead-gen efficiency
     # rollup. We know the firing node from source_node_id; emit one metric delta

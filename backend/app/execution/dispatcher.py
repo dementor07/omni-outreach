@@ -101,6 +101,11 @@ async def _resolve_tone_into_payload(workspace_id: str, command_payload: dict) -
 # by the right person instead of a name hardcoded into the instruction.
 _SENDER_TOKENS = ("{{sender_first_name}}", "{{sender_name}}")
 
+# THREAD-MEMORY-001 bounds. A long conversation must not push the lead's own
+# facts out of the compose prompt, so the history is capped in both directions.
+_THREAD_MAX_MESSAGES = 12
+_THREAD_MAX_CHARS = 1500
+
 
 async def _resolve_sender_into_payload(
     workspace_id: str, command_payload: dict, lead: dict | None
@@ -153,6 +158,53 @@ async def _resolve_sender_into_payload(
         ).replace("{{sender_name}}", full)
     except Exception:  # noqa: BLE001 - never wedge a compose over a name lookup
         log.exception("failed resolving the sender name; compose keeps the raw instruction")
+
+
+async def _resolve_thread_into_payload(
+    workspace_id: str, command_payload: dict, lead: dict | None
+) -> None:
+    """Give ai.compose the conversation it is continuing.
+
+    THREAD-MEMORY-001. Every compose node in a sequence writes its draft to the
+    same ``target_variable`` (``ai_draft`` by default) and the merge is shallow,
+    so each step overwrote the last: message 3 could see message 2 and nothing
+    before it. The follow-up prompts say "read the earlier messages"; there were
+    none to read, and the drafts repeated each other because of it.
+
+    The messages are read here rather than in the muscle for the same reason the
+    tone preset and the sender name are: the muscle is a stateless executor with
+    no database. Absent or empty, the payload key is simply not set and the
+    handler behaves exactly as before.
+
+    Scoped to the CONTACT, not the campaign. The prospect sees one LinkedIn
+    thread whichever campaign produced it, so that is the thread the writer has
+    to avoid repeating."""
+    lead = lead or {}
+    contact_id = lead.get("contact_id")
+    if not contact_id:
+        return
+    try:
+        async with system_scope():
+            rows = await fetch_all(
+                "SELECT direction, body, occurred_at FROM omni_messages "
+                "WHERE workspace_id=$1 AND contact_id=$2 AND COALESCE(body,'') <> '' "
+                "ORDER BY occurred_at ASC LIMIT $3",
+                workspace_id,
+                str(contact_id),
+                _THREAD_MAX_MESSAGES,
+            )
+    except Exception:  # noqa: BLE001 - a compose must not die over its history
+        log.exception("failed loading the thread for lead %s; composing without it", lead.get("id"))
+        return
+    if not rows:
+        return
+    command_payload["previous_messages"] = [
+        {
+            "from": "us" if str(r["direction"]) == "outbound" else "them",
+            "text": str(r["body"])[:_THREAD_MAX_CHARS],
+        }
+        for r in rows
+    ]
 
 
 async def _resolve_node(workspace_id: str, node_id: str) -> dict | None:
@@ -272,6 +324,8 @@ async def handle_event(env: dict) -> None:
         await _resolve_tone_into_payload(workspace_id, command_payload)
     if channel == ChannelType.AI_COMPOSE:
         await _resolve_sender_into_payload(workspace_id, command_payload, lead)
+        # THREAD-MEMORY-001: and what has already been said to this person.
+        await _resolve_thread_into_payload(workspace_id, command_payload, lead)
 
     command = await commands.build_command(
         workspace_id=workspace_id,

@@ -3,8 +3,9 @@
 Re-sending a first touch to someone we already messaged is the single most
 common way an outbound campaign embarrasses the operator — it happens whenever
 a contact is re-enrolled, appears in two campaigns, or a run is re-triggered.
-The data to prevent it already exists (``omni_messages``, direction='outbound');
-what was missing was a guard that consults it before a send.
+The data to prevent it is the send ledger (``omni_send_outcomes``, one row per
+confirmed send on every channel); what was missing was a guard that consults it
+before a send.
 
 This is a per-node, OPT-IN control (default ``off`` → zero behaviour change for
 every saved graph). When enabled, the operator chooses BOTH:

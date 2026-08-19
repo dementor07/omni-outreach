@@ -186,8 +186,46 @@ pub async fn handle_ai_compose(command: &ActionCommand) -> ExecutionResult {
         })
         .unwrap_or_default();
 
+    // THREAD-MEMORY-001: what has already been said to this person, oldest
+    // first. The dispatcher loads it, because the muscle has no database.
+    // Absent, this renders nothing and the prompt is byte-identical to before.
+    // It sits after the rules and before the facts so a follow-up can see the
+    // conversation it is continuing instead of inventing one.
+    let thread_block = command
+        .payload
+        .get("previous_messages")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            let turns: Vec<String> = items
+                .iter()
+                .filter_map(|m| {
+                    let text = m.get("text").and_then(|v| v.as_str())?.trim();
+                    if text.is_empty() {
+                        return None;
+                    }
+                    let who = match m.get("from").and_then(|v| v.as_str()) {
+                        Some("them") => "THEM",
+                        _ => "US",
+                    };
+                    Some(format!("[{who}]\n{text}"))
+                })
+                .collect();
+            if turns.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "\n\nALREADY SENT IN THIS CONVERSATION (oldest first):\n\
+                     Do not repeat these. Do not reuse their sentences, their opening, or \
+                     their closing question. Say something this thread has not said yet.\n\n{}",
+                    turns.join("\n\n")
+                )
+            }
+        })
+        .unwrap_or_default();
+
+
     let user = format!(
-        "Operator instructions:\n{instruction}{examples_block}\n\nLead facts:\n{}",
+        "Operator instructions:\n{instruction}{examples_block}{thread_block}\n\nLead facts:\n{}",
         serde_json::to_string(&facts).unwrap_or_default()
     );
 

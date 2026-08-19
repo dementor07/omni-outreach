@@ -429,7 +429,14 @@ async fn send_chat(command: &ActionCommand, event_type: &str, chat_id_col: &str)
                 }
                 _ => {}
             }
-            let mutations = if cf.is_empty() {
+            // THREAD-MEMORY-001: hand the control plane the copy we just
+            // delivered so it lands in omni_messages as an outbound row. Nothing
+            // else in the system knew what had already been said to a person, so
+            // every follow-up was composed blind. It is built here because this
+            // is the only place that knows the exact text that went out. Note the
+            // position: the NOCHAT-002 guard below returns BEFORE this value is
+            // used, so a 2xx that delivered nothing cannot be recorded.
+            let mut mutations = if cf.is_empty() {
                 json!({})
             } else {
                 json!({ "custom_fields": Value::Object(cf) })
@@ -459,6 +466,20 @@ async fn send_chat(command: &ActionCommand, event_type: &str, chat_id_col: &str)
                 let mut degraded = common::skipped(command, "no_chat_id_returned");
                 degraded.metadata.insert("next_handle".to_string(), json!("no_thread"));
                 return degraded;
+            }
+            if let Some(obj) = mutations.as_object_mut() {
+                obj.insert(
+                    "sent_message".to_string(),
+                    json!({
+                        "channel": command.channel.as_str(),
+                        "body": body_text,
+                        "chat_id": if new_chat_id.is_empty() {
+                            command.payload["chat_id"].as_str().unwrap_or("")
+                        } else {
+                            new_chat_id.as_str()
+                        },
+                    }),
+                );
             }
             common::ok(
                 command,
