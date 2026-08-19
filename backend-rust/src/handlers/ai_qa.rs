@@ -90,8 +90,12 @@ Judge it ONLY against the evidence supplied, on these three questions:
 - unsupported_inference: does it assert something about this person's business that the evidence does not support?
 - weak_signal_forced: does it open on, or lean on, a fact that is not evidence of a commercial priority?
 - overly_salesy: does it oversell?
+- repeats_previous: does it reuse the wording of an earlier message in the same thread?
 
 WHAT IS ALLOWED. Do not flag these:
+- A follow-up returning to the SAME SUBJECT as an earlier message. A sequence is supposed to be about one thing. Staying on topic is not repetition.
+- Asking a shorter, easier version of an earlier question. That is what a nudge is for.
+- Continuing to follow up after no reply. Silence is not a reason to fail a message.
 - Summarising several related facts into the obvious reading. 'Hiring three SDRs and two AEs' -> 'looks like you're building out the sales team' is a summary, not an inference. So is 'opening a US office' -> 'expanding into the US'.
 - Conditional or hypothetical framing. 'If more B2B clients is a priority' and 'is outbound on the agenda' are questions, not claims about them, and need no evidence.
 - Saying plainly what the sender does and offers.
@@ -102,11 +106,12 @@ WHAT TO FLAG:
 - unsupported_inference: a stated cause, motive, pain or consequence that was never observed. 'A new SEO hire delivers more when there are already the right clients to deliver for' invents a problem. 'Outbound is probably the first thing getting squeezed' invents a problem. Telling someone what their own hiring means for their pipeline invents a problem.
 - weak_signal_forced: opening on a video editor, designer, engineer, intern or delivery-side SEO vacancy as though it showed commercial expansion. Opening on a festival or holiday greeting, national day, birthday, work anniversary, award, congratulations, condolence, personal milestone, photo caption or generic motivational post. These are never commercial signals.
 - overly_salesy: unsupported scale claims, stacked promises, flattery for its own sake, or sounding impressed by ordinary business activity.
+- repeats_previous: near-identical SENTENCES. A phrase, a question or a paragraph carried over from an earlier message with only cosmetic changes. Judge the words, not the topic. If you cannot quote the duplicated wording from both messages, it is not repetition.
 
 action:
 - 'send' when none of the three is true. This should be the common outcome for a competent message.
 - 'rewrite' when the copy has a problem that changing the words would fix.
-- 'reject' ONLY when this prospect should not be messaged at all on this evidence. Never use 'reject' for a wording problem.
+- 'reject' ONLY when this prospect should not be messaged at all on this evidence. Never use 'reject' for a wording problem, and never for repeated wording or for a prospect who has not replied yet. Repetition is repairable, so it is 'rewrite'.
 
 problems: one short sentence per flag, quoting the exact offending text. Quote it or do not flag it. Empty when action is 'send'.";
 

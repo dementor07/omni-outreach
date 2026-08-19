@@ -221,7 +221,40 @@ def test_the_policy_says_out_loud_what_must_not_be_flagged():
 
 def test_reject_is_about_the_prospect_never_about_wording():
     policy = HANDLER.split("BASE_POLICY: &str")[1].split('";')[0]
-    assert "Never use 'reject' for a wording problem." in policy
+    assert "Never use 'reject' for a wording problem" in policy
+    # The first trial run rejected message 3 for 7 of 8 leads because the model
+    # read "follow-up asks about the same topic" as repetition. Rejecting a lead
+    # for that drops the campaign at step 3.
+    assert "never for repeated wording or for a prospect who has not replied yet" in policy
+    assert "Repetition is repairable" in policy
+
+
+def test_repetition_means_reused_wording_not_a_reused_topic():
+    """A sequence is supposed to be about one thing; a nudge is supposed to
+    re-ask. Only near-identical sentences count."""
+    policy = HANDLER.split("BASE_POLICY: &str")[1].split('";')[0]
+    assert "repeats_previous: near-identical SENTENCES" in policy
+    assert "Judge the words, not the topic." in policy
+    assert "If you cannot quote the duplicated wording from both messages, it is not repetition." in policy
+    for allowed in (
+        "returning to the SAME SUBJECT",
+        "shorter, easier version of an earlier question",
+        "Silence is not a reason to fail a message",
+    ):
+        assert allowed in policy, f"policy does not permit: {allowed}"
+
+
+def test_every_schema_flag_is_defined_in_the_policy():
+    """`repeats_previous` shipped in the schema but was described nowhere in the
+    policy, so the model invented both its meaning and its action."""
+    policy = HANDLER.split("BASE_POLICY: &str")[1].split('";')[0]
+    schema = HANDLER.split("fn verdict_schema()")[1].split("\n}")[0]
+    flags = [f for f in (
+        "unsupported_inference", "weak_signal_forced", "overly_salesy", "repeats_previous",
+    ) if f in schema]
+    assert len(flags) == 4
+    for f in flags:
+        assert f in policy, f"schema asks for {f} but the policy never defines it"
 
 
 def test_a_literal_hit_overrides_a_model_that_waved_the_draft_through():
