@@ -686,7 +686,12 @@ async def update_workflow_pool(id: uuid.UUID, body: PoolUpdate, ctx: AuthContext
                 """,
                 id, ctx.workspace_id
             )
-    return [SendingAccountOut.model_validate(r) for r in rows]
+    # POOL-SERIALIZE-001: conn.fetch returns asyncpg Records, which pydantic v2
+    # refuses (app.db.fetch_all dicts them for us; this path uses the raw
+    # connection because it needs the transaction). Assigning seats therefore
+    # committed the pool and THEN 500'd on the way out, so the UI reported a
+    # failure for a change that had actually been saved.
+    return [SendingAccountOut.model_validate(dict(r)) for r in rows]
 
 
 # ── Nodes ────────────────────────────────────────────────────────────────────
