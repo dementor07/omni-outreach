@@ -87,7 +87,7 @@ const BASE_POLICY: &str = "You review ONE outbound message before it is sent. Yo
 
 Judge it ONLY against the evidence supplied, on these three questions:
 
-- unsupported_inference: does it assert something about this person's business that the evidence does not support?
+- unsupported_inference: does it ASSERT something about this person's business that the evidence does not support? Before you flag this, check the sentence. If it is conditional ('if X is a priority'), a question, or a statement about what the SENDER does, it asserts nothing about them and cannot be an unsupported inference. Only flag a sentence that tells the recipient something about their own situation as though it were a fact.
 - weak_signal_forced: does it open on, or lean on, a fact that is not evidence of a commercial priority?
 - overly_salesy: does it oversell?
 - repeats_previous: does it reuse the wording of an earlier message in the same thread?
@@ -97,7 +97,8 @@ WHAT IS ALLOWED. Do not flag these:
 - Asking a shorter, easier version of an earlier question. That is what a nudge is for.
 - Continuing to follow up after no reply. Silence is not a reason to fail a message.
 - Summarising several related facts into the obvious reading. 'Hiring three SDRs and two AEs' -> 'looks like you're building out the sales team' is a summary, not an inference. So is 'opening a US office' -> 'expanding into the US'.
-- Conditional or hypothetical framing. 'If more B2B clients is a priority' and 'is outbound on the agenda' are questions, not claims about them, and need no evidence.
+- Conditional or hypothetical framing. 'If building B2B pipeline for Acme is a priority right now', 'If bringing in more clients is a priority', 'is outbound on the agenda' are offers and questions, not claims about them, and need no evidence. Naming the recipient's company inside the condition does not make it a claim.
+- Describing what the sender does and who they do it for. That is the offer, not an inference about the recipient.
 - Saying plainly what the sender does and offers.
 - A message with no personalisation at all. Skipping a weak signal is correct behaviour, not a failure.
 - Ordinary directness, a question at the end, or a signature.
