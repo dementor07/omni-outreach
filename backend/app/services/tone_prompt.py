@@ -74,8 +74,9 @@ def build_tone_system_prompt(spec: Mapping[str, Any], channel: str = "email") ->
 
     length = (
         f"Length: aim for about {recommended} words, never exceed {maximum}. "
-        "Output the message body ONLY — no subject line, no signature, no preamble, "
-        "no surrounding quotes."
+        "Output the message body ONLY. No subject line, no signature, no preamble, "
+        "no surrounding quotes. Never use em dashes or en dashes anywhere in the "
+        "output, use periods and commas instead."
     )
     wc = spec.get("word_count") if isinstance(spec.get("word_count"), Mapping) else {}
     if wc.get("rationale"):

@@ -153,8 +153,41 @@ pub async fn handle_ai_compose(command: &ActionCommand) -> ExecutionResult {
         "source": command.lead.source,
         "extra_data": command.lead.extra_data,
     });
+    // PROMPT-PARTS-001: exemplars are a SEPARATE input from the rules, and they
+    // are delivered as a fenced block that says plainly they are shape-only.
+    // Concatenated into the instruction, a model reads the sample's names,
+    // companies and phrasing as things to reuse, which is how placeholder names
+    // from an example ended up in real outbound drafts.
+    let examples_block = command
+        .payload
+        .get("examples")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            let bodies: Vec<String> = items
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| format!("<example>\n{s}\n</example>"))
+                .collect();
+            if bodies.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "\n\nEXAMPLES (shape only, never content):\n\
+                     The messages below come from other conversations. They show the LENGTH, \
+                     the RHYTHM and the ORDER OF IDEAS to aim for. The names, companies, roles \
+                     and details inside them are NOT about this prospect. Never reuse a name, a \
+                     company, a phrase or a whole sentence from them. If your draft echoes any \
+                     wording from an example, rewrite that part.\n\n{}",
+                    bodies.join("\n\n")
+                )
+            }
+        })
+        .unwrap_or_default();
+
     let user = format!(
-        "Operator instructions:\n{instruction}\n\nLead facts:\n{}",
+        "Operator instructions:\n{instruction}{examples_block}\n\nLead facts:\n{}",
         serde_json::to_string(&facts).unwrap_or_default()
     );
 

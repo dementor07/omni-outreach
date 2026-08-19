@@ -39,6 +39,21 @@ class AiComposeConfig(BaseModel):
     # rules, opening styles, avoid lists) into the compose prompt. Left None, the
     # legacy flat tone is used (backward-compatible).
     tone_id: int | None = Field(None, description="Tone preset id (see GET /tones); overrides `tone` when set")
+    # PROMPT-PARTS-001: exemplars are a SEPARATE input from the rules.
+    # Jamming them into `instruction` conflated two different things: the rules
+    # are constraints the model must obey, an exemplar is a shape it should echo
+    # WITHOUT copying. Mixed together the model treats sample names, companies
+    # and phrasing as instructions, which is how "Rohit at Finkraft" kept
+    # surfacing in real drafts. Kept out of the instruction so each can be
+    # edited, reviewed and versioned on its own.
+    examples: list[str] = Field(
+        default_factory=list,
+        max_length=6,
+        description=(
+            "Sample messages showing tone, length and shape only. Rendered in a "
+            "delimited block that tells the model never to reuse their content."
+        ),
+    )
     max_words: int = Field(120, ge=20, le=600)
     target_variable: str = Field("ai_draft", description="Where to store the draft on the lead context")
     provider: Literal["anthropic", "openai", "gemini", "mindstudio"] = Field(
