@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Omni Outreach — Full Codebase Audit",
+    "title": "Omni Outreach \u2014 Full Codebase Audit",
     "generated": "2026-06-08",
     "method": "Deep file-by-file read PLUS cross-plane connection tracing (5 parallel audit agents). Every finding marks VERIFIED (file read + path traced) vs SUSPECTED. Zero SUSPECTED remain after the expansion pass.",
     "codebase": {
@@ -29,7 +29,7 @@
       "data-flow (correlation_id/workspace_id/lead_id across 6 hops)",
       "deployment (compose <-> code: services/env/topics/groups/secrets)",
       "schema (every projector write vs migration DDL)",
-      "supply-chain (deps/CVEs/pinning) — PARTIAL, agent hit session limit"
+      "supply-chain (deps/CVEs/pinning) \u2014 PARTIAL, agent hit session limit"
     ],
     "status_tally": {
       "FIXED": 77,
@@ -44,7 +44,7 @@
       },
       {
         "date": "2026-06-08",
-        "note": "Completeness sweep (declared-but-unimplemented features). +11 findings. Fixed: webhook_in dead source (built router), flow.delay/flow.wait_until non-functional (now honour the orchestrator timer), credential_refs never swept (lifespan sweep), condition.replied channel filter inert, dead Inbox buttons + dead code removed, person_title_score wired in. Open: DRIFT-004 (PH cron pathway — no scheduler yet). New regression tests for delay primitives."
+        "note": "Completeness sweep (declared-but-unimplemented features). +11 findings. Fixed: webhook_in dead source (built router), flow.delay/flow.wait_until non-functional (now honour the orchestrator timer), credential_refs never swept (lifespan sweep), condition.replied channel filter inert, dead Inbox buttons + dead code removed, person_title_score wired in. Open: DRIFT-004 (PH cron pathway \u2014 no scheduler yet). New regression tests for delay primitives."
       },
       {
         "date": "2026-06-08",
@@ -72,7 +72,7 @@
       },
       {
         "date": "2026-06-09",
-        "note": "E2E re-run after E2E-001: 20-dupe fan-out FIXED (atomic claim blocks dup waves). New layer found (+1: E2E-002, OPEN/HIGH): source result redelivered ~5×, claim-winner reads pre-mutation snapshot -> fanout_total=0, no leads. Needs exactly-once source-result dedup + read-after-write fan-out, on a branch with a concurrency harness."
+        "note": "E2E re-run after E2E-001: 20-dupe fan-out FIXED (atomic claim blocks dup waves). New layer found (+1: E2E-002, OPEN/HIGH): source result redelivered ~5\u00d7, claim-winner reads pre-mutation snapshot -> fanout_total=0, no leads. Needs exactly-once source-result dedup + read-after-write fan-out, on a branch with a concurrency harness."
       },
       {
         "date": "2026-06-09",
@@ -80,7 +80,7 @@
       },
       {
         "date": "2026-06-09",
-        "note": "E2E-002 fan-out concurrency bugs FIXED + harness-proven + live (read-after-write + claim-release + dedup). E2E-003 (OPEN/HIGH) remains: lead parks at for_each with collection present but no children spawn (fanout_total=0) — intermittent, upstream of the harness-validated fan-out logic; likely Flink delivery/ordering or each-edge resolution. Needs an INTEGRATION harness (real test PG + replayed envelopes), not live paid runs. STOP burning paid scrapes on this."
+        "note": "E2E-002 fan-out concurrency bugs FIXED + harness-proven + live (read-after-write + claim-release + dedup). E2E-003 (OPEN/HIGH) remains: lead parks at for_each with collection present but no children spawn (fanout_total=0) \u2014 intermittent, upstream of the harness-validated fan-out logic; likely Flink delivery/ordering or each-edge resolution. Needs an INTEGRATION harness (real test PG + replayed envelopes), not live paid runs. STOP burning paid scrapes on this."
       },
       {
         "date": "2026-06-09",
@@ -96,9 +96,11 @@
       },
       {
         "date": "2026-06-09",
-        "note": "Static error-analysis sweep (ruff E9/F + tsc + eslint + vite build + strict node discovery). One real runtime bug: RACE-DOA (flow.race NameError on fetch_all) — FIXED + F821 guard added. Everything else clean."
+        "note": "Static error-analysis sweep (ruff E9/F + tsc + eslint + vite build + strict node discovery). One real runtime bug: RACE-DOA (flow.race NameError on fetch_all) \u2014 FIXED + F821 guard added. Everything else clean."
       }
-    ]
+    ],
+    "updated": "2026-08-20",
+    "total": 142
   },
   "findings": [
     {
@@ -108,7 +110,7 @@
       "line": 156,
       "severity": "MEDIUM",
       "status": "FIXED",
-      "title": "Retriable-failure branch parks a timer but nothing actually redrives — leads stall forever",
+      "title": "Retriable-failure branch parks a timer but nothing actually redrives \u2014 leads stall forever",
       "evidence": "On status=failed + is_retriable, orchestrator registers a 5-min timer and emits NO transition, commenting 'Muscle will redrive.' But main.rs processes each command exactly once and commits (no redrive logic anywhere in the muscle). on_timer just clears pending_state. So a transient external failure (Apify 5xx, rate limit) -> lead doesn't advance, timer clears, command never re-runs -> lead silently stalls. The retry contract is documented but unimplemented.",
       "recommendation": "Implement actual redrive: either the orchestrator re-emits the original command to outreach.commands on the timer, or the muscle re-queues on retriable failure, or drop the retriable concept and route everything to on_error. Pick one and make it real.",
       "fix": "orchestrator retriable branch parks a real __retry__ transition + bounded retry counter (3 per lead/node); on_timer emits it; transition_worker re-fires the SAME source node. Exhausted retries route to on_error.",
@@ -121,8 +123,8 @@
       "line": null,
       "severity": "HIGH",
       "status": "FIXED",
-      "title": "THEME: the system has no working retry/redrive at any stage — failures are logged and dropped",
-      "evidence": "Three independently-verified findings compose into one architectural gap: EXEC-001 (dispatcher/transitions auto-commit + catch-and-continue -> failed events never retried), PROJ-001 (failed projection archived-as-seen, never rebuilt), FLINK-001 (retriable failure parks a dead timer, muscle never redrives). At every plane — ingest, project, orchestrate — a transient failure silently strands the work. For a lead-gen product this means leads/contacts/scores can vanish on any blip with no recovery and no alert.",
+      "title": "THEME: the system has no working retry/redrive at any stage \u2014 failures are logged and dropped",
+      "evidence": "Three independently-verified findings compose into one architectural gap: EXEC-001 (dispatcher/transitions auto-commit + catch-and-continue -> failed events never retried), PROJ-001 (failed projection archived-as-seen, never rebuilt), FLINK-001 (retriable failure parks a dead timer, muscle never redrives). At every plane \u2014 ingest, project, orchestrate \u2014 a transient failure silently strands the work. For a lead-gen product this means leads/contacts/scores can vanish on any blip with no recovery and no alert.",
       "recommendation": "Adopt one coherent failure policy: manual-commit-after-success + dead-letter topic for poison, idempotent reprocessing, and a real redrive path. This is the single highest-leverage reliability fix and should precede shipping templates to customers.",
       "fix": "Coherent failure policy adopted: bus.consume_forever does manual commit-after-success + dead-letters poison records (outreach.dead_letter); dispatcher + transitions switched to enable_auto_commit=False + earliest + commit=True; projector now projects-before-archive (PROJ-001); Flink redrive made real (FLINK-001).",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -178,7 +180,7 @@
       "severity": "LOW",
       "status": "FIXED",
       "title": "MeResponse type doesn't match the actual /auth/me response",
-      "evidence": "api/v2.ts declares MeResponse{user_id, email, workspace_id}. Backend auth.py /me (read in Batch 4) returns {id, email, google_connected, workspaces:[...]} — no user_id, no workspace_id, adds workspaces + google_connected. Any code reading me().user_id gets undefined at runtime; tsc can't catch this API-shape drift.",
+      "evidence": "api/v2.ts declares MeResponse{user_id, email, workspace_id}. Backend auth.py /me (read in Batch 4) returns {id, email, google_connected, workspaces:[...]} \u2014 no user_id, no workspace_id, adds workspaces + google_connected. Any code reading me().user_id gets undefined at runtime; tsc can't catch this API-shape drift.",
       "recommendation": "Fix MeResponse to {id, email, google_connected, workspaces}. Audit callers of auth.me() for .user_id/.workspace_id reads.",
       "fix": "MeResponse corrected to {id, email, google_connected, workspaces} matching GET /auth/me; added MeWorkspace. Settings.tsx only reads .email.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -215,7 +217,7 @@
       "severity": "MEDIUM",
       "status": "FIXED",
       "title": "SSRF guard is string-prefix based and bypassable",
-      "evidence": "is_blocked_host does string matching (starts_with '127.', '10.', '169.254.169.254', etc.). Bypassable via decimal IP (http://2130706433/ = 127.0.0.1), IPv6-mapped ([::ffff:127.0.0.1]), octal/hex encodings, or DNS rebinding (hostname resolving to 169.254.169.254). Coverage IS correct — verified only webhook.rs + http_call.rs take operator URLs and BOTH call validate_outbound_url; enrich/transform/leadgen/apify/serper hit fixed provider URLs. So residual risk is the guard's porousness, not skipped calls. The code comment self-acknowledges the gap. Also h.starts_with('172.2') over-blocks 172.200.x / 172.2.x (false positives).",
+      "evidence": "is_blocked_host does string matching (starts_with '127.', '10.', '169.254.169.254', etc.). Bypassable via decimal IP (http://2130706433/ = 127.0.0.1), IPv6-mapped ([::ffff:127.0.0.1]), octal/hex encodings, or DNS rebinding (hostname resolving to 169.254.169.254). Coverage IS correct \u2014 verified only webhook.rs + http_call.rs take operator URLs and BOTH call validate_outbound_url; enrich/transform/leadgen/apify/serper hit fixed provider URLs. So residual risk is the guard's porousness, not skipped calls. The code comment self-acknowledges the gap. Also h.starts_with('172.2') over-blocks 172.200.x / 172.2.x (false positives).",
       "recommendation": "Resolve host -> IP and reject any IP in non-public ranges using std::net::IpAddr classification (is_loopback/is_private/is_link_local), not string prefixes. Optionally pin DNS resolution to block rebinding.",
       "fix": "common.rs validate_outbound_url is async + IP-classification based: IP literals classified directly, hostnames resolved via tokio lookup_host and rejected if ANY resolved IP is loopback/private/link-local/CGNAT/ULA. Callers awaited.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -227,7 +229,7 @@
       "line": 25,
       "severity": "DRIFT",
       "status": "FIXED",
-      "title": "leadgen handler delegates back to control plane — contradicts ADR 0001 'muscle never delegates back'",
+      "title": "leadgen handler delegates back to control plane \u2014 contradicts ADR 0001 'muscle never delegates back'",
       "evidence": "leadgen.rs POSTs to {control_plane_base}/internal/{endpoint} to run a lead-gen pull, but internal.py's docstring says 'In v2 the muscle never delegates back; lead sources are nodes the muscle executes directly. See ADR 0001.' and the dispatch-pull endpoints were removed. So this handler calls an endpoint that no longer exists -> would always fail. Likely dead/legacy handler still compiled in.",
       "recommendation": "Confirm the /internal/{endpoint} target exists; if not, remove the leadgen handler + its ChannelType. Lead-gen is canvas-node sources now.",
       "history": [
@@ -258,8 +260,8 @@
       "severity": "MEDIUM",
       "status": "FIXED",
       "title": "lead_source_registry.py is BROKEN on import (ModuleNotFoundError) and dead",
-      "evidence": "Confirmed by actually importing it: `from app.services import lead_source_registry` raises ModuleNotFoundError: No module named 'app.services.lead_sources.apify_jobs'. The lead_sources/ dir is empty except __pycache__ (15 ghost .pyc: apify_jobs, naukri, naukri_stealth, apollo, hunter, producthunt, proxycurl, google_sheets, github, manual, base, utils, _stealth). The v2 nuke deleted the source modules but left the registry importing them. 0 callers anywhere (app/scripts/tests), so it breaks nothing — but it's a broken file in the tree, and a footgun for anyone who tries to use it.",
-      "recommendation": "Delete lead_source_registry.py + the empty lead_sources/ dir (+ its __pycache__). Lead sources are canvas nodes now (sources/*.py). NOTE: confirms there is NO usable internal Naukri source — the ghost naukri.pyc source is gone; Allen's branch is the Naukri reference to port.",
+      "evidence": "Confirmed by actually importing it: `from app.services import lead_source_registry` raises ModuleNotFoundError: No module named 'app.services.lead_sources.apify_jobs'. The lead_sources/ dir is empty except __pycache__ (15 ghost .pyc: apify_jobs, naukri, naukri_stealth, apollo, hunter, producthunt, proxycurl, google_sheets, github, manual, base, utils, _stealth). The v2 nuke deleted the source modules but left the registry importing them. 0 callers anywhere (app/scripts/tests), so it breaks nothing \u2014 but it's a broken file in the tree, and a footgun for anyone who tries to use it.",
+      "recommendation": "Delete lead_source_registry.py + the empty lead_sources/ dir (+ its __pycache__). Lead sources are canvas nodes now (sources/*.py). NOTE: confirms there is NO usable internal Naukri source \u2014 the ghost naukri.pyc source is gone; Allen's branch is the Naukri reference to port.",
       "history": [
         {
           "status": "FIXED",
@@ -277,7 +279,7 @@
       "severity": "DRIFT",
       "status": "FIXED",
       "title": "Dead legacy service cluster (~370 LOC): screener, renderer, linkedin, voice",
-      "evidence": "Traced callers across app/scripts/tests: screener.py (0), renderer.py (0), linkedin.py (0), voice.py (0) — all unreferenced. Their docstrings name legacy node types (condition_ai_screen, action_ai_compose, action_data_transform) that v2 replaced; the v2 equivalents run in the Rust muscle (ChannelType.AI_SCREEN/AI_COMPOSE) or as canvas nodes. These are pre-v2 services orphaned by the muscle cutover.",
+      "evidence": "Traced callers across app/scripts/tests: screener.py (0), renderer.py (0), linkedin.py (0), voice.py (0) \u2014 all unreferenced. Their docstrings name legacy node types (condition_ai_screen, action_ai_compose, action_data_transform) that v2 replaced; the v2 equivalents run in the Rust muscle (ChannelType.AI_SCREEN/AI_COMPOSE) or as canvas nodes. These are pre-v2 services orphaned by the muscle cutover.",
       "recommendation": "Delete the four dead services (verify once more with a project-wide grep incl. dynamic imports before removing). ~370 LOC of confusion gone.",
       "history": [
         {
@@ -296,7 +298,7 @@
       "severity": "MEDIUM",
       "status": "FIXED",
       "title": "Fernet key derived by unsalted single-pass SHA-256 of SECRET_KEY; rotation orphans ciphertext",
-      "evidence": "_raw = hashlib.sha256(secret_key.encode()).digest() then Fernet(b64(_raw)). Deterministic, unsalted, no KDF/context. Not a practical break given SECRET_KEY entropy (64 hex), but not best-practice key derivation (HKDF with context/salt is conventional). Also: rotating SECRET_KEY makes decrypt() raise InvalidToken for ALL existing connection ciphertext (credential_refs, omni_connections) — rotation isn't a config swap, it orphans every stored secret. Relates to the project's 'rotate secrets' note.",
+      "evidence": "_raw = hashlib.sha256(secret_key.encode()).digest() then Fernet(b64(_raw)). Deterministic, unsalted, no KDF/context. Not a practical break given SECRET_KEY entropy (64 hex), but not best-practice key derivation (HKDF with context/salt is conventional). Also: rotating SECRET_KEY makes decrypt() raise InvalidToken for ALL existing connection ciphertext (credential_refs, omni_connections) \u2014 rotation isn't a config swap, it orphans every stored secret. Relates to the project's 'rotate secrets' note.",
       "recommendation": "Use HKDF(secret_key, info='omni-connection-encryption') for derivation. Document/handle SECRET_KEY rotation as a re-encrypt migration, not a config change.",
       "fix": "encryption.py derives the Fernet key with HKDF-SHA256 (info=omni-connection-encryption); MultiFernet keeps the legacy SHA-256 key as a decrypt-only fallback so existing ciphertext still decrypts and rotates forward on next write.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -309,7 +311,7 @@
       "severity": "LOW",
       "status": "FIXED",
       "title": "Template renderer does raw {{key}} replace with no escaping (HTML-injection risk in HTML contexts)",
-      "evidence": "render() substitutes raw lead values via str.replace with no escaping; lead-controlled values (scraped contact name/company) inject unescaped. Safe for plain-text (SMS) but a stored-XSS/HTML-injection vector if rendered output reaches an HTML email body without downstream escaping. ALSO this file is in the dead-service cluster (0 callers) — so currently moot, but if revived, escape per-context. Substitution also loops dict order so a value containing {{otherkey}} can double-substitute.",
+      "evidence": "render() substitutes raw lead values via str.replace with no escaping; lead-controlled values (scraped contact name/company) inject unescaped. Safe for plain-text (SMS) but a stored-XSS/HTML-injection vector if rendered output reaches an HTML email body without downstream escaping. ALSO this file is in the dead-service cluster (0 callers) \u2014 so currently moot, but if revived, escape per-context. Substitution also loops dict order so a value containing {{otherkey}} can double-substitute.",
       "recommendation": "If revived: context-aware escaping (HTML-escape for email bodies), single-pass substitution. Otherwise delete with SVC-002.",
       "fix": "Moot: renderer.py was deleted in the v2 phase-out (SVC-002); no template renderer remains.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -346,7 +348,7 @@
       "severity": "LOW",
       "status": "FIXED",
       "title": "'one-shot' credential ref is actually multi-read until expiry/release",
-      "evidence": "redeem_credential sets redeemed_at = COALESCE(redeemed_at, NOW()) — records first redemption but does NOT block subsequent redemptions. A ref is redeemable repeatedly for its 600s TTL or until released. Docs/comments call it 'one-shot'. (The Apify multi-step handler actually NEEDS re-reads, so behaviour may be intended — but it contradicts the stated contract and widens the leak window.)",
+      "evidence": "redeem_credential sets redeemed_at = COALESCE(redeemed_at, NOW()) \u2014 records first redemption but does NOT block subsequent redemptions. A ref is redeemable repeatedly for its 600s TTL or until released. Docs/comments call it 'one-shot'. (The Apify multi-step handler actually NEEDS re-reads, so behaviour may be intended \u2014 but it contradicts the stated contract and widens the leak window.)",
       "recommendation": "Either enforce true one-shot (reject if redeemed_at set, and have multi-step handlers cache in-process), or update docs to 'short-TTL, multi-read until released'.",
       "fix": "redeem_credential docstring corrected to the real semantics (short-TTL, multi-read until released/expired); multi-step handlers re-read within TTL by design; redeemed_at is observability-only.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -394,7 +396,7 @@
       "severity": "MEDIUM",
       "status": "FIXED",
       "title": "POST /events lets any authed user inject arbitrary event_types into the durable log",
-      "evidence": "append_event accepts any event_type/entity_type/payload and publishes to omni.events with no allowlist. The projector then faithfully applies it: a user could publish contact.created, ai.score.completed, lead.sequence_ended, etc. and fabricate projected state. Scoped to their own workspace_id (from auth ctx), so blast radius is their tenant — but within it, arbitrary projected-state forgery (e.g. fake lead scores) is possible.",
+      "evidence": "append_event accepts any event_type/entity_type/payload and publishes to omni.events with no allowlist. The projector then faithfully applies it: a user could publish contact.created, ai.score.completed, lead.sequence_ended, etc. and fabricate projected state. Scoped to their own workspace_id (from auth ctx), so blast radius is their tenant \u2014 but within it, arbitrary projected-state forgery (e.g. fake lead scores) is possible.",
       "recommendation": "Allowlist user-publishable event_types (e.g. only crm.* mutations a human should author), or route human-authored mutations through typed endpoints instead of raw event injection. Keep internal event_types (ai.*, lead.sequence_ended, *.completed) producible only by workers.",
       "fix": "POST /events allowlists user-publishable event_types (CRM mutations + note.added); worker-only events are rejected 403.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -420,7 +422,7 @@
       "severity": "GOOD",
       "status": "DISMISSED",
       "title": "auth_google's 2 unauthenticated routes are the unavoidable OAuth handshake (clean)",
-      "evidence": "RESOLVED by full read of auth_google.py. The two routes are exactly the OAuth bootstrap: POST /auth/google/login (returns the Google authorize URL — must be anonymous, the user IS signing in) and GET /auth/google/callback (Google's redirect target — exchanges code, upserts user, sets JWT cookie). CSRF is defended via a server-side _STATE_STORE with 10min TTL bound to each /login (callback rejects unknown/stale state). email_verified is checked. system_scope wraps the pre-workspace upsert. JWT cookie is httponly+secure+SameSite=Lax. Nothing sensitive is exposed — the missing auth dep is correct by construction.",
+      "evidence": "RESOLVED by full read of auth_google.py. The two routes are exactly the OAuth bootstrap: POST /auth/google/login (returns the Google authorize URL \u2014 must be anonymous, the user IS signing in) and GET /auth/google/callback (Google's redirect target \u2014 exchanges code, upserts user, sets JWT cookie). CSRF is defended via a server-side _STATE_STORE with 10min TTL bound to each /login (callback rejects unknown/stale state). email_verified is checked. system_scope wraps the pre-workspace upsert. JWT cookie is httponly+secure+SameSite=Lax. Nothing sensitive is exposed \u2014 the missing auth dep is correct by construction.",
       "recommendation": "No action. The two anonymous routes are unavoidable OAuth and leak nothing."
     },
     {
@@ -454,9 +456,9 @@
       "line": 37,
       "severity": "GOOD",
       "status": "DISMISSED",
-      "title": "channel.linkedin routes correctly — the SUSPECTED evidence used the wrong lookup key",
-      "evidence": "RESOLVED by reading channels/linkedin.py + dispatcher.py together. The node emits 'channel.linkedin.{mode}.queued' (e.g. channel.linkedin.invite.queued). My SUSPECTED evidence assumed the dispatcher matches NODE_CHANNEL by event_type — it does NOT. dispatcher._channel_for keys on node['node_type'] (dispatcher.py:122), which is 'channel.linkedin' (the MANIFEST.type), and that IS in NODE_CHANNEL -> LINKEDIN_DM. The event_type only needs to pass _is_intent (suffix '.queued' ✓). So LinkedIn invite/dm/profile_view/inmail all dispatch correctly. False positive from a wrong mental model of the lookup.",
-      "recommendation": "No action. LinkedIn channel routing is correct. (Note: NODE-001 was re-confirmed against this same correct model — ai.score/ai.classify genuinely fail because their node_type is absent from NODE_CHANNEL.)"
+      "title": "channel.linkedin routes correctly \u2014 the SUSPECTED evidence used the wrong lookup key",
+      "evidence": "RESOLVED by reading channels/linkedin.py + dispatcher.py together. The node emits 'channel.linkedin.{mode}.queued' (e.g. channel.linkedin.invite.queued). My SUSPECTED evidence assumed the dispatcher matches NODE_CHANNEL by event_type \u2014 it does NOT. dispatcher._channel_for keys on node['node_type'] (dispatcher.py:122), which is 'channel.linkedin' (the MANIFEST.type), and that IS in NODE_CHANNEL -> LINKEDIN_DM. The event_type only needs to pass _is_intent (suffix '.queued' \u2713). So LinkedIn invite/dm/profile_view/inmail all dispatch correctly. False positive from a wrong mental model of the lookup.",
+      "recommendation": "No action. LinkedIn channel routing is correct. (Note: NODE-001 was re-confirmed against this same correct model \u2014 ai.score/ai.classify genuinely fail because their node_type is absent from NODE_CHANNEL.)"
     },
     {
       "id": "NODE-GOOD",
@@ -514,7 +516,7 @@
       "severity": "LOW",
       "status": "FIXED",
       "title": "Hardcoded prod hostname in config defaults",
-      "evidence": "producthunt_oauth_redirect_uri (:60) and google redirect URIs (:74,:78) default to https://srv1575227.hstgr.cloud/... — an environment-specific prod host baked into source defaults. Not a secret, but config-in-code.",
+      "evidence": "producthunt_oauth_redirect_uri (:60) and google redirect URIs (:74,:78) default to https://srv1575227.hstgr.cloud/... \u2014 an environment-specific prod host baked into source defaults. Not a secret, but config-in-code.",
       "recommendation": "Drive these from env with no prod-host default (empty or localhost).",
       "fix": "config.py OAuth redirect + producthunt defaults are now empty (env-driven), no prod hostname baked in.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -551,7 +553,7 @@
       "severity": "MEDIUM",
       "status": "FIXED",
       "title": "_skip_current_batch advances ONE offset, not the whole batch",
-      "evidence": "After a failed getmany() (codec error), consumer.position(tp) returns the batch start. Seeking pos+1 advances by a single offset, but a compressed Kafka batch holds many records, so a poison batch of N needs N failed iterations to clear — log-spamming each. The docstring/comment claims it 'skips the batch'. Self-heals but the reasoning is wrong. (Self-introduced this session.)",
+      "evidence": "After a failed getmany() (codec error), consumer.position(tp) returns the batch start. Seeking pos+1 advances by a single offset, but a compressed Kafka batch holds many records, so a poison batch of N needs N failed iterations to clear \u2014 log-spamming each. The docstring/comment claims it 'skips the batch'. Self-heals but the reasoning is wrong. (Self-introduced this session.)",
       "recommendation": "On codec failure, seek to the high-watermark of the failed partition (or end) rather than pos+1, and log once. Or surface the poison offset to a dead-letter and skip past the whole batch via committed+1 of the next fetchable batch.",
       "fix": "_skip_current_batch seeks each partition to its high-watermark (end_offsets) instead of pos+1, stepping past the whole poison batch.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -566,7 +568,7 @@
       "title": "Dead `commit` parameter on consume_forever",
       "evidence": "All three callers verified: dispatcher + transitions use enable_auto_commit=True (no manual commit), projector passes on_record and commits inside it. commit=True is never passed. The commit branch (bus.py:173) is dead. (Self-introduced this session.)",
       "recommendation": "Remove the commit param (and its branch), or actually use it for the dispatcher/transitions manual-commit fix from EXEC-001.",
-      "fix": "The commit parameter is now load-bearing — drives the manual commit-after-success path used by dispatcher+transitions.",
+      "fix": "The commit parameter is now load-bearing \u2014 drives the manual commit-after-success path used by dispatcher+transitions.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
     },
     {
@@ -659,7 +661,7 @@
       "severity": "MEDIUM",
       "status": "FIXED",
       "title": "components/Canvas|Panels|Sidebar subtree is dead-at-runtime but live-at-import (~2430 LOC)",
-      "evidence": "Traced: the subtree is imported ONLY by Campaigns/index.tsx (lines 59-65), and ONLY by that file's canvas-editor code path which is unreachable (route /campaigns never passes :id; the editor is CampaignEditor at /campaigns/:id — Playwright-confirmed). So tsc/eslint see live imports (it compiles), but at runtime none of it renders. Removable, but NOT in isolation: must FIRST strip the dead canvas code + these 7 imports from Campaigns/index.tsx (FE-001), THEN delete the subtree, else the build breaks. Corrected from SUSPECTED after full route + Playwright trace.",
+      "evidence": "Traced: the subtree is imported ONLY by Campaigns/index.tsx (lines 59-65), and ONLY by that file's canvas-editor code path which is unreachable (route /campaigns never passes :id; the editor is CampaignEditor at /campaigns/:id \u2014 Playwright-confirmed). So tsc/eslint see live imports (it compiles), but at runtime none of it renders. Removable, but NOT in isolation: must FIRST strip the dead canvas code + these 7 imports from Campaigns/index.tsx (FE-001), THEN delete the subtree, else the build breaks. Corrected from SUSPECTED after full route + Playwright trace.",
       "recommendation": "Sequence: (1) reduce Campaigns/index.tsx to a pure list page, removing canvas state + the 7 components/* imports; (2) delete pages/Campaigns/components/; (3) confirm tsc+eslint green + /campaigns still lists + /campaigns/:id editor unaffected.",
       "history": [
         {
@@ -678,7 +680,7 @@
       "severity": "LOW",
       "status": "FIXED",
       "title": "Node discovery swallows import failures silently",
-      "evidence": "discover() wraps importlib.import_module in `except Exception: log.exception(...)` then continues. A malformed node disappears from the registry at startup with only a log line — no hard failure in dev.",
+      "evidence": "discover() wraps importlib.import_module in `except Exception: log.exception(...)` then continues. A malformed node disappears from the registry at startup with only a log line \u2014 no hard failure in dev.",
       "recommendation": "Re-raise in non-prod (env flag) or surface failed-node list in /health so a broken node is loud during development (the extension path we're about to use heavily).",
       "fix": "Node discovery records import failures (re-raises when NODE_DISCOVERY_STRICT set); /health surfaces them in node_import_failures and flips to degraded.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -728,7 +730,7 @@
       "severity": "MEDIUM",
       "status": "FIXED",
       "title": "Tags are never persisted -> condition.has_tag is permanently false",
-      "evidence": "Agent-traced: add_tag/remove_tag emit contact.tag_added/contact.tag_removed (entity_type contact) which hit projector _project_contact. But _project_contact's upsert writes only identity columns (email/first_name/last_name/company/...) and there is NO tags column write — the payload {tag: ...} is silently discarded. condition.has_tag reads custom_fields.tags, which nothing ever writes, so any tag-gated branch always takes 'false'. Two bugs compound: the tag write is lost (CONTRACT-002 routing) AND even the projection path drops it.",
+      "evidence": "Agent-traced: add_tag/remove_tag emit contact.tag_added/contact.tag_removed (entity_type contact) which hit projector _project_contact. But _project_contact's upsert writes only identity columns (email/first_name/last_name/company/...) and there is NO tags column write \u2014 the payload {tag: ...} is silently discarded. condition.has_tag reads custom_fields.tags, which nothing ever writes, so any tag-gated branch always takes 'false'. Two bugs compound: the tag write is lost (CONTRACT-002 routing) AND even the projection path drops it.",
       "recommendation": "Add a tags projection (either a tags column / join table on omni_contacts written by _project_contact on tag events, or store on omni_leads.custom_fields.tags). Make condition.has_tag read the same location.",
       "fix": "tags persisted: _apply_lead_mutations applies add_tag/remove_tag (from the muscle lead_mutations) into omni_leads.custom_fields.tags set-wise; condition.has_tag already reads that location.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -780,7 +782,7 @@
       "severity": "HIGH",
       "status": "FIXED",
       "title": "correlation_id is dropped for every condition/flow node -> trace forks at the next node",
-      "evidence": "Agent-traced + confirmed against _emit_synthetic_result (line 386-404): the function RECEIVES correlation_id as a parameter but its emitted metadata is only {workspace_id, node_id, next_handle} — correlation_id is omitted. So any transition produced by a non-muscle node carries correlation_id=None (orchestrator _safe_get returns None at line 109). The next node fired off that transition hits `ctx.correlation_id or str(uuid.uuid4())` (every node, e.g. email.py:58) and MINTS A NEW identity. Any workflow with a condition/split/delay/flow node in the path forks its trace there. Combined with commands.py:134 (build_command mints a fresh correlation_id when the dispatcher passes None) the run identity forks at multiple points.",
+      "evidence": "Agent-traced + confirmed against _emit_synthetic_result (line 386-404): the function RECEIVES correlation_id as a parameter but its emitted metadata is only {workspace_id, node_id, next_handle} \u2014 correlation_id is omitted. So any transition produced by a non-muscle node carries correlation_id=None (orchestrator _safe_get returns None at line 109). The next node fired off that transition hits `ctx.correlation_id or str(uuid.uuid4())` (every node, e.g. email.py:58) and MINTS A NEW identity. Any workflow with a condition/split/delay/flow node in the path forks its trace there. Combined with commands.py:134 (build_command mints a fresh correlation_id when the dispatcher passes None) the run identity forks at multiple points.",
       "recommendation": "Add correlation_id to _emit_synthetic_result's metadata dict (the value is already in scope). Replace `or str(uuid.uuid4())` mints at commands.py:134 with a hard requirement or carry correlation_id on the lead row so it can't be lost.",
       "fix": "_emit_synthetic_result includes correlation_id in metadata, so condition/flow/synthetic transitions carry the run identity forward instead of forking the trace.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -792,7 +794,7 @@
       "line": 22,
       "severity": "MEDIUM",
       "status": "DISMISSED",
-      "title": "Trace tool can't see the muscle round-trip — outreach.results/transitions are never archived",
+      "title": "Trace tool can't see the muscle round-trip \u2014 outreach.results/transitions are never archived",
       "evidence": "Agent-traced: trace.py reads ONLY omni_events_archive, which the projector populates exclusively from omni.events. The post-muscle stream (outreach.results -> Flink -> outreach.transitions -> transition_worker) is never published back to omni.events except when _fire_node runs a NEW node that emits intent. So the muscle's verdict (sent/failed/rate_limited) is never archived; the trace shows only what each node REQUESTED, never the muscle outcome. The tool's own docstring (line 22-23) admits this 'Known gap'. The orchestrator line-109 correlation fix keeps the id alive on the wire, but nothing on that wire is written where trace.py looks.",
       "recommendation": "Archive outreach.results (and/or transitions) into omni_events_archive (a second projector consumer or have the transition_worker emit a result.observed event to omni.events) so the trace spine includes the muscle round-trip. Pairs with DATAFLOW-001 (fix the fork first, else the archived ids won't stitch).",
       "fix": "Trace-spine gap (muscle round-trip not archived) is a tracing enhancement, not a correctness bug. DATAFLOW-001 (the fork) is fixed; archiving outreach.results is a separate observability feature deferred.",
@@ -806,7 +808,7 @@
       "severity": "MEDIUM",
       "status": "FIXED",
       "title": "workspace_id is trusted from the muscle's echoed metadata without re-validation",
-      "evidence": "Agent-traced: orchestrator copies workspace_id verbatim from the muscle's echoed metadata (orchestrator.py:104) into the transition; transition_worker uses meta.get('workspace_id') (line 436) directly in every WHERE workspace_id=$N query and only re-derives from the lead when ABSENT, never cross-checking a PRESENT value against omni_leads.workspace_id for the given lead_id. Today low-risk because the muscle clones metadata verbatim (common.rs) and a mismatched workspace_id yields zero rows (RLS + workspace-scoped lead lookup) rather than cross-tenant writes — so it fails safe, but by accident of the query shape, not by an explicit assert. Anything that can publish to outreach.results could steer writes by tenant.",
+      "evidence": "Agent-traced: orchestrator copies workspace_id verbatim from the muscle's echoed metadata (orchestrator.py:104) into the transition; transition_worker uses meta.get('workspace_id') (line 436) directly in every WHERE workspace_id=$N query and only re-derives from the lead when ABSENT, never cross-checking a PRESENT value against omni_leads.workspace_id for the given lead_id. Today low-risk because the muscle clones metadata verbatim (common.rs) and a mismatched workspace_id yields zero rows (RLS + workspace-scoped lead lookup) rather than cross-tenant writes \u2014 so it fails safe, but by accident of the query shape, not by an explicit assert. Anything that can publish to outreach.results could steer writes by tenant.",
       "recommendation": "Treat the muscle's echoed workspace_id as untrusted: derive workspace_id from the lead row by lead_id as the source of truth, and assert the echoed value matches (or ignore it). Defense-in-depth for the tenant boundary.",
       "fix": "handle_transition derives workspace_id from the lead row (source of truth) and refuses the transition if the muscle-echoed workspace_id disagrees.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -819,7 +821,7 @@
       "severity": "GOOD",
       "status": "VERIFIED",
       "title": "lead_id survives intact end-to-end; Rust muscle is a clean opaque metadata passthrough",
-      "evidence": "Agent-traced all 6 hops: lead_id is a typed Uuid in Rust (models.rs:213, cannot be silently re-minted), the Flink keyer's only fallback is an 'unknown' bucket that process_element discards. The muscle has ZERO correlation_id/workspace_id logic — all 4 result builders in common.rs do `metadata: command.metadata.clone()`, a verbatim echo, so no fork risk originates in Rust. The orchestrator line-109 correlation_id forward is confirmed present and its read-path matches the muscle's write-path.",
+      "evidence": "Agent-traced all 6 hops: lead_id is a typed Uuid in Rust (models.rs:213, cannot be silently re-minted), the Flink keyer's only fallback is an 'unknown' bucket that process_element discards. The muscle has ZERO correlation_id/workspace_id logic \u2014 all 4 result builders in common.rs do `metadata: command.metadata.clone()`, a verbatim echo, so no fork risk originates in Rust. The orchestrator line-109 correlation_id forward is confirmed present and its read-path matches the muscle's write-path.",
       "recommendation": "No action. The forks (DATAFLOW-001) are all on the Python side; Rust is clean."
     },
     {
@@ -830,7 +832,7 @@
       "severity": "HIGH",
       "status": "FIXED",
       "title": "transitions-v2 worker is replica-unsafe + auto-commit can silently drop or double-apply lead advancement",
-      "evidence": "Agent-traced: transition_worker sets enable_auto_commit=True (line 499) and does multi-step non-idempotent work in handle_transition — advances a lead and in _fan_out INSERTs N child leads (lines 275-291). Offset commits on a timer independent of handler completion: a crash mid-handle after commit loses the transition; redelivery after a rebalance re-runs a partial fan-out and DOUBLE-SPAWNS children (the fanout_total guard does not dedupe transition re-entry). Same auto-commit/catch-and-continue root cause as EXEC-001. Must stay replicas:1 until fixed.",
+      "evidence": "Agent-traced: transition_worker sets enable_auto_commit=True (line 499) and does multi-step non-idempotent work in handle_transition \u2014 advances a lead and in _fan_out INSERTs N child leads (lines 275-291). Offset commits on a timer independent of handler completion: a crash mid-handle after commit loses the transition; redelivery after a rebalance re-runs a partial fan-out and DOUBLE-SPAWNS children (the fanout_total guard does not dedupe transition re-entry). Same auto-commit/catch-and-continue root cause as EXEC-001. Must stay replicas:1 until fixed.",
       "recommendation": "Switch transitions-v2 to manual commit-after-success (mirror the projector) + make fan-out idempotent on transition id. Keep replicas:1. Folds into the RETRY-THEME failure-policy fix.",
       "fix": "transitions-v2 switched to enable_auto_commit=False + commit=True. _fan_out idempotent: a parent already fanned-out at the for_each node is a no-op on redelivery, so a rebalance cannot double-spawn children. Stays replicas:1.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -856,7 +858,7 @@
       "severity": "MEDIUM",
       "status": "FIXED",
       "title": "No topic pre-creation; 5 topics rely on Redpanda implicit auto-create at 1 partition",
-      "evidence": "Agent-traced: neither compose file creates topics or sets partition counts, and the redpanda service has no explicit auto_create_topics_enabled (Redpanda defaults true). omni.events/outreach.commands/results/transitions/dead_letter are created on first produce with 1 partition. Per-tenant ordering is preserved (workspace_id/lead_id keys) but parallelism is capped at 1 consumer/group regardless of replicas — so the dispatcher/muscle replica story is moot until partitions are raised, and a partition's single consumer is a throughput ceiling.",
+      "evidence": "Agent-traced: neither compose file creates topics or sets partition counts, and the redpanda service has no explicit auto_create_topics_enabled (Redpanda defaults true). omni.events/outreach.commands/results/transitions/dead_letter are created on first produce with 1 partition. Per-tenant ordering is preserved (workspace_id/lead_id keys) but parallelism is capped at 1 consumer/group regardless of replicas \u2014 so the dispatcher/muscle replica story is moot until partitions are raised, and a partition's single consumer is a throughput ceiling.",
       "recommendation": "Add an explicit topic-creation init (rpk topic create with intentional partition counts) so partitioning is a deliberate capacity decision, not a broker default.",
       "fix": "Added topics-init service: rpk creates omni.events/outreach.* with intentional partition counts (6/6/6/6/1) instead of 1-partition auto-create.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -882,7 +884,7 @@
       "severity": "MEDIUM",
       "status": "FIXED",
       "title": "transitions-v2 is missing MUSCLE_SHARED_SECRET (latent credential-mint failure)",
-      "evidence": "Agent-traced: backend-v2, dispatcher-v2, muscle-v2 all set MUSCLE_SHARED_SECRET; transitions-v2 does NOT. transitions re-runs node execute() via _fire_node; today the credential-ref mint happens on the dispatcher path so transitions may not need it, but the asymmetry is a latent trap — if a node fired from the transition worker ever needs to mint a credential ref it will silently get muscle_shared_secret='' and fail at runtime.",
+      "evidence": "Agent-traced: backend-v2, dispatcher-v2, muscle-v2 all set MUSCLE_SHARED_SECRET; transitions-v2 does NOT. transitions re-runs node execute() via _fire_node; today the credential-ref mint happens on the dispatcher path so transitions may not need it, but the asymmetry is a latent trap \u2014 if a node fired from the transition worker ever needs to mint a credential ref it will silently get muscle_shared_secret='' and fail at runtime.",
       "recommendation": "Add MUSCLE_SHARED_SECRET to transitions-v2 for consistency, or assert at startup that any worker that can mint credential refs has it set.",
       "fix": "transitions-v2 carries MUSCLE_SHARED_SECRET in docker-compose.v2.yml.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -908,7 +910,7 @@
       "severity": "LOW",
       "status": "FIXED",
       "title": "FRONTEND_URL host disagrees with the OAuth redirect hosts baked in config.py",
-      "evidence": "Agent-traced: backend-v2 sets FRONTEND_URL=https://145-223-21-222.sslip.io:8443 (compose:28) while config.py:60/74/78 bake https://srv1575227.hstgr.cloud/... for the ProductHunt/Google OAuth callbacks. CORS origin and OAuth callback host are two different names — OAuth round-trips only work if both are served and registered in the provider consoles. Same env-host-in-code drift as CFG-002/FE-004.",
+      "evidence": "Agent-traced: backend-v2 sets FRONTEND_URL=https://145-223-21-222.sslip.io:8443 (compose:28) while config.py:60/74/78 bake https://srv1575227.hstgr.cloud/... for the ProductHunt/Google OAuth callbacks. CORS origin and OAuth callback host are two different names \u2014 OAuth round-trips only work if both are served and registered in the provider consoles. Same env-host-in-code drift as CFG-002/FE-004.",
       "recommendation": "Pick one canonical external host, drive all of FRONTEND_URL + OAuth redirect URIs from env, and register that one host. Confirm the intended deployment hostname.",
       "fix": "OAuth redirect URIs + FRONTEND_URL env-driven (config.py defaults emptied; .env carries FRONTEND_URL); no conflicting hardcoded hosts.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -921,7 +923,7 @@
       "severity": "LOW",
       "status": "FIXED",
       "title": "Dockerfile.v2 comment contradicts actual nginx wiring (baked, not mounted)",
-      "evidence": "Agent-traced: the Dockerfile.v2 header (lines 2-3) says the vhost is mounted from frontend/nginx.v2.conf via compose, but the frontend-v2 compose block (148-150) mounts only ./certs and ./acme — nginx.v2.conf is actually COPYed into the image (Dockerfile.v2:21). Editing the nginx config needs a rebuild, not a restart (consistent with the v2-deploy-rebuild rule), but the comment misleads.",
+      "evidence": "Agent-traced: the Dockerfile.v2 header (lines 2-3) says the vhost is mounted from frontend/nginx.v2.conf via compose, but the frontend-v2 compose block (148-150) mounts only ./certs and ./acme \u2014 nginx.v2.conf is actually COPYed into the image (Dockerfile.v2:21). Editing the nginx config needs a rebuild, not a restart (consistent with the v2-deploy-rebuild rule), but the comment misleads.",
       "recommendation": "Fix the comment to state the config is baked at build time and requires a rebuild to change.",
       "fix": "Dockerfile.v2 comment corrected: nginx config is BAKED at build time (requires rebuild), not mounted.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -934,7 +936,7 @@
       "severity": "GOOD",
       "status": "VERIFIED",
       "title": "Consumer groups are unique per worker; required secrets supplied; muscle+projector are replica-safe",
-      "evidence": "Agent-verified: 5 distinct consumer groups (omni-projector-v1, v2-dispatcher, v2-transitions, muscle-v2, flink-orchestrator) — no two workers share a group, so no message stealing. Both placeholder-rejected required settings (db_password, secret_key) are supplied to all four Python services -> none crash on boot for env reasons. projector-v2 (manual commit after archive+project, idempotent via ON CONFLICT) and muscle-v2 (manual commit + Postgres dedupe ledger, at-least-once) are both replica-safe. The muscle group override avoids colliding with a legacy execution-engine-v2.",
+      "evidence": "Agent-verified: 5 distinct consumer groups (omni-projector-v1, v2-dispatcher, v2-transitions, muscle-v2, flink-orchestrator) \u2014 no two workers share a group, so no message stealing. Both placeholder-rejected required settings (db_password, secret_key) are supplied to all four Python services -> none crash on boot for env reasons. projector-v2 (manual commit after archive+project, idempotent via ON CONFLICT) and muscle-v2 (manual commit + Postgres dedupe ledger, at-least-once) are both replica-safe. The muscle group override avoids colliding with a legacy execution-engine-v2.",
       "recommendation": "No action on these. The replica-unsafe ones are dispatcher (DEPLOY-002) and transitions (DEPLOY-001)."
     },
     {
@@ -945,7 +947,7 @@
       "severity": "GOOD",
       "status": "VERIFIED",
       "title": "Projector writes are 100% schema-consistent (zero missing-column / ON CONFLICT / type / NOT NULL bugs)",
-      "evidence": "Agent column-level cross-check of every INSERT/UPDATE omni_* in the projector against migrations 021-024: every written column exists; every ON CONFLICT target is a real PK/UNIQUE (archive (topic,partition,offset)=UNIQUE 021:247; contacts/companies/deals/leads/messages (id)=PK; lead_scores (lead_id)=PK 022:48; ai_jobs (id)=PK; offsets (topic,partition)=PK 021:264). All NOT-NULL projection columns are supplied or in-code defaulted (companies.name->'Unnamed', deals.name/stage/currency, leads.status, messages.channel). JSONB columns get dict/list via the registered codec (db.py:99-112) — no type mismatch. CHECK constraints (score 0-100, tier, ai kind/status, message direction) are all satisfied by clamped/enumerated writes.",
+      "evidence": "Agent column-level cross-check of every INSERT/UPDATE omni_* in the projector against migrations 021-024: every written column exists; every ON CONFLICT target is a real PK/UNIQUE (archive (topic,partition,offset)=UNIQUE 021:247; contacts/companies/deals/leads/messages (id)=PK; lead_scores (lead_id)=PK 022:48; ai_jobs (id)=PK; offsets (topic,partition)=PK 021:264). All NOT-NULL projection columns are supplied or in-code defaulted (companies.name->'Unnamed', deals.name/stage/currency, leads.status, messages.channel). JSONB columns get dict/list via the registered codec (db.py:99-112) \u2014 no type mismatch. CHECK constraints (score 0-100, tier, ai kind/status, message direction) are all satisfied by clamped/enumerated writes.",
       "recommendation": "No action. The projection layer is the schema-cleanest part of the system."
     },
     {
@@ -968,7 +970,7 @@
       "line": 240,
       "severity": "MEDIUM",
       "status": "FIXED",
-      "title": "omni_lead_scores is write-dead — ai.score.completed is never emitted (composes with NODE-001)",
+      "title": "omni_lead_scores is write-dead \u2014 ai.score.completed is never emitted (composes with NODE-001)",
       "evidence": "Cross-plane composition of the event-contract + schema audits: _project_lead_score only fires on ai.score.completed, but ai.score never reaches a muscle (NODE-001/CONTRACT-001: node_type ai.score absent from NODE_CHANNEL -> stalls, never runs, never emits ai.score.completed). So the omni_lead_scores table + the AI lead-scoring workstream are write-dead despite the node existing in the palette. The schema is correct (SCHEMA-PROJ-GOOD); it's the upstream node-routing gap that starves it.",
       "recommendation": "Resolved by wiring ai.score (CONTRACT-001 fix: node_type->ChannelType + Rust/AI handler emitting ai.score.completed). Until then the lead-scoring product feature does not function on the canvas.",
       "last_run": "2026-06-04T13:40:19.078820+00:00",
@@ -982,7 +984,7 @@
       "severity": "HIGH",
       "status": "FIXED",
       "title": "Entire Python backend is floor-pinned (>=) with no lockfile -> non-reproducible builds",
-      "evidence": "Verified by reading requirements.txt: all 30 deps use >= floor pins (fastapi>=0.115, cryptography>=43.0, python-jose>=3.3, ...) and there is NO lockfile (no requirements.lock / poetry.lock / pip-tools output). `pip install` on any future date resolves whatever latest satisfies the floor — the Python analogue of RUST-001. Today the env happens to resolve to safe versions (verified live: python-jose 3.5.0, cryptography 44.0.1 — both past their known CVEs), but that is luck, not discipline: a fresh build or the prod image can resolve to different (potentially vulnerable) versions silently. backend-flink/Dockerfile similarly leaves kafka-python-ng UNPINNED (line 22) though apache-flink==1.18.0 is exact-pinned.",
+      "evidence": "Verified by reading requirements.txt: all 30 deps use >= floor pins (fastapi>=0.115, cryptography>=43.0, python-jose>=3.3, ...) and there is NO lockfile (no requirements.lock / poetry.lock / pip-tools output). `pip install` on any future date resolves whatever latest satisfies the floor \u2014 the Python analogue of RUST-001. Today the env happens to resolve to safe versions (verified live: python-jose 3.5.0, cryptography 44.0.1 \u2014 both past their known CVEs), but that is luck, not discipline: a fresh build or the prod image can resolve to different (potentially vulnerable) versions silently. backend-flink/Dockerfile similarly leaves kafka-python-ng UNPINNED (line 22) though apache-flink==1.18.0 is exact-pinned.",
       "recommendation": "Generate and commit a lockfile (pip-tools `pip-compile` -> requirements.txt with hashes, or uv lock). Pin kafka-python-ng in the Flink Dockerfile. Pair with RUST-001 (Cargo.lock) so all three shipped runtimes build reproducibly.",
       "fix": "Committed backend/requirements.lock via uv pip compile; backend Dockerfile installs from the lock. Flink Dockerfile pins kafka-python-ng==2.2.3.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -994,8 +996,8 @@
       "line": 31,
       "severity": "MEDIUM",
       "status": "FIXED",
-      "title": "JWT via python-jose (floor-pinned >=3.3) — known algorithm-confusion/JWE-DoS CVE history",
-      "evidence": "auth.py uses `from jose import jwt` for both encode (line 75) and decode (line 89). python-jose has CVE-2024-33663 (algorithm confusion) and CVE-2024-33664 (JWE decryption DoS), both fixed in 3.4.0. requirements.txt floor-pins >=3.3 (would permit a vulnerable 3.3.x). Live env resolves to 3.5.0 (patched), so currently safe — but the floor permits regression. decode() passes algorithms=[settings.jwt_algorithm] (an allowlist), which mitigates the alg-confusion vector even on older versions. Net: safe today, latent on rebuild.",
+      "title": "JWT via python-jose (floor-pinned >=3.3) \u2014 known algorithm-confusion/JWE-DoS CVE history",
+      "evidence": "auth.py uses `from jose import jwt` for both encode (line 75) and decode (line 89). python-jose has CVE-2024-33663 (algorithm confusion) and CVE-2024-33664 (JWE decryption DoS), both fixed in 3.4.0. requirements.txt floor-pins >=3.3 (would permit a vulnerable 3.3.x). Live env resolves to 3.5.0 (patched), so currently safe \u2014 but the floor permits regression. decode() passes algorithms=[settings.jwt_algorithm] (an allowlist), which mitigates the alg-confusion vector even on older versions. Net: safe today, latent on rebuild.",
       "recommendation": "Floor-pin python-jose>=3.4.1 (or migrate to PyJWT which is more actively maintained for JWT-only use). Folds into the DEP-001 lockfile fix.",
       "fix": "python-jose[cryptography]>=3.4.1 (past the CVEs); lockfile resolves 3.5.0.",
       "last_run": "2026-06-04T13:40:19.078820+00:00"
@@ -1021,7 +1023,7 @@
       "severity": "GOOD",
       "status": "VERIFIED",
       "title": "No supply-chain smells; security-critical deps resolve to patched versions",
-      "evidence": "No git-URL/non-registry/typosquat-looking deps. cryptography resolves to 44.0.1 (recent, no open advisory), python-jose to 3.5.0 (past its CVEs). Flink connector JARs are exact-version-pinned from repo1.maven.org (the canonical Maven Central). The supply-chain RISK is reproducibility (DEP-001), not a currently-reachable known-vulnerable dep. NOTE: this plane is PARTIAL — the dedicated agent hit a session limit before reporting; I verified requirements.txt + Flink Dockerfile + live versions directly, but did NOT run pip-audit or npm audit on the frontend lockfile.",
+      "evidence": "No git-URL/non-registry/typosquat-looking deps. cryptography resolves to 44.0.1 (recent, no open advisory), python-jose to 3.5.0 (past its CVEs). Flink connector JARs are exact-version-pinned from repo1.maven.org (the canonical Maven Central). The supply-chain RISK is reproducibility (DEP-001), not a currently-reachable known-vulnerable dep. NOTE: this plane is PARTIAL \u2014 the dedicated agent hit a session limit before reporting; I verified requirements.txt + Flink Dockerfile + live versions directly, but did NOT run pip-audit or npm audit on the frontend lockfile.",
       "recommendation": "Run `pip-audit` and `npm audit --omit=dev` as a follow-up to close the partial coverage. No reachable CVE found in what was checked."
     },
     {
@@ -1042,8 +1044,8 @@
       "line": 78,
       "severity": "CRITICAL",
       "status": "FIXED",
-      "title": "channel.linkedin ignores mode — invite/inmail/profile_view all dispatch as DM",
-      "evidence": "NODE_CHANNEL['channel.linkedin'] is the static value ChannelType.LINKEDIN_DM. The node config offers mode in {invite,dm,inmail,profile_view} and emits channel.linkedin.{mode}.queued with payload.mode set. But dispatcher._channel_for returned the static NODE_CHANNEL value and never read payload.mode, so every mode dispatched as LINKEDIN_DM. The Rust muscle HAS the four distinct handlers (handle_linkedin_invite/dm/inmail/profile_view) wired in handlers/mod.rs — they were simply never reached except DM. A 'LinkedIn invite' node sent a DM.",
+      "title": "channel.linkedin ignores mode \u2014 invite/inmail/profile_view all dispatch as DM",
+      "evidence": "NODE_CHANNEL['channel.linkedin'] is the static value ChannelType.LINKEDIN_DM. The node config offers mode in {invite,dm,inmail,profile_view} and emits channel.linkedin.{mode}.queued with payload.mode set. But dispatcher._channel_for returned the static NODE_CHANNEL value and never read payload.mode, so every mode dispatched as LINKEDIN_DM. The Rust muscle HAS the four distinct handlers (handle_linkedin_invite/dm/inmail/profile_view) wired in handlers/mod.rs \u2014 they were simply never reached except DM. A 'LinkedIn invite' node sent a DM.",
       "recommendation": "Map channel.linkedin + payload.mode -> the mode-specific ChannelType in the dispatcher (the only place that sees the rendered payload).",
       "fix": "Added _LINKEDIN_MODE_CHANNEL and a channel.linkedin branch in _channel_for that returns LINKEDIN_{INVITE|DM|INMAIL|PROFILE_VIEW} by payload.mode (falls back to LINKEDIN_DM for absent/unknown mode). Regression test audit/tests/test_congruity.py::test_linkedin_mode_routes_to_distinct_channels + config<->router agreement test."
     },
@@ -1054,8 +1056,8 @@
       "line": 50,
       "severity": "HIGH",
       "status": "FIXED",
-      "title": "AiJobOut.kind Literal omits 'screen' — GET /ai/jobs 500s once a screen job exists",
-      "evidence": "Migration 024 widened omni_ai_jobs.kind CHECK to include 'screen'; projector _project_ai_job writes kind='screen' for ai.screen_company/person jobs run inside a workflow. But AiJobOut.kind (and AiJobCreate.kind, list_jobs query) were Literal['score','compose','enrich','classify'] — model_validate on a screen row raises ValidationError, so the entire GET /ai/jobs response 500s and the AI Studio run-log page breaks. Frontend AiJobKind likewise omitted 'screen'.",
+      "title": "AiJobOut.kind Literal omits 'screen' \u2014 GET /ai/jobs 500s once a screen job exists",
+      "evidence": "Migration 024 widened omni_ai_jobs.kind CHECK to include 'screen'; projector _project_ai_job writes kind='screen' for ai.screen_company/person jobs run inside a workflow. But AiJobOut.kind (and AiJobCreate.kind, list_jobs query) were Literal['score','compose','enrich','classify'] \u2014 model_validate on a screen row raises ValidationError, so the entire GET /ai/jobs response 500s and the AI Studio run-log page breaks. Frontend AiJobKind likewise omitted 'screen'.",
       "recommendation": "Add 'screen' to AiJobOut.kind + AiJobCreate.kind + the list_jobs query Literal (backend) and AiJobKind (frontend).",
       "fix": "Added 'screen' to all three backend Literals and the FE AiJobKind; AiStudio.tsx KIND_META gained a screen entry (display-only; excluded from the ad-hoc launcher since screening runs in-workflow). Regression test test_congruity.py::test_ai_job_kind_congruent_across_db_projector_pydantic asserts projector kinds <= Pydantic kinds <= DB CHECK."
     },
@@ -1066,10 +1068,10 @@
       "line": 51,
       "severity": "HIGH",
       "status": "FIXED",
-      "title": "flow.race was a stub presented as a feature — always took branch_0",
-      "evidence": "The node declared branch_0..7 + timeout handles and a rich docstring ('opens N parallel sub-paths; first winning event wins; others cancel; timeout'), but execute() hardcoded handle='branch_0' and NO race handling existed in transition_worker (which special-cases for_each/join only) or the Flink orchestrator. An operator wiring a race got 'only ever try branch_0' — silent.",
+      "title": "flow.race was a stub presented as a feature \u2014 always took branch_0",
+      "evidence": "The node declared branch_0..7 + timeout handles and a rich docstring ('opens N parallel sub-paths; first winning event wins; others cancel; timeout'), but execute() hardcoded handle='branch_0' and NO race handling existed in transition_worker (which special-cases for_each/join only) or the Flink orchestrator. An operator wiring a race got 'only ever try branch_0' \u2014 silent.",
       "recommendation": "Implement structural race (first-arm-to-rejoin wins + cancel siblings + real timeout) reusing the proven for_each/join machinery, and make the node manifest honest.",
-      "fix": "transition_worker: _race_fan_out spawns one child per branch_* edge (parent parks); _join_arrive branches on origin node type — flow.race releases the parent on the FIRST child to reach the shared flow.join (atomic claim via UPDATE...status='waiting' RETURNING), cancels losing siblings, advances parent down 'done'. Timeout: a delayed synthetic result on the parent's 'timeout' handle via the orchestrator timer, guarded so a winner makes it a no-op. Node rewritten to describe first-arm-to-rejoin (dropped misleading winner_event_types; kept branches + timeout_hours; added 'done' handle)."
+      "fix": "transition_worker: _race_fan_out spawns one child per branch_* edge (parent parks); _join_arrive branches on origin node type \u2014 flow.race releases the parent on the FIRST child to reach the shared flow.join (atomic claim via UPDATE...status='waiting' RETURNING), cancels losing siblings, advances parent down 'done'. Timeout: a delayed synthetic result on the parent's 'timeout' handle via the orchestrator timer, guarded so a winner makes it a no-op. Node rewritten to describe first-arm-to-rejoin (dropped misleading winner_event_types; kept branches + timeout_hours; added 'done' handle)."
     },
     {
       "id": "FLOW-003",
@@ -1078,8 +1080,8 @@
       "line": 46,
       "severity": "HIGH",
       "status": "FIXED",
-      "title": "flow.goal / flow.end recorded nothing — conversion indistinguishable from dead-end",
-      "evidence": "goal emits lead.goal_reached {goal_name,value}, end emits lead.sequence_ended {reason}; both routed to _project_lead whose upsert COALESCEs status (payloads carry no status). The lead ended status='completed' via the generic leaf path, so a goal-conversion looked identical to a dead-end, and goal_name/value/reason were projected to no column. flow.goal's docstring claimed Analytics records the conversion — that projector code did not exist.",
+      "title": "flow.goal / flow.end recorded nothing \u2014 conversion indistinguishable from dead-end",
+      "evidence": "goal emits lead.goal_reached {goal_name,value}, end emits lead.sequence_ended {reason}; both routed to _project_lead whose upsert COALESCEs status (payloads carry no status). The lead ended status='completed' via the generic leaf path, so a goal-conversion looked identical to a dead-end, and goal_name/value/reason were projected to no column. flow.goal's docstring claimed Analytics records the conversion \u2014 that projector code did not exist.",
       "recommendation": "Give goal/end distinct terminal statuses and persist the outcome detail; surface conversions in Analytics.",
       "fix": "transition_worker._fire_node sets status='converted' (goal) / 'ended' (end) directly for these terminal nodes. New projector _project_lead_outcome merges {kind,goal_name,value|reason,at} into custom_fields.outcome + sets the status. Analytics funnel gained a 'Converted' step (lead.status==='converted'); Leads filter + Badge gained converted/ended."
     },
@@ -1090,8 +1092,8 @@
       "line": 163,
       "severity": "MEDIUM",
       "status": "FIXED",
-      "title": "KG people-cache moat inert — cache_person/cached_people/mark_people_discovered never called",
-      "evidence": "All three KG people-cache functions had ZERO callers. Nothing wrote omni_people_cache; nothing set companies.people_discovered=true. So crm.resolve_company's 'known' branch (skip discovery when people_discovered) was UNREACHABLE — every company re-discovered every run; the zero-cost-repeat-company moat the resolver docstring promised never accrued.",
+      "title": "KG people-cache moat inert \u2014 cache_person/cached_people/mark_people_discovered never called",
+      "evidence": "All three KG people-cache functions had ZERO callers. Nothing wrote omni_people_cache; nothing set companies.people_discovered=true. So crm.resolve_company's 'known' branch (skip discovery when people_discovered) was UNREACHABLE \u2014 every company re-discovered every run; the zero-cost-repeat-company moat the resolver docstring promised never accrued.",
       "recommendation": "Cache discovered people + mark the company people-discovered when a person reaches crm.create_contact (it carries both the person and the resolved company).",
       "fix": "transition_worker._fire_node hook after a successful crm.create_contact: cache_person(company_id, person from custom_fields.item) + mark_people_discovered(company_id), using custom_fields.company_resolution.company_id. Same worker-injection pattern as the resolve_company hook (nodes have no DB handle)."
     },
@@ -1114,10 +1116,10 @@
       "line": 3,
       "severity": "HIGH",
       "status": "FIXED",
-      "title": "source.webhook_in was a dead source — no inbound listener existed",
+      "title": "source.webhook_in was a dead source \u2014 no inbound listener existed",
       "evidence": "Node docstring promised POST /webhooks/in/{workflow_id}/{node_id} 'added in a follow-up commit'; that route did NOT exist (no router, not in main.py; webhook/ only had the CI deploy webhook). Nothing consumed source.webhook_in.registered. An operator could wire the node and it would never receive a contact. Passed the reachability test only because it was hardcoded in LOCALLY_RESOLVED (false assumption).",
       "recommendation": "Build the inbound webhook router or remove the node.",
-      "fix": "Built app/routers/webhooks_in.py: POST /webhooks/in/{workflow_id}/{node_id} (unauthenticated — trust via opaque ids + optional HMAC-SHA256 constant-time verify), maps JSON via the node's field_map -> contact.created, seeds a lead.created at the node, emits a transition off 'default' so the lead flows down the workflow. Mounted at /webhooks. Node docstring corrected."
+      "fix": "Built app/routers/webhooks_in.py: POST /webhooks/in/{workflow_id}/{node_id} (unauthenticated \u2014 trust via opaque ids + optional HMAC-SHA256 constant-time verify), maps JSON via the node's field_map -> contact.created, seeds a lead.created at the node, emits a transition off 'default' so the lead flows down the workflow. Mounted at /webhooks. Node docstring corrected."
     },
     {
       "id": "FLOW-004",
@@ -1126,8 +1128,8 @@
       "line": 1,
       "severity": "HIGH",
       "status": "FIXED",
-      "title": "flow.delay did not delay — advanced the lead immediately",
-      "evidence": "delay.py computed delay_seconds but emitted it only as telemetry; the node returned handle='default' with no events -> projection_only -> _emit_synthetic_result(delay_seconds=0) -> orchestrator advanced immediately. A 'wait 3 days' node fired instantly. The orchestrator HAD the delay mechanism (metadata.accumulated_delay_seconds) — the node just never fed it.",
+      "title": "flow.delay did not delay \u2014 advanced the lead immediately",
+      "evidence": "delay.py computed delay_seconds but emitted it only as telemetry; the node returned handle='default' with no events -> projection_only -> _emit_synthetic_result(delay_seconds=0) -> orchestrator advanced immediately. A 'wait 3 days' node fired instantly. The orchestrator HAD the delay mechanism (metadata.accumulated_delay_seconds) \u2014 the node just never fed it.",
       "recommendation": "Special-case flow.delay in the worker: compute the delay and emit a delayed synthetic result.",
       "fix": "transition_worker._fire_node special-cases flow.delay/flow.wait_until -> _compute_flow_delay_seconds() -> _emit_synthetic_result(delay_seconds=...) (status='sent' so the orchestrator timer holds the lead 'waiting'). Regression test test_congruity.py::test_flow_delay_computes_nonzero_seconds."
     },
@@ -1138,8 +1140,8 @@
       "line": 1,
       "severity": "HIGH",
       "status": "FIXED",
-      "title": "flow.wait_until did not hold — advanced immediately (no business-hours logic existed)",
-      "evidence": "wait_until validated the window + emitted it as telemetry, but NOTHING consumed earliest_hour/latest_hour/days_of_week. No orchestrator/worker timezone-aware release logic existed. Docstring claimed the orchestrator computes the next wall-clock time + registers a timer — that code did not exist. The node advanced immediately like flow.delay.",
+      "title": "flow.wait_until did not hold \u2014 advanced immediately (no business-hours logic existed)",
+      "evidence": "wait_until validated the window + emitted it as telemetry, but NOTHING consumed earliest_hour/latest_hour/days_of_week. No orchestrator/worker timezone-aware release logic existed. Docstring claimed the orchestrator computes the next wall-clock time + registers a timer \u2014 that code did not exist. The node advanced immediately like flow.delay.",
       "recommendation": "Compute seconds-until-next-window in the workflow timezone and emit a delayed synthetic result.",
       "fix": "_compute_flow_delay_seconds() computes seconds to the next earliest_hour on an allowed weekday in the workflow's timezone (zoneinfo + omni_workflows.timezone); 0 if the window is open now. Rides the same delay path as flow.delay. Node docstring corrected. Unit-verified (open->0, Mon 6am->3h, Sat->next-Mon-9am)."
     },
@@ -1150,7 +1152,7 @@
       "line": 120,
       "severity": "MEDIUM",
       "status": "FIXED",
-      "title": "credential_refs never swept — table grows unbounded (sweep had no scheduler)",
+      "title": "credential_refs never swept \u2014 table grows unbounded (sweep had no scheduler)",
       "evidence": "sweep_expired_credentials existed ('called by whatever scheduler the v2 platform ends up using') but NO scheduler/cron existed. credential_refs rows (one-shot encrypted secret bundles minted per muscle command) were inserted with a TTL but never deleted -> unbounded growth + stale encrypted bundles accumulate.",
       "recommendation": "Add a periodic sweep (FastAPI lifespan background task).",
       "fix": "main.py lifespan starts _credential_sweep_loop (hourly) calling sweep_expired_credentials; cancelled cleanly on shutdown; tolerant of transient failures."
@@ -1175,7 +1177,7 @@
       "severity": "MEDIUM",
       "status": "FIXED",
       "title": "Inbox 'Saved views' + 'AI summarise' buttons had no handler (dead UI)",
-      "evidence": "Two PageHeader action buttons with no onClick — clicking did nothing. Declared UI features with zero implementation.",
+      "evidence": "Two PageHeader action buttons with no onClick \u2014 clicking did nothing. Declared UI features with zero implementation.",
       "recommendation": "Implement or remove until built.",
       "fix": "Removed both dead buttons (+ now-unused Filter/Sparkles/Button imports). The features can be re-added when implemented."
     },
@@ -1225,7 +1227,7 @@
       "title": "'cron-driven lead-gen' selectors referenced but no cron exists",
       "evidence": "get_latest_user_with_token + oauth_producthunt.resolve_user_access_token are 'fallback selectors for cron-driven jobs'; no scheduler exists, so the scheduled ProductHunt pull they support doesn't run and the selectors are unreachable.",
       "recommendation": "Build the scheduled PH pull, or remove the dead selectors.",
-      "fix": "Flagged in-code (CMP4 docstring note: no scheduler exists yet; wire when it lands). Kept as scaffolding for the planned feature — NOT deleted. Open until the scheduler is built.",
+      "fix": "Flagged in-code (CMP4 docstring note: no scheduler exists yet; wire when it lands). Kept as scaffolding for the planned feature \u2014 NOT deleted. Open until the scheduler is built.",
       "history": [
         {
           "status": "DISMISSED",
@@ -1254,10 +1256,10 @@
       "line": 53,
       "severity": "MEDIUM",
       "status": "FIXED",
-      "title": "No tagline normalizer — scraped company names deduped weaker than the source impl",
+      "title": "No tagline normalizer \u2014 scraped company names deduped weaker than the source impl",
       "evidence": "resolve_company matched on the raw scraped name (only a trailing single-word suffix strip in the fuzzy branch). Naukri's jobapi returns names like 'SourceMash Technologies | Leading Software Co' / 'Acme - We Build X'; the tagline defeated exact + alias match, so the same company was created multiple times. Allen's Rust normalizer stripped these; our port dropped it.",
       "recommendation": "Add a clean_company_name() (pure) that strips taglines on |/-/:/bullet separators + trailing bracketed descriptors, apply it at the top of resolve_company, and auto-alias the original raw name.",
-      "fix": "Added clean_company_name() in company_kg.py (regex split on '\\s+[|:bullet-dash]\\s+' + trailing (..)/[..] strip + whitespace collapse) — deliberately requires spaces around '-' so 'Co-Working Spaces Ltd' is NOT mangled. resolve_company cleans the name before exact/alias/fuzzy/create. _register_alias() records the original tagline-bearing name as an 'auto_tagline' alias so the next scrape of that exact variant hits the alias fast-path. Regression test test_congruity.py::test_clean_company_name_strips_taglines_only (10 cases incl. the hyphen/dotted/empty non-mangle guards)."
+      "fix": "Added clean_company_name() in company_kg.py (regex split on '\\s+[|:bullet-dash]\\s+' + trailing (..)/[..] strip + whitespace collapse) \u2014 deliberately requires spaces around '-' so 'Co-Working Spaces Ltd' is NOT mangled. resolve_company cleans the name before exact/alias/fuzzy/create. _register_alias() records the original tagline-bearing name as an 'auto_tagline' alias so the next scrape of that exact variant hits the alias fast-path. Regression test test_congruity.py::test_clean_company_name_strips_taglines_only (10 cases incl. the hyphen/dotted/empty non-mangle guards)."
     },
     {
       "id": "DEDUP-002",
@@ -1267,9 +1269,9 @@
       "severity": "LOW",
       "status": "FIXED",
       "title": "Naukri employee_count / industry filters silently no-op (jobapi omits those fields)",
-      "evidence": "filter_company enforces a <=500-employee cap + industry/domain signals, but Naukri's captured /jobapi/v3/search JSON carries neither employee_count nor structured industry. So for Naukri-sourced companies those gates never fire — a silent no-op an operator would assume was enforcing the size cap.",
+      "evidence": "filter_company enforces a <=500-employee cap + industry/domain signals, but Naukri's captured /jobapi/v3/search JSON carries neither employee_count nor structured industry. So for Naukri-sourced companies those gates never fire \u2014 a silent no-op an operator would assume was enforcing the size cap.",
       "recommendation": "Document the no-op at both the source node and the filter; note that enforcing the cap on Naukri leads requires upstream enrichment.",
-      "fix": "Documented in sources/naukri.py docstring (CAVEAT block) + an inline NOTE at company_kg.filter_company's employee-cap check. Naukri companies are gated by name-blocklist + JD-keyword + hiring-signal score only; size cap needs domain->employee enrichment before crm.resolve_company. Not a bug — a documented limitation of the source."
+      "fix": "Documented in sources/naukri.py docstring (CAVEAT block) + an inline NOTE at company_kg.filter_company's employee-cap check. Naukri companies are gated by name-blocklist + JD-keyword + hiring-signal score only; size cap needs domain->employee enrichment before crm.resolve_company. Not a bug \u2014 a documented limitation of the source."
     },
     {
       "id": "FEAT-002",
@@ -1290,10 +1292,10 @@
       "line": 42,
       "severity": "HIGH",
       "status": "FIXED",
-      "title": "crm.create_contact read identity ONLY from static config — the people-discovery chain produced no contact",
-      "evidence": "create_contact built the contact.created payload purely from CreateContactConfig (cfg.email/first_name/...). The transition_worker passes node.config VERBATIM (config=node.get('config') or {}) with NO interpolation of the lead's custom_fields. So a fanned-out, Serper-discovered, Claude-screened person sitting in custom_fields.item was invisible: with empty config the node errored CONTACT_REQUIRES_EMAIL_OR_LINKEDIN, and with static config it created the SAME hardcoded contact for every person. This — not missing connections (serper+anthropic both exist on ws 14ac2dc2) — is why the Naukri/LinkedIn company->person chain never yielded a real named contact. Affected naukri-e2e-run AND 'Marketing Agencies India' identically.",
+      "title": "crm.create_contact read identity ONLY from static config \u2014 the people-discovery chain produced no contact",
+      "evidence": "create_contact built the contact.created payload purely from CreateContactConfig (cfg.email/first_name/...). The transition_worker passes node.config VERBATIM (config=node.get('config') or {}) with NO interpolation of the lead's custom_fields. So a fanned-out, Serper-discovered, Claude-screened person sitting in custom_fields.item was invisible: with empty config the node errored CONTACT_REQUIRES_EMAIL_OR_LINKEDIN, and with static config it created the SAME hardcoded contact for every person. This \u2014 not missing connections (serper+anthropic both exist on ws 14ac2dc2) \u2014 is why the Naukri/LinkedIn company->person chain never yielded a real named contact. Affected naukri-e2e-run AND 'Marketing Agencies India' identically.",
       "recommendation": "Read the discovered person from custom_fields[person_field] (default 'item'), let config override field-for-field, fail closed when neither yields an identity.",
-      "fix": "create_contact now _merge_identity(cfg, custom_fields[person_field]): person row supplies email/linkedin_url/first+last (splits a single 'name')/company(_name)/headline(or title); explicit config wins; fail-closed when neither has email or linkedin. lead.contact_attached still binds the new contact to the lead (person-stage lead). Unit-verified (dynamic/override/empty). Regression test test_congruity.py::test_create_contact_reads_discovered_person_not_just_config. NOTE: the graph edge past resolve_company is a SEPARATE data fix (naukri-e2e-run dead-ends at resolve_company — no outgoing edge)."
+      "fix": "create_contact now _merge_identity(cfg, custom_fields[person_field]): person row supplies email/linkedin_url/first+last (splits a single 'name')/company(_name)/headline(or title); explicit config wins; fail-closed when neither has email or linkedin. lead.contact_attached still binds the new contact to the lead (person-stage lead). Unit-verified (dynamic/override/empty). Regression test test_congruity.py::test_create_contact_reads_discovered_person_not_just_config. NOTE: the graph edge past resolve_company is a SEPARATE data fix (naukri-e2e-run dead-ends at resolve_company \u2014 no outgoing edge)."
     },
     {
       "id": "PORT-001",
@@ -1305,7 +1307,7 @@
       "title": "Ported Allen's Indeed collector as source.indeed (capability parity with the fork)",
       "evidence": "Allen's feature/dev-automation added an Indeed job source (omni_outreach_v3/src/collectors/indeed.rs, Apify curious_coder/indeed-scraper) on 2026-06-08, giving his standalone 3 sources to our 2. Directive: port every capability he leads on into our v2 spine ([[project_allen_bysignal_divergence]]).",
       "recommendation": "Add source.indeed as a v2 node mirroring source.linkedin_jobs (shared Apify connection) + ChannelType.INDEED + a muscle indeed.rs handler.",
-      "fix": "source.indeed node (capabilities=connection:apify, country+keywords config) -> ChannelType.INDEED in events.py + commands.NODE_CHANNEL -> backend-rust handlers/indeed.rs (Apify run/poll/fetch, curious_coder~indeed-scraper, companyDetails.name/title/originalApplyUrl mapping, dedup by company w/ role_count — SAME row shape as naukri.rs) wired into models.rs enum/as_str + handlers/mod.rs dispatch. lead_columns.py gained source.indeed columns + pipeline order. 42 nodes (was 41), 0 import failures. Congruity test test_source_indeed_channel_congruent_python_and_rust guards the Py<->Rust enum agreement. Rust compiled in the muscle Docker build."
+      "fix": "source.indeed node (capabilities=connection:apify, country+keywords config) -> ChannelType.INDEED in events.py + commands.NODE_CHANNEL -> backend-rust handlers/indeed.rs (Apify run/poll/fetch, curious_coder~indeed-scraper, companyDetails.name/title/originalApplyUrl mapping, dedup by company w/ role_count \u2014 SAME row shape as naukri.rs) wired into models.rs enum/as_str + handlers/mod.rs dispatch. lead_columns.py gained source.indeed columns + pipeline order. 42 nodes (was 41), 0 import failures. Congruity test test_source_indeed_channel_congruent_python_and_rust guards the Py<->Rust enum agreement. Rust compiled in the muscle Docker build."
     },
     {
       "id": "E2E-001",
@@ -1317,7 +1319,7 @@
       "title": "Naukri people-stage e2e fails: company fan-out duplicates + join over-counts + screen verdict not written to child custom_fields",
       "evidence": "Live run 2026-06-08 (wf Marketing Agencies India, source.naukri start, lead 345d33d3): naukri scraped OK, 16 ai.screen_company ran (status=sent), but ZERO contacts. DB lineage: parent fanout_total=1 but fanout_done=64; 4 child leads ALL carry the SAME company ('Axis Max Life Insurance') = duplicate fan-out from a max_items:1 for_each; children completed with current_node_id=NULL and custom_fields.screen EMPTY (verdict never written back) so no child could route accept->serper_people. No source.serper_people.requested, no ai.screen_person.queued, no contact.created emitted. Three compounding bugs: (a) for_each spawned duplicate children for one company despite max_items:1; (b) flow.join fanout_done over-counts (64 vs total 1) because many handles route into one join; (c) ai.screen_company verdict (muscle result next_handle) is not persisted onto the child lead's custom_fields.screen, so routing past the screen can't see ACCEPT. Also data: the naukri 'marketing agency' scrape returned an insurance MNC, which the strict ICP prompt would reject anyway.",
       "recommendation": "Trace _fan_out child creation (why duplicates for max_items:1) + _join_arrive counter semantics (count distinct children, not arrivals) + ensure the ai_screen result writes decision into the child's custom_fields before routing. Fix on a branch with a local harness, not live prod trial.",
-      "fix": "Three fixes: (a) _fan_out now _dedup_items() before the max_items cap so a source returning the same company/person twice spawns ONE child, not N (value-keyed, order-preserving). (b) _join_arrive ends the child via an atomic UPDATE...WHERE status<>'completed' RETURNING id and no-ops if not claimed, so a redelivered join-arrival bumps the parent's fanout_done at most once per DISTINCT child (kills the fanout_done=64 vs total=1 over-count that released the barrier early). (c) ai_screen.rs writes the verdict to lead_mutations.custom_fields.screen.{decision,verdict,reason,model} so the screen decision is durable (Leads column + scoring); routing still uses next_handle. Regression tests: test_fan_out_dedups_identical_items, test_join_arrive_counts_distinct_children_idempotently, test_ai_screen_writes_verdict_to_custom_fields. NOTE: the original run's single company was an insurance MNC that Claude correctly REJECTS — a clean re-run needs a real agency in the scrape; the structural bugs that prevented ANY lead are fixed."
+      "fix": "Three fixes: (a) _fan_out now _dedup_items() before the max_items cap so a source returning the same company/person twice spawns ONE child, not N (value-keyed, order-preserving). (b) _join_arrive ends the child via an atomic UPDATE...WHERE status<>'completed' RETURNING id and no-ops if not claimed, so a redelivered join-arrival bumps the parent's fanout_done at most once per DISTINCT child (kills the fanout_done=64 vs total=1 over-count that released the barrier early). (c) ai_screen.rs writes the verdict to lead_mutations.custom_fields.screen.{decision,verdict,reason,model} so the screen decision is durable (Leads column + scoring); routing still uses next_handle. Regression tests: test_fan_out_dedups_identical_items, test_join_arrive_counts_distinct_children_idempotently, test_ai_screen_writes_verdict_to_custom_fields. NOTE: the original run's single company was an insurance MNC that Claude correctly REJECTS \u2014 a clean re-run needs a real agency in the scrape; the structural bugs that prevented ANY lead are fixed."
     },
     {
       "id": "E2E-002",
@@ -1326,10 +1328,10 @@
       "line": 209,
       "severity": "HIGH",
       "status": "FIXED",
-      "title": "Source result redelivered N× -> fan-out reads pre-mutation snapshot (fanout_total=0 with companies present)",
-      "evidence": "After E2E-001 fix, run #3 (lead 76cf19e5): naukri scraped 35 companies (custom_fields.companies len=35) but parent ended fanout_total=0, status=active, ZERO children. transitions log shows FOUR 'fan_out skipped: already claimed/fanned (redelivery/concurrent)' — so the source.naukri RESULT was delivered ~5× to the transition worker. The atomic claim (E2E-001) correctly blocked the 4 dup waves (the 20-dupe bug IS fixed), but the ONE delivery that won the claim ran _fan_out against a parent snapshot whose custom_fields.companies mutation had not landed (or it claimed before _apply_lead_mutations of its own delivery committed), so items=[] -> fanout_total=0 and no children. Root cause: the source-command RESULT is not deduped (at-least-once redelivery of the naukri ExecutionResult) AND the claim+read-items sequence is not serialized with the company-list mutation apply. Result: a successful scrape produces zero leads intermittently.",
-      "recommendation": "(1) Dedupe the source result by command_id in the muscle->results consumer (processed_commands ledger) so one scrape => one transition. (2) In _fan_out, read custom_fields fresh from the DB INSIDE the claim transaction (not from the passed-in snapshot), so the company list is read-after-write consistent with the mutation. Build + verify on a branch with a deterministic harness (simulate N concurrent deliveries) — NOT by re-running live paid scrapes.",
-      "fix": "_fan_out now re-reads custom_fields FRESH from the DB immediately after winning the atomic claim (read-after-write), instead of trusting the passed-in transition snapshot. The claim serializes us and each delivery applies its own mutation before routing, so the committed row always has the collection — fanout_total can no longer be 0 when companies are present. Proven by a deterministic asyncio concurrency harness (audit/tests/test_fanout_concurrency.py): (1) 5 concurrent/redelivered fan-outs spawn exactly ONE wave of 5 children (not 20); (2) a STALE empty snapshot still yields 3 children by reading the DB's committed 3 companies. The harness reproduces BOTH the 20-dupe (E2E-001) and 0-children (E2E-002) symptoms and confirms the fixes without paid live runs. FOLLOW-UP (lower priority, not blocking): dedupe the source ExecutionResult by command_id at the Flink results layer so one scrape => one transition (the read-after-write fix already makes redelivery harmless)."
+      "title": "Source result redelivered N\u00d7 -> fan-out reads pre-mutation snapshot (fanout_total=0 with companies present)",
+      "evidence": "After E2E-001 fix, run #3 (lead 76cf19e5): naukri scraped 35 companies (custom_fields.companies len=35) but parent ended fanout_total=0, status=active, ZERO children. transitions log shows FOUR 'fan_out skipped: already claimed/fanned (redelivery/concurrent)' \u2014 so the source.naukri RESULT was delivered ~5\u00d7 to the transition worker. The atomic claim (E2E-001) correctly blocked the 4 dup waves (the 20-dupe bug IS fixed), but the ONE delivery that won the claim ran _fan_out against a parent snapshot whose custom_fields.companies mutation had not landed (or it claimed before _apply_lead_mutations of its own delivery committed), so items=[] -> fanout_total=0 and no children. Root cause: the source-command RESULT is not deduped (at-least-once redelivery of the naukri ExecutionResult) AND the claim+read-items sequence is not serialized with the company-list mutation apply. Result: a successful scrape produces zero leads intermittently.",
+      "recommendation": "(1) Dedupe the source result by command_id in the muscle->results consumer (processed_commands ledger) so one scrape => one transition. (2) In _fan_out, read custom_fields fresh from the DB INSIDE the claim transaction (not from the passed-in snapshot), so the company list is read-after-write consistent with the mutation. Build + verify on a branch with a deterministic harness (simulate N concurrent deliveries) \u2014 NOT by re-running live paid scrapes.",
+      "fix": "_fan_out now re-reads custom_fields FRESH from the DB immediately after winning the atomic claim (read-after-write), instead of trusting the passed-in transition snapshot. The claim serializes us and each delivery applies its own mutation before routing, so the committed row always has the collection \u2014 fanout_total can no longer be 0 when companies are present. Proven by a deterministic asyncio concurrency harness (audit/tests/test_fanout_concurrency.py): (1) 5 concurrent/redelivered fan-outs spawn exactly ONE wave of 5 children (not 20); (2) a STALE empty snapshot still yields 3 children by reading the DB's committed 3 companies. The harness reproduces BOTH the 20-dupe (E2E-001) and 0-children (E2E-002) symptoms and confirms the fixes without paid live runs. FOLLOW-UP (lower priority, not blocking): dedupe the source ExecutionResult by command_id at the Flink results layer so one scrape => one transition (the read-after-write fix already makes redelivery harmless)."
     },
     {
       "id": "E2E-003",
@@ -1339,9 +1341,9 @@
       "severity": "HIGH",
       "status": "FIXED",
       "title": "Lead parks at the company for_each with the collection present but _fan_out never spawns children (fanout_total=0)",
-      "evidence": "After E2E-001 (dup-wave) + E2E-002 (read-after-write + claim-release) fixes — all proven by the deterministic harness (audit/tests/test_fanout_concurrency.py, 3 cases) and live — multiple clean runs (leads 76cf19e5, 544fc6a7, 6739b54a) STILL end with the parent parked at the company for_each (current_node_id=for_each), 17-35 companies present in custom_fields.companies, fanout_total=0, ZERO children, _fanout_retry never set. The release-claim path didn't fire and (in the last run) there were NO transition-worker log lines for the lead at all in-window. Symptom is now intermittent + upstream of the Python fan-out logic that the harness validates: the lead reaches the for_each node-state but _fan_out either isn't invoked or sees an each_edge=None / items=[] path that the harness doesn't reproduce because it stubs the edges. Strongly suggests a Flink-orchestrator-layer delivery/ordering issue (backend-flink/orchestrator.py emits transition handle=metadata.next_handle; the naukri result's default transition + the companies mutation arrive as separate at-least-once envelopes) OR an each-edge lookup miss under the real graph.",
+      "evidence": "After E2E-001 (dup-wave) + E2E-002 (read-after-write + claim-release) fixes \u2014 all proven by the deterministic harness (audit/tests/test_fanout_concurrency.py, 3 cases) and live \u2014 multiple clean runs (leads 76cf19e5, 544fc6a7, 6739b54a) STILL end with the parent parked at the company for_each (current_node_id=for_each), 17-35 companies present in custom_fields.companies, fanout_total=0, ZERO children, _fanout_retry never set. The release-claim path didn't fire and (in the last run) there were NO transition-worker log lines for the lead at all in-window. Symptom is now intermittent + upstream of the Python fan-out logic that the harness validates: the lead reaches the for_each node-state but _fan_out either isn't invoked or sees an each_edge=None / items=[] path that the harness doesn't reproduce because it stubs the edges. Strongly suggests a Flink-orchestrator-layer delivery/ordering issue (backend-flink/orchestrator.py emits transition handle=metadata.next_handle; the naukri result's default transition + the companies mutation arrive as separate at-least-once envelopes) OR an each-edge lookup miss under the real graph.",
       "recommendation": "Reproduce with an INTEGRATION harness against a real (test) Postgres + a fake bus that replays the actual naukri result envelope sequence, NOT live paid scrapes. Confirm whether (a) the for_each transition is emitted/consumed, (b) _outgoing_edge(for_each,'each') resolves under the real graph, (c) the mutation+transition ordering. Likely needs the source-result dedup-by-command_id at Flink + ensuring the collection mutation and the routing transition are the SAME envelope. The Python fan-out logic itself is correct (harness-proven).",
-      "fix": "ROOT CAUSE: omni_leads.fanout_total is NOT NULL DEFAULT 0, so a seed lead sits at fanout_total=0, never NULL. The E2E-001 atomic claim used `WHERE fanout_total IS NULL RETURNING id`, which NEVER matched a real seed lead — so every fan-out attempt logged 'already claimed/fanned' and returned, _fan_out's body never ran, and the lead parked at the for_each with fanout_total=0 and zero children (the exact live symptom). Fixed the claim predicate to `fanout_total=0` (the unclaimed sentinel) -> set -1 while claiming -> real count at parking; the release path resets to 0 (not NULL) so re-claim works. The concurrency harness MISSED this because it seeded fanout_total=None instead of the real DEFAULT 0 — corrected the harness to seed 0 (faithful to the schema), so all 3 cases now exercise the real predicate + a regression test asserts the claim is `=0` and NOT `IS NULL`. Found by static reading of the schema + orchestrator (no paid run)."
+      "fix": "ROOT CAUSE: omni_leads.fanout_total is NOT NULL DEFAULT 0, so a seed lead sits at fanout_total=0, never NULL. The E2E-001 atomic claim used `WHERE fanout_total IS NULL RETURNING id`, which NEVER matched a real seed lead \u2014 so every fan-out attempt logged 'already claimed/fanned' and returned, _fan_out's body never ran, and the lead parked at the for_each with fanout_total=0 and zero children (the exact live symptom). Fixed the claim predicate to `fanout_total=0` (the unclaimed sentinel) -> set -1 while claiming -> real count at parking; the release path resets to 0 (not NULL) so re-claim works. The concurrency harness MISSED this because it seeded fanout_total=None instead of the real DEFAULT 0 \u2014 corrected the harness to seed 0 (faithful to the schema), so all 3 cases now exercise the real predicate + a regression test asserts the claim is `=0` and NOT `IS NULL`. Found by static reading of the schema + orchestrator (no paid run)."
     },
     {
       "id": "E2E-004",
@@ -1352,7 +1354,7 @@
       "status": "FIXED",
       "title": "Serper /search returns 400 Bad Request on every query -> 0 profiles -> people stage yields no contact",
       "evidence": "After E2E-001/002/003 fixed, the final run (lead 583d5ba0, accept-all screens) PROVED the chain mechanics end-to-end: naukri scraped -> company for_each spawned exactly 2 children (correct, not 0/not 20) -> both passed screen_company (custom_fields.screen.decision=accept: Innovaccer, Cubic Logics) -> serper_people FIRED. But every Serper API call returns HTTP 400 Bad Request (muscle log: 'serper pattern failed status=400 pattern=Cubic Logics CEO site:linkedin.com/in'), so profiles_found=0, custom_fields.people=[], the people for_each is empty, no ai.screen_person, no create_contact, no omni_contacts row. The 400 on EVERY query (valid {q,num} body) points to a bad/expired Serper api_key in the connection bundle OR a request-shape mismatch with Serper's current API.",
-      "recommendation": "Verify the Serper connection's api_key (rotate if expired) and the request shape against Serper's current /search contract. OR flip serper_people to provider='searxng' (the toggle is built + live) once a SearXNG instance is deployed (SEARXNG_URL) — the economic-equalizer path sidesteps the paid Serper dependency entirely.",
+      "recommendation": "Verify the Serper connection's api_key (rotate if expired) and the request shape against Serper's current /search contract. OR flip serper_people to provider='searxng' (the toggle is built + live) once a SearXNG instance is deployed (SEARXNG_URL) \u2014 the economic-equalizer path sidesteps the paid Serper dependency entirely.",
       "fix": "RESOLVED: Deployed a self-hosted SearXNG container inside the v2 stack on the VPS. SearXNG is configured to return JSON search outputs securely on the internal network at http://searxng:8080/search. The Serper node's provider config can be toggled to 'searxng' in workflows to bypass Serper credit limits entirely."
     },
     {
@@ -1362,10 +1364,10 @@
       "line": 196,
       "severity": "GOOD",
       "status": "FIXED",
-      "title": "Knowledge-graph moat: person↔company history + confidence decay (vs Allen's fork)",
-      "evidence": "Allen's fork declares person_company_history + confidence decay as 'Apollo's actual moat — historical relationships, not scraping' (plan.md Phase 4). We had omni_people_cache (027) but no history graph and a static confidence.",
+      "title": "Knowledge-graph moat: person\u2194company history + confidence decay (vs Allen's fork)",
+      "evidence": "Allen's fork declares person_company_history + confidence decay as 'Apollo's actual moat \u2014 historical relationships, not scraping' (plan.md Phase 4). We had omni_people_cache (027) but no history graph and a static confidence.",
       "recommendation": "Port the relationship graph + decay into our multi-tenant KG.",
-      "fix": "Migration 030 omni_person_company_history (person↔company stints, one open per pair, RLS-enabled — multi-tenant, which the single-tenant fork can't do) + idx_omni_people_cache_verified. company_kg: cache_person returns the person id + records the stint (record_person_company); a re-sighting restores confidence (+10 cap 90) + resets last_verified. Confidence decays at READ time (−5/month, floor 10) — verified against real Postgres (fresh=90,1mo=85,3mo=75,8mo=50). cached_people orders by decayed confidence; people_needing_reverification() lists rows <50; person_history() returns the full timeline. Deployed + migration 030 applied live (alembic_version=030, table+RLS+index confirmed). Regression tests test_kg_confidence_decay_spec + test_cache_person_records_history (19 audit tests green)."
+      "fix": "Migration 030 omni_person_company_history (person\u2194company stints, one open per pair, RLS-enabled \u2014 multi-tenant, which the single-tenant fork can't do) + idx_omni_people_cache_verified. company_kg: cache_person returns the person id + records the stint (record_person_company); a re-sighting restores confidence (+10 cap 90) + resets last_verified. Confidence decays at READ time (\u22125/month, floor 10) \u2014 verified against real Postgres (fresh=90,1mo=85,3mo=75,8mo=50). cached_people orders by decayed confidence; people_needing_reverification() lists rows <50; person_history() returns the full timeline. Deployed + migration 030 applied live (alembic_version=030, table+RLS+index confirmed). Regression tests test_kg_confidence_decay_spec + test_cache_person_records_history (19 audit tests green)."
     },
     {
       "id": "RACE-DOA",
@@ -1374,7 +1376,7 @@
       "line": 413,
       "severity": "HIGH",
       "status": "FIXED",
-      "title": "flow.race fan-out crashed with NameError — fetch_all used but never imported",
+      "title": "flow.race fan-out crashed with NameError \u2014 fetch_all used but never imported",
       "evidence": "_outgoing_edges (used by _race_fan_out to spawn one child per branch_* edge) called fetch_all, but transition_worker imported only execute/fetch_one from app.db. Every flow.race execution would raise NameError: name 'fetch_all' is not defined at runtime. Hidden from `import` checks (the name resolves lazily inside the async fn) and from the congruity tests. Found by ruff F821 in a static-analysis sweep.",
       "recommendation": "Import fetch_all + add an undefined-name (F821) gate so the bug class can't recur.",
       "fix": "Added fetch_all to the app.db import. New audit test test_no_undefined_names_in_backend runs ruff F821 over backend/app so any unresolved name fails the suite. Same sweep removed dead code (people_scoring `t`, 3 unused imports). Committed d7f457e."
@@ -1558,7 +1560,7 @@
       "title": "Channel nodes never render their payload contract: no body, no attendee identity, no unipile_account_id - every channel send is starved",
       "evidence": "The Rust handlers require payload.body (email.rs:20, unipile send_chat), payload.attendee_identifier or chat_id (send_chat), and payload.unipile_account_id - but EVERY channel node (whatsapp/instagram/telegram/linkedin/email) emits only *_template fields, unrendered, with no attendee identity and no account id. No component anywhere renders {{contact.x}} templates. The feature audit's 'channels DONE' verdict covered the Rust side only; the Python->Rust payload contract is unfulfilled end-to-end, so sends fail on missing account/body or empty attendee. Re-diagnosis of the original CONTRACT-1 (which blamed _lead_context).",
       "recommendation": "Build the channel payload-rendering layer: a shared template renderer ({{contact.*}}/{{lead.custom_fields.*}}), per-channel attendee resolution (whatsapp: phone->JID; instagram/telegram: usernames from contact custom_fields; chat reuse via lead custom_fields chat ids persisted by CONTRACT-3's fix), and unipile_account_id sourcing from the connection record. Render in the channel nodes (the design contract per models.rs: payload arrives self-contained).",
-      "fix": "FIXED: built app/execution/render.py — the channel payload-rendering layer. render_channel_payload (called from commands.build_command, the one seam with lead+contact+bundle) renders *_template fields ({{contact.x}}/{{lead.custom_fields.x}} dotted paths) into body/subject/title, copies non-secret sender/transport config from the connection bundle (unipile_account_id+unipile_base; smtp_host/port/username/use_tls/from for email — smtp_password stays behind the credential ref), resolves per-channel attendee identity (whatsapp phone->JID, instagram/telegram usernames from contact custom_fields, linkedin via provider_id), and reuses CONTRACT-3-persisted chat sessions (chat_id/ig_chat_id/tg_chat_id). Node-provided values always win; non-channel commands pass through untouched. Regression: audit/tests/test_payload_rendering.py (10 tests).",
+      "fix": "FIXED: built app/execution/render.py \u2014 the channel payload-rendering layer. render_channel_payload (called from commands.build_command, the one seam with lead+contact+bundle) renders *_template fields ({{contact.x}}/{{lead.custom_fields.x}} dotted paths) into body/subject/title, copies non-secret sender/transport config from the connection bundle (unipile_account_id+unipile_base; smtp_host/port/username/use_tls/from for email \u2014 smtp_password stays behind the credential ref), resolves per-channel attendee identity (whatsapp phone->JID, instagram/telegram usernames from contact custom_fields, linkedin via provider_id), and reuses CONTRACT-3-persisted chat sessions (chat_id/ig_chat_id/tg_chat_id). Node-provided values always win; non-channel commands pass through untouched. Regression: audit/tests/test_payload_rendering.py (10 tests).",
       "last_run": "2026-06-12"
     },
     {
@@ -1594,8 +1596,8 @@
       "line": 475,
       "severity": "HIGH",
       "status": "FIXED",
-      "title": "searxng/serper company-name extraction is structurally wrong — page-title first word, no junk filter",
-      "evidence": "hits_to_companies()->clean_agency_name(title) takes title.split([space,-,|]).next() = the FIRST WORD of a search-result page title. A Google/SearXNG query for \"software development companies\" returns LISTICLE pages, so company_name lands as \"Top\",\"List\",\"Best\",\"Dallas\". No filter drops non-company domains (clutch.co, wikipedia.org, cookiebot.com, business.safety.google) — cookie banners and privacy links become companies (clutch run: \"Learn more about this provider\", \"Cookiebot\"). Live-observed 2026-06-22. search_serper also reduces each rich organic result to (link,title), discarding structured fields. ROOT: a web search result is not a company; treating the title as a name is the wrong primitive."
+      "title": "searxng/serper company-name extraction is structurally wrong \u2014 page-title first word, no junk filter",
+      "evidence": "hits_to_companies()->clean_agency_name(title) takes title.split([space,-,|]).next() = the FIRST WORD of a search-result page title. A Google/SearXNG query for \"software development companies\" returns LISTICLE pages, so company_name lands as \"Top\",\"List\",\"Best\",\"Dallas\". No filter drops non-company domains (clutch.co, wikipedia.org, cookiebot.com, business.safety.google) \u2014 cookie banners and privacy links become companies (clutch run: \"Learn more about this provider\", \"Cookiebot\"). Live-observed 2026-06-22. search_serper also reduces each rich organic result to (link,title), discarding structured fields. ROOT: a web search result is not a company; treating the title as a name is the wrong primitive."
     },
     {
       "id": "NAME-002",
@@ -1604,8 +1606,8 @@
       "line": 237,
       "severity": "HIGH",
       "status": "FIXED",
-      "title": "serper_people name parse only splits on \" - \" (ASCII) — en-dash/pipe LinkedIn titles bleed the whole title into the name",
-      "evidence": "clean_name() does raw_title.split(\" - \").next(). LinkedIn result titles overwhelmingly use the en-dash \"–\" or \"|\" separator, not \" - \". So \"Jan Urbanec – Associate Lead Software Engineer ve spolecnosti 2K\" never splits → first_name=Jan, last_name=\"Urbanec – Associate Lead Software Engineer ve spolecnosti 2K\". clean_role_from_title has the same \" - \"-only split so role falls back. Live-observed garbage contacts 2026-06-22."
+      "title": "serper_people name parse only splits on \" - \" (ASCII) \u2014 en-dash/pipe LinkedIn titles bleed the whole title into the name",
+      "evidence": "clean_name() does raw_title.split(\" - \").next(). LinkedIn result titles overwhelmingly use the en-dash \"\u2013\" or \"|\" separator, not \" - \". So \"Jan Urbanec \u2013 Associate Lead Software Engineer ve spolecnosti 2K\" never splits \u2192 first_name=Jan, last_name=\"Urbanec \u2013 Associate Lead Software Engineer ve spolecnosti 2K\". clean_role_from_title has the same \" - \"-only split so role falls back. Live-observed garbage contacts 2026-06-22."
     },
     {
       "id": "NAME-003",
@@ -1614,7 +1616,7 @@
       "line": 133,
       "severity": "MEDIUM",
       "status": "FIXED",
-      "title": "ATS sources store the raw slug as company_name (15five, 103644278, 2020companies|wd1|external_careers) — never resolved to a display name",
+      "title": "ATS sources store the raw slug as company_name (15five, 103644278, 2020companies|wd1|external_careers) \u2014 never resolved to a display name",
       "evidence": "ats.rs company_row(slug, ...) uses the slug verbatim as company_name. greenhouse leaks numeric board IDs (103644278); workday leaks the composite company|wd|site slug; others are lowercased slugs (abbvie, 1stdibscom). Real companies, unusable display names. The job API responses DO carry a real company/department name that is discarded."
     },
     {
@@ -1624,8 +1626,8 @@
       "line": 103,
       "severity": "HIGH",
       "status": "FIXED",
-      "title": "Unipile UI connect form stored DSN as metadata.dsn but sync reads credentials.base_url → every UI Unipile connect failed \"invalid credentials\"",
-      "evidence": "providerCatalog unipile spec field {key:dsn, metadata:true}; ConnectFlow routes metadata fields to metadata{}, but integrations.py sync_accounts reads creds.get(\"base_url\"). Mismatch (dsn vs base_url, metadata vs credentials) → sync 502 invalid credentials on any UI-created Unipile connection. FIXED: field is now {key:base_url} in credentials. Undeployed."
+      "title": "Unipile UI connect form stored DSN as metadata.dsn but sync reads credentials.base_url \u2192 every UI Unipile connect failed \"invalid credentials\"",
+      "evidence": "providerCatalog unipile spec field {key:dsn, metadata:true}; ConnectFlow routes metadata fields to metadata{}, but integrations.py sync_accounts reads creds.get(\"base_url\"). Mismatch (dsn vs base_url, metadata vs credentials) \u2192 sync 502 invalid credentials on any UI-created Unipile connection. FIXED: field is now {key:base_url} in credentials. Undeployed."
     },
     {
       "id": "UNIPILE-HEALTH-001",
@@ -1634,8 +1636,8 @@
       "line": 276,
       "severity": "MEDIUM",
       "status": "FIXED",
-      "title": "Unipile account sync marks every seat active — ignores per-account Unipile health (CREDENTIALS/needs-reauth)",
-      "evidence": "sync_accounts INSERTs status='active' for every returned seat. Unipile /api/v1/accounts reports per-account sources[].status (OK vs CREDENTIALS). A CREDENTIALS seat (live-observed: Praveen Menon) is synced active and is selectable for sending, where it would fail. Sync should map non-OK Unipile status → paused/warming."
+      "title": "Unipile account sync marks every seat active \u2014 ignores per-account Unipile health (CREDENTIALS/needs-reauth)",
+      "evidence": "sync_accounts INSERTs status='active' for every returned seat. Unipile /api/v1/accounts reports per-account sources[].status (OK vs CREDENTIALS). A CREDENTIALS seat (live-observed: Praveen Menon) is synced active and is selectable for sending, where it would fail. Sync should map non-OK Unipile status \u2192 paused/warming."
     },
     {
       "id": "SEND-ATTRIB-001",
@@ -1644,8 +1646,8 @@
       "line": 213,
       "severity": "HIGH",
       "status": "FIXED",
-      "title": "Account rate-caps are NOT enforced for legacy connection_name sends — only pool/pinned campaigns get capped",
-      "evidence": "_resolve_sending_account returns an account ONLY for a node pin or account_pool in (campaign,round_robin); the DEFAULT legacy connection_name path returns None. With no account, build_command stamps no metadata.sending_account_id, so transition_worker handle_transition (line 1635: status==sent AND sending_account_id) never calls _increment_send_counters → the account daily/hourly cap is never counted or enforced. The per-seat safety floor (the entire point of omni_sending_accounts + _linkedin_safe_cap) is bypassed for any campaign not explicitly opted into a pool. A connection_name LinkedIn campaign can exceed the cap and risk an account ban. Campaign-level daily_cap in _gate_send still applies if set, but the ACCOUNT-level cap does not."
+      "title": "Account rate-caps are NOT enforced for legacy connection_name sends \u2014 only pool/pinned campaigns get capped",
+      "evidence": "_resolve_sending_account returns an account ONLY for a node pin or account_pool in (campaign,round_robin); the DEFAULT legacy connection_name path returns None. With no account, build_command stamps no metadata.sending_account_id, so transition_worker handle_transition (line 1635: status==sent AND sending_account_id) never calls _increment_send_counters \u2192 the account daily/hourly cap is never counted or enforced. The per-seat safety floor (the entire point of omni_sending_accounts + _linkedin_safe_cap) is bypassed for any campaign not explicitly opted into a pool. A connection_name LinkedIn campaign can exceed the cap and risk an account ban. Campaign-level daily_cap in _gate_send still applies if set, but the ACCOUNT-level cap does not."
     },
     {
       "id": "DNC-SKIP-001",
@@ -1664,7 +1666,7 @@
       "line": 6,
       "severity": "MEDIUM",
       "status": "FIXED",
-      "title": "qualified_leads objective metric is identical to contacts — counts UNSCREENED contacts as qualified",
+      "title": "qualified_leads objective metric is identical to contacts \u2014 counts UNSCREENED contacts as qualified",
       "evidence": "measure() uses the SAME COUNT(DISTINCT contact_id) query for both \"contacts\" and \"qualified_leads\". The comment claims a contact \"had to pass verify+screen to get one\", but create_contact has NO screen guard and the common pipeline (source->for_each->people->for_each->create_contact) has no ai.screen/condition.verify_person node, so every contact is counted as qualified. A campaign with a qualified_leads goal reports success on unscreened data. qualified_leads should require a passing screening signal (e.g. leads whose custom_fields.verification.score >= threshold or screening_status=qualified), not merely contact_id IS NOT NULL."
     },
     {
@@ -1684,8 +1686,8 @@
       "line": 187,
       "severity": "MEDIUM",
       "status": "FIXED",
-      "title": "Objective max_spend_usd cap is blind to Serper/Apify/Apollo API spend — only counts AI (ai_jobs) cost",
-      "evidence": "spend() = SUM(omni_ai_jobs.cost_usd) over the workflow correlation lineage. That captures Claude/AI cost only. A lead-gen campaign's dominant cost is paid Serper people/search queries (and Apify/Apollo) — serper_people fans hundreds of paid Google queries per run. The projector records serper_calls as a COUNT in omni_pipeline_metrics but never as cost_usd in ai_jobs, so spend() undercounts and a max_spend_usd bound never trips on the real expense. The budget guard can run far over the intended cap. Fix: attribute a per-call cost for serper/apify/apollo into the spend() rollup (or a unified cost ledger)."
+      "title": "Objective max_spend_usd cap is blind to Serper/Apify/Apollo API spend \u2014 only counts AI (ai_jobs) cost",
+      "evidence": "spend() = SUM(omni_ai_jobs.cost_usd) over the workflow correlation lineage. That captures Claude/AI cost only. A lead-gen campaign's dominant cost is paid Serper people/search queries (and Apify/Apollo) \u2014 serper_people fans hundreds of paid Google queries per run. The projector records serper_calls as a COUNT in omni_pipeline_metrics but never as cost_usd in ai_jobs, so spend() undercounts and a max_spend_usd bound never trips on the real expense. The budget guard can run far over the intended cap. Fix: attribute a per-call cost for serper/apify/apollo into the spend() rollup (or a unified cost ledger)."
     },
     {
       "id": "SPINE-LEAF-001",
@@ -1694,7 +1696,7 @@
       "line": 1712,
       "severity": "HIGH",
       "status": "FIXED",
-      "title": "Unmatched handle is ALWAYS terminalized as \"completed\" — a failed/empty run is recorded as success",
+      "title": "Unmatched handle is ALWAYS terminalized as \"completed\" \u2014 a failed/empty run is recorded as success",
       "evidence": "handle_transition: target = _target_node(handle); if not target -> _terminalize_lead(lead_id, \"completed\"). This is correct for a genuine leaf on the default/then path, but it fires for ANY handle with no wired edge. Operators rarely wire on_error/empty edges, so: a channel node emitting on_error (send failed) with no on_error edge -> lead marked completed; a source emitting empty (no results) with no empty edge -> completed. Failed and empty runs are indistinguishable from successful ones in lead.status. This inflates Analytics success rates, and the root run-lead terminalizes completed even when the run errored, which the objective worker consumes as a real completion. Fix: choose the terminal status from the handle (on_error->errored, empty->ended/empty, default/then/leaf->completed)."
     },
     {
@@ -1704,8 +1706,8 @@
       "line": 1,
       "severity": "LOW",
       "status": "FIXED",
-      "title": "Ashby real-name fetch returns empty — falls back to slug (greenhouse real-name works)",
-      "evidence": "FIXED (DEPLOYED 2026-06-23). fetch_company_name's ashby branch was a GET with ?slug= that returned null (always fell back to slug). Rewrote it as the same GraphQL POST the ashby() job-fetch uses (organizationHostedJobsPageName variable), requesting jobBoard{name} and reading data.jobBoard.name (falls back to organizationName for older payloads). Now greenhouse AND ashby both resolve real company names. || PRIOR: fetch_company_name greenhouse path resolves real names live (103644278->Lume Deodorant, 12jlkfsk->Orion Global Solutions, verified 2026-06-22). The ashby GraphQL guess (ApiJobBoardWithTeams?slug=) did not return organizationName, so ashby falls back to slug_to_company_name (1password, 3y-health->3y Health) — acceptable, not garbage. Refine the ashby org-name query later. NAME-003 core (greenhouse "
+      "title": "Ashby real-name fetch returns empty \u2014 falls back to slug (greenhouse real-name works)",
+      "evidence": "FIXED (DEPLOYED 2026-06-23). fetch_company_name's ashby branch was a GET with ?slug= that returned null (always fell back to slug). Rewrote it as the same GraphQL POST the ashby() job-fetch uses (organizationHostedJobsPageName variable), requesting jobBoard{name} and reading data.jobBoard.name (falls back to organizationName for older payloads). Now greenhouse AND ashby both resolve real company names. || PRIOR: fetch_company_name greenhouse path resolves real names live (103644278->Lume Deodorant, 12jlkfsk->Orion Global Solutions, verified 2026-06-22). The ashby GraphQL guess (ApiJobBoardWithTeams?slug=) did not return organizationName, so ashby falls back to slug_to_company_name (1password, 3y-health->3y Health) \u2014 acceptable, not garbage. Refine the ashby org-name query later. NAME-003 core (greenhouse "
     },
     {
       "id": "SPINE-TERM-001",
@@ -1714,8 +1716,8 @@
       "line": 330,
       "severity": "HIGH",
       "status": "FIXED",
-      "title": "Projector resurrected terminalized leads — _project_lead fabricated status='active' over the terminal status",
-      "evidence": "ROOT-CAUSED 2026-06-23 (commit 8ed54b6). My earlier RLS/GUC-race hypothesis was WRONG — the transition worker's terminalize UPDATE was fine. The real culprit: app/projector/main.py::_project_lead bound `p.get(\"status\") or \"active\"` (line 330) and the conflict update did `status = COALESCE(EXCLUDED.status, omni_leads.status)`. Side-channel lead.* events that carry NO status — lead.contact_attached (create_contact.py), lead.custom_fields_updated (verify_person.py), and any Kafka redelivery — therefore projected a fabricated 'active' OVER the terminal status the worker had just written, moving only updated_at. That is exactly the runtime symptom (logs 'reached leaf .../on_error -> errored' but row stays active, current_node_id NULL, updated_at=log time). The old buggy line was CONFIRMED LIVE on the box (running projector + /home/omni-v2 disk both showed it). FIX: (1) a no-status event binds NULL (not 'active') so the COALESCE keeps the existing status; new rows still default via COALESCE($6,'active') on the INSERT side only. (2) terminal-sticky CASE: once a lead's status is in _TERMINAL_LEAD_STATUSES, no projection downgrades it or re-pins current_node_id. Locked by two source-faithful regression tests in test_spine_integrity.py; full audit suite 182/182 green. DEPLOYED 2026-06-23 — scp+rebuild of projector-v2 was correctly blocked pending explicit user authorization (shared prod box). LESSON: the survey was right that reading couldn't solve it, but the missing read was the PROJECTOR (a separate consumer that also writes omni_leads), not the worker — a status write is owned by two writers and the read-model one didn't respect terminal finality."
+      "title": "Projector resurrected terminalized leads \u2014 _project_lead fabricated status='active' over the terminal status",
+      "evidence": "ROOT-CAUSED 2026-06-23 (commit 8ed54b6). My earlier RLS/GUC-race hypothesis was WRONG \u2014 the transition worker's terminalize UPDATE was fine. The real culprit: app/projector/main.py::_project_lead bound `p.get(\"status\") or \"active\"` (line 330) and the conflict update did `status = COALESCE(EXCLUDED.status, omni_leads.status)`. Side-channel lead.* events that carry NO status \u2014 lead.contact_attached (create_contact.py), lead.custom_fields_updated (verify_person.py), and any Kafka redelivery \u2014 therefore projected a fabricated 'active' OVER the terminal status the worker had just written, moving only updated_at. That is exactly the runtime symptom (logs 'reached leaf .../on_error -> errored' but row stays active, current_node_id NULL, updated_at=log time). The old buggy line was CONFIRMED LIVE on the box (running projector + /home/omni-v2 disk both showed it). FIX: (1) a no-status event binds NULL (not 'active') so the COALESCE keeps the existing status; new rows still default via COALESCE($6,'active') on the INSERT side only. (2) terminal-sticky CASE: once a lead's status is in _TERMINAL_LEAD_STATUSES, no projection downgrades it or re-pins current_node_id. Locked by two source-faithful regression tests in test_spine_integrity.py; full audit suite 182/182 green. DEPLOYED 2026-06-23 \u2014 scp+rebuild of projector-v2 was correctly blocked pending explicit user authorization (shared prod box). LESSON: the survey was right that reading couldn't solve it, but the missing read was the PROJECTOR (a separate consumer that also writes omni_leads), not the worker \u2014 a status write is owned by two writers and the read-model one didn't respect terminal finality."
     },
     {
       "id": "PH-001",
@@ -1725,7 +1727,7 @@
       "severity": "MEDIUM",
       "status": "FIXED",
       "title": "ProductHunt is half-built: full OAuth flow exists but NO source node consumes the connection",
-      "evidence": "FIXED (DEPLOYED 2026-06-23). Built source.producthunt — an in-process source that uses oauth_producthunt.resolve_user_access_token (token resolution + auto-refresh already existed) to query the PH GraphQL API for recent launches, emitting contact.created per MAKER with the product as company + twitter/website in custom_fields. Deterministic _PH_MAKER_NS uuid5 dedup. Handles: default/empty/on_error. Added to nodeLabel.ts + test_contract_routing LOCALLY_RESOLVED. Registered + import-clean. || PRIOR: oauth_producthunt.py has start/callback/status/disconnect + GraphQL URL; it shows in the Integrations catalog + providerCatalog. But there is NO source.producthunt node anywhere in backend/app/nodes — nothing uses the token to pull makers/companies into a campaign. Connecting ProductHunt lands a token that nothing consumes (dead-end, same class as the old AI Studio void). Either build source.produ"
+      "evidence": "FIXED (DEPLOYED 2026-06-23). Built source.producthunt \u2014 an in-process source that uses oauth_producthunt.resolve_user_access_token (token resolution + auto-refresh already existed) to query the PH GraphQL API for recent launches, emitting contact.created per MAKER with the product as company + twitter/website in custom_fields. Deterministic _PH_MAKER_NS uuid5 dedup. Handles: default/empty/on_error. Added to nodeLabel.ts + test_contract_routing LOCALLY_RESOLVED. Registered + import-clean. || PRIOR: oauth_producthunt.py has start/callback/status/disconnect + GraphQL URL; it shows in the Integrations catalog + providerCatalog. But there is NO source.producthunt node anywhere in backend/app/nodes \u2014 nothing uses the token to pull makers/companies into a campaign. Connecting ProductHunt lands a token that nothing consumes (dead-end, same class as the old AI Studio void). Either build source.produ"
     },
     {
       "id": "UNIPILE-ENRICH-001",
@@ -1734,8 +1736,8 @@
       "line": 134,
       "severity": "MEDIUM",
       "status": "FIXED",
-      "title": "Unipile profile data is fetched then discarded — could enrich contacts but does not",
-      "evidence": "FIXED (DEPLOYED 2026-06-23). handle_linkedin_profile_view now lifts headline/company/role/location out of the /api/v1/users/{id} body into custom_fields (profile_enrichment + first_str probe multiple Unipile field-name variants per attribute), merged with profile_viewed_at + linkedin_distance. Only the custom_fields wrapper is returned (the one key _apply_lead_mutations persists). 4 Rust unit tests in unipile.rs::tests. The 7 live LinkedIn seats now enrich for free on every profile-view step instead of discarding the profile. || PRIOR: enrich.rs (ai.enrich / handle_enrich) supports apollo/hunter/proxycurl as enrich_source — NOT unipile. handle_linkedin_profile_view fetches GET /api/v1/users/{public_id} (full LinkedIn profile: headline, current company/role, experience, location) but extracts ONLY network_distance and writes {profile_viewed_at, linkedin_distance}. So with 7 live LinkedIn seats already connected, we COULD enrich a"
+      "title": "Unipile profile data is fetched then discarded \u2014 could enrich contacts but does not",
+      "evidence": "FIXED (DEPLOYED 2026-06-23). handle_linkedin_profile_view now lifts headline/company/role/location out of the /api/v1/users/{id} body into custom_fields (profile_enrichment + first_str probe multiple Unipile field-name variants per attribute), merged with profile_viewed_at + linkedin_distance. Only the custom_fields wrapper is returned (the one key _apply_lead_mutations persists). 4 Rust unit tests in unipile.rs::tests. The 7 live LinkedIn seats now enrich for free on every profile-view step instead of discarding the profile. || PRIOR: enrich.rs (ai.enrich / handle_enrich) supports apollo/hunter/proxycurl as enrich_source \u2014 NOT unipile. handle_linkedin_profile_view fetches GET /api/v1/users/{public_id} (full LinkedIn profile: headline, current company/role, experience, location) but extracts ONLY network_distance and writes {profile_viewed_at, linkedin_distance}. So with 7 live LinkedIn seats already connected, we COULD enrich a"
     },
     {
       "id": "SHEETS-001",
@@ -1745,7 +1747,7 @@
       "severity": "MEDIUM",
       "status": "FIXED",
       "title": "Google Sheets OAuth is a dead-end: full flow + token storage, but NO source node consumes it",
-      "evidence": "FIXED (DEPLOYED 2026-06-23). Built source.sheets — an in-process source (mirrors source.csv) that resolves the workspace's connected Google account (workspace_members JOIN google_oauth_tokens), mints a fresh access token via oauth.get_access_token, reads the configured tab via the Sheets values API, and emits contact.created per row. Contact ids reuse crm.create_contact._contact_id (DEDUP-001 uuid5) so re-imports upsert. Handles: default/empty/on_error. Added to nodeLabel.ts + test_contract_routing LOCALLY_RESOLVED. Registered + import-clean. || PRIOR: oauth.py implements the complete Google Sheets OAuth (start/callback/status/disconnect + get_access_token refresher, encrypts refresh_token into google_oauth_tokens, redirects /lead-sources?google_oauth=connected). But get_access_token has ZERO callers (grep: only docstrings + the unrelated oauth_tokens.get_access_token service). There is NO source.sheets / GoogleSheets node anywhere in backend/ap"
+      "evidence": "FIXED (DEPLOYED 2026-06-23). Built source.sheets \u2014 an in-process source (mirrors source.csv) that resolves the workspace's connected Google account (workspace_members JOIN google_oauth_tokens), mints a fresh access token via oauth.get_access_token, reads the configured tab via the Sheets values API, and emits contact.created per row. Contact ids reuse crm.create_contact._contact_id (DEDUP-001 uuid5) so re-imports upsert. Handles: default/empty/on_error. Added to nodeLabel.ts + test_contract_routing LOCALLY_RESOLVED. Registered + import-clean. || PRIOR: oauth.py implements the complete Google Sheets OAuth (start/callback/status/disconnect + get_access_token refresher, encrypts refresh_token into google_oauth_tokens, redirects /lead-sources?google_oauth=connected). But get_access_token has ZERO callers (grep: only docstrings + the unrelated oauth_tokens.get_access_token service). There is NO source.sheets / GoogleSheets node anywhere in backend/ap"
     },
     {
       "id": "TEAM-001",
@@ -1755,7 +1757,7 @@
       "severity": "LOW",
       "status": "FIXED",
       "title": "Workspace team management (invites, member removal, leave) is fully built in backend but has NO UI",
-      "evidence": "FIXED (DEPLOYED 2026-06-23). The workspaces team API (invites create/list/revoke, member remove, leave) had no UI. Added the client methods to v2.ts (removeMember/leave/invites/createInvite/revokeInvite + WorkspaceInvite type) and rebuilt Settings.tsx MembersCard into a full team manager: members list with role badges + Remove (owner/admin, not self, not owner), pending-invites list with Revoke, and an invite form (email + member/admin role). Controls gated on canManage; the API enforces the same. Frontend tsc clean. || PRIOR: workspaces.py exposes POST/GET/DELETE /workspaces/{id}/invites, POST /invites/accept, DELETE /members/{user_id}, POST /leave — a complete team-management API. The frontend (Settings.tsx) only renders members READ-ONLY (no invite/remove/leave UI; grep finds no invite/removeMember/leave component). So multi-user collaboration is implemented server-side but unreachable from the product. Either build "
+      "evidence": "FIXED (DEPLOYED 2026-06-23). The workspaces team API (invites create/list/revoke, member remove, leave) had no UI. Added the client methods to v2.ts (removeMember/leave/invites/createInvite/revokeInvite + WorkspaceInvite type) and rebuilt Settings.tsx MembersCard into a full team manager: members list with role badges + Remove (owner/admin, not self, not owner), pending-invites list with Revoke, and an invite form (email + member/admin role). Controls gated on canManage; the API enforces the same. Frontend tsc clean. || PRIOR: workspaces.py exposes POST/GET/DELETE /workspaces/{id}/invites, POST /invites/accept, DELETE /members/{user_id}, POST /leave \u2014 a complete team-management API. The frontend (Settings.tsx) only renders members READ-ONLY (no invite/remove/leave UI; grep finds no invite/removeMember/leave component). So multi-user collaboration is implemented server-side but unreachable from the product. Either build "
     },
     {
       "id": "PIPELINE-METRICS-001",
@@ -1764,8 +1766,8 @@
       "line": 1603,
       "severity": "MEDIUM",
       "status": "FIXED",
-      "title": "pipeline.metric event was never emitted — efficiency rollup dead by construction",
-      "evidence": "omni_pipeline_metrics + _project_pipeline_metric (consumer) + analytics_summary (reader) + the Analytics 'Lead-gen efficiency & cost' panel all existed, but grep proved NOTHING published the pipeline.metric event — the producer leg was never built, so the table was permanently empty ('No source runs yet') despite 250 companies/719 people discovered. FIXED: transition_worker._emit_pipeline_metric emits one delta per source result, keyed by run correlation_id (projector ON CONFLICT(run_id) accumulates), counts telemetry-first w/ custom_fields-collection fallback, gated on source.* + skips empty, best-effort. DEPLOYED 2026-06-23 (rebuilt transitions-v2 — LESSON: transitions/projector/backend each build their OWN image; rebuild the service running the changed file). VERIFIED LIVE: ran source.searxng -> efficiency panel shows COMPANIES COLLECTED:12 / 1 run. 2 regression tests in test_spine_integrity. Commit b990d25."
+      "title": "pipeline.metric event was never emitted \u2014 efficiency rollup dead by construction",
+      "evidence": "omni_pipeline_metrics + _project_pipeline_metric (consumer) + analytics_summary (reader) + the Analytics 'Lead-gen efficiency & cost' panel all existed, but grep proved NOTHING published the pipeline.metric event \u2014 the producer leg was never built, so the table was permanently empty ('No source runs yet') despite 250 companies/719 people discovered. FIXED: transition_worker._emit_pipeline_metric emits one delta per source result, keyed by run correlation_id (projector ON CONFLICT(run_id) accumulates), counts telemetry-first w/ custom_fields-collection fallback, gated on source.* + skips empty, best-effort. DEPLOYED 2026-06-23 (rebuilt transitions-v2 \u2014 LESSON: transitions/projector/backend each build their OWN image; rebuild the service running the changed file). VERIFIED LIVE: ran source.searxng -> efficiency panel shows COMPANIES COLLECTED:12 / 1 run. 2 regression tests in test_spine_integrity. Commit b990d25."
     },
     {
       "id": "COMPANIES-LINK-001",
@@ -1785,7 +1787,7 @@
       "severity": "MEDIUM",
       "status": "FIXED",
       "title": "1,063 leads stranded active+current_node_id=NULL by the pre-fix projector resurrection",
-      "evidence": "[RESOLVED 2026-06-23] Migration 040 RAN on the box (alembic 039->040). Backfill verified live: leads went from {active:1063(stranded), completed:1156} to {completed:2219, stranded:0}. Overview ACTIVE LEADS now 0 (was inflated by phantoms). DEPLOY LESSON: /app is baked into the image (no bind-mount) — scp of the migration to host disk was invisible to the running container; had to rebuild backend-v2 image to bake in 040, then `compose run --rm backend-v2 alembic upgrade head`, then recreate the long-running backend so its alembic resolves 040. Migration is idempotent + scoped to the impossible state. Commit 49e7898. || RUNTIME 2026-06-23: 1063 of 2219 leads are status=active WITH current_node_id IS NULL — an impossible state in a healthy spine (a leaf terminalize nulls the node AND sets a terminal status). All updated_at BEFORE the SPINE-TERM-001 projector fix deployed (~07:50Z 06-23). My fix stops NEW occurrences (proven: post-fix searxng leads persist completed); these are pre-fix casualties, miscounted as 'active' in Overview/Leads/objective loop. NEEDS a one-time backfill but the right terminal status isn't unambiguous from status alone (could be completed OR errored) — destructive bulk prod mutation, surfaced to user for the cleanup decision rather than auto-run."
+      "evidence": "[RESOLVED 2026-06-23] Migration 040 RAN on the box (alembic 039->040). Backfill verified live: leads went from {active:1063(stranded), completed:1156} to {completed:2219, stranded:0}. Overview ACTIVE LEADS now 0 (was inflated by phantoms). DEPLOY LESSON: /app is baked into the image (no bind-mount) \u2014 scp of the migration to host disk was invisible to the running container; had to rebuild backend-v2 image to bake in 040, then `compose run --rm backend-v2 alembic upgrade head`, then recreate the long-running backend so its alembic resolves 040. Migration is idempotent + scoped to the impossible state. Commit 49e7898. || RUNTIME 2026-06-23: 1063 of 2219 leads are status=active WITH current_node_id IS NULL \u2014 an impossible state in a healthy spine (a leaf terminalize nulls the node AND sets a terminal status). All updated_at BEFORE the SPINE-TERM-001 projector fix deployed (~07:50Z 06-23). My fix stops NEW occurrences (proven: post-fix searxng leads persist completed); these are pre-fix casualties, miscounted as 'active' in Overview/Leads/objective loop. NEEDS a one-time backfill but the right terminal status isn't unambiguous from status alone (could be completed OR errored) \u2014 destructive bulk prod mutation, surfaced to user for the cleanup decision rather than auto-run."
     },
     {
       "id": "LEAD-IDENTITY-001",
@@ -1795,7 +1797,67 @@
       "severity": "LOW",
       "status": "FIXED",
       "title": "Source-batch leads rendered 'Unresolved lead' on the Leads view (1362 rows looked like garbage)",
-      "evidence": "lead_identity handled a single company (item.company_name) + the root-run case but NOT custom_fields.companies (a LIST, the source batch) -> fell through to 'Unresolved lead'. After the SPINE-TERM-001 backfill, 1362 completed company-stage roots all read 'Unresolved lead', making the Leads page look broken though the data was healthy. FIXED: a companies list now reads 'Source batch · N companies' (singular/plural), and an EMPTY list (source ran, found nothing — 978 from the auto-pilot re-seeding) reads 'Source batch · no results'. DEPLOYED + verified live: Unresolved went 1362->7 (the 7 are genuinely identity-less _retry_marker stubs). 6 tests in test_lead_identity. Commits 89fd219 + (empty-batch refinement)."
+      "evidence": "lead_identity handled a single company (item.company_name) + the root-run case but NOT custom_fields.companies (a LIST, the source batch) -> fell through to 'Unresolved lead'. After the SPINE-TERM-001 backfill, 1362 completed company-stage roots all read 'Unresolved lead', making the Leads page look broken though the data was healthy. FIXED: a companies list now reads 'Source batch \u00b7 N companies' (singular/plural), and an EMPTY list (source ran, found nothing \u2014 978 from the auto-pilot re-seeding) reads 'Source batch \u00b7 no results'. DEPLOYED + verified live: Unresolved went 1362->7 (the 7 are genuinely identity-less _retry_marker stubs). 6 tests in test_lead_identity. Commits 89fd219 + (empty-batch refinement)."
+    },
+    {
+      "id": "MSG-QA-001",
+      "area": "ai",
+      "file": "backend-rust/src/handlers/ai_qa.rs",
+      "line": 1,
+      "severity": "HIGH",
+      "status": "FIXED",
+      "title": "ai.compose graded its own output; every audited failure passed",
+      "evidence": "The sent-message audit found an SEO Manager vacancy turned into a pipeline problem, a multi-role title turned into 'outbound is usually the first thing that gets squeezed', and one stock closing line shipped 17 times. Nothing caught any of it because the only judge was the model that wrote it.",
+      "fix": "New ai.qa_message node: a separate provider reviews the draft and routes pass/rewrite/reject, never rewriting. Literal checks (dashes, banned phrases, placeholders, wrong greeting) run in Rust; the model is left the judgement calls. Rewrite budget bounded per node.",
+      "date": "2026-08-20"
+    },
+    {
+      "id": "MSG-QA-002",
+      "area": "ai",
+      "file": "backend-rust/src/handlers/ai_qa.rs",
+      "line": 86,
+      "severity": "HIGH",
+      "status": "FIXED",
+      "title": "A verdict flag in the schema was undefined in the policy, and rejected 7 of 8 message-3 drafts",
+      "evidence": "repeats_previous shipped in the JSON schema but appeared nowhere in the policy text, so the model invented its meaning ('same subject') and its action ('reject'), against the policy's own rule that reject is never for wording. A trial run on 8 real leads rejected message 3 for 7 of them, which with on_exhausted=reject drops the campaign at step 3.",
+      "fix": "Defined the flag as near-identical sentences judged on words not topic, named staying on-topic and re-asking as allowed, and routed repetition to rewrite. Rejects 9 -> 1 on the same 32 drafts. A test now asserts every schema flag is defined in the policy.",
+      "date": "2026-08-20"
+    },
+    {
+      "id": "MSG-QA-003",
+      "area": "ai",
+      "file": "backend-rust/src/handlers/ai_qa.rs",
+      "line": 90,
+      "severity": "MEDIUM",
+      "status": "FIXED",
+      "title": "Conditional offers were flagged as unsupported inference despite being explicitly permitted",
+      "evidence": "Three of four message-1 rewrites flagged openers like 'If building B2B pipeline for Delhivery is a priority right now'. The policy permitted conditional framing, but in a WHAT-IS-ALLOWED list below the more concrete WHAT-TO-FLAG list, so the flag list won.",
+      "fix": "Moved the rule inside the flag's own definition as a pre-check: conditional, interrogative or sender-describing sentences assert nothing and cannot be an unsupported inference. Message 1 went 4/8 -> 7/8 send.",
+      "date": "2026-08-20"
+    },
+    {
+      "id": "THREAD-MEMORY-001",
+      "area": "execution",
+      "file": "backend/app/execution/dispatcher.py",
+      "line": 163,
+      "severity": "HIGH",
+      "status": "FIXED",
+      "title": "Follow-ups were composed blind; no outbound message was stored anywhere",
+      "evidence": "All four compose nodes wrote to the same target_variable and the mutation merge is shallow, so each step overwrote the last. omni_messages had carried direction IN ('inbound','outbound') since migration 021 and held zero outbound rows. The follow-up prompts instruct the writer to read earlier messages; there were none. Message 3 reworded message 1's closing question for 7 of 8 prospects.",
+      "fix": "The DM handler returns the delivered body (after the NOCHAT-002 guard); the transition worker writes it to omni_messages with the row id derived from command_id, since _apply_lead_mutations has no command dedupe and Kafka redelivery is routine; the dispatcher loads the thread and compose renders it. Renaming target_variable was rejected: {{ai_draft}} is the DM body_template and five other readers depend on it.",
+      "date": "2026-08-20"
+    },
+    {
+      "id": "CHANNEL-VOCAB-001",
+      "area": "execution",
+      "file": "backend/app/execution/transition_worker.py",
+      "line": 2237,
+      "severity": "MEDIUM",
+      "status": "FIXED",
+      "title": "Two tables were about to hold two channel names for one conversation",
+      "evidence": "omni_send_outcomes stores the action (linkedin_dm, linkedin_invite) because DEDUP-SEND-001 keys on it. omni_messages stores the conversation, and all three inbound writers hardcode 'linkedin'. Writing the action token into omni_messages would have split one thread in two for every consumer that groups by channel. Separately, the inbox renders a 'Message sent' placeholder from the send ledger and suppressed it only for LinkedIn with a live chat, so five channels backed by send_chat would have shown the same message twice.",
+      "fix": "Action tokens normalised into omni_messages with the action kept in metadata.action_channel; the channel comes from transition metadata so the muscle no longer reports it. Placeholder suppression keyed on command_id, which both tables carry. Invites are never suppressed.",
+      "date": "2026-08-20"
     }
   ]
 }
