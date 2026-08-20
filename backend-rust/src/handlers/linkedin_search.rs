@@ -50,7 +50,13 @@ async fn unipile_creds(command: &ActionCommand) -> Result<(String, String), Stri
 
 /// Pull a person row out of a Unipile search "member" object. Field names vary
 /// by tier, so probe several. Returns None when there's no usable identity.
-fn member_to_person(m: &Value) -> Option<Value> {
+/// `scoped_company` is the company the SEARCH was scoped to. Unipile's member
+/// results carry no company field, so without it every person this emits has
+/// `company_name: ""` — and ai.screen_person then rejects them for "cannot
+/// verify current company affiliation", a fact the caller already knew.
+/// Measured 2026-08-20: 116 of 116 people in one Campaign 3 run, and 32 of
+/// them rejected on exactly that reasoning.
+fn member_to_person(m: &Value, scoped_company: &str) -> Option<Value> {
     let name = m
         .get("name")
         .or_else(|| m.get("full_name"))
@@ -88,11 +94,15 @@ fn member_to_person(m: &Value) -> Option<Value> {
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    // Prefer whatever the result carries; fall back to the company the search
+    // was scoped to, which is the company this person was found AT.
     let company = m
         .get("company")
         .or_else(|| m.get("current_company"))
         .and_then(|v| v.as_str())
-        .unwrap_or("")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(scoped_company)
         .to_string();
     Some(json!({
         "name": name,
@@ -156,6 +166,9 @@ pub async fn handle_linkedin_search(command: &ActionCommand) -> ExecutionResult 
     }
     let keywords = common::s(command, "keywords");
     let company_name = common::s(command, "company_name");
+    // Carried onto every person the search returns: they were found AT this
+    // company, and the provider does not say so in the member record.
+    let scoped_company = company_name.clone();
     let fetch_count = command.payload["fetch_count"].as_i64().unwrap_or(25).clamp(1, 100) as usize;
     let people_key = {
         let k = common::s(command, "people_key");
@@ -221,7 +234,7 @@ pub async fn handle_linkedin_search(command: &ActionCommand) -> ExecutionResult 
         if people.len() >= fetch_count {
             break;
         }
-        if let Some(person) = member_to_person(m) {
+        if let Some(person) = member_to_person(m, &scoped_company) {
             let key = person["linkedin_url"]
                 .as_str()
                 .filter(|s| !s.is_empty())
@@ -244,4 +257,53 @@ pub async fn handle_linkedin_search(command: &ActionCommand) -> ExecutionResult 
     let handle = if people.is_empty() { "empty" } else { "default" };
     result.metadata.insert("next_handle".to_string(), json!(handle));
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_person_inherits_the_company_the_search_was_scoped_to() {
+        // Unipile member records carry no company field. Without the fallback
+        // every row is company_name:"" and ai.screen_person rejects the person
+        // for "cannot verify current company affiliation" — using a fact the
+        // caller supplied in the first place. 116 of 116 in one Campaign 3 run.
+        let m = json!({
+            "name": "Asha Rao",
+            "public_identifier": "asha-rao",
+            "id": "ACoAAA123",
+            "headline": "Head of Marketing"
+        });
+        let row = member_to_person(&m, "Verona Matchmaking").expect("maps");
+        assert_eq!(row["company_name"], json!("Verona Matchmaking"));
+    }
+
+    #[test]
+    fn a_company_on_the_record_still_wins_over_the_scope() {
+        let m = json!({
+            "name": "Asha Rao", "public_identifier": "asha-rao", "id": "ACoAAA123",
+            "company": "Actual Employer Ltd"
+        });
+        let row = member_to_person(&m, "Search Scope Inc").expect("maps");
+        assert_eq!(row["company_name"], json!("Actual Employer Ltd"));
+    }
+
+    #[test]
+    fn a_blank_company_on_the_record_does_not_beat_the_scope() {
+        let m = json!({
+            "name": "Asha Rao", "public_identifier": "asha-rao", "id": "ACoAAA123",
+            "company": "   "
+        });
+        let row = member_to_person(&m, "Verona Matchmaking").expect("maps");
+        assert_eq!(row["company_name"], json!("Verona Matchmaking"));
+    }
+
+    #[test]
+    fn an_unscoped_search_still_yields_an_empty_company_not_a_guess() {
+        let m = json!({"name": "Asha Rao", "public_identifier": "asha-rao", "id": "ACoAAA123"});
+        let row = member_to_person(&m, "").expect("maps");
+        assert_eq!(row["company_name"], json!(""));
+    }
 }
