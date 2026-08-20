@@ -82,5 +82,5 @@ def test_a_message_that_never_left_is_never_recorded_as_one():
     idx_record = body.index('"sent_message".to_string()')
     assert idx_return < idx_record, "the send log is reachable from the no-delivery path"
     # and it carries the text that actually went out, not the draft on the lead
-    record = body[idx_record:idx_record + 400]
+    record = body[idx_record:body.index("common::ok(", idx_record)]
     assert '"body": body_text' in record

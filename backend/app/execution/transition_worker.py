@@ -2221,12 +2221,49 @@ async def _apply_enrichment_mutation(
 # writing the message twice.
 _SENT_MSG_NS = uuid.UUID("2b9c7f41-6a3d-4e58-9f10-7c8d5e2a4b60")
 
+# CHANNEL-VOCAB-001. Two tables, two questions, two vocabularies:
+#
+#   omni_send_outcomes answers "which ACTION fired" — linkedin_invite,
+#   linkedin_dm, linkedin_inmail are all distinct rows and must stay distinct
+#   (DEDUP-SEND-001 keys on it; an invite must not suppress a DM).
+#
+#   omni_messages answers "which CONVERSATION is this part of". A prospect sees
+#   one LinkedIn thread; a reply cannot even say which action it answers, which
+#   is why all three inbound writers hardcode "linkedin" and condition.replied
+#   documents its filter as "(email, linkedin, …)".
+#
+# Writing the action token into omni_messages would put two names for one
+# conversation in the same table: the reply says "linkedin", our send says
+# "linkedin_dm", and every consumer that groups a thread by channel splits it in
+# two. So the action token is normalised on the way in, and kept in metadata for
+# anyone who needs to know which node actually sent it.
+_CONVERSATION_CHANNEL = {
+    "linkedin_dm": "linkedin",
+    "linkedin_inmail": "linkedin",
+    "linkedin_invite": "linkedin",
+    "linkedin_profile_view": "linkedin",
+    "linkedin": "linkedin",
+}
+
+
+def _conversation_channel(action_channel: str | None) -> str:
+    """The thread a send belongs to, from the action that sent it.
+
+    Anything unmapped passes through unchanged: email, sms, whatsapp, instagram
+    and telegram are already one action per conversation, and an unrecognised
+    channel is better recorded honestly than coerced into the wrong thread."""
+    token = str(action_channel or "").strip().lower()
+    if not token:
+        return "unknown"
+    return _CONVERSATION_CHANNEL.get(token, token)
+
 
 async def _record_sent_message(
     workspace_id: str,
     lead_id: str,
     sent: Any,
     command_id: str | None,
+    action_channel: str | None = None,
 ) -> None:
     """Persist a message we actually delivered into ``omni_messages``.
 
@@ -2267,13 +2304,15 @@ async def _record_sent_message(
             str(uuid.uuid5(_SENT_MSG_NS, str(command_id))),
             workspace_id,
             str(lead["contact_id"]),
-            str(sent.get("channel") or "linkedin"),
+            _conversation_channel(action_channel),
             body,
             json.dumps({
                 "lead_id": str(lead_id),
                 "workflow_id": str(lead["workflow_id"]) if lead.get("workflow_id") else None,
                 "command_id": str(command_id),
                 "chat_id": sent.get("chat_id") or None,
+                # the ACTION that sent it, which the conversation token drops
+                "action_channel": str(action_channel or "") or None,
             }),
         )
 
@@ -2283,6 +2322,7 @@ async def _apply_lead_mutations(
     lead_id: str,
     mutations: dict,
     command_id: str | None = None,
+    action_channel: str | None = None,
 ) -> None:
     """Merge typed muscle-supplied mutations into lead/contact state.
 
@@ -2308,7 +2348,9 @@ async def _apply_lead_mutations(
             )
 
     await _apply_enrichment_mutation(workspace_id, lead_id, mutations.get("enrichment"))
-    await _record_sent_message(workspace_id, lead_id, mutations.get("sent_message"), command_id)
+    await _record_sent_message(
+        workspace_id, lead_id, mutations.get("sent_message"), command_id, action_channel
+    )
 
     # CONTRACT-003: persist tag mutations into custom_fields.tags (a JSONB string
     # array). condition.has_tag reads the same location. The ADD_TAG/REMOVE_TAG
@@ -2803,7 +2845,11 @@ async def handle_transition(t: dict) -> None:
     # for_each or downstream node sees the freshly merged data.
     if lead_mutations:
         await _apply_lead_mutations(
-            workspace_id, lead_id, lead_mutations, command_id=meta.get("command_id")
+            workspace_id,
+            lead_id,
+            lead_mutations,
+            command_id=meta.get("command_id"),
+            action_channel=meta.get("channel"),
         )
 
     # PIPELINE-METRICS-001: a source node's result feeds the lead-gen efficiency

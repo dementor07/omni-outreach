@@ -471,7 +471,12 @@ async fn send_chat(command: &ActionCommand, event_type: &str, chat_id_col: &str)
                 obj.insert(
                     "sent_message".to_string(),
                     json!({
-                        "channel": command.channel.as_str(),
+                        // CHANNEL-VOCAB-001: no channel here on purpose. The
+                        // transition worker already has the action channel in
+                        // the transition metadata and normalises it to the
+                        // CONVERSATION token omni_messages uses. Reporting it
+                        // from here too would be a second source of truth for
+                        // the same fact, and the two would drift.
                         "body": body_text,
                         "chat_id": if new_chat_id.is_empty() {
                             command.payload["chat_id"].as_str().unwrap_or("")

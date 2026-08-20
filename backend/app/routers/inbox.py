@@ -296,16 +296,30 @@ async def get_thread(
             contact_id,
             limit,
         )
+    # THREAD-MEMORY-001: omni_messages now holds the real body of what we sent,
+    # so remember which send each rendered row came from. The ledger loop below
+    # only exists to stand in for a body it could not show; showing both is the
+    # same message twice.
+    rendered_sends: set[str] = set()
     for r in stored:
         if live_linkedin and str(r["channel"] or "").startswith("linkedin"):
             continue
+        meta = r["metadata"]
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except ValueError:
+                meta = {}
+        cid = (meta or {}).get("command_id")
+        if cid:
+            rendered_sends.add(str(cid))
         out.append(InboxMessage.model_validate(r))
 
     # 3. Invites/connection-requests (and any DM we couldn't pull live) as special
     #    bubbles from the send ledger.
     async with system_scope():
         sends = await fetch_all(
-            "SELECT id, contact_id, channel, occurred_at, status FROM omni_send_outcomes "
+            "SELECT id, contact_id, channel, occurred_at, status, command_id FROM omni_send_outcomes "
             "WHERE contact_id = $1 AND status = 'sent' ORDER BY occurred_at ASC LIMIT $2",
             contact_id,
             limit,
@@ -316,6 +330,12 @@ async def get_thread(
         is_invite = "invite" in ch or "profile_view" in ch
         if not is_invite and live_linkedin and ch.startswith("linkedin"):
             continue  # the DM body already came from the live chat
+        # ...and on every other channel (whatsapp/instagram/telegram, or
+        # LinkedIn when the live fetch failed), the body came from the stored
+        # outbound row. Keyed on command_id, which both tables carry, so this is
+        # an exact match rather than a channel guess.
+        if not is_invite and str(r["command_id"] or "") in rendered_sends:
+            continue
         if is_invite:
             # A contact gets ONE connection request; multiple 'sent' rows are the
             # re-fire artifact (LinkedIn dedupes them). Collapse to a single bubble.
