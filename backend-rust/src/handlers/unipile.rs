@@ -73,8 +73,21 @@ async fn linkedin_profile_check(
     account_id: &str,
     public_id: &str,
 ) -> (Option<bool>, Option<String>) {
+    let (d, p, _raw, _inv) = linkedin_profile_state(client, base, api_key, account_id, public_id).await;
+    (d, p)
+}
+
+/// The same lookup, keeping the two facts the caller throws away: the raw
+/// network distance, and whether an invitation is already outstanding.
+async fn linkedin_profile_state(
+    client: &reqwest::Client,
+    base: &str,
+    api_key: &str,
+    account_id: &str,
+    public_id: &str,
+) -> (Option<bool>, Option<String>, String, bool) {
     if public_id.is_empty() {
-        return (None, None);
+        return (None, None, String::new(), false);
     }
     let resp = match client
         .get(format!("{}/api/v1/users/{}", base, public_id))
@@ -84,12 +97,18 @@ async fn linkedin_profile_check(
         .await
     {
         Ok(r) if r.status().is_success() => r,
-        _ => return (None, None),
+        _ => return (None, None, String::new(), false),
     };
     let body: Value = match resp.json().await {
         Ok(v) => v,
-        Err(_) => return (None, None),
+        Err(_) => return (None, None, String::new(), false),
     };
+    let invitation_pending = body
+        .get("invitation")
+        .and_then(|v| v.get("type"))
+        .and_then(|v| v.as_str())
+        .map(|t| t.eq_ignore_ascii_case("SENT"))
+        .unwrap_or(false);
     let provider_id = body
         .get("provider_id")
         .or_else(|| body.get("id"))
@@ -108,7 +127,7 @@ async fn linkedin_profile_check(
         // else (DISTANCE_2/3, OUT_OF_NETWORK) needs InMail, not a plain DM.
         Some(distance.contains('1') || distance.contains("FIRST"))
     };
-    (degree, provider_id)
+    (degree, provider_id, distance, invitation_pending)
 }
 
 /// LinkedIn invite. Posts to /api/v1/users/invite. Sets `invited_at` on the lead.
@@ -141,6 +160,7 @@ pub async fn handle_linkedin_invite(command: &ActionCommand) -> ExecutionResult 
     // (needed to POST the invite) from ONE /users/{public_id} call.
     let mut provider_id = common::s(command, "provider_id");
     let mut already_connected = false;
+    let mut network_distance = String::new();
     if provider_id.is_empty() || command.lead.linkedin_url.is_some() {
         let public_id = command.lead.linkedin_url.as_deref().map(public_id_from_linkedin_url).unwrap_or_default();
         if provider_id.is_empty() && public_id.is_empty() {
@@ -154,8 +174,9 @@ pub async fn handle_linkedin_invite(command: &ActionCommand) -> ExecutionResult 
         // 1st-degree connections, each burning a spacing slot for nothing. The
         // provider_id is stable and every source now supplies it.
         let lookup = if !provider_id.is_empty() { provider_id.as_str() } else { public_id.as_str() };
-        let (degree, resolved) =
-            linkedin_profile_check(&client, &base, &api_key, &unipile_account_id, lookup).await;
+        let (degree, resolved, distance, _pending) =
+            linkedin_profile_state(&client, &base, &api_key, &unipile_account_id, lookup).await;
+        network_distance = distance;
         already_connected = matches!(degree, Some(true));
         if provider_id.is_empty() {
             match resolved {
@@ -188,7 +209,35 @@ pub async fn handle_linkedin_invite(command: &ActionCommand) -> ExecutionResult 
 
     match resp {
         Ok(r) if r.status().is_success() => {
-            info!("[unipile] invite sent for lead {}", command.lead.id);
+            // INVITE-TRUTH-001: a 2xx is Unipile accepting the request, not
+            // LinkedIn creating an invitation. LinkedIn silently declines plenty
+            // of them — out-of-network members it wants an email address for,
+            // weekly invite limits — and answers 200 all the same. Measured
+            // 2026-08-20: of six Campaign 3 invites recorded 'sent', three had
+            // no invitation at LinkedIn at all. Recording those as sent parks
+            // the lead on invite_accepted waiting for an acceptance that can
+            // never come, exactly as NOCHAT-002 did for DMs.
+            //
+            // So ask the provider. The invite is 'sent' when LinkedIn actually
+            // holds an outstanding invitation for this member.
+            let confirm_id = if !provider_id.is_empty() { provider_id.as_str() } else { "" };
+            let (_d, _p, _raw, invitation_pending) =
+                linkedin_profile_state(&client, &base, &api_key, &unipile_account_id, confirm_id).await;
+            if !invitation_pending {
+                warn!(
+                    "[unipile] invite for lead {} returned 2xx but LinkedIn holds no invitation (distance={}) — NOT sent",
+                    command.lead.id, network_distance
+                );
+                let mut degraded = common::skipped(command, "invite_not_created");
+                degraded.metadata.insert("next_handle".to_string(), json!("on_error"));
+                degraded.lead_mutations = json!({"custom_fields": {
+                    "provider_id": provider_id,
+                    "linkedin_distance": network_distance,
+                    "invite_not_created": true,
+                }});
+                return degraded;
+            }
+            info!("[unipile] invite confirmed at LinkedIn for lead {}", command.lead.id);
             // Persist provider_id + invited_at under custom_fields so the sync
             // worker's _apply_lead_mutations actually applies them (it only
             // merges the `custom_fields` envelope). The invite-accepted webhook
@@ -879,5 +928,29 @@ mod tests {
         // worker merges nothing — no spurious empty keys on the lead.
         let m = profile_enrichment(&json!({"network_distance": "DISTANCE_2"}));
         assert_eq!(m, json!({}));
+    }
+
+    #[test]
+    fn a_two_hundred_is_not_an_invitation() {
+        // INVITE-TRUTH-001. The handler must ask LinkedIn whether an invitation
+        // exists rather than trust Unipile's 2xx. Three of six Campaign 3
+        // invites recorded 'sent' had no invitation at the provider.
+        let src = include_str!("unipile.rs");
+        let f = src.split("pub async fn handle_linkedin_invite").nth(1).unwrap();
+        let f = f.split("\n/// ").next().unwrap();
+        let post = f.split("status().is_success()").nth(1).unwrap();
+        let confirm = post.find("invitation_pending").expect("verifies at the provider");
+        let ok = post.find("common::ok(").expect("has a success path");
+        assert!(confirm < ok, "the confirmation must run before recording a send");
+        assert!(post.contains("invite_not_created"));
+    }
+
+    #[test]
+    fn an_unconfirmed_invite_routes_instead_of_stranding() {
+        // SEND-ONCE-002: a refusal that does not move the lead is a silent stall.
+        let src = include_str!("unipile.rs");
+        let f = src.split("pub async fn handle_linkedin_invite").nth(1).unwrap();
+        let deg = f.split("invite_not_created").nth(1).unwrap();
+        assert!(deg.contains("next_handle"), "the degraded path must route");
     }
 }
