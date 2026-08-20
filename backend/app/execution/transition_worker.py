@@ -87,6 +87,10 @@ _LEAF_TERMINAL_STATUS: dict[str, str] = {
     # this channel (dedupe_action=skip_step) with no wired continuation ends
     # honestly — it's neither a fresh send nor a failure.
     "already_messaged": "ended",
+    # MSG-QA-001: the reviewer refused this draft for the PROSPECT, not the
+    # wording. Unwired, the lead stops here — but nothing was sent, so
+    # 'completed' would claim a send that never happened.
+    "reject": "ended",
 }
 
 
