@@ -187,6 +187,13 @@ async def _link_chat_to_lead(ws: str, chat: dict) -> int:
     The chat list response already includes ``attendee_provider_id``, which is
     the same LinkedIn member id contacts store as ``custom_fields.provider_id``,
     so the match needs no extra API call and no profile view.
+
+    REPLY-BIND-002: match the LEAD's provider_id too, not just the contact's.
+    The invite handler stamps provider_id onto the lead whether or not the
+    contact row ever had one, and before CONTACT-PROVIDER-001 the contacts this
+    pipeline created had none — so a reply from anyone invited in that window
+    would find no row to bind and be dropped on the floor. Either side proving
+    identity is enough; they are the same LinkedIn member id.
     """
     attendee = str(chat.get("attendee_provider_id") or "")
     chat_id = str(chat.get("id") or "")
@@ -202,7 +209,10 @@ async def _link_chat_to_lead(ws: str, chat: dict) -> int:
               FROM omni_contacts c
              WHERE c.id = l.contact_id
                AND l.workspace_id = $1
-               AND c.custom_fields->>'provider_id' = $2
+               AND $2 IN (
+                     c.custom_fields->>'provider_id',
+                     l.custom_fields->>'provider_id'
+                   )
                AND COALESCE(l.custom_fields->>'chat_id', '') = ''
             RETURNING l.id
             """,

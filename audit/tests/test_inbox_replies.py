@@ -53,7 +53,10 @@ async def test_an_unlinked_chat_is_matched_to_its_contact(monkeypatch):
     assert captured["args"] == ("ws-1", "ACoAAA_member_123", "chatXYZ")
     # It must only fill an EMPTY chat_id, never overwrite a live one.
     assert "COALESCE(l.custom_fields->>'chat_id', '') = ''" in captured["query"]
-    assert "c.custom_fields->>'provider_id' = $2" in captured["query"]
+    # REPLY-BIND-002: either side proving identity is enough — the invite
+    # handler stamps provider_id on the LEAD even when the contact row has none.
+    assert "c.custom_fields->>'provider_id'" in captured["query"]
+    assert "l.custom_fields->>'provider_id'" in captured["query"]
 
 
 @pytest.mark.asyncio

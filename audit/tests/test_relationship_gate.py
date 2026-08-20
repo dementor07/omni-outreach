@@ -32,15 +32,26 @@ def _rs_fn(name: str) -> str:
 
 
 def test_distance_resolver_classifies_first_degree_and_returns_provider_id():
-    body = _rs_fn("linkedin_profile_check")
-    # ONE /users/{public_id} lookup answers both: degree + provider_id.
+    # INVITE-TRUTH-001 moved the lookup into linkedin_profile_state, which
+    # answers two more questions off the SAME call: the raw distance string, and
+    # whether an invitation is already outstanding. linkedin_profile_check is now
+    # a thin delegation kept for the callers that only want degree + id.
+    body = _rs_fn("linkedin_profile_state")
+    # ONE /users/{public_id} lookup answers all of it.
     assert "/api/v1/users/" in body
     assert "network_distance" in body
     assert "provider_id" in body, "the lookup must also return the provider_id (DM-ATTENDEE-001)"
     # 1st-degree (DISTANCE_1 / FIRST_DEGREE) => true; anything else => false.
     assert "FIRST" in body and "'1'" in body
-    # unknown/resolve-failure => (None, None) (fail-open on the degree).
-    assert "(None, None)" in body
+    # unknown/resolve-failure => fail OPEN on the degree, so a lookup outage
+    # never silently blocks every send.
+    assert "(None, None, String::new(), false)" in body
+
+    # the wrapper must stay a pure delegation — two resolvers that could drift
+    # apart is how the gate ends up disagreeing with the invite.
+    wrapper = _rs_fn("linkedin_profile_check")
+    assert "linkedin_profile_state(" in wrapper
+    assert "/api/v1/users/" not in wrapper
 
 
 def test_gate_only_opens_chat_for_first_degree_linkedin():
@@ -84,7 +95,9 @@ def test_invite_skips_when_already_connected():
     # resolve distance FIRST and, when already connected, SKIP the invite and
     # route via the `already_connected` handle (the engine owns this invariant).
     body = _rs_fn("handle_linkedin_invite")
-    assert "linkedin_profile_check(" in body, "the invite must resolve distance before firing"
+    # INVITE-TRUTH-001 widened this read to also report whether an invitation is
+    # already outstanding, so the invite path calls the four-value variant.
+    assert "linkedin_profile_state(" in body, "the invite must resolve distance before firing"
     assert "already_connected" in body
     # the skip must come BEFORE the /users/invite POST (don't fire a redundant invite).
     skip = body.find("already_connected")

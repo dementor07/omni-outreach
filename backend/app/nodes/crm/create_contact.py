@@ -187,7 +187,14 @@ async def execute(ctx: NodeContext) -> NodeResult:
             "event_type": "contact.created",
             "entity_type": "contact",
             "entity_id": contact_id,
-            "payload": {**identity, "phone": cfg.phone, "source": cfg.source},
+            "payload": {
+                **identity,
+                "phone": cfg.phone,
+                "source": cfg.source,
+                # CONTACT-PROVIDER-001 — the projector merges this into
+                # omni_contacts.custom_fields (`||`), so it only ever adds.
+                "custom_fields": _provider_fields(person, lead_cf),
+            },
         }
     ]
     # Bind the new contact to the lead this node ran on, so the discovered +
@@ -234,6 +241,39 @@ def _contact_id(workspace_id: str, linkedin_url: str | None, email: str | None) 
         key = "em:" + email.strip().lower()
     # key is guaranteed non-None: the caller already rejected no-email-no-linkedin.
     return str(uuid.uuid5(_CONTACT_NS, f"{workspace_id}|{key}"))
+
+
+# CONTACT-PROVIDER-001: the identifiers the PROVIDER knows a person by.
+# linkedin_search emits provider_id + public_id on every discovered person, and
+# _merge_identity kept only the human-readable fields — so every contact this
+# pipeline created landed with custom_fields = {}. That provider_id is what
+# binds an inbound LinkedIn reply to its lead (unipile_sync_worker matches a
+# chat's attendee_provider_id against omni_contacts.custom_fields->>'provider_id'),
+# so dropping it means a reply from someone this campaign invited never reaches
+# their thread. Measured 2026-08-20: four Campaign 3 contacts invited that day
+# had no provider_id at all, and the invite handler had to re-resolve each one
+# by URL slug — an extra profile view per send.
+_PROVIDER_KEYS = ("provider_id", "public_id", "location", "industry")
+
+
+def _provider_fields(person: dict, lead_cf: dict) -> dict:
+    """Provider-side identifiers for the contact's custom_fields. The person dict
+    wins over the lead, since it is the row this contact was actually built from."""
+    out: dict[str, str] = {}
+    for key in _PROVIDER_KEYS:
+        value = person.get(key) or lead_cf.get(key)
+        if isinstance(value, str) and value.strip():
+            out[key] = value.strip()
+    # linkedin_search says network_distance, the older rows say distance.
+    distance = (
+        person.get("distance")
+        or person.get("network_distance")
+        or lead_cf.get("distance")
+        or lead_cf.get("network_distance")
+    )
+    if isinstance(distance, str) and distance.strip():
+        out["distance"] = distance.strip()
+    return out
 
 
 def _merge_identity(cfg: CreateContactConfig, person: dict) -> dict:
