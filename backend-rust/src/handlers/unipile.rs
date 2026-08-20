@@ -146,8 +146,16 @@ pub async fn handle_linkedin_invite(command: &ActionCommand) -> ExecutionResult 
         if provider_id.is_empty() && public_id.is_empty() {
             return common::fail(command, "neither provider_id nor linkedin_url available", false);
         }
+        // SMART-INVITE-002: look the profile up by provider_id when we have one.
+        // The public_id is a URL slug the member can change, and a stale slug
+        // 404s — which this function reports as "degree unknown", so the caller
+        // fails open and invites someone we are already connected to. Measured
+        // 2026-08-20: three of five Campaign 3 invites went to existing
+        // 1st-degree connections, each burning a spacing slot for nothing. The
+        // provider_id is stable and every source now supplies it.
+        let lookup = if !provider_id.is_empty() { provider_id.as_str() } else { public_id.as_str() };
         let (degree, resolved) =
-            linkedin_profile_check(&client, &base, &api_key, &unipile_account_id, &public_id).await;
+            linkedin_profile_check(&client, &base, &api_key, &unipile_account_id, lookup).await;
         already_connected = matches!(degree, Some(true));
         if provider_id.is_empty() {
             match resolved {
