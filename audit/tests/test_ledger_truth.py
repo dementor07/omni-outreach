@@ -59,3 +59,33 @@ def test_a_real_muscle_result_is_still_recorded():
     body = _fn("_emit_send_outcome")
     assert 'if meta.get("provider")' not in body
     assert 'status not in {"sent", "failed", "skipped"}' in body
+
+
+# --------------------------------------------------------------------------
+# LEDGER-TRUTH-002: the marker does not survive the orchestrator
+# --------------------------------------------------------------------------
+
+def test_the_synthetic_marker_is_dropped_in_transit():
+    """The Flink orchestrator rebuilds transition metadata from a fixed key
+    list. If `synthetic` ever appears there this test should be deleted, but
+    while it does not, the source-side marker alone cannot be relied on."""
+    orch = (ROOT / "backend-flink/orchestrator.py").read_text(encoding="utf-8")
+    build = orch.split("def _build_transition")[1].split("\n    def ")[0]
+    assert '"metadata": {' in build
+    assert "synthetic" not in build, \
+        "the orchestrator now forwards `synthetic` — the handle fallback can go"
+
+
+def test_a_retry_never_writes_a_send_row():
+    """A delayed hold re-fires on `__retry__`; a real send routes on `sent`.
+    Nothing that reached the provider arrives here as a retry."""
+    guard = SRC.split("async def _emit_send_outcome")[1].split("\nasync def ")[0]
+    assert 'if (handle or "").strip() == "__retry__":' in guard
+    assert "LEDGER-TRUTH-002" in guard
+
+
+def test_the_handle_actually_reaches_the_guard():
+    """The check is worthless if the caller never passes it."""
+    assert "handle: str | None = None," in SRC
+    caller = SRC.split("async def handle_transition")[1]
+    assert "handle=handle," in caller

@@ -2543,6 +2543,7 @@ async def _emit_send_outcome(
     lead_mutations: dict,
     correlation_id: str | None,
     firing_node_id: str | None = None,
+    handle: str | None = None,
 ) -> None:
     """OBSERVABILITY-001: a durable, per-lead, cross-queryable record of EVERY
     outbound send attempt (all channels, not just email) — status, the failure
@@ -2561,6 +2562,31 @@ async def _emit_send_outcome(
     # re-fire); recording it as a send makes the ledger claim messages that were
     # never attempted.
     if meta.get("synthetic"):
+        return
+    # LEDGER-TRUTH-002: ...but the marker does not survive the trip. The Flink
+    # orchestrator rebuilds transition metadata from a fixed key list
+    # (command_id, channel, status, error, is_retriable, telemetry,
+    # lead_mutations, workspace_id, correlation_id, sending_account_id) and
+    # `synthetic` is not one of them, so it is dropped in transit and the guard
+    # above never fires.
+    #
+    # The handle survives, and it is decisive. A delayed hold re-fires its node
+    # on `__retry__`; a real send routes on the channel node's `sent` handle
+    # (build_command stamps it). Nothing that reaches the provider ever arrives
+    # here as `__retry__`.
+    #
+    # Measured 2026-08-20 on Campaign 3: a spacing hold wrote a phantom
+    # status='sent' row with provider_ids={} and no sending_account_id, and
+    # LinkedIn had no invitation for that person. That row then poisons
+    # SEND-ONCE-001, whose guard is `status='sent' AND node_id=...`, so the real
+    # invite is dropped as a duplicate and the lead waits forever on an
+    # acceptance that can never come — SEND-ONCE-002 all over again.
+    #
+    # Fixing the orchestrator to forward the marker is the tidier change, but
+    # that job runs without checkpointing: restarting it drops the pending
+    # timers and strands every currently-held lead. This closes the hole without
+    # touching it.
+    if (handle or "").strip() == "__retry__":
         return
     status = str(meta.get("status") or "").lower()
     if status not in {"sent", "failed", "skipped"}:
@@ -2896,6 +2922,7 @@ async def handle_transition(t: dict) -> None:
             lead_mutations,
             correlation_id,
             firing_node_id=str(firing_node.get("id") or source_node_id or "") or None,
+            handle=handle,
         )
 
     # Rate-counter increment on a CONFIRMED send. A real outbound result carries
