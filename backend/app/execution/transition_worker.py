@@ -1217,10 +1217,27 @@ async def _spacing_hold(
                 # A retry fired ahead of the reserved slot — keep holding.
                 await _hold_send(workspace_id, lead, node, correlation_id, remaining, reason="spacing")
                 return True
-            # Slot reached: release. Clear the marker so a later send node for
-            # this same lead (a follow-up DM) reserves its own fresh slot.
+            # SPACE-STALE-001: a slot only means "your turn" for as long as the
+            # send it was reserved for is still the one happening. A marker
+            # outlives its send whenever the lead leaves this node another way —
+            # an approval, a reply gate, a graph edit, an operator recovery — and
+            # nothing ever cleared it. On the lead's NEXT send that abandoned
+            # marker read as "slot reached", so the send released immediately
+            # and never reserved a new one: spacing silently did not apply.
+            # Measured on 2026-08-20 — ten Campaign 2 invites went out two
+            # seconds apart against a 600s setting, every one of them carrying a
+            # marker days old, and the campaign clock advanced by a single gap.
+            # Only a slot near its reserved moment is genuinely reached; an older
+            # one is abandoned and has to queue again like any other send.
+            if remaining > -float(spacing):
+                await _clear_spacing_slot(workspace_id, str(lead["id"]))
+                return False
+            log.info(
+                "lead %s: abandoned spacing slot from %s (%.0fs stale) — re-queuing",
+                lead["id"], slot.isoformat(), -remaining,
+            )
             await _clear_spacing_slot(workspace_id, str(lead["id"]))
-            return False
+            # fall through and reserve a fresh slot below
 
     # First pass: reserve this send's slot by advancing the campaign clock.
     jitter = int(controls.get("send_spacing_jitter_pct") or 0)
