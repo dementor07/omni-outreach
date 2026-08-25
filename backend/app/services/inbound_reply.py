@@ -44,6 +44,43 @@ async def resolve_contact_by_linkedin(ws: str, linkedin_url: str) -> str | None:
     return str(row["id"]) if row else None
 
 
+async def _resolve_campaign(ws: str, contact_id: str) -> str | None:
+    """MSG-CAMPAIGN-001 — which campaign does this inbound reply belong to?
+
+    A contact can sit in several campaigns at once, so there is no single
+    ``contact -> campaign`` answer. The reply is attributed to whoever last SENT
+    to them: a reply belongs to the conversation that prompted it, and the most
+    recent outbound touch IS that conversation. Where there is no send history
+    (a reply to a message that predates outcome tracking), a contact belonging
+    to exactly ONE campaign takes that campaign.
+
+    Returns None when nothing separates the candidates. That is deliberate --
+    the column is nullable so an unattributable reply stays visibly
+    unattributed instead of inflating whichever campaign sorted first.
+    """
+    async with system_scope():
+        last_send = await fetch_one(
+            """
+            SELECT workflow_id FROM omni_send_outcomes
+             WHERE workspace_id = $1 AND contact_id = $2 AND workflow_id IS NOT NULL
+             ORDER BY occurred_at DESC
+             LIMIT 1
+            """,
+            ws, contact_id,
+        )
+        if last_send and last_send.get("workflow_id"):
+            return str(last_send["workflow_id"])
+        sole = await fetch_one(
+            """
+            SELECT (array_agg(DISTINCT workflow_id))[1] AS workflow_id FROM omni_leads
+             WHERE workspace_id = $1 AND contact_id = $2 AND workflow_id IS NOT NULL
+            HAVING COUNT(DISTINCT workflow_id) = 1
+            """,
+            ws, contact_id,
+        )
+    return str(sole["workflow_id"]) if sole and sole.get("workflow_id") else None
+
+
 async def process_reply(
     ws: str,
     contact_id: str,
@@ -62,6 +99,9 @@ async def process_reply(
     """
     correlation_id = correlation_id or str(uuid.uuid4())
     intent, confidence, reason, source = reply_classifier.classify_reply(text)
+    # Resolve the campaign BEFORE publishing so the projector can stamp it
+    # onto the row; the event payload is the only channel it has.
+    workflow_id = await _resolve_campaign(ws, contact_id)
 
     # 1+2. message.received — build the envelope by hand so we can pin a
     # deterministic id when we have a provider message id (dedupe on redelivery /
@@ -81,6 +121,7 @@ async def process_reply(
                 "entity_id": str(uuid.uuid4()),
                 "payload": {
                     "contact_id": contact_id,
+                    "workflow_id": workflow_id,
                     "channel": channel,
                     "body": text,
                     "classification": intent,

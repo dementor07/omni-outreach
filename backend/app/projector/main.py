@@ -459,14 +459,17 @@ async def _project_message(env: dict[str, Any]) -> None:
     direction = "inbound" if env["event_type"] == "message.received" else "outbound"
     await execute(
         """
-        INSERT INTO omni_messages (id, workspace_id, contact_id, channel, direction,
+        INSERT INTO omni_messages (id, workspace_id, contact_id, workflow_id, channel, direction,
                               subject, body, classification, confidence, metadata, occurred_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)
         ON CONFLICT (id) DO NOTHING
         """,
         env["id"],
         env["workspace_id"],
         p.get("contact_id"),
+        # MSG-CAMPAIGN-001: NULL when the producer could not attribute the
+        # message to one campaign -- an honest gap beats a guessed number.
+        p.get("workflow_id"),
         p.get("channel") or "unknown",
         direction,
         p.get("subject"),

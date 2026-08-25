@@ -104,7 +104,8 @@ ENTITIES: dict[str, EntityDef] = {
     "messages": EntityDef(
         table="omni_messages",
         columns={
-            "id": "uuid", "contact_id": "uuid", "channel": "text", "direction": "text",
+            "id": "uuid", "contact_id": "uuid", "workflow_id": "uuid",
+            "channel": "text", "direction": "text",
             "subject": "text", "body": "text", "classification": "text",
             "confidence": "numeric", "occurred_at": _TS,
         },
