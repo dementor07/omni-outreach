@@ -31,6 +31,22 @@ from app.nodes import (
 
 class AiComposeConfig(BaseModel):
     instruction: str = Field(description="What to write, in plain language")
+    # COMPOSE-PURPOSE-001: a campaign carries several compose steps and they all
+    # render identically, so there is no way to tell the opening message from
+    # the third follow-up without opening each one and reading its instruction.
+    # Naming the step makes the sequence readable on the canvas and tells the
+    # model which message in the thread it is writing.
+    #
+    # None is a real state, not a missing value: every compose node that existed
+    # before this field is genuinely unlabelled, and defaulting them all to
+    # "intro" or "follow_up" would assert something untrue about most of them.
+    purpose: Literal["intro", "follow_up"] | None = Field(
+        None,
+        description=(
+            "Which message in the sequence this step writes — 'intro' for the "
+            "first touch, 'follow_up' for anything after it. Shown on the canvas."
+        ),
+    )
     channel: Literal["email", "linkedin", "sms", "whatsapp"] = Field("email", description="Channel the draft will be sent on")
     tone: Literal["professional", "casual", "warm", "direct"] = Field("professional")
     # TONE-PRESET-001: pick one of the structured tone presets (the team's tone
@@ -97,8 +113,9 @@ async def execute(ctx: NodeContext) -> NodeResult:
                 "tone": cfg.tone,
                 "tone_id": cfg.tone_id,
                 "max_words": cfg.max_words,
+                "purpose": cfg.purpose,
                 "target_variable": cfg.target_variable,
-                "correlation_id": correlation_id,
+                "correlation_id": correlation_id
             },
         }
     ]

@@ -37,6 +37,18 @@ function nodeLabel(manifest: NodeManifest): string {
   return manifest.display_name || nodeLabelFor(manifest.type)
 }
 
+// COMPOSE-PURPOSE-001: a campaign carries several ai.compose steps and they all
+// render with the same type label, so the opening message is indistinguishable
+// from the third follow-up without opening each one. Steps that declare a
+// purpose say so on the card; ones that do not are left alone rather than
+// guessed at.
+function purposeLabel(config: Record<string, unknown> | undefined): string | null {
+  const purpose = config?.purpose
+  if (purpose === 'intro') return 'Intro'
+  if (purpose === 'follow_up') return 'Follow-up'
+  return null
+}
+
 export interface GraphShape {
   linear: boolean
   orderedNodeIds: string[]
@@ -229,6 +241,9 @@ export default function SequentialBuilder({ nodes, edges, manifests, onChange, o
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <p className="truncate text-[15px] font-bold text-slate-900 dark:text-white">{nodeLabel(manifest)}</p>
+                        {purposeLabel(node.data.config) && (
+                          <Badge label={purposeLabel(node.data.config) as string} variant="info" size="xs" />
+                        )}
                         {missing.length > 0 && <Badge label="Needs config" variant="warning" size="xs" />}
                       </div>
                       <p className="mt-0.5 truncate text-[11px] font-medium text-slate-400">{manifest.summary}</p>
