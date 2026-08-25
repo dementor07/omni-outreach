@@ -58,6 +58,19 @@ export const PROVIDERS: ProviderSpec[] = [
     ],
   },
   {
+    // MSG-QA-001 wants the reviewer on a DIFFERENT model from the writer: a
+    // model scoring its own output rates its own habits as fine. Without a card
+    // here there was no way to give it one, so ai.qa_message silently fell back
+    // to Anthropic — the writer grading itself, which is the thing it prevents.
+    id: 'kimi', name: 'Kimi (Moonshot)', category: 'ai', icon: Sparkles,
+    blurb: 'The independent reviewer for ai.qa_message — judges drafts written by Claude.',
+    docsUrl: 'https://platform.moonshot.ai/console/api-keys',
+    fields: [
+      { key: 'api_key', label: 'API key', type: 'secret', placeholder: 'sk-…' },
+      { key: 'default_model', label: 'Default model', type: 'text', placeholder: 'kimi-k2.6', optional: true, metadata: true },
+    ],
+  },
+  {
     id: 'openai', name: 'OpenAI', category: 'ai', icon: Sparkles,
     blurb: 'OpenAI Responses API for agentic view authoring and other AI work.',
     docsUrl: 'https://platform.openai.com/api-keys',

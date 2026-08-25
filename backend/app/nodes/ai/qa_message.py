@@ -111,7 +111,10 @@ MANIFEST = NodeManifest(
         NodeHandle("rewrite", "Repairable problems found — wire back to the compose node"),
         NodeHandle("reject", "Should not be sent (or the rewrite budget ran out)"),
     ),
-    capabilities=("connection:anthropic",),
+    # Either provider can review. Kimi is the intended one — a writer grading
+    # itself passes its own habits — but the picker must offer both, or the
+    # only selectable connection is the writer's own.
+    capabilities=("connection:kimi", "connection:anthropic"),
     side_effect=SideEffect.NETWORK,
     icon="shield-check",
 )

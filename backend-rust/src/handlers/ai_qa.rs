@@ -32,8 +32,20 @@ const KIMI_URL: &str = "https://api.moonshot.ai/v1/chat/completions";
 const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const KIMI_DEFAULT_MODEL: &str = "kimi-k2.6";
+/// kimi-k2.6 accepts no other value; sending 0.0 is a hard 400.
+const KIMI_TEMPERATURE: f32 = 1.0;
 const ANTHROPIC_DEFAULT_MODEL: &str = "claude-haiku-4-5-20251001";
 const MAX_TOKENS: u32 = 900;
+/// MSG-QA-008: kimi-k2.6 is a REASONING model — it spends completion tokens
+/// thinking before it writes anything, and the thinking is billed against the
+/// same max_tokens. A measured verdict on a one-line draft burned 930 completion
+/// tokens, 784 of them reasoning, leaving 146 for the JSON. At MAX_TOKENS=900
+/// the reasoning eats the whole budget and `content` comes back EMPTY —
+/// observed on 7 of 9 calls. An empty body fails to parse, which routes on
+/// on_error, which is `reject`: the gate would have refused nearly every draft
+/// and the campaign would have sent nothing at all. Anthropic is not a reasoning
+/// model and keeps the smaller budget.
+const KIMI_MAX_TOKENS: u32 = 4000;
 
 /// Evidence is a lead's whole `custom_fields`, which can carry scraped post
 /// bodies and website dumps. Bound what goes to the reviewer so one fat lead
@@ -429,8 +441,14 @@ async fn review_kimi(
     };
     let body = json!({
         "model": model,
-        "temperature": 0.0,
-        "max_tokens": MAX_TOKENS,
+        // MSG-QA-007: kimi-k2.6 REJECTS any temperature but 1 —
+        // {"error":{"message":"invalid temperature: only 1 is allowed for this
+        // model"}} — so 0.0 made every Kimi review fail with a 400. Paired with
+        // on_error=reject that is not a degraded gate, it is a gate that refuses
+        // every draft. A judge wants determinism, but a working judge at the
+        // provider's only temperature beats a deterministic one that 400s.
+        "temperature": KIMI_TEMPERATURE,
+        "max_tokens": KIMI_MAX_TOKENS,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
