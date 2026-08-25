@@ -1243,10 +1243,22 @@ async def _spacing_hold(
             await _clear_spacing_slot(workspace_id, str(lead["id"]))
             # fall through and reserve a fresh slot below
 
-    # First pass: reserve this send's slot by advancing the campaign clock.
+    # First pass: reserve this send's slot by advancing the LANE clock.
     jitter = int(controls.get("send_spacing_jitter_pct") or 0)
     gap = send_policy.jittered_gap_seconds(float(spacing), jitter, random.uniform(-1.0, 1.0))
-    assigned = await _reserve_spacing_slot(workspace_id, workflow_id, gap)
+    # SEND-LANE-001: warm DMs no longer queue behind cold invites, and pooled
+    # seats no longer take turns through one pointer. An invite lane rotates by
+    # LRU so its gap divides across the eligible seats; a DM is pinned to the
+    # seat that sent its invite (SEAT-PIN-001) and keeps the full gap on a lane
+    # of its own, so no single account ever speeds up.
+    lane = send_policy.spacing_lane(
+        str(node.get("node_type") or ""), cf.get("invite_account_id")
+    )
+    if lane == send_policy.INVITE_LANE:
+        gap = send_policy.effective_gap_seconds(
+            gap, await _eligible_seat_count(workspace_id, workflow_id)
+        )
+    assigned = await _reserve_spacing_slot(workspace_id, workflow_id, lane, gap)
     if assigned is None:
         return False  # workflow row vanished — fail open (send now)
     if assigned.tzinfo is None:
@@ -1259,23 +1271,54 @@ async def _spacing_hold(
     return True
 
 
+async def _eligible_seat_count(workspace_id: str, workflow_id: str) -> int:
+    """How many pooled seats could carry a rotating send right now.
+
+    The invite lane divides its gap by this, so N healthy seats drip in parallel
+    while each still averages a full gap between its own sends. Returns at least
+    1, and falls back to 1 on any error — that is today's behaviour (one lane at
+    the full gap), and over-spacing is the safe direction to fail in."""
+    try:
+        async with system_scope():
+            rows = await fetch_all(
+                """
+                SELECT a.status, a.daily_cap, a.hourly_cap, a.sends_today,
+                       a.sends_this_hour, a.day_anchor, a.hour_anchor, a.warmup_target
+                FROM omni_sending_accounts a
+                JOIN omni_campaign_sending_accounts p ON p.sending_account_id = a.id
+                WHERE a.workspace_id = $1 AND p.workflow_id = $2
+                """,
+                workspace_id, workflow_id,
+            )
+        now = datetime.now(UTC)
+        eligible = send_policy.eligible_accounts(
+            [dict(r) for r in rows], now.date(), now.replace(minute=0, second=0, microsecond=0)
+        )
+        return max(1, len(eligible))
+    except Exception:  # noqa: BLE001 — spacing must never halt a send
+        log.exception("seat count failed for workflow %s; spacing at the full gap", workflow_id)
+        return 1
+
+
 async def _reserve_spacing_slot(
-    workspace_id: str, workflow_id: str, gap_seconds: float
+    workspace_id: str, workflow_id: str, lane: str, gap_seconds: float
 ) -> datetime | None:
-    """Atomically advance omni_workflows.next_send_at by one gap and return the
-    slot assigned to THIS send (the pre-advance value, clamped to now). The row
-    lock serialises concurrent reservations so each send gets a distinct slot."""
+    """Atomically advance ONE LANE's clock by a gap and return the slot assigned
+    to THIS send (the pre-advance value, clamped to now). The upsert serialises
+    concurrent reservations per lane, so each send gets a distinct slot and
+    lanes never contend with each other."""
     async with system_scope():
         row = await fetch_one(
             """
-            UPDATE omni_workflows
-            SET next_send_at = GREATEST(COALESCE(next_send_at, NOW()), NOW())
-                               + make_interval(secs => $3),
+            INSERT INTO omni_send_lanes (workspace_id, workflow_id, lane, next_send_at)
+            VALUES ($1, $2, $3, NOW() + make_interval(secs => $4))
+            ON CONFLICT (workspace_id, workflow_id, lane) DO UPDATE
+            SET next_send_at = GREATEST(COALESCE(omni_send_lanes.next_send_at, NOW()), NOW())
+                               + make_interval(secs => $4),
                 updated_at = NOW()
-            WHERE id = $1 AND workspace_id = $2
-            RETURNING next_send_at - make_interval(secs => $3) AS assigned_slot
+            RETURNING next_send_at - make_interval(secs => $4) AS assigned_slot
             """,
-            workflow_id, workspace_id, float(gap_seconds),
+            workspace_id, workflow_id, lane, float(gap_seconds),
         )
     return row["assigned_slot"] if row else None
 
@@ -2318,13 +2361,16 @@ async def _record_sent_message(
         await execute(
             """
             INSERT INTO omni_messages
-                (id, workspace_id, contact_id, channel, direction, body, metadata, occurred_at)
-            VALUES ($1, $2, $3, $4, 'outbound', $5, $6::jsonb, NOW())
+                (id, workspace_id, contact_id, workflow_id, channel, direction,
+                 body, metadata, occurred_at)
+            VALUES ($1, $2, $3, $4, $5, 'outbound', $6, $7::jsonb, NOW())
             ON CONFLICT (id) DO NOTHING
             """,
             str(uuid.uuid5(_SENT_MSG_NS, str(command_id))),
             workspace_id,
             str(lead["contact_id"]),
+            # MSG-CAMPAIGN-001: the campaign is a column now, not just metadata.
+            str(lead["workflow_id"]) if lead.get("workflow_id") else None,
             _conversation_channel(action_channel),
             body,
             json.dumps({

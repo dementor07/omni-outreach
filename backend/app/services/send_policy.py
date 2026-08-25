@@ -253,3 +253,53 @@ def jittered_gap_seconds(base_seconds: float, jitter_pct: int, rand_uniform: flo
     r = max(-1.0, min(1.0, float(rand_uniform)))
     factor = 1.0 + (pct / 100.0) * r
     return max(1.0, float(base_seconds) * factor)
+
+
+# ── SEND-LANE-001: which queue a send waits in, and how wide its gap is ──────
+# SEND-SPACE-001 put every send a campaign makes behind ONE pointer. Two things
+# that share a queue but shouldn't: a warm DM to somebody who just accepted, and
+# a cold invite; and two different seats, which LinkedIn rate-limits separately.
+
+INVITE_NODE_TYPE = "channel.linkedin_invite"
+INVITE_LANE = "invite"       # rotates across the pool -> gap divides
+MESSAGE_LANE = "message"     # unpinned fallback -> full gap, shared
+
+
+def spacing_lane(node_type: str, seat_external_id: str | None) -> str:
+    """The spacing queue this send belongs in.
+
+    Invites share ONE campaign lane because the pool rotates through them by
+    LRU — no invite is tied to a particular seat, so the campaign is the right
+    unit and the gap gets divided across the seats (see effective_gap_seconds).
+
+    A DM is different: SEAT-PIN-001 pins a follow-up to the seat that sent the
+    accepted invite, because only that seat is a 1st-degree connection. Two
+    consecutive DMs can therefore land on the SAME account, so they get a lane
+    per seat at the full gap. Different seats then drip independently, which is
+    the parallelism, and no single account ever sends faster than the gap.
+
+    A DM with no pin falls back to one shared message lane at the full gap —
+    conservative, because without the pin there is nothing proving which account
+    will carry it.
+    """
+    if node_type == INVITE_NODE_TYPE:
+        return INVITE_LANE
+    seat = (seat_external_id or "").strip()
+    return f"msg:{seat}" if seat else MESSAGE_LANE
+
+
+def effective_gap_seconds(gap_seconds: float, seat_count: int) -> float:
+    """Divide a campaign-wide gap across the seats that will rotate through it.
+
+    The seat is not known when the gate runs — pick_lru chooses later, in the
+    dispatcher — so an invite lane cannot key on it. Dividing gets the same
+    outcome: with N healthy seats the CAMPAIGN emits every gap/N, while LRU
+    rotation means each individual SEAT still averages a full gap between its
+    own sends. That is the safety property that matters, since the provider
+    rate-limits per account.
+
+    Only ever used for lanes that rotate. A per-seat lane passes seat_count=1.
+    """
+    if gap_seconds <= 0:
+        return 0.0
+    return max(1.0, float(gap_seconds) / max(1, int(seat_count)))
