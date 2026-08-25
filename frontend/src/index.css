@@ -1,4 +1,12 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* Geist for the interface, JetBrains Mono for code.
+   Inter was the previous UI face. It is a fine typeface and precisely the
+   problem: it is the default every generated interface reaches for, so the
+   product read as templated before a single word was set. Geist is drawn for
+   product UI — tighter apertures, a taller x-height, and genuinely distinct
+   digit shapes, which matters on a screen that is mostly counts and dates.
+   Mono stays JetBrains: the canvas and node-config panes are edited by hand and
+   its 0/O and 1/l/I separation is worth more there than family tidiness. */
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -173,10 +181,45 @@
     display: none;
   }
 
+  /* Overlay entrances. These exist because Toast and Modal were written against
+     tailwindcss-animate's `animate-in / fade-in / zoom-in-95 / slide-in-from-*`
+     classes, and that plugin is not installed — `plugins: []` in the Tailwind
+     config. Tailwind emitted nothing for those class names, so both surfaces
+     have always appeared instantly with no transition at all. Rather than pull
+     in a plugin for three keyframes, the three entrances the app actually uses
+     are defined here. Transform + opacity only, so they stay on the compositor. */
+  .overlay-in {
+    animation: overlay-fade 0.2s ease-out both;
+  }
+  .panel-in {
+    animation: panel-rise 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .toast-in {
+    animation: toast-slide 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .skeleton::after { animation: none; }
     .page-enter { animation: none; }
+    .overlay-in,
+    .panel-in,
+    .toast-in { animation: none; }
   }
+}
+
+@keyframes overlay-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes panel-rise {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes toast-slide {
+  from { opacity: 0; transform: translateX(1rem); }
+  to   { opacity: 1; transform: translateX(0); }
 }
 
 /* Custom scrollbar — matches the slate UI chrome */
@@ -254,5 +297,26 @@
 @media (prefers-reduced-motion: reduce) {
   .react-flow__edge path[style*="omni-edge-flow"] {
     animation: none !important;
+  }
+}
+
+/* Reduced-motion backstop.
+   The guards above are per-component, so they only ever covered the three
+   animations someone remembered to list. Everything else kept moving: every
+   Button carries `transition-all duration-150 active:scale-[0.97]`, `.lift`
+   translates on hover, and cards shift on the campaign board. A user who has
+   asked the OS for less motion still got all of it.
+
+   Durations collapse to ~0 rather than `animation: none`, because `none`
+   suppresses transitionend/animationend and any handler waiting on those events
+   would simply never fire. Near-zero keeps the events, drops the motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

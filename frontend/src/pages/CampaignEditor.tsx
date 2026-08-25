@@ -1520,8 +1520,14 @@ function EnrichmentStackDialog({
               Put your most trusted source first. Each later source fills missing fields; it never silently replaces a value learned earlier.
             </p>
           </div>
-          <button type="button" onClick={onClose} title="Close" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
-            <X size={16} />
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close enrichment stack builder"
+            title="Close"
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 dark:hover:bg-slate-800"
+          >
+            <X size={16} aria-hidden="true" />
           </button>
         </div>
 

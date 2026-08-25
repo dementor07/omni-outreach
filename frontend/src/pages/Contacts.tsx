@@ -13,7 +13,7 @@ import EmptyState from '../components/EmptyState'
 import { FilterBar, SearchInput, Select } from '../components/FilterBar'
 import { useToast } from '../components/Toast'
 import { useDebounce } from '../hooks/useDebounce'
-import { fullName } from '../lib/format'
+import { fullName, linkedinSlug } from '../lib/format'
 import { downloadCsv, type CsvColumn } from '../lib/csv'
 
 const CSV_COLUMNS: CsvColumn<Contact>[] = [
@@ -304,8 +304,19 @@ export default function Contacts() {
                         <div className="flex items-center gap-2.5">
                           <Avatar name={fullName(c) || c.email || 'Unknown'} size={30} />
                           <div className="min-w-0">
-                            <p className="truncate font-medium text-slate-900 dark:text-white">{fullName(c) || '—'}</p>
-                            <p className="truncate text-xs text-slate-500">{c.email ?? c.linkedin_url ?? '—'}</p>
+                            {/* An unnamed contact says so, rather than
+                                borrowing its url as a name. The second line is
+                                the linkedin handle, not the whole address —
+                                previously both lines rendered the identical
+                                60-character url, one above the other. */}
+                            {fullName(c) === 'Unknown' ? (
+                              <p className="truncate font-medium italic text-slate-400 dark:text-slate-500">Unnamed contact</p>
+                            ) : (
+                              <p className="truncate font-medium text-slate-900 dark:text-white">{fullName(c)}</p>
+                            )}
+                            <p className="truncate text-xs text-slate-500">
+                              {c.email ?? (linkedinSlug(c.linkedin_url) ? `in/${linkedinSlug(c.linkedin_url)}` : '—')}
+                            </p>
                           </div>
                         </div>
                       </td>

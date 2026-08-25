@@ -30,6 +30,7 @@ export default function DataTable<T extends { id?: string }>({ columns, rows, on
             {columns.map((c) => (
               <th
                 key={c.key}
+                scope="col"
                 className={clsx(
                   'whitespace-nowrap px-4 py-3 text-left text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400',
                   c.align === 'right' && 'text-right',
@@ -47,9 +48,35 @@ export default function DataTable<T extends { id?: string }>({ columns, rows, on
               key={row.id || i}
               className={clsx(
                 'border-b border-slate-100 bg-white/70 transition-colors last:border-b-0 dark:border-slate-800/60 dark:bg-slate-900/40',
-                onRowClick && 'cursor-pointer hover:bg-brand-50/45 dark:hover:bg-brand-950/15',
+                onRowClick &&
+                  'cursor-pointer hover:bg-brand-50/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/60 dark:hover:bg-brand-950/15',
               )}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
+              // A clickable row was reachable with a mouse only. It carried an
+              // onClick and a pointer cursor but no tabIndex and no key handler,
+              // so opening a contact, lead or company from the keyboard was
+              // simply impossible — on tables that are the primary way into
+              // those records.
+              //
+              // The row stays a <tr> rather than becoming role="button": that
+              // role would strip the row/cell semantics screen readers use to
+              // announce "column 3 of 7", and the column headers are what make
+              // these tables legible in the first place. A focusable row plus
+              // Enter/Space matches how the mouse already behaves.
+              tabIndex={onRowClick ? 0 : undefined}
+              onKeyDown={
+                onRowClick
+                  ? (e) => {
+                      if (e.key !== 'Enter' && e.key !== ' ') return
+                      // Only when the row itself holds focus. A button or link
+                      // rendered inside a cell must keep its own Space/Enter
+                      // behaviour instead of also opening the row.
+                      if (e.target !== e.currentTarget) return
+                      e.preventDefault()
+                      onRowClick(row)
+                    }
+                  : undefined
+              }
             >
               {columns.map((c) => (
                 <td

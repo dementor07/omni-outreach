@@ -474,13 +474,15 @@ function MessageBubble({ m, contactId }: { m: import('../api/v2').InboxMessage; 
               rows={4}
               value={text}
               onChange={(e) => setText(e.target.value)}
-              className="w-full resize-y rounded-lg border border-white/40 bg-white/95 px-2.5 py-2 text-sm text-slate-900 outline-none dark:bg-slate-950 dark:text-slate-100"
+              aria-label="Edit message text"
+              className="w-full resize-y rounded-lg border border-white/40 bg-white/95 px-2.5 py-2 text-sm text-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 dark:bg-slate-950 dark:text-slate-100"
             />
             <input
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="Note for your records (optional)"
-              className="w-full rounded-lg border border-white/40 bg-white/95 px-2.5 py-1.5 text-[11px] text-slate-700 outline-none dark:bg-slate-950 dark:text-slate-200"
+              aria-label="Note for your records"
+              className="w-full rounded-lg border border-white/40 bg-white/95 px-2.5 py-1.5 text-[11px] text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 dark:bg-slate-950 dark:text-slate-200"
             />
             <p className={clsx('text-[10px] leading-snug', outbound ? 'text-white/75' : 'text-slate-500')}>
               This edits the message on LinkedIn — they'll see the new text, marked edited.

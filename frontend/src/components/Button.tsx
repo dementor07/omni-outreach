@@ -28,12 +28,20 @@ import type { ForwardRefExoticComponent, RefAttributes } from 'react'
 
 type LucideIcon = ForwardRefExoticComponent<Omit<LucideProps, 'ref'> & RefAttributes<SVGSVGElement>>
 
+// Icons here are decorative — the button's own text (or its aria-label) is the
+// accessible name — so the component needs to be able to pass aria-hidden down.
+// Without it in the signature a custom icon component silently drops the
+// attribute and screen readers announce the glyph on top of the label.
+type ButtonIcon =
+  | LucideIcon
+  | React.ComponentType<{ size?: number; className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>
+
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   as?: ElementType
   size?: ButtonSize
   variant?: ButtonVariant
-  icon?: LucideIcon | React.ComponentType<{ size?: number; className?: string }>
-  iconRight?: LucideIcon | React.ComponentType<{ size?: number; className?: string }>
+  icon?: ButtonIcon
+  iconRight?: ButtonIcon
   isLoading?: boolean
   children?: ReactNode
 }
@@ -76,18 +84,30 @@ export default function Button({
   return (
     <Comp
       className={clsx(
-        'inline-flex shrink-0 items-center justify-center rounded-lg font-semibold transition-all duration-150 active:scale-[0.97]',
+        // The transition names its properties. `transition-all` was animating
+        // every animatable property including layout ones, which is both a
+        // paint cost on a component this common and a source of odd flicker
+        // when a variant swaps padding or width.
+        'inline-flex shrink-0 items-center justify-center rounded-lg font-semibold',
+        'transition-[color,background-color,border-color,box-shadow,transform] duration-150 active:scale-[0.97]',
+        // A keyboard user had no idea where they were: nothing in the base or
+        // variant classes drew a focus state, so the only indicator was the
+        // browser default outline — which the surrounding inputs suppress with
+        // outline-none, making focus inconsistent across a single form. The
+        // offset ring reads on both the light page and the dark chrome.
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-900',
         sizeClasses[size],
         variantClasses[variant],
-        isDisabled && 'opacity-60 pointer-events-none',
+        isDisabled && 'pointer-events-none opacity-60',
         className,
       )}
       disabled={isDisabled}
+      aria-busy={isLoading || undefined}
       {...rest}
     >
-      {isLoading ? <Spinner size={iconSize} /> : IconComp && <IconComp size={iconSize} />}
+      {isLoading ? <Spinner size={iconSize} /> : IconComp && <IconComp size={iconSize} aria-hidden="true" />}
       {children}
-      {!isLoading && IconR && <IconR size={iconSize} />}
+      {!isLoading && IconR && <IconR size={iconSize} aria-hidden="true" />}
     </Comp>
   )
 }

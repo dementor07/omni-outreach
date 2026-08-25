@@ -26,8 +26,11 @@ interface AnnotationControls {
   onRemoveAnnotation?: (annotationId: string) => void
 }
 
+/** What an absent cell renders as. Shared so callers can detect it again. */
+const EMPTY_CELL = '—'
+
 function formatCell(value: unknown): string {
-  if (value === null || value === undefined) return '—'
+  if (value === null || value === undefined) return EMPTY_CELL
   if (typeof value === 'number') {
     return Number.isInteger(value) ? value.toLocaleString() : value.toFixed(2)
   }
@@ -85,7 +88,17 @@ function WidgetShell({
     <Card
       padding="sm"
       className={clsx(
-        'group relative flex h-full min-h-[140px] flex-col overflow-hidden border-slate-200/80 bg-gradient-to-br from-white to-slate-50/50 transition duration-200 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-lg dark:border-slate-800 dark:from-slate-950 dark:to-slate-900/40 dark:hover:border-brand-900',
+        // Flat surface, not a gradient. from-white → to-slate-50/50 spanned two
+        // values a half-step apart, so it cost a paint to render something no
+        // one could see — and every card carrying the same faint wash is the
+        // texture that makes a grid read as generated.
+        // max-h bounds the runaway. Rows in this grid are auto-sized, so the
+        // tallest card in a band sets the height of everything beside it — and
+        // the recent-contacts list renders up to 20 rows, which pushed its band
+        // past 800px and dragged the eight-row campaigns table up with it. Both
+        // cards then sat mostly empty. Capping the card lets the short widgets
+        // stay short and sends the long ones to their own scrollbar.
+        'group relative flex h-full min-h-[140px] max-h-[26rem] flex-col overflow-hidden border-slate-200/80 bg-white transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-card dark:border-slate-800 dark:bg-slate-950 dark:hover:border-slate-700',
         annotationMode && 'border-brand-300 ring-2 ring-brand-100 hover:-translate-y-0 hover:border-brand-400 dark:border-brand-800 dark:ring-brand-950/70',
         WIDTH_CLASSES[widget.width ?? 2] ?? WIDTH_CLASSES[2],
         HEIGHT_CLASSES[widget.height ?? 1] ?? '',
@@ -94,8 +107,13 @@ function WidgetShell({
       data-annotation-target={annotationMode ? 'true' : undefined}
     >
       <div className="mb-3 flex items-center justify-between gap-3">
-        <p className="flex min-w-0 items-center gap-2 truncate text-[11px] font-bold uppercase tracking-[0.11em] text-slate-500 dark:text-slate-400">
-          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-600 transition group-hover:bg-brand-100 dark:bg-brand-950/50 dark:text-brand-300"><Icon size={13} /></span>
+        {/* Sentence case, and the icon is muted rather than sitting in a brand
+            chip. The chip was rose-on-rose at 28px on every card — four of them
+            in a row across the stat strip, each showing the same glyph, all
+            competing with the figure underneath, which is the only thing on the
+            card anyone came to read. */}
+        <p className="flex min-w-0 items-center gap-2 truncate text-[12px] font-medium text-slate-500 dark:text-slate-400">
+          <Icon size={13} aria-hidden="true" className="shrink-0 text-slate-400 dark:text-slate-500" />
           <span className="truncate">{widget.title}</span>
         </p>
         <div className="flex shrink-0 items-center gap-1.5">
@@ -104,18 +122,21 @@ function WidgetShell({
               {annotations.length} note{annotations.length === 1 ? '' : 's'}
             </span>
           )}
-          {annotationMode ? (
+          {/* The "Live" pill used to sit on every widget unconditionally. A
+              label that is true of all items distinguishes none of them, so it
+              was pure chrome; the freshness it claimed to convey is already in
+              the data. Only the annotate affordance remains, and only in the
+              mode where it does something. */}
+          {annotationMode && (
             <button
               type="button"
               onClick={() => setComposerOpen((current) => !current)}
-              className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-white px-2 py-1 text-[9px] font-bold uppercase tracking-wide text-brand-700 transition hover:border-brand-400 hover:bg-brand-50 dark:border-brand-800 dark:bg-slate-900 dark:text-brand-300"
+              className="inline-flex items-center gap-1 rounded-md border border-brand-200 bg-white px-2 py-1 text-[10px] font-semibold text-brand-700 transition-colors hover:border-brand-400 hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 dark:border-brand-800 dark:bg-slate-900 dark:text-brand-300"
               aria-expanded={composerOpen}
               aria-label={`Annotate ${widget.title}`}
             >
-              <MessageSquarePlus size={11} /> Annotate
+              <MessageSquarePlus size={11} aria-hidden="true" /> Annotate
             </button>
-          ) : (
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-400 dark:bg-slate-800">Live</span>
           )}
         </div>
       </div>
@@ -167,7 +188,25 @@ function WidgetShell({
 }
 
 function LoadingState() {
-  return <div className="h-full animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
+  // `.skeleton` is the app's shimmer, and it already carries the
+  // reduced-motion opt-out. The previous plain `animate-pulse` block did not.
+  return <div className="skeleton h-full min-h-16 w-full" />
+}
+
+/**
+ * The widget-scale empty state.
+ *
+ * "No data" used to render as a 12px grey line in the top-left of the card,
+ * leaving the rest of a 300px panel blank — which reads as a component that
+ * failed rather than a question that legitimately has no answer yet. Centring
+ * it and naming the reason turns the same fact into a finished state.
+ */
+function EmptyState({ message = 'Nothing to show yet' }: { message?: string }) {
+  return (
+    <div className="grid h-full min-h-16 place-items-center px-3 py-6 text-center">
+      <p className="text-[12px] text-slate-400 dark:text-slate-500">{message}</p>
+    </div>
+  )
 }
 
 function ErrorState({ message }: { message: string }) {
@@ -181,8 +220,13 @@ function StatWidget({ widget }: { widget: WidgetInstance }) {
   const first = data?.rows[0]
   const col = data?.columns[0]
   const value = first && col ? first[col] : 0
+  // Solid ink, not gradient-clipped text. The gradient ran slate-950 → brand-600,
+  // so the right-hand digits of every figure were rendered in the mid-brand rose
+  // — the lightest part of the ramp, on a white card. It cost contrast on the one
+  // element the page exists to communicate, and gradient-filled numerals are the
+  // single most recognisable "generated dashboard" tell.
   return (
-    <p className="bg-gradient-to-r from-slate-950 to-brand-600 bg-clip-text text-4xl font-black tracking-tight text-transparent tabular-nums dark:from-white dark:to-brand-300">
+    <p className="text-4xl font-bold tracking-tight text-slate-900 tabular-nums dark:text-white">
       {formatCell(value ?? 0)}
     </p>
   )
@@ -192,7 +236,7 @@ function TableWidget({ widget }: { widget: WidgetInstance }) {
   const { data, isLoading, error } = useWidgetData(widget)
   if (isLoading) return <LoadingState />
   if (error) return <ErrorState message="query failed" />
-  if (!data?.rows.length) return <p className="text-[12px] text-slate-400">No data</p>
+  if (!data?.rows.length) return <EmptyState message="No rows match this query" />
   return (
     <div className="h-full overflow-auto">
       <table className="w-full text-left text-[12px]">
@@ -248,19 +292,26 @@ function buildSeries(columns: string[], widget: WidgetInstance): Series[] {
   }))
 }
 
-/** Round a max up to a clean axis top so ticks read 0 / 50 / 100, not 0 / 47 / 94. */
-function niceMax(value: number): number {
-  if (value <= 0) return 1
-  const magnitude = 10 ** Math.floor(Math.log10(value))
-  for (const step of [1, 2, 2.5, 5, 10]) {
-    const candidate = step * magnitude
-    if (candidate >= value) return candidate
-  }
-  return 10 * magnitude
-}
-
-function axisTicks(max: number, count = 4): number[] {
-  return Array.from({ length: count + 1 }, (_, i) => (max / count) * i)
+/**
+ * A clean axis: a rounded top AND round ticks between 0 and it.
+ *
+ * Rounding the top alone was not enough. The top was chosen first and then cut
+ * into `count` equal pieces, so a perfectly good max of 2,000 split three ways
+ * printed 667 / 1,333 / 2,000 down the side of the weekly-contacts chart. The
+ * step has to be the rounded quantity — the top is then whatever multiple of
+ * that step clears the data.
+ */
+function niceScale(peak: number, targetTicks = 4): { max: number; ticks: number[] } {
+  if (!(peak > 0)) return { max: 1, ticks: [0, 1] }
+  const rawStep = peak / targetTicks
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep))
+  const step =
+    [1, 2, 2.5, 5, 10].map((m) => m * magnitude).find((s) => s >= rawStep) ?? 10 * magnitude
+  const max = Math.ceil(peak / step) * step
+  const ticks: number[] = []
+  // Half a step of slack absorbs float drift so the top tick is never dropped.
+  for (let v = 0; v <= max + step / 2; v += step) ticks.push(Number(v.toPrecision(12)))
+  return { max, ticks }
 }
 
 function ChartLegend({ series }: { series: Series[] }) {
@@ -293,7 +344,7 @@ function BarChartWidget({ widget }: { widget: WidgetInstance }) {
   const { data, isLoading, error } = useWidgetData(widget)
   if (isLoading) return <LoadingState />
   if (error) return <ErrorState message="query failed" />
-  if (!data?.rows.length || data.columns.length < 2) return <p className="text-[12px] text-slate-400">No data</p>
+  if (!data?.rows.length || data.columns.length < 2) return <EmptyState message="Not enough data to chart yet" />
 
   const labelCol = data.columns[0]
   const series = buildSeries(data.columns, widget)
@@ -307,8 +358,7 @@ function BarChartWidget({ widget }: { widget: WidgetInstance }) {
   const peak = stacked
     ? Math.max(...rows.map(rowTotal), 1)
     : Math.max(...rows.flatMap((r) => series.map((s) => Number(r[s.key]) || 0)), 1)
-  const max = niceMax(peak)
-  const ticks = axisTicks(max)
+  const { max, ticks } = niceScale(peak)
 
   return (
     <div className="flex h-full flex-col">
@@ -413,7 +463,7 @@ function LineChartWidget({ widget }: { widget: WidgetInstance }) {
   const { data, isLoading, error } = useWidgetData(widget)
   if (isLoading) return <LoadingState />
   if (error) return <ErrorState message="query failed" />
-  if (!data?.rows.length || data.columns.length < 2) return <p className="text-[12px] text-slate-400">No data</p>
+  if (!data?.rows.length || data.columns.length < 2) return <EmptyState message="Not enough data to chart yet" />
 
   const bucketCol = data.columns[0]
   const series = buildSeries(data.columns, widget)
@@ -429,8 +479,7 @@ function LineChartWidget({ widget }: { widget: WidgetInstance }) {
   const plotH = H - PAD.top - PAD.bottom
 
   const peak = Math.max(...rows.flatMap((r) => series.map((s) => Number(r[s.key]) || 0)), 1)
-  const max = niceMax(peak)
-  const ticks = axisTicks(max, 3)
+  const { max, ticks } = niceScale(peak, 3)
   const x = (i: number) => PAD.left + (rows.length > 1 ? (i / (rows.length - 1)) * plotW : plotW / 2)
   const y = (v: number) => PAD.top + plotH - (v / max) * plotH
 
@@ -493,22 +542,38 @@ function ListWidget({ widget }: { widget: WidgetInstance }) {
   const { data, isLoading, error } = useWidgetData(widget)
   if (isLoading) return <LoadingState />
   if (error) return <ErrorState message="query failed" />
-  if (!data?.rows.length) return <p className="text-[12px] text-slate-400">No data</p>
+  if (!data?.rows.length) return <EmptyState message="No rows match this query" />
   const [titleCol, subtitleCol] = data.columns
   return (
     <ul className="space-y-1.5 overflow-auto">
-      {data.rows.slice(0, 20).map((row, i) => (
-        <li key={i} className="rounded-xl border border-transparent bg-slate-50 px-3 py-2 transition hover:border-brand-100 hover:bg-brand-50/60 dark:bg-slate-800/60 dark:hover:border-brand-900 dark:hover:bg-brand-950/20">
-          <p className="truncate text-[12px] font-medium text-slate-800 dark:text-slate-200">
-            {formatCell(row[titleCol])}
-          </p>
-          {subtitleCol && (
-            <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
-              {formatCell(row[subtitleCol])}
+      {data.rows.slice(0, 20).map((row, i) => {
+        const title = formatCell(row[titleCol])
+        const subtitle = subtitleCol ? formatCell(row[subtitleCol]) : ''
+        // formatCell renders a null as an em dash, and most contacts carry no
+        // name, so every row printed "—" above a second "—" — a stack of
+        // identical placeholders that reads as a failed component rather than
+        // as missing data. Say "Unnamed" once, and drop the subtitle line
+        // entirely when it has nothing of its own to add.
+        const hasTitle = title !== EMPTY_CELL
+        const hasSubtitle = subtitle && subtitle !== EMPTY_CELL && subtitle !== title
+        return (
+          <li key={i} className="rounded-xl border border-transparent bg-slate-50 px-3 py-2 transition-colors hover:border-brand-100 hover:bg-brand-50/60 dark:bg-slate-800/60 dark:hover:border-brand-900 dark:hover:bg-brand-950/20">
+            <p
+              className={clsx(
+                'truncate text-[12px]',
+                hasTitle
+                  ? 'font-medium text-slate-800 dark:text-slate-200'
+                  : 'italic text-slate-400 dark:text-slate-500',
+              )}
+            >
+              {hasTitle ? title : 'Unnamed'}
             </p>
-          )}
-        </li>
-      ))}
+            {hasSubtitle && (
+              <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">{subtitle}</p>
+            )}
+          </li>
+        )
+      })}
     </ul>
   )
 }

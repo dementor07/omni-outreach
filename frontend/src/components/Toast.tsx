@@ -52,29 +52,74 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="fixed bottom-5 right-5 z-[100] flex flex-col gap-2 w-80">
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className={clsx(
-              'flex items-start gap-3 rounded-xl border px-4 py-3 shadow-lg text-sm font-medium animate-in slide-in-from-right-4 fade-in duration-200',
-              toast.type === 'success'
-                ? 'bg-white border-emerald-200 text-emerald-800'
-                : 'bg-white border-rose-200 text-rose-800',
-            )}
-          >
-            {toast.type === 'success'
-              ? <CheckCircle2 size={16} className="text-emerald-500 mt-0.5 shrink-0" />
-              : <XCircle size={16} className="text-rose-500 mt-0.5 shrink-0" />
-            }
-            <span className="flex-1">{toast.message}</span>
-            <button onClick={() => dismiss(toast.id)} className="text-slate-400 hover:text-slate-600 shrink-0">
-              <X size={14} />
-            </button>
-          </div>
-        ))}
+      {/* Two live regions, not one. A failure needs to interrupt whatever the
+          screen reader is currently saying; a success does not and should wait
+          its turn. That is exactly the assertive/polite split, and it cannot be
+          expressed on a single shared container — politeness is a property of
+          the region, so a lone region would force one setting on both kinds.
+
+          Both regions stay mounted even when empty. A live region only announces
+          content that arrives while it is already in the accessibility tree; a
+          container mounted at the same moment as its first toast is typically
+          announced late or not at all.
+
+          pointer-events-none on the wrappers, auto on each toast: the stack is
+          320px wide and fixed to the bottom-right, so without this the column
+          and the gaps between toasts swallow clicks meant for the page beneath. */}
+      <div className="pointer-events-none fixed bottom-5 right-5 z-[100] flex w-80 flex-col gap-2 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)]">
+        <ToastRegion toasts={toasts.filter((t) => t.type === 'error')} onDismiss={dismiss} politeness="assertive" />
+        <ToastRegion toasts={toasts.filter((t) => t.type === 'success')} onDismiss={dismiss} politeness="polite" />
       </div>
     </ToastContext.Provider>
+  )
+}
+
+function ToastRegion({
+  toasts,
+  onDismiss,
+  politeness,
+}: {
+  toasts: Toast[]
+  onDismiss: (id: number) => void
+  politeness: 'polite' | 'assertive'
+}) {
+  return (
+    <div
+      role={politeness === 'assertive' ? 'alert' : 'status'}
+      aria-live={politeness}
+      aria-atomic="false"
+      className="flex flex-col gap-2"
+    >
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          className={clsx(
+            'toast-in pointer-events-auto flex items-start gap-3 rounded-xl border px-4 py-3 text-sm font-medium shadow-lg',
+            toast.type === 'success'
+              ? 'border-emerald-200 bg-white text-emerald-800'
+              : 'border-rose-200 bg-white text-rose-800',
+          )}
+        >
+          {toast.type === 'success'
+            ? <CheckCircle2 size={16} aria-hidden="true" className="mt-0.5 shrink-0 text-emerald-500" />
+            : <XCircle size={16} aria-hidden="true" className="mt-0.5 shrink-0 text-rose-500" />
+          }
+          {/* The icon carries the success/error distinction visually, so it is
+              restated in text for anyone who cannot see it — the message alone
+              often reads identically either way ("Campaign 6 updated"). */}
+          <span className="sr-only">{toast.type === 'success' ? 'Success:' : 'Error:'}</span>
+          <span className="min-w-0 flex-1 break-words">{toast.message}</span>
+          <button
+            type="button"
+            onClick={() => onDismiss(toast.id)}
+            aria-label="Dismiss notification"
+            className="shrink-0 rounded text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50"
+          >
+            <X size={14} aria-hidden="true" />
+          </button>
+        </div>
+      ))}
+    </div>
   )
 }
 

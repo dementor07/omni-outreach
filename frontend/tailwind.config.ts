@@ -25,7 +25,9 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        // Inter is kept as the first fallback: identical metrics class, so the
+        // page holds its layout if Geist is slow or blocked.
+        sans: ['Geist', 'Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
       },
       // Whisper-soft, layered elevation — quiet depth over the gradient-mesh

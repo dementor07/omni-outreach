@@ -32,21 +32,38 @@ interface SearchInputProps {
 
 export function SearchInput({ value, onChange, placeholder = 'Search…', className = '' }: SearchInputProps) {
   return (
-    <div className={clsx('relative flex h-9 flex-1 items-center', className)}>
-      <Search size={14} className="absolute left-3 text-slate-400" />
+    // The ring sits on the wrapper, not the input. The input is deliberately
+    // border-0/bg-transparent so it blends into whatever bar hosts it, which
+    // left it with outline-none and nothing to replace the outline — tabbing
+    // into search produced no visible change anywhere on screen. focus-within
+    // lets the whole control light up instead, which is also what the eye
+    // expects when the magnifier and clear button read as part of one field.
+    <div
+      className={clsx(
+        'relative flex h-9 flex-1 items-center rounded-lg',
+        'focus-within:ring-2 focus-within:ring-brand-500/50',
+        className,
+      )}
+    >
+      <Search size={14} aria-hidden="true" className="absolute left-3 text-slate-400" />
       <input
-        type="text"
+        type="search"
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="h-9 w-full rounded-lg border-0 bg-transparent pl-9 pr-3 text-sm text-slate-700 outline-none placeholder:text-slate-400 dark:text-slate-200"
+        aria-label={typeof placeholder === 'string' ? placeholder : 'Search'}
+        autoComplete="off"
+        spellCheck={false}
+        className="h-9 w-full rounded-lg border-0 bg-transparent pl-9 pr-3 text-sm text-slate-700 outline-none placeholder:text-slate-400 dark:text-slate-200 [&::-webkit-search-cancel-button]:appearance-none"
       />
       {value && (
         <button
+          type="button"
           onClick={() => onChange('')}
-          className="absolute right-2 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
+          aria-label="Clear search"
+          className="absolute right-2 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 dark:hover:bg-slate-800"
         >
-          <X size={12} />
+          <X size={12} aria-hidden="true" />
         </button>
       )}
     </div>
