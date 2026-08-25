@@ -29,7 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.auth import AuthContext, get_current_workspace
-from app.db import acquire, execute, fetch_all, fetch_one
+from app.db import acquire, execute, fetch_all, fetch_one, system_scope
 from app.routers.integrations import SendingAccountOut
 from app.services.campaign_composer import CampaignSpec, compile_campaign_spec
 from app.services.graph_validation import validate_graph
@@ -46,6 +46,10 @@ class WorkflowCreate(BaseModel):
 
 class WorkflowUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=200)
+    # CAMPAIGN-OWNER-001: who runs this campaign. Explicitly nullable — sending
+    # null unassigns, which is why update_workflow reads model_fields_set rather
+    # than relying on exclude_none (that cannot tell "absent" from "cleared").
+    owner_user_id: uuid.UUID | None = None
     status: Literal["draft", "active", "paused", "archived"] | None = None
     timezone: str | None = Field(None, max_length=64)
     # B6 campaign schedule window. Outbound sends hold until start_at and stop
@@ -171,6 +175,7 @@ class WorkflowOut(BaseModel):
     earliest_hour: int | None = None
     latest_hour: int | None = None
     days_of_week: list[int] | None = None
+    owner_user_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -570,11 +575,34 @@ async def get_workflow(workflow_id: uuid.UUID, _: AuthContext = Depends(get_curr
 async def update_workflow(
     workflow_id: uuid.UUID,
     body: WorkflowUpdate,
-    _: AuthContext = Depends(get_current_workspace),
+    ctx: AuthContext = Depends(get_current_workspace),
 ) -> WorkflowOut:
     fields = body.model_dump(exclude_none=True)
+    # CAMPAIGN-OWNER-001: unassigning is an explicit null, and exclude_none drops
+    # it. model_fields_set is the only thing that separates "caller did not
+    # mention the owner" from "caller cleared the owner".
+    if "owner_user_id" in body.model_fields_set:
+        fields["owner_user_id"] = body.owner_user_id
     if not fields:
         raise HTTPException(status_code=400, detail="no fields to update")
+
+    # A campaign can only be allocated to someone who is actually in this
+    # workspace. Checked here rather than with a foreign key: users is a global
+    # table, and an FK from tenant data would let a workspace probe for user ids
+    # it cannot otherwise see.
+    owner = fields.get("owner_user_id")
+    if owner is not None:
+        async with system_scope():
+            member = await fetch_one(
+                "SELECT 1 FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
+                ctx.workspace_id,
+                owner,
+            )
+        if not member:
+            raise HTTPException(
+                status_code=422,
+                detail="owner_user_id is not a member of this workspace",
+            )
 
     if "days_of_week" in fields:
         fields["days_of_week"] = json.dumps(fields["days_of_week"])

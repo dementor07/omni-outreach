@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Archive, GitBranch, Megaphone, Plus, RotateCcw, Trash2,
 } from 'lucide-react'
-import { canvas, integrations, type Workflow } from '../api/v2'
+import { auth, canvas, integrations, workspaces, type Workflow, type WorkspaceMember } from '../api/v2'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Button from '../components/Button'
@@ -19,6 +19,16 @@ export default function Campaigns() {
   const { data: campaigns = [], isLoading } = useQuery({ queryKey: ['workflows'], queryFn: canvas.list })
   const { data: templates = [] } = useQuery({ queryKey: ['campaign-templates'], queryFn: canvas.templates })
   const { data: connections = [] } = useQuery({ queryKey: ['integrations'], queryFn: () => integrations.list() })
+  // CAMPAIGN-OWNER-001: the assignee list is the workspace's membership — a
+  // campaign can only be allocated to someone who is actually in it (the API
+  // enforces the same rule and 422s otherwise).
+  const meQ = useQuery({ queryKey: ['me'], queryFn: auth.me })
+  const workspaceId = meQ.data?.workspaces?.[0]?.id
+  const { data: members = [] } = useQuery({
+    queryKey: ['workspace-members', workspaceId],
+    queryFn: () => workspaces.members(workspaceId!),
+    enabled: Boolean(workspaceId),
+  })
 
   const [showCreate, setShowCreate] = useState(false)
   const onCreated = (workflowId: string) => {
@@ -56,20 +66,28 @@ export default function Campaigns() {
         <Card><EmptyState icon={Megaphone} title="No campaigns yet" description="Create your first campaign and start building a sequence on the canvas." action={<Button variant="primary" size="sm" icon={Plus} onClick={() => setShowCreate(true)}>New campaign</Button>} /></Card>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
-          {campaigns.map((c) => <CampaignCard key={c.id} c={c} />)}
+          {campaigns.map((c) => <CampaignCard key={c.id} c={c} members={members} />)}
         </div>
       )}
     </div>
   )
 }
 
-function CampaignCard({ c }: { c: Workflow }) {
+function CampaignCard({ c, members }: { c: Workflow; members: WorkspaceMember[] }) {
   const qc = useQueryClient()
   const toast = useToast()
   const [confirmDelete, setConfirmDelete] = useState(false)
   const tone: 'success' | 'warning' | 'neutral' | 'info' =
     c.status === 'active' ? 'success' : c.status === 'paused' ? 'warning' : c.status === 'archived' ? 'neutral' : 'info'
   const isArchived = c.status === 'archived'
+  const ownerMut = useMutation({
+    mutationFn: (ownerUserId: string | null) => canvas.update(c.id, { owner_user_id: ownerUserId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['workflows'] })
+      toast.success('Campaign owner updated')
+    },
+    onError: () => toast.error('Could not update the campaign owner'),
+  })
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['workflows'] })
   const archiveMut = useMutation({
@@ -107,7 +125,23 @@ function CampaignCard({ c }: { c: Workflow }) {
           <Badge label={c.status} variant={tone} dot size="xs" />
         </div>
         <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-5">
-          <p className="text-[11px] text-slate-400">Updated {new Date(c.updated_at).toLocaleDateString()}</p>
+          <div className="flex min-w-0 flex-col gap-1">
+            <p className="text-[11px] text-slate-400">Updated {new Date(c.updated_at).toLocaleDateString()}</p>
+            <div onClick={stop}>
+              <label className="sr-only" htmlFor={`owner-${c.id}`}>Campaign owner</label>
+              <select
+                id={`owner-${c.id}`}
+                value={c.owner_user_id ?? ''}
+                disabled={ownerMut.isPending}
+                onClick={stop}
+                onChange={(e) => ownerMut.mutate(e.target.value || null)}
+                className="max-w-[11rem] truncate rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+              >
+                <option value="">Unassigned</option>
+                {members.map((m) => <option key={m.user_id} value={m.user_id}>{m.email}</option>)}
+              </select>
+            </div>
+          </div>
           <div className="ml-auto flex items-center gap-1" onClick={stop}>
             {!isArchived ? (
               <Button variant="ghost" size="sm" icon={Archive} isLoading={archiveMut.isPending}

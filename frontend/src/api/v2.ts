@@ -429,6 +429,8 @@ export interface Workflow {
   earliest_hour: number | null
   latest_hour: number | null
   days_of_week: number[] | null
+  /** CAMPAIGN-OWNER-001: which workspace member runs this campaign. */
+  owner_user_id: UUID | null
   created_at: ISODate
   updated_at: ISODate
 }
@@ -633,7 +635,7 @@ export const canvas = {
   get: (id: UUID) => api.get<WorkflowDetail>(`/canvas/workflows/${id}`).then((r) => r.data),
   validation: (id: UUID) =>
     api.get<GraphValidation>(`/canvas/workflows/${id}/validation`).then((r) => r.data),
-  update: (id: UUID, body: Partial<Pick<Workflow, 'name' | 'status' | 'timezone' | 'start_at' | 'end_at' | 'daily_cap' | 'earliest_hour' | 'latest_hour' | 'days_of_week'>>) =>
+  update: (id: UUID, body: Partial<Pick<Workflow, 'name' | 'status' | 'timezone' | 'start_at' | 'end_at' | 'daily_cap' | 'earliest_hour' | 'latest_hour' | 'days_of_week' | 'owner_user_id'>>) =>
     api.patch<Workflow>(`/canvas/workflows/${id}`, body).then((r) => r.data),
   archive: (id: UUID) => api.delete(`/canvas/workflows/${id}`).then(() => undefined),
   // Hard-delete an ARCHIVED workflow + all its data (nodes/edges/leads/objectives).
